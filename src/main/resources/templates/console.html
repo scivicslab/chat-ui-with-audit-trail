@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat UI with audit trail</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <!-- Hallmark redesign (modern-minimal · Cobalt): Space Grotesk display, Inter body, JetBrains Mono code. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+    <!-- chat-ui stylesheet first, then the shell overrides/additions. -->
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="console.css">
+</head>
+<body>
+    <!-- Login screen hidden in this static mock; the console shell is shown directly. -->
+    <div id="login-screen" style="display:none">
+        <form id="login-form" style="text-align:center;">
+            <h2 id="login-title" style="margin-bottom:16px;">Quarkus Chat UI</h2>
+            <input id="login-user" type="text" placeholder="Username" autocomplete="username"
+                   style="padding:8px 12px;font-size:16px;border-radius:4px;border:1px solid #555;background:#2a2a2a;color:#eee;width:220px;">
+            <br><br>
+            <button type="submit" style="padding:8px 24px;font-size:16px;border-radius:4px;cursor:pointer;">Login</button>
+        </form>
+    </div>
+
+    <!--
+      Two-pane console (chat-ui3-style).
+        - #left-panel  : the existing Claude chat UI, embedded inline and unchanged (app.js owns it).
+        - #splitter    : draggable divider.
+        - #right-panel : tabbed workspace (Sessions / Actors / System Log / Workflow).
+      Everything from the original chat-ui <body> is kept verbatim inside #left-panel so app.js
+      finds every element id it expects (header, chat, queue, log panel, input, overlays).
+    -->
+    <!-- Global header bar (chat-ui3-style): app-wide controls span the full width above the panes. -->
+    <div id="app-header">
+        <h1 id="app-title">Chat UI</h1>
+        <div id="status-bar">
+            <label id="theme-label">Theme:
+                <select id="theme-select">
+                    <option value="dark-catppuccin">Dark Catppuccin</option>
+                    <option value="dark-nord">Dark Nord</option>
+                    <option value="dark-blue">Dark Blue</option>
+                    <option value="dark-green">Dark Green</option>
+                    <option value="dark-red">Dark Red</option>
+                    <option value="light-clean">Light Clean</option>
+                    <option value="light-warm">Light Warm</option>
+                    <option value="light-blue">Light Blue</option>
+                    <option value="light-green">Light Green</option>
+                    <option value="light-red">Light Red</option>
+                </select>
+            </label>
+            <label id="model-label">Model:
+                <select id="model-select">
+                    <!-- Populated dynamically from /api/models -->
+                </select>
+                <button id="refresh-models-btn" title="Refresh model list">&#x21bb;</button>
+            </label>
+            <label id="think-label" style="display:none" title="Enable thinking mode (Qwen3 extended CoT)">
+                <input type="checkbox" id="think-check"> Think
+            </label>
+            <span id="session-label"></span>
+            <span id="activity-label"></span>
+            <span id="user-label" style="display:none"></span>
+            <button id="logout-btn" style="display:none" title="Logout">Logout</button>
+            <div id="extensions-menu" class="ext-menu">
+                <button id="extensions-btn" title="Show installed Skills, Agents, Hooks and MCP Servers">Extensions &#x25be;</button>
+                <div id="extensions-panel" class="ext-panel" style="display:none;">
+                    <div class="ext-tabs">
+                        <button class="ext-tab active" data-tab="skills">Skills</button>
+                        <button class="ext-tab" data-tab="agents">Agents</button>
+                        <button class="ext-tab" data-tab="hooks">Hooks</button>
+                        <button class="ext-tab" data-tab="mcp">MCP Servers</button>
+                    </div>
+                    <div id="ext-content" class="ext-content">
+                        <div class="ext-loading">Loading…</div>
+                    </div>
+                </div>
+            </div>
+            <span id="connection-status" class="disconnected">disconnected</span>
+        </div>
+    </div>
+
+    <div id="console-root">
+        <div id="left-panel">
+            <!-- ===== BEGIN chat-ui markup (unchanged: Claude features kept) ===== -->
+            <div id="app">
+                <!-- Left-pane header: actions that operate only on this pane's chat (chat-ui3-style). -->
+                <header>
+                    <div class="left-pane-actions" style="display:flex;align-items:center;gap:8px">
+                        <button id="save-chat-btn" title="Save conversation as Markdown">Save Chat</button>
+                        <button id="clear-chat-btn" title="Clear chat display (session continues)">Clear</button>
+                    </div>
+                </header>
+                <div id="notification-bar"></div>
+                <main id="chat-area">
+                    <!-- Messages will be appended here -->
+                </main>
+
+                <div id="queue-resize-handle" style="display:none"></div>
+                <div id="queue-area" style="display:none"></div>
+
+                <details id="log-panel">
+                    <summary>Server Logs</summary>
+                    <div id="log-content"></div>
+                </details>
+
+                <div id="input-resize-handle" title="Drag to resize input area"></div>
+                <footer>
+                    <div id="input-area" style="position:relative">
+                        <div id="predict-popup" style="display:none"></div>
+                        <div id="skill-suggest" style="display:none"></div>
+                        <textarea id="prompt-input" placeholder="Type a message… (Shift+Enter to send, Tab to predict, /btw question for side questions)" rows="5"></textarea>
+                        <div id="buttons">
+                            <button id="send-btn" title="Send (Shift+Enter)">Send</button>
+                            <button id="cancel-btn" title="Cancel" disabled>Cancel</button>
+                            <button id="queue-btn" title="Add to queue">Queue</button>
+                        </div>
+                    </div>
+                </footer>
+            </div>
+            <!-- ===== END chat-ui markup ===== -->
+        </div>
+
+        <div id="splitter" title="Drag to resize"></div>
+
+        <div id="right-panel">
+            <div id="right-tab-bar">
+                <button class="rtab-btn active" data-tab="logdb">Sessions</button>
+                <button class="rtab-btn" data-tab="actors">Actors</button>
+                <button class="rtab-btn" data-tab="syslog">System Log</button>
+                <button class="rtab-btn" data-tab="workflow">Workflow</button>
+                <!-- Add new feature tabs here. -->
+            </div>
+
+            <div class="rtab-body">
+                <section id="tab-actors" class="rtab-content">
+                    <div class="tab-toolbar">
+                        <button id="actors-refresh" type="button">Refresh</button>
+                        <label class="tab-auto"><input type="checkbox" id="actors-auto" checked> Auto</label>
+                        <span id="actors-status"></span>
+                    </div>
+                    <div id="actors-tree"></div>
+                </section>
+
+                <section id="tab-logdb" class="rtab-content active">
+                    <!-- Sessions: list conversations; expand one to read its turn-by-turn trace inline;
+                         clean up. (Backed by the H2 I/O log — added in a later phase.) -->
+                    <div class="tab-toolbar">
+                        <button id="io-refresh" type="button">Refresh</button>
+                        <span class="tab-auto" title="Delete sessions older than this many days (the active conversation is never deleted)">older than
+                            <input id="io-del-days" type="number" value="30" min="0" max="3650" style="width:4em">d
+                            <button id="io-del-old" type="button">Delete old</button>
+                        </span>
+                        <span id="io-status"></span>
+                    </div>
+                    <div id="io-sessions"></div>
+                </section>
+
+                <section id="tab-syslog" class="rtab-content">
+                    <div class="tab-toolbar">
+                        <button id="logs-refresh" type="button">Refresh</button>
+                        <label class="tab-auto"><input type="checkbox" id="logs-auto" checked> Auto</label>
+                        <label class="tab-auto" title="Show this severity and above (filtered by numeric level value)">Level:
+                            <select id="logs-level">
+                                <option value="" selected>ALL</option>
+                                <option value="400">TRACE</option>
+                                <option value="500">DEBUG</option>
+                                <option value="800">INFO</option>
+                                <option value="900">WARN</option>
+                                <option value="1000">ERROR</option>
+                            </select>
+                        </label>
+                        <span id="logs-status"></span>
+                    </div>
+                    <div id="logs-list"></div>
+                </section>
+
+                <section id="tab-workflow" class="rtab-content">
+                    <div class="tab-toolbar">
+                        <label class="tab-auto">Workflow:
+                            <select id="wf-select"></select>
+                        </label>
+                        <button id="wf-refresh" type="button">Refresh</button>
+                        <input id="wf-run-input" type="text"
+                               placeholder='input JSON, e.g. &#123;"path":"~/works/…/checklist.md"&#125;'
+                               style="flex:1;min-width:12em">
+                        <button id="wf-run" type="button" title="Run this workflow (drives Claude step by step)">Run</button>
+                        <span id="wf-status"></span>
+                    </div>
+                    <div id="wf-form" class="wf-form" style="display:none"></div>
+                    <div id="wf-list"></div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <!-- BTW Overlay (side question while LLM is processing) -->
+    <div id="btw-overlay" style="display:none">
+        <div id="btw-header">
+            <span class="btw-label">BTW</span>
+            <button id="btw-close" title="Close (Escape)">&#x00D7;</button>
+        </div>
+        <div id="btw-question"></div>
+        <div id="btw-response"></div>
+    </div>
+    <!-- API Key Dialog (shown when no authentication is configured) -->
+    <div id="auth-overlay" style="display:none">
+        <div id="auth-dialog">
+            <h2>Anthropic API Key Required</h2>
+            <p>Claude CLI was not found on this system. Please enter your Anthropic API key to continue.</p>
+            <input type="password" id="api-key-input" placeholder="sk-ant-…" autocomplete="off">
+            <button id="auth-submit-btn">Submit</button>
+            <p id="auth-error" style="color:var(--error-text,#f44);display:none"></p>
+        </div>
+    </div>
+    <!-- Extensions content dialog -->
+    <div id="ext-dialog-overlay" style="display:none">
+        <div id="ext-dialog">
+            <div id="ext-dialog-header">
+                <span id="ext-dialog-title"></span>
+                <button id="ext-dialog-close" title="Close">&#x00D7;</button>
+            </div>
+            <div id="ext-dialog-body"></div>
+        </div>
+    </div>
+</body>
+</html>
