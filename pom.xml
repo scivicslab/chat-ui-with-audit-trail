@@ -17,6 +17,9 @@
     <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
     <quarkus.platform.version>3.28.3</quarkus.platform.version>
     <surefire-plugin.version>3.5.4</surefire-plugin.version>
+    <!-- Actor model + Turing Workflow engine (IIActorSystem / RootIIAR) for the Actors tab -->
+    <pojo-actor.version>3.5.0</pojo-actor.version>
+    <turing-workflow.version>3.7.0</turing-workflow.version>
     <!-- uber-jar without the -runner suffix, per the project naming rule -->
     <quarkus.package.jar.type>uber-jar</quarkus.package.jar.type>
     <quarkus.package.jar.add-runner-suffix>false</quarkus.package.jar.add-runner-suffix>
@@ -43,6 +46,23 @@
     <dependency>
       <groupId>io.quarkus</groupId>
       <artifactId>quarkus-rest-qute</artifactId>
+    </dependency>
+    <!-- JSON serialization for GET /api/actors -->
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-rest-jackson</artifactId>
+    </dependency>
+    <!-- POJO-actor: the actor model that backs the actor tree -->
+    <dependency>
+      <groupId>com.scivicslab</groupId>
+      <artifactId>pojo-actor</artifactId>
+      <version>${pojo-actor.version}</version>
+    </dependency>
+    <!-- Turing Workflow: provides IIActorSystem and its auto-created RootIIAR root actor -->
+    <dependency>
+      <groupId>com.scivicslab</groupId>
+      <artifactId>turing-workflow</artifactId>
+      <version>${turing-workflow.version}</version>
     </dependency>
     <!-- Health probe for Kubernetes, per the project standard -->
     <dependency>
