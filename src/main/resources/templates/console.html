@@ -35,6 +35,7 @@
     -->
     <!-- Global header bar (chat-ui3-style): app-wide controls span the full width above the panes. -->
     <div id="app-header">
+        <button id="dock-toggle" title="Toggle the actor panel">&#9776;</button>
         <h1 id="app-title">Chat UI</h1>
         <div id="status-bar">
             <label id="theme-label">Theme:
@@ -82,7 +83,20 @@
         </div>
     </div>
 
-    <div id="console-root">
+    <div id="app-body">
+        <!-- (2) Collapsible left dock: the actor tree (html-saurus-style). -->
+        <aside id="left-dock">
+            <div class="dock-head">
+                <span class="dock-title">Actors</span>
+                <button id="actors-refresh" type="button" title="Refresh">&#x21bb;</button>
+                <label class="tab-auto"><input type="checkbox" id="actors-auto" checked> Auto</label>
+                <span id="actors-status"></span>
+            </div>
+            <div id="actors-tree"></div>
+        </aside>
+
+        <!-- (3) Main pane: (3-1) chat sub-pane | (3-2) right sub-pane (tabs). -->
+        <div id="console-root">
         <div id="left-panel">
             <!-- ===== BEGIN chat-ui markup (unchanged: Claude features kept) ===== -->
             <div id="app">
@@ -128,22 +142,12 @@
         <div id="right-panel">
             <div id="right-tab-bar">
                 <button class="rtab-btn active" data-tab="logdb">Sessions</button>
-                <button class="rtab-btn" data-tab="actors">Actors</button>
                 <button class="rtab-btn" data-tab="syslog">System Log</button>
                 <button class="rtab-btn" data-tab="workflow">Workflow</button>
                 <!-- Add new feature tabs here. -->
             </div>
 
             <div class="rtab-body">
-                <section id="tab-actors" class="rtab-content">
-                    <div class="tab-toolbar">
-                        <button id="actors-refresh" type="button">Refresh</button>
-                        <label class="tab-auto"><input type="checkbox" id="actors-auto" checked> Auto</label>
-                        <span id="actors-status"></span>
-                    </div>
-                    <div id="actors-tree"></div>
-                </section>
-
                 <section id="tab-logdb" class="rtab-content active">
                     <!-- Sessions: list conversations; expand one to read its turn-by-turn trace inline;
                          clean up. (Backed by the H2 I/O log — added in a later phase.) -->
@@ -194,6 +198,7 @@
                 </section>
             </div>
         </div>
+    </div>
     </div>
 
     <!-- BTW Overlay (side question while LLM is processing) -->

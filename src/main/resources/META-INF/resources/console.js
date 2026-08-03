@@ -19,7 +19,17 @@
             document.querySelectorAll(".rtab-content").forEach(function (c) {
                 c.classList.toggle("active", c.id === "tab-" + tab);
             });
-            if (tab === "actors") refreshActors();
+        });
+    }
+
+    // ── (2) Collapsible left dock (actor tree) ──────────────────────────────
+    function initDock() {
+        var toggle = document.getElementById("dock-toggle");
+        var dock = document.getElementById("left-dock");
+        if (!toggle || !dock) return;
+        toggle.addEventListener("click", function () {
+            var collapsed = dock.classList.toggle("collapsed");
+            if (!collapsed) refreshActors();   // refresh when re-opening
         });
     }
 
@@ -103,8 +113,8 @@
             if (auto && auto.checked) {
                 if (!timer) {
                     timer = setInterval(function () {
-                        var tab = document.getElementById("tab-actors");
-                        if (tab && tab.classList.contains("active")) refreshActors();
+                        var dock = document.getElementById("left-dock");
+                        if (dock && !dock.classList.contains("collapsed")) refreshActors();
                     }, 3000);
                 }
             } else if (timer) {
@@ -119,8 +129,7 @@
     document.addEventListener("DOMContentLoaded", function () {
         initTabs();
         initActors();
-        // Load immediately if the Actors tab starts active.
-        var tab = document.getElementById("tab-actors");
-        if (tab && tab.classList.contains("active")) refreshActors();
+        initDock();
+        refreshActors();   // the actor dock is visible by default
     });
 })();

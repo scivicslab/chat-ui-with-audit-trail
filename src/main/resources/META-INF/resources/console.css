@@ -379,7 +379,56 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
 #app-header { flex: 0 0 auto; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
     padding: 6px 14px; background: var(--bg-secondary, #161616);
     border-bottom: 1px solid var(--border-color, #2c2c2c); color: var(--text-secondary, #b8b8b8); font-size: 13px; }
-#console-root { flex: 1 1 auto; min-height: 0; height: auto; width: 100%; }
+/* (3) main pane fills the row to the right of the left dock */
+#console-root { flex: 1 1 auto; min-height: 0; height: auto; width: auto; }
+
+/* ── (2) Collapsible left dock (actor tree, html-saurus-style) ── */
+#app-body { flex: 1 1 auto; min-height: 0; display: flex; width: 100%; overflow: hidden; }
+#left-dock {
+    flex: 0 0 auto;
+    width: 260px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg-secondary, #161616);
+    border-right: 1px solid var(--border-color, #2c2c2c);
+    transition: width .15s ease;
+}
+#left-dock.collapsed { width: 0; border-right: none; }
+.dock-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-color, #2c2c2c);
+    font-size: 12px;
+    color: var(--text-secondary, #b8b8b8);
+    white-space: nowrap;
+}
+.dock-title { font-weight: 600; color: var(--text-primary, #e6e6e6); margin-right: auto; }
+.dock-head button {
+    background: var(--bg-primary, #2a2a2a);
+    color: var(--text-primary, #e6e6e6);
+    border: 1px solid var(--border-color, #444);
+    border-radius: 4px;
+    padding: 2px 8px;
+    cursor: pointer;
+    font-size: 12px;
+}
+.dock-head button:hover { filter: brightness(1.2); }
+#dock-toggle {
+    background: transparent;
+    border: 1px solid var(--border-color, #444);
+    color: var(--text-secondary, #b8b8b8);
+    border-radius: 4px;
+    padding: 2px 9px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+}
+#dock-toggle:hover { color: var(--text-primary, #e6e6e6); }
 #app-header #app-title { font-size: 15px; font-weight: 600; margin: 0; color: var(--text-primary, #e6e6e6); }
 #app-header label { display: inline-flex; align-items: center; gap: 4px; }
 #app-header select { background: var(--bg-primary, #2a2a2a); color: var(--text-primary, #e6e6e6);
