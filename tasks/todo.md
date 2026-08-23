@@ -67,8 +67,11 @@
 
 5. **`write`のような複数パラメータのツールで、モデルが`<parameter name="...">`書式を守らないことがある**——実機テストで最初、モデルが`write`を呼ぶ際に`<path>write-marker.txt</path>`・`<content>フラミンゴ</content>`という、パラメータ名をタグ名にした省略形を使い、`TextToolCallParser`の`PARAM`正規表現（`<parameter name="...">`しか見ない）が何も拾えず、`path required`エラーを繰り返して`MAX_STEPS`（6）に達し失敗した。システムプロンプトに「1パラメータの例」と「2パラメータ（`write`）の例」を具体的に書き、`<path>`のような省略タグを明示的に禁止する一文を足したところ、モデルは正しい`<parameter name="path">`／`<parameter name="content">`形式を使うようになった——`write-marker.txt`に「フラミンゴ」という指定した文字列が実際に書き込まれることを確認した。ここではプロンプト側の修正で解決したが、`TextToolCallParser`自体を省略タグにも寛容にする、という代替案は採らなかった（`quarkus-chat-ui3`からの無改名移植を優先）。
 
+`fetch`・`web_search`・`search_docs`も確認した。ツール実装自体（`FetchTool`/`WebSearchTool`/`DocSearchTool`）はプレーンなJavaメソッドとして直接呼び出し、実際にhtml-saurus（`localhost:28001`）・DuckDuckGoから正しい結果が返ることを確認した。`fetch`はagent loop経由でも確認済み——「`http://localhost:28001/api/search?q=Interpreter...`をfetchツールで取得して」という指示で、モデルが正しいURLで`fetch`を呼び、html-saurusの実際のJSON応答が観測できた。`web_search`・`search_docs`はツール実装の直接呼び出しでは確認したが、agent loop（LLM経由）でのラウンドトリップはまだ試していない——`calc`/`read`/`write`/`fetch`で同じ`<invoke>`書式・同じ`runTool`分岐が既に4回確認できているため、リスクは低いと考えるが、実行はしていない。
+
+`cancel()`によるagent loop途中終了も実機確認した。LLMが応答をストリーミング中（`<reason>`タグの途中）に`cancel()`を呼んだところ、`OpenAiCompatProvider`側の`sendingThread.interrupt()`が効いて即座に`"error: Request cancelled"`イベントが発生し、`runUntilEnd()`はツール実行（`calc`）まで進むことなく1.5秒程度で終了した。`busy`は`false`に戻り、`getResultStatus(resultKey)`は`"completed"`にならず`"unknown"`のまま——`finish()`の`cancelled`分岐（`storeCompletedResult`を呼ばない静かな終了）が正しく機能していることを確認した。
+
 未検証・未対応のまま残っている点：
 
-- `web_search`・`fetch`・`search_docs`の3ツールは、実装は移植したが実機で1回も呼ばせていない（`calc`・`read`・`write`のみ確認）。
-- `cancel()`中の`agent loop`の途中終了（`cancelled`チェック）は未確認。
+- `web_search`・`search_docs`はagent loop（LLM経由）でのラウンドトリップ未確認（ツール単体は確認済み）。
 - `060_PromptQueuePorting_260823_oo01`にあった`noThink`引数は、`PromptQueue.dequeueAndSend`の新しい呼び出し（`chat.start(...)`）に渡していない（`start`のシグネチャに無い）——Qwen3以外のモデルでは今のところ影響しないが、明示的な欠落として記録する。
