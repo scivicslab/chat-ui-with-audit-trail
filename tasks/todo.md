@@ -60,12 +60,15 @@
 
 1. **`InterpreterIIAR`のコンストラクタは`selfActorRef`を自動設定しない**——`Interpreter.setSelfActorRef(IIActorRef<?>)`という別メソッドが存在し、`IIActorRef`実装側が明示的に呼ぶ設計になっている。呼び忘れると、YAMLの`actor: this`が`Interpreter.action()`内で`selfActorRef==null`の分岐（`system.getIIActor("this")`という額面通りの文字列検索）に落ち、`"Actor not found: this"`で毎回失敗する——実機テストで最初に踏んだ。`ChatSessionIIAR`のコンストラクタに`chatSession().setSelfActorRef(this)`を追加して解決。
 2. **YAMLの`execution`は既定が`POOL`**——`Interpreter.action()`は、アクションの実行モードを明示しない限り`ManagedThreadPool`へディスパッチする（`ExecutionMode.POOL`が既定値）。これは`chat-session-agent-loop.yaml`の設計時に検討した「`runUntilEnd()`は`tell()`クロージャの中でプレーンなJavaメソッドとして呼び、`ManagedThreadPool`を経由させない」という前提を、`execCode()`内部の個々のステップ実行の段階で覆してしまう——`ChatSession`自身のフィールド変更が、呼び出し元のアクタースレッドとは別の`ManagedThreadPool`のスレッドで起きてしまい、`pollAutonomousActivity`等の通常の`tell`経由の処理と競合しうる。YAMLの各ステップに明示的に`execution: direct`を指定することで、`actorAR.callByActionName(...)`が呼び出し元のスレッド上で直接実行されるようにして回避した。
-3. **`transitionTo`と`setCurrentState`は別物**——`setCurrentState(state)`は`currentState`だけを書き換え、遷移スキャンの起点（`currentTransitionIndex`）を動かさない。`start()`が`setCurrentState("think")`を呼ぶと、2回目以降のターンで`currentTransitionIndex`が前回終了時の位置（`think→end`側）に残ったままになり、次の`execCode()`が`think→act`を飛ばしていきなり`think→end`（`finish`）を実行してしまう——1ターン目だけ正しく動いて2ターン目以降が壊れる、という発見しにくい不具合になるところだった。`transitionTo("think")`（`setCurrentState`＋`findNextMatchingTransition`を両方行う）を使うことで回避した。今回は1ターンの実機テストまでしか行っておらず、複数ターンでの動作は未確認。
+3. **`transitionTo`と`setCurrentState`は別物**——`setCurrentState(state)`は`currentState`だけを書き換え、遷移スキャンの起点（`currentTransitionIndex`）を動かさない。`start()`が`setCurrentState("think")`を呼ぶと、2回目以降のターンで`currentTransitionIndex`が前回終了時の位置（`think→end`側）に残ったままになり、次の`execCode()`が`think→act`を飛ばしていきなり`think→end`（`finish`）を実行してしまう——1ターン目だけ正しく動いて2ターン目以降が壊れる、という発見しにくい不具合になるところだった。`transitionTo("think")`（`setCurrentState`＋`findNextMatchingTransition`を両方行う）を使うことで回避した。**同一`ChatSession`で2ターン連続実行する実機テストで確認済み**（「日本の首都は」→「東京です。」の後、同じインスタンスで「フランスの首都は」→「パリです。」が正しく完了した）。
 4. **`McpRequestQueue`ベースのagent loop設計は誤りだった**——`080_McpRequestQueuePorting_260823_oo01`に記録済みの通り、`runTool()`は`McpRequestQueue`を使わず、`quarkus-chat-ui3`から移植したインプロセスのツール実装を直接呼ぶ。
+
+`read`ツールも実機確認済み——モデルが知り得ない合言葉を書いたファイルを用意し、「readツールで読んで合言葉を答えて」と指示したところ、実際に`FileReadTool.read`経由でファイル内容を取得し、正しい合言葉を最終回答に含めた。
+
+5. **`write`のような複数パラメータのツールで、モデルが`<parameter name="...">`書式を守らないことがある**——実機テストで最初、モデルが`write`を呼ぶ際に`<path>write-marker.txt</path>`・`<content>フラミンゴ</content>`という、パラメータ名をタグ名にした省略形を使い、`TextToolCallParser`の`PARAM`正規表現（`<parameter name="...">`しか見ない）が何も拾えず、`path required`エラーを繰り返して`MAX_STEPS`（6）に達し失敗した。システムプロンプトに「1パラメータの例」と「2パラメータ（`write`）の例」を具体的に書き、`<path>`のような省略タグを明示的に禁止する一文を足したところ、モデルは正しい`<parameter name="path">`／`<parameter name="content">`形式を使うようになった——`write-marker.txt`に「フラミンゴ」という指定した文字列が実際に書き込まれることを確認した。ここではプロンプト側の修正で解決したが、`TextToolCallParser`自体を省略タグにも寛容にする、という代替案は採らなかった（`quarkus-chat-ui3`からの無改名移植を優先）。
 
 未検証・未対応のまま残っている点：
 
-- 複数ターン（同じ`ChatSession`で2回以上`start`→`runUntilEnd`を回す）の動作は未確認。上記3の`transitionTo`修正で理論上は正しいはずだが、実機で確認していない。
-- `web_search`・`fetch`・`search_docs`・`write`・`read`の5ツールは、実装は移植したが実機で1回も呼ばせていない（`calc`のみ確認）。
+- `web_search`・`fetch`・`search_docs`の3ツールは、実装は移植したが実機で1回も呼ばせていない（`calc`・`read`・`write`のみ確認）。
 - `cancel()`中の`agent loop`の途中終了（`cancelled`チェック）は未確認。
 - `060_PromptQueuePorting_260823_oo01`にあった`noThink`引数は、`PromptQueue.dequeueAndSend`の新しい呼び出し（`chat.start(...)`）に渡していない（`start`のシグネチャに無い）——Qwen3以外のモデルでは今のところ影響しないが、明示的な欠落として記録する。

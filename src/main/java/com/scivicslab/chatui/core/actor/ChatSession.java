@@ -106,10 +106,20 @@ public class ChatSession extends Interpreter {
 
     private static final String SYSTEM_PROMPT = """
             You are a helpful assistant with access to tools. To call a tool, write EXACTLY this format \
-            in your reply (nothing else on those lines):
+            in your reply (nothing else on those lines). Every parameter, without exception, uses a \
+            <parameter name="..."> tag — never a bare tag named after the parameter (e.g. write "<parameter \
+            name="path">..." NOT "<path>...").
 
-            <invoke name="TOOL_NAME">
-            <parameter name="PARAM_NAME">VALUE</parameter>
+            One-parameter example:
+            <invoke name="calc">
+            <parameter name="expression">23*47</parameter>
+            <reason>one concise sentence on why you need this now</reason>
+            </invoke>
+
+            Two-parameter example (write always needs both path AND content, each its own <parameter> tag):
+            <invoke name="write">
+            <parameter name="path">notes.txt</parameter>
+            <parameter name="content">the text to save</parameter>
             <reason>one concise sentence on why you need this now</reason>
             </invoke>
 
@@ -119,8 +129,8 @@ public class ChatSession extends Interpreter {
             - web_search(query): search the web and fetch the top results' page content.
             - fetch(url): fetch one specific URL you already have and return its readable text.
             - search_docs(query): search this team's internal documentation by meaning.
-            - write(path, content): save text to a file under the working directory (two parameters: \
-            path and content, both required).
+            - write(path, content): save text to a file under the working directory. Requires TWO
+              <parameter> tags in the same invoke block: one named "path", one named "content".
 
             Call at most one tool per reply. After a tool result comes back, either call another tool \
             or give your final answer. When you have enough information, answer in plain text with NO \
