@@ -1,0 +1,51 @@
+name: chat-session-agent-loop
+description: |
+  ChatSession's own agent loop: (think -> act)* -> end, i.e. (stepExpectingAction -> runTool)*
+  -> finish. See ChatSessionAgentLoop_260823_oo01.
+
+  start() is a plain Java method, called directly by whoever hands off a prompt (never
+  dispatched through this YAML) — it resets the per-turn fields and positions the state
+  machine at "think" via transitionTo("think"), not setCurrentState("think") (the latter
+  would not reposition the transition-scan cursor, so a second turn could resume mid-list
+  and skip straight to think-final without ever calling stepExpectingAction again).
+
+  Every action below sets execution: direct. The default (POOL) would run the action on
+  IIActorSystem's ManagedThreadPool, off ChatSession's own actor thread — ManagedThreadPool
+  does not serialize per actor name, so ChatSession's own fields (scratchpad, pendingCalls,
+  busy, ...) would then be mutated from a thread unrelated to the actor's message queue,
+  racing with ordinary tell()/ask() calls (e.g. the idle-monitor's pollAutonomousActivity).
+  execution: direct keeps every step on whichever thread called runUntilEnd() — which must
+  itself be invoked as a plain Java method from within an existing tell() closure (see
+  PromptQueuePorting_260823_oo01), so the whole turn stays on ChatSession's one actor thread.
+
+steps:
+  - states: ["think", "act"]
+    label: think-action
+    note: |
+      ONE LLM call. stepExpectingAction() succeeds (-> act) when the response contains a
+      <invoke name="..."> tool-call block; fails (-> end, via think-final) when it is a
+      plain final answer, the step limit was reached, or the turn was cancelled.
+    actions:
+      - actor: this
+        method: stepExpectingAction
+        execution: direct
+
+  - states: ["think", "end"]
+    label: think-final
+    note: |
+      No tool was called: emit the final answer already captured in stepExpectingAction and
+      end the turn. Reached only when think-action just failed (tried second, same state).
+    actions:
+      - actor: this
+        method: finish
+        execution: direct
+
+  - states: ["act", "think"]
+    label: run-tool
+    note: |
+      A tool was called: execute it (read/calc/web_search/fetch/search_docs/write), append
+      the observation to the scratchpad, then loop back to think for the next LLM call.
+    actions:
+      - actor: this
+        method: runTool
+        execution: direct

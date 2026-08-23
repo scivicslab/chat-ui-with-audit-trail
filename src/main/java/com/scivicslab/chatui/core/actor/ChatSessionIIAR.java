@@ -8,6 +8,7 @@ import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 import com.scivicslab.turingworkflow.workflow.InterpreterIIAR;
 
+import java.io.InputStream;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -24,10 +25,24 @@ import java.util.concurrent.CompletableFuture;
  */
 public class ChatSessionIIAR extends InterpreterIIAR {
 
+    private static final String AGENT_LOOP_YAML = "/workflows/chat-session-agent-loop.yaml";
+
     public ChatSessionIIAR(String actorName, LlmProvider provider, Optional<String> configApiKey,
                      IoLogStore ioLog, IIActorSystem system) {
         super(actorName, new ChatSession(provider, configApiKey, ioLog), system);
         chatSession().setActorSystem(system);
+        // InterpreterIIAR's constructor does not call this itself — without it, "actor: this" in
+        // chat-session-agent-loop.yaml resolves through Interpreter.action()'s selfActorRef==null
+        // fallback (system.getIIActor("this")), which finds nothing ("Actor not found: this").
+        chatSession().setSelfActorRef(this);
+        try (InputStream yaml = getClass().getResourceAsStream(AGENT_LOOP_YAML)) {
+            if (yaml == null) {
+                throw new IllegalStateException("Agent-loop workflow not found on classpath: " + AGENT_LOOP_YAML);
+            }
+            chatSession().readYaml(yaml);
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("Failed to load agent-loop workflow: " + AGENT_LOOP_YAML, e);
+        }
     }
 
     private ChatSession chatSession() { return (ChatSession) object; }
@@ -49,6 +64,16 @@ public class ChatSessionIIAR extends InterpreterIIAR {
             return sendPrompt(arg);
         } else if (actionName.equals("getResult")) {
             return getResult(arg);
+        } else if (actionName.equals("stepExpectingAction")) {
+            // Dispatched by chat-session-agent-loop.yaml ("actor: this") from inside
+            // Interpreter.execCode(), itself only ever invoked as a plain runUntilEnd() call
+            // from within an existing tell() closure — so this runs on ChatSession's own
+            // actor thread, not on IIActorSystem's ManagedThreadPool.
+            return chatSession().stepExpectingAction();
+        } else if (actionName.equals("runTool")) {
+            return chatSession().runTool();
+        } else if (actionName.equals("finish")) {
+            return chatSession().finish();
         }
         // execCode / runUntilEnd / call / runWorkflow / readYaml / setCurrentState etc. are
         // handled by InterpreterIIAR itself, since ChatSession is an Interpreter.

@@ -155,12 +155,17 @@ public class PromptQueue {
     // ---- Internal ----
 
     /**
-     * Dequeues the next item and tells ChatSession to start the prompt.
+     * Dequeues the next item and runs it through ChatSession's agent loop.
      * Runs within ChatSession's message context (via tell), so isBusy() is safe to read directly.
      *
-     * <p>Stage 1: dispatches via {@code ChatSession.startPrompt(...)} directly (no agent loop yet).
-     * {@code ChatSessionAgentLoop_260823_oo01} will change this hand-off to
-     * {@code chat.start(...)} + {@code chat.runUntilEnd(...)} once the agent loop is ported.</p>
+     * <p>{@code chat.start(...)} and {@code chat.runUntilEnd()} (inherited from {@code Interpreter})
+     * are called here as plain Java methods, inside this actor's own {@code tell()} closure — not
+     * via {@code ChatSessionIIAR}'s generic {@code callByActionName("runUntilEnd", ...)}, which
+     * would dispatch onto {@code IIActorSystem}'s {@code ManagedThreadPool} and mutate ChatSession's
+     * fields off its own actor thread (see {@code chat-session-agent-loop.yaml}'s own note, and
+     * {@code ChatSessionAgentLoop_260823_oo01}). {@code runUntilEnd()} itself blocks this call until
+     * the turn reaches "end" — cheap, since this is a virtual thread — so the whole turn, including
+     * every LLM call and tool execution inside it, stays serialized on ChatSession's own thread.</p>
      */
     private void dequeueAndSend(ChatSession chat, ActorRef<ChatSession> chatSessionRef) {
         if (queue.isEmpty()) return;
@@ -172,7 +177,11 @@ public class PromptQueue {
         LOG.info("Dequeuing prompt (remaining=" + queue.size() + "): "
                 + truncate(item.prompt(), 80));
 
-        chat.startPrompt(item.prompt(), item.model(), item.emitter(), chatSessionRef, item.done(), item.resultKey(), item.noThink());
+        chat.start(item.prompt(), item.model(), item.emitter(), chatSessionRef, item.done(), item.resultKey());
+        com.scivicslab.pojoactor.core.ActionResult result = chat.runUntilEnd();
+        if (!result.isSuccess()) {
+            LOG.warning("Agent loop did not reach 'end': " + result.getResult());
+        }
     }
 
     private static String truncate(String s, int maxLen) {

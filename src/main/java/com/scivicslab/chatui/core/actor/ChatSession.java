@@ -1,15 +1,26 @@
 package com.scivicslab.chatui.core.actor;
 
+import com.scivicslab.chatui.agent.ContextBudget;
+import com.scivicslab.chatui.agent.DocSearchTool;
+import com.scivicslab.chatui.agent.FetchTool;
+import com.scivicslab.chatui.agent.FileReadTool;
+import com.scivicslab.chatui.agent.FileWriteTool;
+import com.scivicslab.chatui.agent.TextToolCallParser;
+import com.scivicslab.chatui.agent.ToolCall;
+import com.scivicslab.chatui.agent.WebSearchTool;
 import com.scivicslab.chatui.core.iolog.IoLogStore;
 import com.scivicslab.chatui.core.provider.LlmProvider;
 import com.scivicslab.chatui.core.provider.ProviderContext;
 import com.scivicslab.chatui.core.rest.ChatEvent;
 import com.scivicslab.chatui.core.service.AuthMode;
+import com.scivicslab.pojoactor.core.ActionResult;
 import com.scivicslab.pojoactor.core.ActorRef;
+import com.scivicslab.turingworkflow.examples.jshell.JShellCalculator;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 import com.scivicslab.turingworkflow.workflow.Interpreter;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -88,6 +99,50 @@ public class ChatSession extends Interpreter {
     private final Set<String> pendingResultKeys = new HashSet<>();
     // UUID of the prompt currently being processed, or null
     private String activeResultKey;
+
+    // ---- Agent loop (ChatSessionAgentLoop_260823_oo01): start -> (stepExpectingAction -> runTool)* -> finish ----
+    private static final int MAX_STEPS = 6;
+    private static final Path WORKING_DIR = Path.of("").toAbsolutePath();
+
+    private static final String SYSTEM_PROMPT = """
+            You are a helpful assistant with access to tools. To call a tool, write EXACTLY this format \
+            in your reply (nothing else on those lines):
+
+            <invoke name="TOOL_NAME">
+            <parameter name="PARAM_NAME">VALUE</parameter>
+            <reason>one concise sentence on why you need this now</reason>
+            </invoke>
+
+            Available tools:
+            - read(path): read a file, or a whole directory recursively, under the working directory.
+            - calc(expression): evaluate a Java arithmetic expression, e.g. 23*47 or Math.sqrt(16).
+            - web_search(query): search the web and fetch the top results' page content.
+            - fetch(url): fetch one specific URL you already have and return its readable text.
+            - search_docs(query): search this team's internal documentation by meaning.
+            - write(path, content): save text to a file under the working directory (two parameters: \
+            path and content, both required).
+
+            Call at most one tool per reply. After a tool result comes back, either call another tool \
+            or give your final answer. When you have enough information, answer in plain text with NO \
+            <invoke> block — that plain text is taken as your final answer to the user.""";
+
+    // Per-turn working memory, reset in start(). Not thread-confined by field type (see
+    // ChatSessionAgentLoop_260823_oo01's own note in chat-session-agent-loop.yaml) — safe only
+    // because runUntilEnd() is always invoked as a plain method from within an existing tell()
+    // closure, so the whole turn runs on this actor's own single thread.
+    private String question;
+    private String pendingPrompt;
+    private String turnModel;
+    private Consumer<ChatEvent> turnEmitter;
+    private ActorRef<ChatSession> turnSelf;
+    private CompletableFuture<Void> turnDone;
+    private List<ToolCall> pendingCalls;
+    private String finalAnswer;
+    private int stepCount;
+    private volatile boolean cancelled;
+
+    /** Lazily created on first {@code calc} tool call; kept for this session's lifetime. */
+    private JShellCalculator calculator;
 
     /**
      * Convenience constructor without the I/O log (used by tests).
@@ -432,6 +487,194 @@ public class ChatSession extends Interpreter {
         done.complete(null);
     }
 
+    // ---- Agent loop (ChatSessionAgentLoop_260823_oo01) ----
+    // Driven by chat-session-agent-loop.yaml: (stepExpectingAction -> runTool)* -> finish.
+    // Callers must invoke start(...) then runUntilEnd() (inherited from Interpreter) as plain Java
+    // method calls from within an existing tell()/ask() closure — never through
+    // ChatSessionIIAR's generic callByActionName("runUntilEnd", ...), which would dispatch onto
+    // IIActorSystem's ManagedThreadPool and mutate these fields off this actor's own thread.
+
+    /**
+     * Begins an agent-loop turn: resets per-turn state and positions the state machine at
+     * "think" so a following {@code runUntilEnd()} call runs the loop to completion.
+     *
+     * @param prompt    the user's prompt text
+     * @param model     the model to use, or {@code null}/blank to keep the provider's current model
+     * @param emitter   callback that receives {@link ChatEvent}s as the turn streams
+     * @param self      this actor's own reference, used for hand-offs (e.g. {@code onPromptComplete})
+     * @param done      completed once the turn has finished processing (success or error)
+     * @param resultKey UUID under which the final answer is stored for later retrieval via
+     *                  {@link #getCompletedResult(String)}, or {@code null} for human-typed prompts
+     */
+    public void start(String prompt, String model, Consumer<ChatEvent> emitter,
+                       ActorRef<ChatSession> self, CompletableFuture<Void> done, String resultKey) {
+        if (busy) {
+            emitter.accept(ChatEvent.error("Already processing a prompt. Please wait or cancel."));
+            done.complete(null);
+            return;
+        }
+        if (!isAuthenticated()) {
+            emitter.accept(ChatEvent.error("No authentication configured. Please provide an API key."));
+            done.complete(null);
+            return;
+        }
+
+        busy = true;
+        recordHistory("user", prompt);
+        if (resultKey != null) {
+            pendingResultKeys.remove(resultKey);
+            activeResultKey = resultKey;
+        }
+
+        this.question = prompt;
+        this.pendingPrompt = prompt;
+        this.turnModel = model;
+        this.turnEmitter = emitter;
+        this.turnSelf = self;
+        this.turnDone = done;
+        this.pendingCalls = null;
+        this.finalAnswer = null;
+        this.stepCount = 0;
+        this.cancelled = false;
+
+        emitter.accept(ChatEvent.status(provider.getCurrentModel(), provider.getSessionId(), true));
+        // transitionTo (not setCurrentState) also repositions the transition-scan cursor, so a
+        // second turn resumes scanning from the top and finds think-action before think-final
+        // (see chat-session-agent-loop.yaml's own note).
+        transitionTo("think");
+    }
+
+    /**
+     * One LLM call. Succeeds (state moves to "act") when the response contains a tool-call
+     * request; fails ("think" -> "end" via {@code finish}) when it is a plain final answer, the
+     * step limit was reached, the turn was cancelled, or the call errored.
+     *
+     * @return {@link ActionResult} with {@code success=true} if a tool call was found
+     */
+    public ActionResult stepExpectingAction() {
+        if (cancelled) {
+            finalAnswer = null;
+            return new ActionResult(false, "cancelled");
+        }
+        if (++stepCount > MAX_STEPS) {
+            finalAnswer = "(step limit reached)";
+            return new ActionResult(false, "step limit");
+        }
+
+        String promptToSend = (stepCount == 1) ? (SYSTEM_PROMPT + "\n\n" + pendingPrompt) : pendingPrompt;
+        ProviderContext ctx = new ProviderContext(apiKey, List.of(), false, () -> {});
+        StringBuilder assistantBuf = new StringBuilder();
+        ActorRef<LlmProvider> providerRef = providerRef();
+
+        try {
+            providerRef.ask(p -> {
+                Consumer<ChatEvent> wrapped = event -> {
+                    if ("delta".equals(event.type()) && event.content() != null) {
+                        assistantBuf.append(event.content());
+                    }
+                    turnEmitter.accept(event);
+                };
+                p.sendPrompt(promptToSend, turnModel, wrapped, ctx);
+                return null;
+            }, system.getManagedThreadPool()).get();
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "Agent-loop LLM call failed", e);
+            turnEmitter.accept(ChatEvent.error("Error: " + e.getMessage()));
+            finalAnswer = null;
+            return new ActionResult(false, "error: " + e.getMessage());
+        }
+
+        String text = assistantBuf.toString();
+        List<ToolCall> calls = TextToolCallParser.parse(text);
+        if (!calls.isEmpty()) {
+            pendingCalls = calls;
+            for (ToolCall tc : calls) {
+                turnEmitter.accept(ChatEvent.thinking("\n→ " + tc.name() + "(" + tc.argumentsJson() + ")\n"));
+            }
+            return new ActionResult(true, "action");
+        }
+
+        finalAnswer = text.trim();
+        return new ActionResult(false, "final");
+    }
+
+    /**
+     * Executes every pending tool call, appends the observations to the scratchpad prompt for
+     * the next {@code stepExpectingAction()} call, then clears {@code pendingCalls}.
+     *
+     * @return {@link ActionResult} with {@code success=true} (this transition never fails)
+     */
+    public ActionResult runTool() {
+        if (pendingCalls == null || pendingCalls.isEmpty()) {
+            return new ActionResult(true, "observed");
+        }
+        StringBuilder observations = new StringBuilder();
+        for (ToolCall tc : pendingCalls) {
+            String observation;
+            try {
+                observation = ContextBudget.truncateObservation(executeTool(tc));
+            } catch (Exception e) {
+                observation = "error: " + e.getMessage();
+            }
+            turnEmitter.accept(ChatEvent.thinking("Observation (" + tc.name() + "): "
+                    + observation.substring(0, Math.min(200, observation.length())) + "\n"));
+            observations.append("Tool result (").append(tc.name()).append("):\n")
+                    .append(observation).append("\n\n");
+        }
+        pendingCalls = null;
+        pendingPrompt = observations.toString().stripTrailing();
+        return new ActionResult(true, "observed");
+    }
+
+    /**
+     * Emits the final answer (if any), commits it to history, stores it under the turn's
+     * {@code resultKey} if any, and runs the same completion hand-off as {@link #onPromptComplete}.
+     *
+     * @return {@link ActionResult} with {@code success=true}
+     */
+    public ActionResult finish() {
+        if (!cancelled && finalAnswer != null) {
+            String answer = finalAnswer;
+            recordHistory("assistant", answer);
+            if (activeResultKey != null) {
+                storeCompletedResult(activeResultKey, answer);
+            }
+            turnEmitter.accept(ChatEvent.delta(answer));
+            turnEmitter.accept(ChatEvent.result(provider.getSessionId(), 0.0, 0));
+        }
+        onPromptComplete(turnEmitter, turnDone, turnSelf);
+        return new ActionResult(true, "finished");
+    }
+
+    /** Dispatches one tool call to its implementation and returns the raw (untruncated) observation. */
+    private String executeTool(ToolCall tc) {
+        String args = tc.argumentsJson();
+        return switch (tc.name()) {
+            case "read" -> FileReadTool.read(WORKING_DIR, extractInput(args, "path"));
+            case "write" -> FileWriteTool.write(WORKING_DIR,
+                    extractInput(args, "path"), extractInput(args, "content"));
+            case "calc" -> calculator().evaluate(extractInput(args, "expression"));
+            case "web_search" -> WebSearchTool.searchAndFetch(extractInput(args, "query"));
+            case "fetch" -> FetchTool.fetch(extractInput(args, "url"));
+            case "search_docs" -> DocSearchTool.search(extractInput(args, "query"), 0);
+            default -> "error: unknown tool '" + tc.name() + "'";
+        };
+    }
+
+    /** Extracts one named field from a tool call's JSON arguments, or {@code ""} if absent. */
+    private String extractInput(String argumentsJson, String field) {
+        try {
+            return new org.json.JSONObject(argumentsJson == null ? "{}" : argumentsJson).optString(field, "");
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private JShellCalculator calculator() {
+        if (calculator == null) calculator = new JShellCalculator();
+        return calculator;
+    }
+
     // ---- Autonomous turns (idle monitor) ----
 
     /**
@@ -506,13 +749,17 @@ public class ChatSession extends Interpreter {
     }
 
     /**
-     * Cancels the currently running prompt, if any.
+     * Cancels the currently running prompt, if any — a plain {@code startPrompt} call or an
+     * agent-loop turn alike.
      *
      * <p>Uses {@code tellNow()} to bypass the provider actor's queue so that the
      * cancel signal reaches the provider immediately, even while {@code sendPrompt()}
-     * is blocking the queue.</p>
+     * is blocking the queue. {@code cancelled} is checked by {@link #stepExpectingAction()}
+     * at the top of each step so an agent-loop turn stops advancing once the in-flight
+     * provider call this unblocks returns.</p>
      */
     public void cancel() {
+        cancelled = true;
         if (providerName == null) return;
         ActorRef<LlmProvider> providerRef = providerRef();
         if (providerRef != null) providerRef.tellNow(LlmProvider::cancel);
