@@ -64,6 +64,33 @@
       <artifactId>turing-workflow</artifactId>
       <version>${turing-workflow.version}</version>
     </dependency>
+    <!-- turing-workflow:3.7.0's own published pom omits this, even though Interpreter (which
+         ChatSession extends) uses org.apache.commons.jexl3 directly — declared explicitly here
+         so it resolves at runtime, not just compile time. -->
+    <dependency>
+      <groupId>org.apache.commons</groupId>
+      <artifactId>commons-jexl3</artifactId>
+      <version>3.3</version>
+    </dependency>
+    <!-- H2-backed complete I/O log (Sessions tab / audit trail). Only the storage primitives are
+         used (H2LogStore / DistributedLogStore / SessionStatus), which depend on H2 + org.json only.
+         pojo-actor and turing-workflow are excluded so this does NOT pull a second pojo-actor
+         version — this project stays on its own; the H2 classes never reference them. -->
+    <dependency>
+      <groupId>com.scivicslab.turingworkflow.plugins</groupId>
+      <artifactId>plugin-log-db</artifactId>
+      <version>1.6.0</version>
+      <exclusions>
+        <exclusion>
+          <groupId>com.scivicslab</groupId>
+          <artifactId>pojo-actor</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>com.scivicslab</groupId>
+          <artifactId>turing-workflow</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
     <!-- Health probe for Kubernetes, per the project standard -->
     <dependency>
       <groupId>io.quarkus</groupId>
