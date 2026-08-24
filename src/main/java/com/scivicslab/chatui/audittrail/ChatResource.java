@@ -122,6 +122,29 @@ public class ChatResource {
     }
 
     /**
+     * Reports one tab's {@link PromptQueue} state, for the left pane's Queue indicator — this
+     * project queues on the server (whenever {@code ChatSession} is busy), unlike
+     * {@code quarkus-chat-ui3}'s client-side-only draft queue.
+     *
+     * @param tabId conversation tab identifier
+     * @return {@code {"size": N, "hasPending": bool}}
+     */
+    @GET
+    @Path("/tabs/{tabId}/queue")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Map<String, Object> queue(@PathParam("tabId") String tabId) {
+        actorSystem.createTab(tabId);
+        ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(tabId);
+        try {
+            int size = promptQueueRef.ask(PromptQueue::getQueueSize).get(5, TimeUnit.SECONDS);
+            return Map.of("size", size, "hasPending", size > 0);
+        } catch (Exception e) {
+            LOG.warning("Failed to read queue state for tab " + tabId + ": " + e.getMessage());
+            return Map.of("size", 0, "hasPending", false);
+        }
+    }
+
+    /**
      * Lists the models available from one tab's provider.
      *
      * @param tabId conversation tab identifier

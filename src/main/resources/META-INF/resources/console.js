@@ -1,11 +1,16 @@
-// Minimal console script for chat-ui-with-audit-trail (from-scratch rebuild stage).
+// Console script for chat-ui-with-audit-trail.
 //   - right-pane tab switching
 //   - Actors tab: fetch GET /api/actors and render the actor tree
-// Other right-pane tabs (Sessions / System Log / Workflow) have no backend yet.
+//   - Sessions tab: GET /api/sessions + trace view (ported from quarkus-chat-ui3)
+//   - System Log tab: GET /api/logs, backed by LogTap (ported from quarkus-chat-ui3)
+// The Workflow tab has no backend yet.
 (function () {
     "use strict";
 
     // ── Right-pane tabs ─────────────────────────────────────────────────────
+    // Single click handler for #right-tab-bar (a second, separate listener here previously raced
+    // with initIo()'s own — both fired on the same click, and depending on timing that could kick
+    // off two concurrent ioLoadSessions() calls stepping on each other's DOM update).
     function initTabs() {
         var bar = document.getElementById("right-tab-bar");
         if (!bar) return;
@@ -19,7 +24,127 @@
             document.querySelectorAll(".rtab-content").forEach(function (c) {
                 c.classList.toggle("active", c.id === "tab-" + tab);
             });
+            if (tab === "logdb") ioOnShow();
+            if (tab === "syslog") refreshLogs();
         });
+    }
+
+    // ── System Log tab (GET /api/logs — LogTap's server-wide ring buffer) ──────
+    // Ported near-verbatim from quarkus-chat-ui3's console.js.
+    function fmtLogTime(ms) {
+        if (!ms) return "";
+        var d = new Date(ms);
+        var p = function (n, w) { return String(n).padStart(w || 2, "0"); };
+        return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds())
+            + "." + p(d.getMilliseconds(), 3);
+    }
+
+    function renderLogs(entries) {
+        var list = document.getElementById("logs-list");
+        if (!list) return;
+        list.textContent = "";
+        if (!Array.isArray(entries) || entries.length === 0) {
+            var empty = document.createElement("div");
+            empty.className = "log-empty";
+            empty.textContent = "No log entries yet.";
+            list.appendChild(empty);
+            return;
+        }
+        entries.forEach(function (e) {
+            var line = document.createElement("div");
+            line.className = "log-line log-" + (e.level || "INFO");
+            if (typeof e.levelValue === "number") line.setAttribute("data-lv", e.levelValue);
+            var t = document.createElement("span");
+            t.className = "log-time";
+            t.textContent = fmtLogTime(e.time) + " ";
+            var lv = document.createElement("span");
+            lv.className = "log-level";
+            lv.textContent = "[" + (e.level || "?") + "] ";
+            var lg = document.createElement("span");
+            lg.className = "log-logger";
+            lg.textContent = (e.logger || "") + ": ";
+            var msg = document.createElement("span");
+            msg.textContent = e.message || "";   // textContent => no HTML injection
+            line.appendChild(t);
+            line.appendChild(lv);
+            line.appendChild(lg);
+            line.appendChild(msg);
+            list.appendChild(line);
+        });
+        list.scrollTop = list.scrollHeight;
+    }
+
+    var lastLogEntries = [];
+
+    // Re-render the last-fetched logs, keeping only entries at or above the selected severity.
+    function applyLevelFilter() {
+        var sel = document.getElementById("logs-level");
+        var min = (sel && sel.value !== "") ? Number(sel.value) : -Infinity;
+        var filtered = lastLogEntries.filter(function (e) {
+            var lv = (typeof e.levelValue === "number") ? e.levelValue : NaN;
+            return isNaN(lv) || lv >= min;   // unknown value: always show
+        });
+        renderLogs(filtered);
+        var status = document.getElementById("logs-status");
+        if (status) status.textContent = filtered.length + " / " + lastLogEntries.length + " line(s)";
+    }
+
+    function hasTextSelectionIn(el) {
+        var sel = window.getSelection();
+        if (!el || !sel || sel.isCollapsed || sel.rangeCount === 0) return false;
+        var node = sel.anchorNode;
+        return !!(node && el.contains(node));
+    }
+
+    var logsRefreshing = false;
+    var lastLogSig = null;
+    function refreshLogs() {
+        if (logsRefreshing) return;
+        logsRefreshing = true;
+        var status = document.getElementById("logs-status");
+        fetch("api/logs")
+            .then(function (r) {
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                return r.json();
+            })
+            .then(function (entries) {
+                entries = Array.isArray(entries) ? entries : [];
+                var sig = JSON.stringify(entries);
+                if (sig === lastLogSig) return;   // unchanged (e.g. idle): do not touch the DOM
+                lastLogSig = sig;
+                lastLogEntries = entries;
+                applyLevelFilter();
+            })
+            .catch(function (err) {
+                if (status) status.textContent = "error: " + err.message;
+            })
+            .finally(function () { logsRefreshing = false; });
+    }
+
+    function initLogs() {
+        var btn = document.getElementById("logs-refresh");
+        var auto = document.getElementById("logs-auto");
+        if (btn) btn.addEventListener("click", refreshLogs);
+        var levelSel = document.getElementById("logs-level");
+        if (levelSel) levelSel.addEventListener("change", applyLevelFilter);
+
+        var timer = null;
+        function applyAuto() {
+            if (auto && auto.checked) {
+                if (!timer) timer = setInterval(function () {
+                    var tab = document.getElementById("tab-syslog");
+                    if (tab && tab.classList.contains("active")
+                        && !hasTextSelectionIn(document.getElementById("logs-list"))) {
+                        refreshLogs();
+                    }
+                }, 3000);
+            } else if (timer) {
+                clearInterval(timer);
+                timer = null;
+            }
+        }
+        if (auto) auto.addEventListener("change", applyAuto);
+        applyAuto();
     }
 
     // ── (2) Collapsible left dock (actor tree) ──────────────────────────────
@@ -147,8 +272,16 @@
     }
 
     function ioLoadSessions() {
+        var el = document.getElementById("io-sessions");
+        // Remember which sessions were expanded so a refresh re-fetches their trace (picking up
+        // any new turns) instead of silently collapsing whatever the user had open to inspect.
+        var openIds = {};
+        if (el) {
+            el.querySelectorAll("details.sess[open]").forEach(function (d) {
+                if (d.dataset.sessionId) openIds[d.dataset.sessionId] = true;
+            });
+        }
         return fetch("api/sessions").then(function (r) { return r.json(); }).then(function (list) {
-            var el = document.getElementById("io-sessions");
             if (!el) return;
             el.textContent = "";
             list = list || [];
@@ -156,7 +289,11 @@
                 var e = document.createElement("div"); e.className = "io-empty"; e.textContent = "No sessions.";
                 el.appendChild(e); ioSetStatus("0 sessions"); ioSessionsLoaded = true; return;
             }
-            list.forEach(function (s) { el.appendChild(ioSessionEl(s)); });
+            list.forEach(function (s) {
+                var row = ioSessionEl(s);
+                el.appendChild(row);
+                if (openIds[String(s.sessionId)]) row.open = true;   // re-triggers its trace fetch
+            });
             ioSessionsLoaded = true;
             ioSetStatus(list.length + " session(s)");
         }).catch(function (err) { ioSetStatus("error: " + err.message); });
@@ -164,6 +301,7 @@
 
     function ioSessionEl(s) {
         var det = document.createElement("details"); det.className = "sess";
+        det.dataset.sessionId = String(s.sessionId);
         var sum = document.createElement("summary"); sum.className = "sess-head";
         var meta = document.createElement("span"); meta.className = "sess-meta";
         meta.textContent = "#" + s.sessionId + "  ·  " + (s.startedAt || "") + "  ·  "
@@ -350,14 +488,7 @@
                 })
                 .catch(function (e) { ioSetStatus("error: " + e); });
         });
-        // Load lazily the first time the Sessions tab is actually shown.
-        var bar = document.getElementById("right-tab-bar");
-        if (bar) {
-            bar.addEventListener("click", function (e) {
-                var btn = e.target.closest(".rtab-btn");
-                if (btn && btn.getAttribute("data-tab") === "logdb") ioOnShow();
-            });
-        }
+        // Tab-switch-triggered lazy load is wired once, in initTabs()'s own #right-tab-bar handler.
     }
 
     document.addEventListener("DOMContentLoaded", function () {
@@ -365,6 +496,7 @@
         initActors();
         initDock();
         initIo();
+        initLogs();
         refreshActors();   // the actor dock is visible by default
         ioOnShow();         // Sessions is the default-active right-pane tab
     });

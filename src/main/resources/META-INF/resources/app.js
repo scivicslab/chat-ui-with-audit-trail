@@ -11,6 +11,7 @@
     function apiUrl(path) { return path; }
 
     var chatArea, promptInput, sendBtn, connStatus, activityLabel, modelSelect, notificationBar;
+    var themeSelect, queueBtn, queueArea;
     var eventSource = null;
     var streamingEl = null;   // the live assistant bubble currently receiving deltas
     var thinkingEl = null;    // the live "thinking" trace bubble, if any
@@ -54,10 +55,27 @@
         return div;
     }
 
+    var queuePollTimer = null;
+
     function setBusy(v) {
         busy = v;
-        if (sendBtn) sendBtn.disabled = v;
+        // Deliberately NOT disabling sendBtn while busy: chat-ui-with-audit-trail queues a prompt
+        // sent while ChatSession is busy (PromptQueue, server-side) rather than rejecting it, so a
+        // human should be able to type a follow-up and have it wait its turn. Disabling the button
+        // here would silently block that — sendPrompt()'s own guard only checks for empty text.
         if (activityLabel) activityLabel.textContent = v ? "thinking…" : "";
+        // Poll while busy: a single check right after sending can land in the brief window before
+        // a second prompt has actually been queued server-side, showing "empty" even though the
+        // queue fills moments later — confirmed by direct testing (curl showed size:1 mid-turn while
+        // a single post-send browser check had already moved on).
+        if (v && !queuePollTimer) {
+            refreshQueue();   // setInterval's first tick is 2s away; check right now too
+            queuePollTimer = setInterval(refreshQueue, 2000);
+        } else if (!v && queuePollTimer) {
+            clearInterval(queuePollTimer);
+            queuePollTimer = null;
+            refreshQueue();
+        }
     }
 
     function notify(text, isError) {
@@ -69,6 +87,43 @@
                 if (notificationBar.textContent === text) notificationBar.textContent = "";
             }, 5000);
         }
+    }
+
+    // ── Theme (chat-ui3-style: [data-theme] on <html>, persisted per-browser) ──
+
+    var THEME_KEY = "chat-ui-theme";
+
+    function initTheme() {
+        if (!themeSelect) return;
+        var saved = localStorage.getItem(THEME_KEY) || "dark-catppuccin";
+        document.documentElement.setAttribute("data-theme", saved);
+        themeSelect.value = saved;
+        themeSelect.addEventListener("change", function () {
+            var theme = themeSelect.value;
+            document.documentElement.setAttribute("data-theme", theme);
+            localStorage.setItem(THEME_KEY, theme);
+        });
+    }
+
+    // ── Queue status (server-side: chat-ui-with-audit-trail queues on the server whenever
+    // ChatSession is busy, unlike chat-ui3's client-side-only draft queue) ─────
+
+    function refreshQueue() {
+        if (!queueArea) return;
+        fetch(apiUrl("api/tabs/" + TAB_ID + "/queue"))
+            .then(function (r) { return r.json(); })
+            .then(function (q) {
+                var size = (q && q.size) || 0;
+                queueArea.textContent = "";
+                var header = document.createElement("div");
+                header.className = "queue-header";
+                header.textContent = size > 0
+                    ? size + " prompt(s) queued (waiting for the current turn to finish)"
+                    : "Queue is empty";
+                queueArea.appendChild(header);
+                queueArea.style.display = (size > 0 || queueArea.dataset.forcedOpen === "1") ? "block" : "none";
+            })
+            .catch(function () { /* leave the last known state on failure */ });
     }
 
     // ── SSE ──────────────────────────────────────────────────────────────────
@@ -91,6 +146,7 @@
         switch (event.type) {
             case "status":
                 setBusy(!!event.busy);
+                refreshQueue();
                 if (event.model && modelSelect && !modelSelect.value) {
                     // Model list may not be loaded yet on the very first status event; ignore.
                 }
@@ -138,7 +194,7 @@
 
     function sendPrompt() {
         var text = promptInput.value.trim();
-        if (!text || busy) return;
+        if (!text) return;
         appendMessage("user", text);
         promptInput.value = "";
         setBusy(true);
@@ -155,6 +211,8 @@
               if (result && result.type === "error") {
                   notify(result.message || "request rejected", true);
                   setBusy(false);
+              } else {
+                  refreshQueue(); // may have landed in the server-side queue if already busy
               }
               // Otherwise: content arrives over SSE.
           })
@@ -206,6 +264,9 @@
         activityLabel = el("activity-label");
         modelSelect = el("model-select");
         notificationBar = el("notification-bar");
+        themeSelect = el("theme-select");
+        queueBtn = el("queue-btn");
+        queueArea = el("queue-area");
 
         if (sendBtn) sendBtn.addEventListener("click", sendPrompt);
         if (promptInput) {
@@ -213,9 +274,19 @@
                 if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); sendPrompt(); }
             });
         }
+        if (queueBtn) {
+            queueBtn.addEventListener("click", function () {
+                if (!queueArea) return;
+                var opening = queueArea.style.display !== "block";
+                queueArea.dataset.forcedOpen = opening ? "1" : "0";
+                if (opening) refreshQueue(); else queueArea.style.display = "none";
+            });
+        }
 
+        initTheme();
         loadModels();
         hydrateConversation();
+        refreshQueue();
         connectSSE();
     });
 })();
