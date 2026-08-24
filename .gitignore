@@ -8,3 +8,9 @@ target/
 .classpath
 .project
 .factorypath
+
+# Local I/O-log H2 store (chat-ui.iolog.db-path, per-instance-port file) — runtime data, not source.
+chat-ui-iolog-*.db
+chat-ui-iolog-*.mv.db
+chat-ui-iolog-*.trace.db
+chat-ui-iolog-*.lock.db

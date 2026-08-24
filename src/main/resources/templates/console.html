@@ -12,6 +12,8 @@
     <!-- chat-ui stylesheet first, then the shell overrides/additions. -->
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="console.css">
+    <!-- Markdown rendering for assistant messages (headings/tables/bold/lists) — app.js -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
     <!-- Login screen hidden in this static mock; the console shell is shown directly. -->
@@ -230,6 +232,7 @@
             <div id="ext-dialog-body"></div>
         </div>
     </div>
+    <script src="app.js"></script>
     <script src="console.js"></script>
 </body>
 </html>

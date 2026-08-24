@@ -58,6 +58,15 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     @SuppressWarnings("unchecked")
     private ActorRef<ChatSession> self() { return (ActorRef<ChatSession>) (ActorRef<?>) this; }
 
+    /**
+     * Public form of {@link #self()}, for callers outside this class that need to pass this
+     * session's {@code ActorRef<ChatSession>} to another actor's method (e.g. {@code ChatResource}
+     * enqueuing a browser-typed prompt via {@code PromptQueue.enqueue(..., chatSessionRef, ...)}).
+     *
+     * @return this actor reference, viewed as {@code ActorRef<ChatSession>}
+     */
+    public ActorRef<ChatSession> asChatSessionRef() { return self(); }
+
     @Override
     public ActionResult callByActionName(String actionName, String arg) {
         if (actionName.equals("sendPrompt")) {

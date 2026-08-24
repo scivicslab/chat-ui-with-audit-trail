@@ -73,5 +73,26 @@
 
 未検証・未対応のまま残っている点：
 
-- `web_search`・`search_docs`はagent loop（LLM経由）でのラウンドトリップ未確認（ツール単体は確認済み）。
+- `search_docs`はagent loop（LLM経由）でのラウンドトリップ未確認（ツール単体は確認済み）。`web_search`はステージ2.5（下記）のブラウザ実機テストで確認できた。
 - `060_PromptQueuePorting_260823_oo01`にあった`noThink`引数は、`PromptQueue.dequeueAndSend`の新しい呼び出し（`chat.start(...)`）に渡していない（`start`のシグネチャに無い）——Qwen3以外のモデルでは今のところ影響しないが、明示的な欠落として記録する。
+
+## 計画（ステージ2.5 — ブラウザUIとI/Oログ可視化）
+
+「ブラウザから実際にagent loopを試し、LLMに投げた内容（システムプロンプト込み）と返ってきた内容をSessionsタブで追えるようにする」という実機end-to-endテストのために追加した一式。`quarkus-chat-ui3`の該当実装（チャット送受信のSSE機構、Sessionsタブの trace ビュー）を土台にした。
+
+- [x] `ChatSession`のagent loopに`IoLogView.trace()`が期待するマーカー書式（`turnN/stepM/llm|tool`ラベル、`REQUEST:`/`RESPONSE:`/`TOOL_CALLS:`/`USAGE:`・`TOOL:`/`INPUT:`/`OBSERVATION:`）でのI/Oログ記録を追加（`stepExpectingAction`・`runTool`）
+- [x] `SseConnection`を新規実装——`050_SseConnectionPorting_260823_oo01`が想定した生Vert.x方式ではなく、`quarkus-chat-ui3`の`Multi<String>`/`UnicastProcessor`方式（このプロジェクトはJAX-RSのみのため）
+- [x] `ChatUiActorSystem`に`getPromptQueue(tabId)`/`getSseConnection(tabId)`を追加、`createTab`で`SseConnection`を配線
+- [x] `ChatResource`を新規実装（`POST /api/tabs/{tabId}/chat`・`GET /api/tabs/{tabId}/chat/stream`・`GET /api/tabs/{tabId}/conversation`・`GET /api/tabs/{tabId}/models`）
+- [x] `SessionsResource`を新規実装（`GET /api/sessions`・`GET /api/sessions/{id}/trace`・`GET /api/sessions/{id}/entry/{logId}`・削除系2本）——`IoLogView`は既に移植済みなので薄いラッパーのみ
+- [x] `app.js`を新規作成（チャット送受信のSSE配線。タブIDは最初のテストでは`"alpha"`固定、タブ切替UIはまだ無い）
+- [x] `console.js`にSessionsタブの表示ロジックを追加（`quarkus-chat-ui3`の該当コードをほぼそのまま移植——CSS（`console.css`）が既に同じクラス名で用意されていたため）
+- [x] ブラウザ実機テスト（Playwright、`~/tools/headless-verify`）——「今日の天気予報を教えてください。web_searchツールを使って調べてから答えてください。」で、実際にweb_search経由の回答が返り、Sessionsタブでそのターンを展開すると`loop → LLM`のリクエストにシステムプロンプト全文を含むJSONがそのまま見えることを確認した
+
+### 発見した不具合と修正（ユーザーの実機操作で発覚）
+
+ユーザー自身がブラウザから「東京の週間天気予報を、表形式にして表示して」と試したところ、(1) 同じ回答が2回表示される、(2) markdownがHTMLとして整形されずそのまま表示され改行も消える、という2つの不具合が見つかった。
+
+1. **回答の重複表示**——`ChatSession.stepExpectingAction()`は、LLMが送ってくる生のストリーミングトークンを`OpenAiCompatProvider`からそのまま`"delta"`イベントとして`turnEmitter`へ転送していた。一方`finish()`も、確定した最終回答全文を`ChatEvent.delta(answer)`として送っていた——ツール呼び出しの無い最終ステップでは、同じ文章が「ストリーミングで少しずつ」＋「`finish()`でまとめてもう一度」の二重に表示されていた。`quarkus-chat-ui3`の`AgentActor`を見直すと、ライブストリーミングは`ChatEvent.thinking(fragment)`（トレース欄）で送り、実際の回答チャンネル（`delta`）は`finish()`が1回だけ使う、という設計だった——`chat-ui-with-audit-trail`はこの区別をしていなかった。`stepExpectingAction()`内で、プロバイダの`"delta"`イベントを`"thinking"`として転送し直し、プロバイダ自身の`"result"`イベントは握りつぶす（agent loop全体の完了は`finish()`の`"result"`だけが伝える）よう修正した。
+2. **markdownがHTMLとして整形されない**——`app.js`が`textContent`だけで描画しており、markdownパーサを使っていなかった。`quarkus-chat-ui3`と同じ`marked`（CDN経由）を`console.html`に追加し、assistantメッセージは`marked.parse(...)`の結果を`innerHTML`に設定するよう変更した。1で「`delta`は`finish()`から1回だけ」という設計に直したことで、ストリーミング中の未確定markdown（閉じていないフェンス等）を気にする必要も無くなった（`quarkus-chat-ui3`の`closeOpenMarkdown`相当の処理は不要）。
+3. 修正後、ブラウザ実機で再確認——「東京の週間天気予報を、web_searchツールで調べてから表形式（markdownのtable）で表示してください」に対し、`<table><thead><tbody>`という実際のHTML構造で7日分の予報が描画され、1ターンにつき吹き出しは1個だけになることを確認した。

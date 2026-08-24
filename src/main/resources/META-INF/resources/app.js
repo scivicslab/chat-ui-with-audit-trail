@@ -1,0 +1,221 @@
+// Chat pane wiring for chat-ui-with-audit-trail (adapted from quarkus-chat-ui3's app.js).
+//   - one persistent EventSource per conversation tab
+//   - POST /api/tabs/{tabId}/chat only acknowledges; all content streams over SSE
+//   - renders delta/thinking/result/error/status ChatEvents into #chat-area
+// First cut: tabId is fixed to "alpha" (no tab switcher yet).
+(function () {
+    "use strict";
+
+    var TAB_ID = "alpha";
+
+    function apiUrl(path) { return path; }
+
+    var chatArea, promptInput, sendBtn, connStatus, activityLabel, modelSelect, notificationBar;
+    var eventSource = null;
+    var streamingEl = null;   // the live assistant bubble currently receiving deltas
+    var thinkingEl = null;    // the live "thinking" trace bubble, if any
+    var busy = false;
+
+    if (typeof marked !== "undefined") {
+        marked.setOptions({ breaks: true, gfm: true });
+    }
+
+    // Renders assistant text as markdown (headings/tables/bold/lists) — the agent loop's ChatSession
+    // sends the confirmed-final answer as ONE whole-text "delta" event (from finish()), never
+    // incremental tokens on that channel, so there is no unclosed-fence mid-stream case to patch.
+    function renderMarkdown(text) {
+        if (typeof marked === "undefined") return escapeHtml(text);
+        try { return marked.parse(text); } catch (e) { return escapeHtml(text); }
+    }
+
+    function escapeHtml(s) {
+        var d = document.createElement("div");
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    function el(id) { return document.getElementById(id); }
+
+    function appendMessage(role, text) {
+        var div = document.createElement("div");
+        div.className = "message " + role;
+        div.textContent = text;
+        chatArea.appendChild(div);
+        chatArea.scrollTop = chatArea.scrollHeight;
+        return div;
+    }
+
+    function appendMarkdownMessage(role, text) {
+        var div = document.createElement("div");
+        div.className = "message " + role;
+        div.innerHTML = renderMarkdown(text);
+        chatArea.appendChild(div);
+        chatArea.scrollTop = chatArea.scrollHeight;
+        return div;
+    }
+
+    function setBusy(v) {
+        busy = v;
+        if (sendBtn) sendBtn.disabled = v;
+        if (activityLabel) activityLabel.textContent = v ? "thinking…" : "";
+    }
+
+    function notify(text, isError) {
+        if (!notificationBar) return;
+        notificationBar.textContent = text;
+        notificationBar.className = isError ? "error" : "";
+        if (text) {
+            setTimeout(function () {
+                if (notificationBar.textContent === text) notificationBar.textContent = "";
+            }, 5000);
+        }
+    }
+
+    // ── SSE ──────────────────────────────────────────────────────────────────
+
+    function connectSSE() {
+        if (eventSource) eventSource.close();
+        eventSource = new EventSource(apiUrl("api/tabs/" + TAB_ID + "/chat/stream"));
+        eventSource.onopen = function () {
+            if (connStatus) { connStatus.textContent = "connected"; connStatus.className = "connected"; }
+        };
+        eventSource.onerror = function () {
+            if (connStatus) { connStatus.textContent = "disconnected"; connStatus.className = "disconnected"; }
+        };
+        eventSource.onmessage = function (ev) {
+            try { handleEvent(JSON.parse(ev.data)); } catch (e) { /* ignore non-JSON keepalive */ }
+        };
+    }
+
+    function handleEvent(event) {
+        switch (event.type) {
+            case "status":
+                setBusy(!!event.busy);
+                if (event.model && modelSelect && !modelSelect.value) {
+                    // Model list may not be loaded yet on the very first status event; ignore.
+                }
+                break;
+            case "thinking":
+                if (!thinkingEl) {
+                    thinkingEl = document.createElement("div");
+                    thinkingEl.className = "message thinking";
+                    chatArea.appendChild(thinkingEl);
+                }
+                thinkingEl.textContent += event.content || "";
+                chatArea.scrollTop = chatArea.scrollHeight;
+                break;
+            case "delta":
+                // ChatSession's agent loop sends this exactly once per turn, from finish(), with the
+                // whole confirmed-final answer text (never incremental tokens on this channel — those
+                // stream as "thinking" instead, since an intermediate step might still be a tool call).
+                if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
+                streamingEl = appendMarkdownMessage("assistant", event.content || "");
+                chatArea.scrollTop = chatArea.scrollHeight;
+                break;
+            case "result":
+                streamingEl = null;
+                thinkingEl = null;
+                setBusy(false);
+                break;
+            case "error":
+                appendMessage("error", "Error: " + (event.content || "unknown error"));
+                streamingEl = null;
+                thinkingEl = null;
+                setBusy(false);
+                break;
+            case "info":
+                notify(event.content || "");
+                break;
+            case "heartbeat":
+                break;
+            default:
+                // log / prompt / mcp_user etc. — not rendered in this first cut.
+                break;
+        }
+    }
+
+    // ── Sending ──────────────────────────────────────────────────────────────
+
+    function sendPrompt() {
+        var text = promptInput.value.trim();
+        if (!text || busy) return;
+        appendMessage("user", text);
+        promptInput.value = "";
+        setBusy(true);
+
+        var payload = { text: text };
+        if (modelSelect && modelSelect.value) payload.model = modelSelect.value;
+
+        fetch(apiUrl("api/tabs/" + TAB_ID + "/chat"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        }).then(function (r) { return r.json(); })
+          .then(function (result) {
+              if (result && result.type === "error") {
+                  notify(result.message || "request rejected", true);
+                  setBusy(false);
+              }
+              // Otherwise: content arrives over SSE.
+          })
+          .catch(function (err) {
+              notify("send failed: " + err.message, true);
+              setBusy(false);
+          });
+    }
+
+    // ── Models ───────────────────────────────────────────────────────────────
+
+    function loadModels() {
+        if (!modelSelect) return;
+        fetch(apiUrl("api/tabs/" + TAB_ID + "/models"))
+            .then(function (r) { return r.json(); })
+            .then(function (models) {
+                modelSelect.textContent = "";
+                (models || []).forEach(function (m) {
+                    var opt = document.createElement("option");
+                    opt.value = m.name;
+                    opt.textContent = m.name;
+                    modelSelect.appendChild(opt);
+                });
+            })
+            .catch(function () { /* leave the dropdown empty on failure */ });
+    }
+
+    // ── History hydration ────────────────────────────────────────────────────
+
+    function hydrateConversation() {
+        fetch(apiUrl("api/tabs/" + TAB_ID + "/conversation"))
+            .then(function (r) { return r.json(); })
+            .then(function (turns) {
+                (turns || []).forEach(function (t) {
+                    if (t.role === "assistant") appendMarkdownMessage(t.role, t.content);
+                    else appendMessage(t.role, t.content);
+                });
+            })
+            .catch(function () { /* start with an empty pane on failure */ });
+    }
+
+    // ── Init ─────────────────────────────────────────────────────────────────
+
+    document.addEventListener("DOMContentLoaded", function () {
+        chatArea = el("chat-area");
+        promptInput = el("prompt-input");
+        sendBtn = el("send-btn");
+        connStatus = el("connection-status");
+        activityLabel = el("activity-label");
+        modelSelect = el("model-select");
+        notificationBar = el("notification-bar");
+
+        if (sendBtn) sendBtn.addEventListener("click", sendPrompt);
+        if (promptInput) {
+            promptInput.addEventListener("keydown", function (e) {
+                if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); sendPrompt(); }
+            });
+        }
+
+        loadModels();
+        hydrateConversation();
+        connectSSE();
+    });
+})();

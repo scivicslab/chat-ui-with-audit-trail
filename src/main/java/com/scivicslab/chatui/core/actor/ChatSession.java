@@ -146,6 +146,10 @@ public class ChatSession extends Interpreter {
     private Consumer<ChatEvent> turnEmitter;
     private ActorRef<ChatSession> turnSelf;
     private CompletableFuture<Void> turnDone;
+    /** Open I/O-log session id for this turn, or -1 when logging is disabled. Set in start(). */
+    private long ioSession = -1;
+    /** This turn's number, for turn{N}/step{M}/... I/O-log labels. Set in start(). */
+    private int ioTurnNo;
     private List<ToolCall> pendingCalls;
     private String finalAnswer;
     private int stepCount;
@@ -542,6 +546,8 @@ public class ChatSession extends Interpreter {
         this.turnEmitter = emitter;
         this.turnSelf = self;
         this.turnDone = done;
+        this.ioSession = (ioLog != null) ? ioLog.ensureSession() : -1;
+        this.ioTurnNo = ++ioTurn;
         this.pendingCalls = null;
         this.finalAnswer = null;
         this.stepCount = 0;
@@ -578,11 +584,24 @@ public class ChatSession extends Interpreter {
 
         try {
             providerRef.ask(p -> {
+                // Relabel the provider's own "delta"/"result" as "thinking" / (dropped): this step
+                // might still be a tool call, not the final answer, so its streamed text goes to the
+                // browser's live trace, not the answer bubble — only finish() emits the browser's
+                // "delta"/"result" for the answer, exactly once, with the confirmed final text.
+                // Forwarding the provider's raw per-step "delta"/"result" here would (a) show
+                // intermediate steps' raw <invoke> text as if it were the answer, and (b) show the
+                // final step's answer text twice (once streamed here, once from finish()) — both
+                // observed live before this fix.
                 Consumer<ChatEvent> wrapped = event -> {
                     if ("delta".equals(event.type()) && event.content() != null) {
                         assistantBuf.append(event.content());
+                        turnEmitter.accept(ChatEvent.thinking(event.content()));
+                    } else if ("result".equals(event.type())) {
+                        // The provider's own per-call completion signal; the agent loop's real
+                        // completion signal is finish()'s result event, emitted once for the turn.
+                    } else {
+                        turnEmitter.accept(event);
                     }
-                    turnEmitter.accept(event);
                 };
                 p.sendPrompt(promptToSend, turnModel, wrapped, ctx);
                 return null;
@@ -596,6 +615,7 @@ public class ChatSession extends Interpreter {
 
         String text = assistantBuf.toString();
         List<ToolCall> calls = TextToolCallParser.parse(text);
+        recordStepIo(promptToSend, text, calls);
         if (!calls.isEmpty()) {
             pendingCalls = calls;
             for (ToolCall tc : calls) {
@@ -606,6 +626,37 @@ public class ChatSession extends Interpreter {
 
         finalAnswer = text.trim();
         return new ActionResult(false, "final");
+    }
+
+    /**
+     * Records one LLM call of the agent loop to the I/O log ({@code turn{N}/step{M}/llm}), in the
+     * same marker format {@link IoLogView}'s {@code trace()} already parses (ported from
+     * quarkus-chat-ui3): {@code REQUEST:} is the exact text sent to {@code provider.sendPrompt}
+     * (which, on step 1, is the system prompt followed by the user's prompt — see
+     * {@code ChatSessionAgentLoop_260823_oo01} "システムプロンプト"), {@code RESPONSE:} is the
+     * accumulated reply, {@code TOOL_CALLS:} lists any tool-call requests found in it.
+     */
+    private void recordStepIo(String promptSent, String responseText, List<ToolCall> calls) {
+        if (ioLog == null || ioSession < 0) return;
+        try {
+            String requestJson = new org.json.JSONObject()
+                    .put("messages", new org.json.JSONArray().put(
+                            new org.json.JSONObject().put("role", "user").put("content", promptSent)))
+                    .toString();
+            StringBuilder m = new StringBuilder();
+            m.append("REQUEST:\n").append(requestJson);
+            m.append("\n\nRESPONSE:\n").append(responseText == null ? "" : responseText);
+            if (!calls.isEmpty()) {
+                m.append("\n\nTOOL_CALLS:\n");
+                for (ToolCall tc : calls) {
+                    m.append("  ").append(tc.name()).append(" ").append(tc.argumentsJson()).append("\n");
+                }
+            }
+            m.append("\n\nUSAGE: promptTokens=0 completionTokens=0");
+            ioLog.record(ioSession, "agent", "turn" + ioTurnNo + "/step" + stepCount + "/llm", m.toString());
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "I/O log step record failed", e);
+        }
     }
 
     /**
@@ -620,20 +671,38 @@ public class ChatSession extends Interpreter {
         }
         StringBuilder observations = new StringBuilder();
         for (ToolCall tc : pendingCalls) {
-            String observation;
+            String fullObservation;
             try {
-                observation = ContextBudget.truncateObservation(executeTool(tc));
+                fullObservation = executeTool(tc);
             } catch (Exception e) {
-                observation = "error: " + e.getMessage();
+                fullObservation = "error: " + e.getMessage();
             }
+            String forModel = ContextBudget.truncateObservation(fullObservation);
+            recordToolIo(tc, fullObservation);
             turnEmitter.accept(ChatEvent.thinking("Observation (" + tc.name() + "): "
-                    + observation.substring(0, Math.min(200, observation.length())) + "\n"));
+                    + forModel.substring(0, Math.min(200, forModel.length())) + "\n"));
             observations.append("Tool result (").append(tc.name()).append("):\n")
-                    .append(observation).append("\n\n");
+                    .append(forModel).append("\n\n");
         }
         pendingCalls = null;
         pendingPrompt = observations.toString().stripTrailing();
         return new ActionResult(true, "observed");
+    }
+
+    /**
+     * Records one tool call to the I/O log ({@code turn{N}/step{M}/tool}), full untruncated
+     * observation included (the copy fed back to the model is truncated by
+     * {@link ContextBudget#truncateObservation}, but the log keeps the whole thing).
+     */
+    private void recordToolIo(ToolCall tc, String fullObservation) {
+        if (ioLog == null || ioSession < 0) return;
+        try {
+            String m = "TOOL: " + tc.name() + "\nINPUT:\n" + tc.argumentsJson()
+                    + "\nOBSERVATION:\n" + fullObservation;
+            ioLog.record(ioSession, "agent", "turn" + ioTurnNo + "/step" + stepCount + "/tool", m);
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "I/O log tool record failed", e);
+        }
     }
 
     /**

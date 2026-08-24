@@ -1,5 +1,7 @@
 package com.scivicslab.chatui.core.actor;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.scivicslab.chatui.core.iolog.IoLogStore;
 import com.scivicslab.chatui.core.provider.LlmProvider;
 import com.scivicslab.chatui.openaicompat.OpenAiCompatProvider;
 import com.scivicslab.pojoactor.core.ActorRef;
@@ -7,6 +9,7 @@ import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 import com.scivicslab.turingworkflow.workflow.RootIIAR;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.util.ArrayList;
@@ -44,6 +47,12 @@ public class ChatUiActorSystem {
     @ConfigProperty(name = "chat-ui.default-model", defaultValue = "default")
     String defaultModel = "default";
 
+    @Inject
+    IoLogStore ioLogStore;
+
+    // Field initializer for the no-CDI unit-test path (see the servers/defaultModel comment above).
+    ObjectMapper objectMapper = new ObjectMapper();
+
     private IIActorSystem actorSystem;
     private final Map<String, ActorRef<ConversationTab>> tabs = new ConcurrentHashMap<>();
     private final Map<String, ChatSessionIIAR> chatSessions = new ConcurrentHashMap<>();
@@ -79,7 +88,7 @@ public class ChatUiActorSystem {
         // cannot call addChildActor itself (ChatSessionIIAR_260810_oo01 "ConversationTab への接続").
         OpenAiCompatProvider provider = new OpenAiCompatProvider(servers, defaultModel);
         ChatSessionIIAR chatSessionIIAR = new ChatSessionIIAR(
-                tabRef.getName() + ".chat", provider, Optional.empty(), null, actorSystem);
+                tabRef.getName() + ".chat", provider, Optional.empty(), ioLogStore, actorSystem);
         chatSessionIIAR.setParentName(tabRef.getName());
         tabRef.getNamesOfChildren().add(chatSessionIIAR.getName());
         actorSystem.addIIActor(chatSessionIIAR);
@@ -97,7 +106,32 @@ public class ChatUiActorSystem {
                 tabRef.createChild(tabRef.getName() + ".queue", new PromptQueue());
         chatSessionIIAR.tell(a -> ((ChatSession) a).setPromptQueueName(promptQueueRef.getName()));
 
+        // SseConnection — plain createChild, same as PromptQueue (ChatResourceDesign_260823_oo01).
+        tabRef.createChild(tabRef.getName() + ".sse", new SseConnection(objectMapper));
+
         return tabRef;
+    }
+
+    /**
+     * Returns the {@link ActorRef} for {@code tabId}'s {@link PromptQueue}, or {@code null} if
+     * the tab does not exist.
+     *
+     * @param tabId conversation tab identifier
+     * @return the queue's actor reference, or {@code null}
+     */
+    public ActorRef<PromptQueue> getPromptQueue(String tabId) {
+        return actorSystem.getActor("tab-" + tabId + ".queue");
+    }
+
+    /**
+     * Returns the {@link ActorRef} for {@code tabId}'s {@link SseConnection}, or {@code null} if
+     * the tab does not exist.
+     *
+     * @param tabId conversation tab identifier
+     * @return the connection's actor reference, or {@code null}
+     */
+    public ActorRef<SseConnection> getSseConnection(String tabId) {
+        return actorSystem.getActor("tab-" + tabId + ".sse");
     }
 
     /**
