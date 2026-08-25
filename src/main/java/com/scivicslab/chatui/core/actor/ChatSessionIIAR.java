@@ -83,6 +83,20 @@ public class ChatSessionIIAR extends InterpreterIIAR {
             return chatSession().runTool();
         } else if (actionName.equals("finish")) {
             return chatSession().finish();
+        } else if (actionName.equals("hasMoreConstructedPrompts")) {
+            // Dispatched by chat-session-agent-loop.yaml's "think-continue" transition.
+            return chatSession().hasMoreConstructedPrompts();
+        } else if (actionName.equals("buildDefaultPrompt")) {
+            // Dispatched by prompt-construction-default.yaml ("actor: ..") from a sub-workflow
+            // Interpreter.call() creates — see ChatSessionPorting_260823_oo01 2-b-i.
+            chatSession().buildDefaultPrompt();
+            return new ActionResult(true, "");
+        } else if (actionName.equals("appendConstructedPrompt")) {
+            // Generic primitive any prompt-construction sub-workflow (default or swapped-in) can
+            // call, possibly more than once, to hand back the prompt(s) it built.
+            String prompt = new org.json.JSONArray(arg).getString(0);
+            chatSession().appendConstructedPrompt(prompt);
+            return new ActionResult(true, "");
         }
         // execCode / runUntilEnd / call / runWorkflow / readYaml / setCurrentState etc. are
         // handled by InterpreterIIAR itself, since ChatSession is an Interpreter.

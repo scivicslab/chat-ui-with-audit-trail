@@ -1,0 +1,17 @@
+name: prompt-construction-default
+description: |
+  Default prompt-construction sub-workflow (ChatSessionPorting_260823_oo01 2-b-i-①). Called by
+  ChatSession.stepExpectingAction() via Interpreter.call(...) whenever its constructed-prompt
+  queue is empty. Calls back into the parent ChatSession ("actor: ..", resolved by
+  Interpreter.call() setting this sub-workflow's parentName to the calling ChatSession) to build
+  exactly the single prompt stepExpectingAction() constructed directly before this indirection
+  existed — this default preserves current behavior. A custom sub-workflow swapped in via
+  ChatSession.setPromptWorkflowFile(...) can instead call "appendConstructedPrompt" one or more
+  times with its own text, e.g. to split one turn's input into several prompts sent as separate
+  LLM turns.
+
+steps:
+  - states: ["0", "end"]
+    actions:
+      - actor: ..
+        method: buildDefaultPrompt

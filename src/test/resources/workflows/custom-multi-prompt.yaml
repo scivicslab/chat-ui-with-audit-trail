@@ -1,0 +1,16 @@
+name: custom-multi-prompt
+description: |
+  Test-only prompt-construction sub-workflow for ChatSessionPromptWorkflowTest — splits one
+  turn's input into two separately-sent prompts, exercising ChatSessionPorting_260823_oo01
+  2-b-i-②'s "N items -> N prompts" example without depending on real checklist-splitting logic.
+steps:
+  - states: ["0", "1"]
+    actions:
+      - actor: ..
+        method: appendConstructedPrompt
+        arguments: ["first constructed prompt"]
+  - states: ["1", "end"]
+    actions:
+      - actor: ..
+        method: appendConstructedPrompt
+        arguments: ["second constructed prompt"]

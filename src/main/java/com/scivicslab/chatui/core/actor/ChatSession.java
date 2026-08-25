@@ -21,8 +21,10 @@ import com.scivicslab.turingworkflow.workflow.Interpreter;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -156,6 +158,17 @@ public class ChatSession extends Interpreter {
     private int stepCount;
     private volatile boolean cancelled;
 
+    // ---- Prompt construction (ChatSessionPorting_260823_oo01 2-b-i) ----
+    // stepExpectingAction() delegates building the text it sends to provider.sendPrompt() to a
+    // swappable sub-workflow (Interpreter.call(...)), rather than constructing it directly. The
+    // sub-workflow pushes one or more constructed prompts via appendConstructedPrompt(); this
+    // queue is drained one prompt per stepExpectingAction() call, so a sub-workflow that splits
+    // one turn's input into N prompts (e.g. N checklist items) sends them as N separate LLM
+    // turns instead of one combined call.
+    private final Deque<String> constructedPrompts = new ArrayDeque<>();
+    /** Classpath workflow file used to build each step's prompt(s); swappable via the setter. */
+    private String promptWorkflowFile = "prompt-construction-default.yaml";
+
     /** Lazily created on first {@code calc} tool call; kept for this session's lifetime. */
     private JShellCalculator calculator;
 
@@ -234,6 +247,14 @@ public class ChatSession extends Interpreter {
      * @param promptQueueName the name of the sibling PromptQueue
      */
     public void setPromptQueueName(String promptQueueName) { this.promptQueueName = promptQueueName; }
+
+    /**
+     * Swaps the prompt-construction sub-workflow (default: {@code prompt-construction-default.yaml}).
+     *
+     * @param promptWorkflowFile classpath-relative workflow file, resolved the same way
+     *                           {@link Interpreter#call(String)} resolves any sub-workflow
+     */
+    public void setPromptWorkflowFile(String promptWorkflowFile) { this.promptWorkflowFile = promptWorkflowFile; }
 
     /**
      * Looks up the sibling PromptQueue by name, on demand — not stored as a field.
@@ -557,12 +578,49 @@ public class ChatSession extends Interpreter {
         this.finalAnswer = null;
         this.stepCount = 0;
         this.cancelled = false;
+        this.constructedPrompts.clear();
 
         emitter.accept(ChatEvent.status(provider.getCurrentModel(), provider.getSessionId(), true));
         // transitionTo (not setCurrentState) also repositions the transition-scan cursor, so a
         // second turn resumes scanning from the top and finds think-action before think-final
         // (see chat-session-agent-loop.yaml's own note).
         transitionTo("think");
+    }
+
+    /**
+     * Pushes one constructed prompt onto the queue {@link #stepExpectingAction()} drains, one per
+     * LLM call. A prompt-construction sub-workflow calls this — possibly more than once per
+     * invocation (e.g. to split one turn's input into several prompts sent as separate LLM
+     * turns) — to hand back the text it built.
+     *
+     * @param prompt the prompt text to send to {@code provider.sendPrompt(...)} on a future step
+     */
+    public void appendConstructedPrompt(String prompt) {
+        constructedPrompts.addLast(prompt);
+    }
+
+    /**
+     * Cheap check ({@code chat-session-agent-loop.yaml}'s {@code think-continue} transition) —
+     * no LLM call. After a step whose response had no tool call, distinguishes "nothing else
+     * queued, this is the turn's final answer" (go to {@code finish}) from "the prompt-
+     * construction sub-workflow queued more than one prompt, more remain" (loop back to
+     * {@code stepExpectingAction} for the next one).
+     *
+     * @return {@link ActionResult} with {@code success=true} iff prompts remain queued
+     */
+    public ActionResult hasMoreConstructedPrompts() {
+        boolean more = !constructedPrompts.isEmpty();
+        return new ActionResult(more, more ? "more queued" : "empty");
+    }
+
+    /**
+     * Default prompt-construction strategy ({@code prompt-construction-default.yaml}'s only
+     * action): reproduces what {@code stepExpectingAction()} built inline before this sub-workflow
+     * indirection existed — the system prompt prefixed to the turn's first step, the
+     * tool-observation-appended {@code pendingPrompt} verbatim on later steps.
+     */
+    public void buildDefaultPrompt() {
+        appendConstructedPrompt((stepCount == 1) ? (SYSTEM_PROMPT + "\n\n" + pendingPrompt) : pendingPrompt);
     }
 
     /**
@@ -582,7 +640,15 @@ public class ChatSession extends Interpreter {
             return new ActionResult(false, "step limit");
         }
 
-        String promptToSend = (stepCount == 1) ? (SYSTEM_PROMPT + "\n\n" + pendingPrompt) : pendingPrompt;
+        if (constructedPrompts.isEmpty()) {
+            ActionResult built = call(promptWorkflowFile);
+            if (constructedPrompts.isEmpty()) {
+                finalAnswer = null;
+                turnEmitter.accept(ChatEvent.error("Prompt construction failed: " + built.getResult()));
+                return new ActionResult(false, "prompt construction error: " + built.getResult());
+            }
+        }
+        String promptToSend = constructedPrompts.pollFirst();
         ProviderContext ctx = new ProviderContext(apiKey, List.of(), turnNoThink, () -> {});
         StringBuilder assistantBuf = new StringBuilder();
         ActorRef<LlmProvider> providerRef = providerRef();

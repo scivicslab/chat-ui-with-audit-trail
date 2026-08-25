@@ -3,6 +3,12 @@ description: |
   ChatSession's own agent loop: (think -> act)* -> end, i.e. (stepExpectingAction -> runTool)*
   -> finish. See ChatSessionAgentLoop_260823_oo01.
 
+  stepExpectingAction() no longer sends a directly-constructed prompt — it delegates that to a
+  swappable prompt-construction sub-workflow (ChatSessionPorting_260823_oo01 2-b-i,
+  prompt-construction-default.yaml by default), which can queue more than one prompt per turn.
+  think-continue (below) is what lets a turn keep sending queued prompts as separate LLM calls
+  even when none of them contained a tool call, instead of ending the turn after the first one.
+
   start() is a plain Java method, called directly by whoever hands off a prompt (never
   dispatched through this YAML) — it resets the per-turn fields and positions the state
   machine at "think" via transitionTo("think"), not setCurrentState("think") (the latter
@@ -23,18 +29,31 @@ steps:
     label: think-action
     note: |
       ONE LLM call. stepExpectingAction() succeeds (-> act) when the response contains a
-      <invoke name="..."> tool-call block; fails (-> end, via think-final) when it is a
-      plain final answer, the step limit was reached, or the turn was cancelled.
+      <invoke name="..."> tool-call block; fails (tries think-continue next, then think-final)
+      when it is a plain final answer, the step limit was reached, or the turn was cancelled.
     actions:
       - actor: this
         method: stepExpectingAction
         execution: direct
 
+  - states: ["think", "think"]
+    label: think-continue
+    note: |
+      No tool was called on the step that just ran, but the prompt-construction sub-workflow
+      queued more than one prompt and some remain (e.g. splitting one turn's input into several
+      prompts, ChatSessionPorting_260823_oo01 2-b-i-②) — loop back to think-action, which sends
+      the next queued prompt as its own LLM call. No LLM call here, just a queue check.
+    actions:
+      - actor: this
+        method: hasMoreConstructedPrompts
+        execution: direct
+
   - states: ["think", "end"]
     label: think-final
     note: |
-      No tool was called: emit the final answer already captured in stepExpectingAction and
-      end the turn. Reached only when think-action just failed (tried second, same state).
+      No tool was called and no more prompts are queued: emit the final answer already captured
+      in stepExpectingAction and end the turn. Reached only when think-action and think-continue
+      both just failed (tried third, same state).
     actions:
       - actor: this
         method: finish
