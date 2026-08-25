@@ -110,21 +110,21 @@
 
 `010_ChatResourceAndSseConnection_260825_oo01`が"最小実装"として`TAB_ID`を`"alpha"`固定にしたまま残していた分。バックエンド（`ChatUiActorSystem.createTab`・`ChatResource`の各エンドポイントは既に`tabId`パラメータを取る設計）は複数タブに対応済みで、無いのはブラウザ側のUIだけ。
 
-- [ ] `ChatUiActorSystem`に`List<String> getTabIds()`を追加（`tabs`マップのキー一覧）
-- [ ] `ChatResource`に`GET /api/tabs`（一覧）・`POST /api/tabs/{tabId}`（作成、既存なら無視——`createTab`が既に冪等）を追加
-- [ ] `console.html`にタブバー要素を追加（`#right-tab-bar`と同じ見た目の`.tab-toolbar`パターンを踏襲）
-- [ ] `app.js`：`TAB_ID`を可変にし、`switchTab(tabId)`（EventSource張り替え・chatArea再構築・conversation/models/queueの再取得）を実装
-- [ ] `app.js`：起動時に`GET /api/tabs`でタブ一覧を取得してタブバーを描画、直前に見ていたタブは`localStorage`（`theme`と同じパターン）で復元
-- [ ] 「+ New Tab」ボタン——新規タブIDを生成し`POST /api/tabs/{id}`で作成、`switchTab`で切り替え
-- [ ] ブラウザ実機で、2タブ以上を作成→切り替え→それぞれ別々に会話が進むことを確認
+- [x] `ChatUiActorSystem`に`List<String> getTabIds()`を追加（`tabs`マップのキー一覧）
+- [x] `ChatResource`に`GET /api/tabs`（一覧）・`POST /api/tabs/{tabId}`（作成、既存なら無視——`createTab`が既に冪等）を追加
+- [x] `console.html`にタブバー要素を追加（`#right-tab-bar`と同じ見た目の`.rtab-btn`スタイルを再利用）
+- [x] `app.js`：`TAB_ID`を可変にし、`switchTab(tabId)`（EventSource張り替え・chatArea再構築・conversation/models/queueの再取得）を実装
+- [x] `app.js`：起動時に`GET /api/tabs`でタブ一覧を取得してタブバーを描画、直前に見ていたタブは`localStorage`（`theme`と同じパターン）で復元
+- [x] 「+ New Tab」ボタン——新規タブIDを生成し`POST /api/tabs/{id}`で作成、`switchTab`で切り替え
+- [x] ブラウザ実機（Playwright）で、2タブ以上を作成→切り替え→それぞれ別々に会話が進むこと、リロード後もlocalStorageで直前のタブへ戻ることを確認
 
 ## 計画（Stage 3 — プロンプト構築サブワークフローの差し替え）
 
 `040_ChatSessionPorting_260823_oo01`の2-b-i-①〜③が定めた設計。現在の`stepExpectingAction()`は`String promptToSend = (stepCount == 1) ? (SYSTEM_PROMPT + "\n\n" + pendingPrompt) : pendingPrompt;`とプロンプトを直接組み立てており、サブワークフロー経由になっていない——`100_ChatSessionAgentLoop_260823_oo01`のUnder the Hoodが触れていない、未着手のまま残っていた部分。
 
-- [ ] 既定のプロンプト構築サブワークフローYAML（「会話履歴に今回のプロンプトを足すだけ」の最小実装）を新設
-- [ ] `stepExpectingAction()`の直接構築を、`Interpreter.call(...)`によるサブワークフロー呼び出しに置き換え——戻り値は1個とは限らない（複数プロンプトに分割される場合がある、`040`2-b-i-②の例）ので、`pendingPrompt`を単一`String`から`List<String>`相当の扱いに変更する必要がある
-- [ ] サブワークフローが返す複数プロンプトを順に`provider`へ渡すループを`stepExpectingAction()`に実装
-- [ ] サブワークフロー用の子`InterpreterIIAR`のライフサイクル（`040`の図が示す「2-b-iの間だけ存在し、終わると`removeChildActor`で消える」）を実装
-- [ ] ユニットテスト（フェイクLlmProvider、複数プロンプトに分割するサブワークフローを差し替えて動作確認）
-- [ ] 実機で、既定サブワークフロー（単純連結）が今までと同じ挙動を保つことを確認 → 差し替えたサブワークフローで複数プロンプト分割が実際に効くことを確認
+- [x] 既定のプロンプト構築サブワークフローYAML（`prompt-construction-default.yaml`）を新設——`buildDefaultPrompt()`を呼ぶだけの単純な実装
+- [x] `stepExpectingAction()`の直接構築を、`Interpreter.call(promptWorkflowFile)`によるサブワークフロー呼び出しに置き換え。計画では`pendingPrompt`自体を`List<String>`相当にする想定だったが、実装では`pendingPrompt`はそのまま残し、別に`Deque<String> constructedPrompts`（サブワークフローが`appendConstructedPrompt(...)`で積む）を新設した——`pendingPrompt`は「次にサブワークフローへ渡す元ネタ」、`constructedPrompts`は「サブワークフローが組み立てた、実際にproviderへ送る文字列の列」という別の役割なので、型を差し替えるより素直だった
+- [x] サブワークフローが返す複数プロンプトを順に`provider`へ渡すループ——`stepExpectingAction()`はキューが空の時だけサブワークフローを呼び直し、空でなければ1件popして送るだけ。「ツール呼び出し無し、かつキューにまだ残っている」を`hasMoreConstructedPrompts()`で判定し、`chat-session-agent-loop.yaml`に`think-continue`遷移（`think`→`think`の自己ループ）を追加してターンを終わらせず次のプロンプトへ回す——計画には無かった追加だが、複数プロンプトを1ターン内で送るには必須だった
+- [x] サブワークフロー用の子アクターのライフサイクル——`Interpreter.call(...)`が既に4段階（子生成・YAML読込・実行・`finally`での子削除）を内蔵しており、自前で`removeChildActor`を書く必要は無かった（計画時点ではこの既存メソッドの中身を確認していなかった）
+- [x] ユニットテスト2本（`ChatSessionPromptWorkflowTest`）——既定サブワークフローが以前と同じテキストを組み立てることの確認、カスタムサブワークフロー（テスト専用YAML）が2件のプロンプトをそれぞれ別のLLM呼び出しとして順に送ることの確認
+- [x] 実機で、既定サブワークフロー経由でも実際のcalcツール呼び出し→最終回答という既存の挙動が壊れていないことを確認（Sessionsタブのトレースで`REQUEST:`にシステムプロンプト込みの全文が変わらず記録されていることも確認）。複数プロンプト分割の実機確認（本物のLLMでの動作）はユニットテストの範囲に留まり、まだ行っていない
