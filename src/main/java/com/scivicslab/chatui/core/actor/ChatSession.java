@@ -146,6 +146,7 @@ public class ChatSession extends Interpreter {
     private Consumer<ChatEvent> turnEmitter;
     private ActorRef<ChatSession> turnSelf;
     private CompletableFuture<Void> turnDone;
+    private boolean turnNoThink;
     /** Open I/O-log session id for this turn, or -1 when logging is disabled. Set in start(). */
     private long ioSession = -1;
     /** This turn's number, for turn{N}/step{M}/... I/O-log labels. Set in start(). */
@@ -519,9 +520,12 @@ public class ChatSession extends Interpreter {
      * @param done      completed once the turn has finished processing (success or error)
      * @param resultKey UUID under which the final answer is stored for later retrieval via
      *                  {@link #getCompletedResult(String)}, or {@code null} for human-typed prompts
+     * @param noThink   whether to ask the provider to skip its reasoning/thinking phase for
+     *                  every LLM call in this turn (see {@link #stepExpectingAction()})
      */
     public void start(String prompt, String model, Consumer<ChatEvent> emitter,
-                       ActorRef<ChatSession> self, CompletableFuture<Void> done, String resultKey) {
+                       ActorRef<ChatSession> self, CompletableFuture<Void> done, String resultKey,
+                       boolean noThink) {
         if (busy) {
             emitter.accept(ChatEvent.error("Already processing a prompt. Please wait or cancel."));
             done.complete(null);
@@ -546,6 +550,7 @@ public class ChatSession extends Interpreter {
         this.turnEmitter = emitter;
         this.turnSelf = self;
         this.turnDone = done;
+        this.turnNoThink = noThink;
         this.ioSession = (ioLog != null) ? ioLog.ensureSession() : -1;
         this.ioTurnNo = ++ioTurn;
         this.pendingCalls = null;
@@ -578,7 +583,7 @@ public class ChatSession extends Interpreter {
         }
 
         String promptToSend = (stepCount == 1) ? (SYSTEM_PROMPT + "\n\n" + pendingPrompt) : pendingPrompt;
-        ProviderContext ctx = new ProviderContext(apiKey, List.of(), false, () -> {});
+        ProviderContext ctx = new ProviderContext(apiKey, List.of(), turnNoThink, () -> {});
         StringBuilder assistantBuf = new StringBuilder();
         ActorRef<LlmProvider> providerRef = providerRef();
 

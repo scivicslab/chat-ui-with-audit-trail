@@ -99,6 +99,7 @@ public class ChatSessionIIAR extends InterpreterIIAR {
         org.json.JSONObject args = new org.json.JSONObject(arg == null ? "{}" : arg);
         String prompt = args.getString("prompt");
         String model = args.optString("model", null);
+        boolean noThink = args.optBoolean("noThink", false);
         ActorRef<PromptQueue> promptQueue = chatSession().getPromptQueue();
         if (promptQueue == null) {
             return new ActionResult(false, "PromptQueue not wired yet");
@@ -108,7 +109,7 @@ public class ChatSessionIIAR extends InterpreterIIAR {
         promptQueue.tell(q -> q.enqueue(
                 prompt, model, "queue",
                 (ChatEvent event) -> {}, self(), "agent:workflow", resultKey,
-                new CompletableFuture<Void>()));
+                new CompletableFuture<Void>(), noThink));
         return new ActionResult(true, resultKey);
     }
 

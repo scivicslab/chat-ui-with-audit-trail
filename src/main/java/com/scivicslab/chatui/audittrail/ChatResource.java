@@ -83,8 +83,10 @@ public class ChatResource {
     public Response chat(@PathParam("tabId") String tabId, Map<String, Object> body) {
         Object textVal = body != null ? body.get("text") : null;
         Object modelVal = body != null ? body.get("model") : null;
+        Object noThinkVal = body != null ? body.get("noThink") : null;
         String text = textVal != null ? String.valueOf(textVal) : null;
         String model = modelVal != null && !String.valueOf(modelVal).isBlank() ? String.valueOf(modelVal) : null;
+        boolean noThink = Boolean.TRUE.equals(noThinkVal);
         if (text == null || text.isBlank()) {
             return Response.status(400).entity(Map.of("type", "error", "message", "text is required")).build();
         }
@@ -96,7 +98,7 @@ public class ChatResource {
 
         java.util.function.Consumer<ChatEvent> emitter = event -> sseRef.tell(a -> a.emit(event));
         promptQueueRef.tell(q -> q.enqueue(text, model, "queue", emitter,
-                chatSessionIIAR.asChatSessionRef(), "human", null, new CompletableFuture<Void>()));
+                chatSessionIIAR.asChatSessionRef(), "human", null, new CompletableFuture<Void>(), noThink));
 
         return Response.ok(Map.of("type", "accepted")).build();
     }

@@ -177,7 +177,8 @@ public class PromptQueue {
         LOG.info("Dequeuing prompt (remaining=" + queue.size() + "): "
                 + truncate(item.prompt(), 80));
 
-        chat.start(item.prompt(), item.model(), item.emitter(), chatSessionRef, item.done(), item.resultKey());
+        chat.start(item.prompt(), item.model(), item.emitter(), chatSessionRef, item.done(), item.resultKey(),
+                item.noThink());
         com.scivicslab.pojoactor.core.ActionResult result = chat.runUntilEnd();
         if (!result.isSuccess()) {
             LOG.warning("Agent loop did not reach 'end': " + result.getResult());
