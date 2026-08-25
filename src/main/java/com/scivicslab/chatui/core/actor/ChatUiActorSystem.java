@@ -155,6 +155,16 @@ public class ChatUiActorSystem {
     }
 
     /**
+     * Returns the ids of all conversation tabs created so far (insertion order not guaranteed —
+     * callers that need a stable display order should sort).
+     *
+     * @return tab ids
+     */
+    public List<String> getTabIds() {
+        return new ArrayList<>(tabs.keySet());
+    }
+
+    /**
      * Builds the actor tree from ROOT for the Actors tab.
      *
      * @return the root {@link ActorNode}

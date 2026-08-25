@@ -165,4 +165,34 @@ public class ChatResource {
             return List.of();
         }
     }
+
+    // ── Tab list (browser tab switcher) ─────────────────────────────────────────
+
+    /**
+     * Lists the ids of all conversation tabs created so far, for the browser's tab switcher.
+     *
+     * @return tab ids, sorted for a stable display order
+     */
+    @GET
+    @Path("/tabs")
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<String> tabs() {
+        return actorSystem.getTabIds().stream().sorted().toList();
+    }
+
+    /**
+     * Creates {@code tabId} if it does not already exist. {@code POST /tabs/{tabId}/chat} also
+     * creates the tab lazily on first prompt, so this exists only for the "+ New Tab" button,
+     * which needs the (initially empty) tab to appear in the tab list before any prompt is sent.
+     *
+     * @param tabId conversation tab identifier
+     * @return {@code {"type": "created"}}
+     */
+    @POST
+    @Path("/tabs/{tabId}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response createTab(@PathParam("tabId") String tabId) {
+        actorSystem.createTab(tabId);
+        return Response.ok(Map.of("type", "created")).build();
+    }
 }

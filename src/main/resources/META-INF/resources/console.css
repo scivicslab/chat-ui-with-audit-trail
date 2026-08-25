@@ -72,6 +72,31 @@
 #right-config-bar input[type=number] { width: 64px; }
 #cfg-status { color: var(--accent-blue, #a5b4fc); margin-left: auto; }
 
+/* ── Conversation tab bar (left pane) ─────────────────────────────
+   Same look as #right-tab-bar's .rtab-btn — reused as-is for the buttons. */
+#conv-tab-bar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+    padding: 0 8px;
+    background: var(--bg-secondary, #161616);
+    border-bottom: 2px solid var(--border-color, #2c2c2c);
+}
+#conv-tab-list { display: flex; gap: 4px; overflow-x: auto; }
+#conv-tab-new {
+    appearance: none;
+    background: transparent;
+    border: 1px solid var(--border-color, #2c2c2c);
+    border-radius: 4px;
+    color: var(--text-secondary, #9aa0a6);
+    font-size: 13px;
+    padding: 2px 8px;
+    margin-left: 4px;
+    cursor: pointer;
+}
+#conv-tab-new:hover { color: var(--text-primary, #d0d0d0); border-color: var(--accent-blue, #6366f1); }
+
 /* ── Right-pane tabs ───────────────────────────────────────────── */
 #right-tab-bar {
     display: flex;

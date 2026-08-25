@@ -2,16 +2,18 @@
 //   - one persistent EventSource per conversation tab
 //   - POST /api/tabs/{tabId}/chat only acknowledges; all content streams over SSE
 //   - renders delta/thinking/result/error/status ChatEvents into #chat-area
-// First cut: tabId is fixed to "alpha" (no tab switcher yet).
+//   - a tab bar (#conv-tab-bar) lets the user switch which ConversationTab this pane talks to
 (function () {
     "use strict";
 
-    var TAB_ID = "alpha";
+    var TAB_ID_KEY = "chat-ui-last-tab";
+    var TAB_ID = localStorage.getItem(TAB_ID_KEY) || "alpha";
 
     function apiUrl(path) { return path; }
 
     var chatArea, promptInput, sendBtn, connStatus, activityLabel, modelSelect, notificationBar;
     var themeSelect, queueBtn, queueArea;
+    var convTabList, convTabNewBtn;
     var eventSource = null;
     var streamingEl = null;   // the live assistant bubble currently receiving deltas
     var thinkingEl = null;    // the live "thinking" trace bubble, if any
@@ -240,6 +242,58 @@
             .catch(function () { /* leave the dropdown empty on failure */ });
     }
 
+    // ── Conversation tabs (switch which ConversationTab this pane talks to) ────
+
+    function renderTabBar(tabIds) {
+        if (!convTabList) return;
+        convTabList.textContent = "";
+        tabIds.forEach(function (id) {
+            var btn = document.createElement("button");
+            btn.className = "rtab-btn" + (id === TAB_ID ? " active" : "");
+            btn.textContent = id;
+            btn.title = "Switch to tab " + id;
+            btn.addEventListener("click", function () { if (id !== TAB_ID) switchTab(id); });
+            convTabList.appendChild(btn);
+        });
+    }
+
+    function loadTabs() {
+        fetch(apiUrl("api/tabs"))
+            .then(function (r) { return r.json(); })
+            .then(function (ids) { renderTabBar(ids || []); })
+            .catch(function () { /* leave the tab bar as-is on failure */ });
+    }
+
+    // Tears down the current tab's live state and rebuilds the pane for `tabId` — same sequence
+    // as the initial page load (hydrate history, load models, check queue, open SSE), just run
+    // again against a different tabId instead of only once at DOMContentLoaded.
+    function switchTab(tabId) {
+        if (eventSource) { eventSource.close(); eventSource = null; }
+        TAB_ID = tabId;
+        localStorage.setItem(TAB_ID_KEY, tabId);
+        chatArea.textContent = "";
+        streamingEl = null;
+        thinkingEl = null;
+        setBusy(false);
+        if (queueArea) { queueArea.style.display = "none"; queueArea.dataset.forcedOpen = "0"; }
+
+        renderTabBar(Array.prototype.map.call(convTabList.children, function (b) { return b.textContent; }));
+        loadModels();
+        hydrateConversation();
+        refreshQueue();
+        connectSSE();
+    }
+
+    function createAndSwitchToNewTab() {
+        var id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        fetch(apiUrl("api/tabs/" + id), { method: "POST" })
+            .then(function () {
+                switchTab(id);
+                loadTabs(); // pick up the new tab in the bar
+            })
+            .catch(function (err) { notify("failed to create tab: " + err.message, true); });
+    }
+
     // ── History hydration ────────────────────────────────────────────────────
 
     function hydrateConversation() {
@@ -267,6 +321,8 @@
         themeSelect = el("theme-select");
         queueBtn = el("queue-btn");
         queueArea = el("queue-area");
+        convTabList = el("conv-tab-list");
+        convTabNewBtn = el("conv-tab-new");
 
         if (sendBtn) sendBtn.addEventListener("click", sendPrompt);
         if (promptInput) {
@@ -282,8 +338,10 @@
                 if (opening) refreshQueue(); else queueArea.style.display = "none";
             });
         }
+        if (convTabNewBtn) convTabNewBtn.addEventListener("click", createAndSwitchToNewTab);
 
         initTheme();
+        loadTabs();
         loadModels();
         hydrateConversation();
         refreshQueue();

@@ -102,6 +102,13 @@
         <div id="left-panel">
             <!-- ===== BEGIN chat-ui markup (unchanged: Claude features kept) ===== -->
             <div id="app">
+                <!-- Conversation tab bar: switches which ConversationTab (backend) app.js talks to.
+                     Buttons are rendered by app.js (tab set is dynamic), reusing #right-tab-bar's
+                     .rtab-btn look for visual consistency. -->
+                <div id="conv-tab-bar">
+                    <div id="conv-tab-list"></div>
+                    <button id="conv-tab-new" title="New conversation tab">+</button>
+                </div>
                 <!-- Left-pane header: actions that operate only on this pane's chat (chat-ui3-style). -->
                 <header>
                     <div class="left-pane-actions" style="display:flex;align-items:center;gap:8px">

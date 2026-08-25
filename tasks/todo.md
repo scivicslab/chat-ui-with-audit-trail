@@ -105,3 +105,26 @@
 - [x] **Queue表示**——`chat-ui-with-audit-trail`は`quarkus-chat-ui3`と違いサーバ側（`PromptQueue`）でキューイングする設計なので、クライアント側の下書きキューではなく、サーバのキュー深さを表示する形にした。`GET /api/tabs/{tabId}/queue`を新設し、`app.js`が送信直後と`busy`中2秒おきにポーリングして`#queue-area`に反映する。実装中に見つけた本当のバグ：`sendPrompt()`が`if (!text || busy) return;`というガードを持っており、`busy`中に2件目を送信しようとするとJS側で黙って握りつぶされ、サーバへ届くことすら無かった（`#send-btn`の`disabled`属性もbusy中は無効化されており、二重に阻止していた）。`PromptQueue`はまさに「busy中に届いたプロンプトを保留する」ために存在するので、この2つのガードは`chat-ui-with-audit-trail`の設計そのものと矛盾していた——ガードを「本文が空でない」だけに絞り、`#send-btn`はbusy中も無効化しないよう修正。修正後、2件連続送信で実際に`"1 prompt(s) queued"`と表示され、両ターンとも正しく完了することを確認した。
 - [x] **Sessionsのrefreshボタン**——再現できなかった。ボタン自体・状態更新（`io-status`のセッション数表示）はテストで正しく動作した。ただしコードレビューで、`#right-tab-bar`のクリックを`initTabs()`と`initIo()`の2箇所で別々に監視しており、同じクリックで`ioLoadSessions()`が二重に走りうる潜在的な競合を発見・解消した（1本のハンドラに統合）。あわせて、refresh時に展開中の`<details>`行が問答無用で閉じてしまう（せっかく開いたトレースが消える）UXも直し、展開中のセッションIDを記憶して再展開＋トレース再取得するようにした。ユーザーが遭遇したのはこのUXの方だった可能性がある——再度確認をお願いしたい。
 - [x] **System Logタブ**——3件の報告の後、ユーザーが追加で発見。`console.js`の元コメント通り、System Logタブは元々バックエンド無しの空タブだった。`quarkus-chat-ui3`の`LogTap`（`java.util.logging`のルートロガーに`Handler`を1個ぶら下げ、直近1000件をメモリに保持するグローバルなログ集積——`ChatSession.getRecentLogs()`とは別物で、こちらはJVM全体・全ロガーが対象）を無改名で移植し、`GET /api/logs`（`LogsResource`、新規）で公開、`console.js`のログ描画・レベルフィルタ・自動更新ロジックもほぼそのまま移植した。ブラウザ実機で確認——起動時のQuarkusログ7件が表示され、レベルフィルタ（ERROR以上）を選ぶと0件になることも確認した。
+
+## 計画（タブ切替UI — 複数`ConversationTab`をブラウザから切り替える）
+
+`010_ChatResourceAndSseConnection_260825_oo01`が"最小実装"として`TAB_ID`を`"alpha"`固定にしたまま残していた分。バックエンド（`ChatUiActorSystem.createTab`・`ChatResource`の各エンドポイントは既に`tabId`パラメータを取る設計）は複数タブに対応済みで、無いのはブラウザ側のUIだけ。
+
+- [ ] `ChatUiActorSystem`に`List<String> getTabIds()`を追加（`tabs`マップのキー一覧）
+- [ ] `ChatResource`に`GET /api/tabs`（一覧）・`POST /api/tabs/{tabId}`（作成、既存なら無視——`createTab`が既に冪等）を追加
+- [ ] `console.html`にタブバー要素を追加（`#right-tab-bar`と同じ見た目の`.tab-toolbar`パターンを踏襲）
+- [ ] `app.js`：`TAB_ID`を可変にし、`switchTab(tabId)`（EventSource張り替え・chatArea再構築・conversation/models/queueの再取得）を実装
+- [ ] `app.js`：起動時に`GET /api/tabs`でタブ一覧を取得してタブバーを描画、直前に見ていたタブは`localStorage`（`theme`と同じパターン）で復元
+- [ ] 「+ New Tab」ボタン——新規タブIDを生成し`POST /api/tabs/{id}`で作成、`switchTab`で切り替え
+- [ ] ブラウザ実機で、2タブ以上を作成→切り替え→それぞれ別々に会話が進むことを確認
+
+## 計画（Stage 3 — プロンプト構築サブワークフローの差し替え）
+
+`040_ChatSessionPorting_260823_oo01`の2-b-i-①〜③が定めた設計。現在の`stepExpectingAction()`は`String promptToSend = (stepCount == 1) ? (SYSTEM_PROMPT + "\n\n" + pendingPrompt) : pendingPrompt;`とプロンプトを直接組み立てており、サブワークフロー経由になっていない——`100_ChatSessionAgentLoop_260823_oo01`のUnder the Hoodが触れていない、未着手のまま残っていた部分。
+
+- [ ] 既定のプロンプト構築サブワークフローYAML（「会話履歴に今回のプロンプトを足すだけ」の最小実装）を新設
+- [ ] `stepExpectingAction()`の直接構築を、`Interpreter.call(...)`によるサブワークフロー呼び出しに置き換え——戻り値は1個とは限らない（複数プロンプトに分割される場合がある、`040`2-b-i-②の例）ので、`pendingPrompt`を単一`String`から`List<String>`相当の扱いに変更する必要がある
+- [ ] サブワークフローが返す複数プロンプトを順に`provider`へ渡すループを`stepExpectingAction()`に実装
+- [ ] サブワークフロー用の子`InterpreterIIAR`のライフサイクル（`040`の図が示す「2-b-iの間だけ存在し、終わると`removeChildActor`で消える」）を実装
+- [ ] ユニットテスト（フェイクLlmProvider、複数プロンプトに分割するサブワークフローを差し替えて動作確認）
+- [ ] 実機で、既定サブワークフロー（単純連結）が今までと同じ挙動を保つことを確認 → 差し替えたサブワークフローで複数プロンプト分割が実際に効くことを確認
