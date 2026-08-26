@@ -99,7 +99,7 @@
     <dependency>
       <groupId>com.scivicslab.turingworkflow.plugins</groupId>
       <artifactId>plugin-log-output</artifactId>
-      <version>1.5.0</version>
+      <version>1.6.0</version>
     </dependency>
     <!-- Agent-loop tools (read/write/web_search/fetch/search_docs): jsoup for HTML parsing
          (DuckDuckGo results, fetched pages). Same version as quarkus-chat-ui3, which these
