@@ -11,6 +11,7 @@ import com.scivicslab.pojoactor.core.ActorRef;
 import io.smallrye.mutiny.Multi;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
@@ -144,6 +145,98 @@ public class ChatResource {
             LOG.warning("Failed to read queue state for tab " + tabId + ": " + e.getMessage());
             return Map.of("size", 0, "hasPending", false, "items", List.of());
         }
+    }
+
+    /**
+     * Removes the queued item at {@code index}, regardless of who queued it —
+     * {@code QueueContentsEditing_260826_oo01} applies deletion to every source, not just
+     * human-typed items.
+     *
+     * @param tabId conversation tab identifier
+     * @param index position in the queue (0 = next to send)
+     */
+    @DELETE
+    @Path("/tabs/{tabId}/queue/{index}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response removeQueueItem(@PathParam("tabId") String tabId, @PathParam("index") int index) {
+        ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(tabId);
+        if (promptQueueRef == null) return Response.status(404).build();
+        try {
+            boolean removed = promptQueueRef.ask(q -> q.removeAt(index)).get(5, TimeUnit.SECONDS);
+            return removed ? Response.ok(Map.of("type", "removed")).build() : Response.status(404).build();
+        } catch (Exception e) {
+            LOG.warning("Failed to remove queue item " + index + " for tab " + tabId + ": " + e.getMessage());
+            return Response.status(500).build();
+        }
+    }
+
+    /**
+     * Swaps the queued item at {@code index} with its neighbor.
+     *
+     * @param tabId conversation tab identifier
+     * @param index position in the queue
+     * @param body  {@code {"direction": "up"|"down"}}
+     */
+    @POST
+    @Path("/tabs/{tabId}/queue/{index}/move")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response moveQueueItem(@PathParam("tabId") String tabId, @PathParam("index") int index,
+                                   Map<String, Object> body) {
+        ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(tabId);
+        if (promptQueueRef == null) return Response.status(404).build();
+        int direction = "down".equals(body != null ? body.get("direction") : null) ? 1 : -1;
+        try {
+            boolean moved = promptQueueRef.ask(q -> q.moveInQueue(index, direction)).get(5, TimeUnit.SECONDS);
+            return moved ? Response.ok(Map.of("type", "moved")).build() : Response.status(409).build();
+        } catch (Exception e) {
+            LOG.warning("Failed to move queue item " + index + " for tab " + tabId + ": " + e.getMessage());
+            return Response.status(500).build();
+        }
+    }
+
+    /**
+     * Sets whether the queued item at {@code index} auto-dispatches once it's at the front and
+     * {@code ChatSession} is idle, or waits as a manual checkpoint until {@link #advanceQueue}.
+     *
+     * @param tabId conversation tab identifier
+     * @param index position in the queue
+     * @param body  {@code {"auto": true|false}}
+     */
+    @POST
+    @Path("/tabs/{tabId}/queue/{index}/auto")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response setQueueItemAuto(@PathParam("tabId") String tabId, @PathParam("index") int index,
+                                      Map<String, Object> body) {
+        ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(tabId);
+        if (promptQueueRef == null) return Response.status(404).build();
+        boolean auto = !Boolean.FALSE.equals(body != null ? body.get("auto") : null);
+        try {
+            boolean set = promptQueueRef.ask(q -> q.setAuto(index, auto)).get(5, TimeUnit.SECONDS);
+            return set ? Response.ok(Map.of("type", "updated")).build() : Response.status(404).build();
+        } catch (Exception e) {
+            LOG.warning("Failed to set auto for queue item " + index + " for tab " + tabId + ": " + e.getMessage());
+            return Response.status(500).build();
+        }
+    }
+
+    /**
+     * Dispatches the queue's front item immediately, ignoring its {@code auto} flag — the
+     * browser's manual "send the next one" action (empty-input Send), or the explicit resume
+     * after pausing an item via {@link #setQueueItemAuto}.
+     *
+     * @param tabId conversation tab identifier
+     */
+    @POST
+    @Path("/tabs/{tabId}/queue/advance")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response advanceQueue(@PathParam("tabId") String tabId) {
+        ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(tabId);
+        ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(tabId);
+        if (promptQueueRef == null || chatSessionIIAR == null) return Response.status(404).build();
+        promptQueueRef.tell(q -> q.advance(chatSessionIIAR.asChatSessionRef()));
+        return Response.ok(Map.of("type", "accepted")).build();
     }
 
     /**

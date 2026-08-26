@@ -105,6 +105,11 @@ public class ChatUiActorSystem {
         ActorRef<PromptQueue> promptQueueRef =
                 tabRef.createChild(tabRef.getName() + ".queue", new PromptQueue());
         chatSessionIIAR.tell(a -> ((ChatSession) a).setPromptQueueName(promptQueueRef.getName()));
+        // Lets PromptQueue's own dispatch-request handlers (enqueue/onPromptComplete/advance)
+        // hand the actual queue.remove(0) back to its own actor thread via self.ask(...) instead
+        // of mutating `queue` directly from ChatSession's thread (see PromptQueueThreadSafety
+        // fix — mirrors how ChatSession receives its own setActorSystem/setProviderName).
+        promptQueueRef.tell(q -> q.setSelf(promptQueueRef));
 
         // SseConnection — plain createChild, same as PromptQueue (ChatResourceDesign_260823_oo01).
         tabRef.createChild(tabRef.getName() + ".sse", new SseConnection(objectMapper));

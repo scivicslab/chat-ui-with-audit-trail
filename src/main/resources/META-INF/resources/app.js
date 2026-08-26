@@ -126,12 +126,17 @@
     // ── Queue status (server-side: chat-ui-with-audit-trail queues on the server whenever
     // ChatSession is busy, unlike chat-ui3's client-side-only draft queue) ─────
 
+    // Edit/remove/reorder/auto apply to every queued item regardless of who queued it (human or
+    // MCP agent) — QueueContentsEditing_260826_oo01. Index-addressed: a concurrent submitter
+    // (agent/workflow) could shift indices between fetch and action, same simplification
+    // quarkus-chat-ui3's own single-browser queue effectively has too.
     function refreshQueue() {
         if (!queueArea) return;
         fetch(apiUrl("api/tabs/" + TAB_ID + "/queue"))
             .then(function (r) { return r.json(); })
             .then(function (q) {
-                var size = (q && q.size) || 0;
+                var items = (q && q.items) || [];
+                var size = items.length;
                 queueArea.textContent = "";
                 var header = document.createElement("div");
                 header.className = "queue-header";
@@ -139,19 +144,86 @@
                     ? size + " prompt(s) queued (waiting for the current turn to finish)"
                     : "Queue is empty";
                 queueArea.appendChild(header);
-                // View-only: no reorder/edit controls. PromptQueue is server-side and shared with
-                // MCP-agent/workflow submitters, so a browser-editable list isn't as simple as
-                // chat-ui3's own client-side queue array (QueueContentsDisplay_260826_oo01).
-                (q && q.items || []).forEach(function (item) {
+
+                items.forEach(function (item, i) {
                     var row = document.createElement("div");
-                    row.className = "queue-item";
-                    row.textContent = item.prompt;
-                    if (item.source && item.source !== "human") row.title = "source: " + item.source;
+                    row.className = "queue-item" + (i === 0 ? " current" : "");
+
+                    var index = document.createElement("span");
+                    index.className = "queue-index";
+                    index.textContent = (i + 1) + ".";
+                    row.appendChild(index);
+
+                    var text = document.createElement("span");
+                    text.className = "queue-text";
+                    text.textContent = item.prompt;
+                    if (item.source && item.source !== "human") text.title = "source: " + item.source;
+                    row.appendChild(text);
+
+                    var autoLabel = document.createElement("label");
+                    autoLabel.className = "queue-auto";
+                    var autoCheckbox = document.createElement("input");
+                    autoCheckbox.type = "checkbox";
+                    autoCheckbox.checked = !!item.auto;
+                    autoCheckbox.addEventListener("change", function () {
+                        fetch(apiUrl("api/tabs/" + TAB_ID + "/queue/" + i + "/auto"), {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ auto: autoCheckbox.checked })
+                        }).then(refreshQueue);
+                    });
+                    autoLabel.appendChild(autoCheckbox);
+                    autoLabel.appendChild(document.createTextNode(" Auto"));
+                    row.appendChild(autoLabel);
+
+                    var upBtn = document.createElement("button");
+                    upBtn.className = "queue-move";
+                    upBtn.title = "Move up";
+                    upBtn.innerHTML = "&uarr;";
+                    upBtn.disabled = (i === 0);
+                    upBtn.addEventListener("click", function () { moveQueueItem(i, "up"); });
+                    row.appendChild(upBtn);
+
+                    var downBtn = document.createElement("button");
+                    downBtn.className = "queue-move";
+                    downBtn.title = "Move down";
+                    downBtn.innerHTML = "&darr;";
+                    downBtn.disabled = (i === items.length - 1);
+                    downBtn.addEventListener("click", function () { moveQueueItem(i, "down"); });
+                    row.appendChild(downBtn);
+
+                    var editBtn = document.createElement("button");
+                    editBtn.className = "queue-edit";
+                    editBtn.title = "Edit (copy to input)";
+                    editBtn.textContent = "📝";
+                    editBtn.addEventListener("click", function () {
+                        promptInput.value = item.prompt;
+                        promptInput.focus();
+                    });
+                    row.appendChild(editBtn);
+
+                    var removeBtn = document.createElement("button");
+                    removeBtn.className = "queue-remove";
+                    removeBtn.title = "Remove";
+                    removeBtn.innerHTML = "&times;";
+                    removeBtn.addEventListener("click", function () {
+                        fetch(apiUrl("api/tabs/" + TAB_ID + "/queue/" + i), { method: "DELETE" }).then(refreshQueue);
+                    });
+                    row.appendChild(removeBtn);
+
                     queueArea.appendChild(row);
                 });
                 queueArea.style.display = (size > 0 || queueArea.dataset.forcedOpen === "1") ? "block" : "none";
             })
             .catch(function () { /* leave the last known state on failure */ });
+    }
+
+    function moveQueueItem(index, direction) {
+        fetch(apiUrl("api/tabs/" + TAB_ID + "/queue/" + index + "/move"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ direction: direction })
+        }).then(refreshQueue);
     }
 
     // ── SSE ──────────────────────────────────────────────────────────────────
@@ -222,7 +294,12 @@
 
     function sendPrompt() {
         var text = promptInput.value.trim();
-        if (!text) return;
+        if (!text) {
+            // Empty send = "send the next one" (quarkus-chat-ui3's own semantics): force-dispatch
+            // the queue's front item, ignoring its auto flag. No-ops server-side if empty.
+            fetch(apiUrl("api/tabs/" + TAB_ID + "/queue/advance"), { method: "POST" }).then(refreshQueue);
+            return;
+        }
         appendMessage("user", text);
         promptInput.value = "";
         setBusy(true);
