@@ -19,6 +19,16 @@
     var thinkingEl = null;    // the live "thinking" trace bubble, if any
     var busy = false;
 
+    // Enable KaTeX math rendering inside markdown so LaTeX ($...$, $$...$$) in assistant answers
+    // is typeset. Optional: if the CDN scripts did not load, fall back to plain markdown.
+    try {
+        if (typeof marked !== "undefined" && typeof markedKatex === "function") {
+            marked.use(markedKatex({ throwOnError: false, nonStandard: true }));
+        }
+    } catch (e) {
+        // math rendering is optional; ignore and render markdown without it
+    }
+
     if (typeof marked !== "undefined") {
         marked.setOptions({ breaks: true, gfm: true });
     }
