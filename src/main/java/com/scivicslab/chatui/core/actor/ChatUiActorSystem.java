@@ -3,8 +3,13 @@ package com.scivicslab.chatui.core.actor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.scivicslab.chatui.core.iolog.IoLogStore;
 import com.scivicslab.chatui.core.provider.LlmProvider;
+import com.scivicslab.chatui.logging.ForwardingAccumulator;
+import com.scivicslab.chatui.logging.RecentEntriesAccumulator;
 import com.scivicslab.chatui.openaicompat.OpenAiCompatProvider;
 import com.scivicslab.pojoactor.core.ActorRef;
+import com.scivicslab.turingworkflow.plugins.logoutput.MultiplexerAccumulator;
+import com.scivicslab.turingworkflow.plugins.logoutput.MultiplexerAccumulatorActor;
+import com.scivicslab.turingworkflow.plugins.logoutput.MultiplexerLogHandler;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 import com.scivicslab.turingworkflow.workflow.RootIIAR;
 import jakarta.annotation.PostConstruct;
@@ -19,6 +24,7 @@ import java.util.Optional;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -53,9 +59,17 @@ public class ChatUiActorSystem {
     // Field initializer for the no-CDI unit-test path (see the servers/defaultModel comment above).
     ObjectMapper objectMapper = new ObjectMapper();
 
+    /** Name of the system-wide log multiplexer actor — fixed, per {@code MultiplexerLogHandler}'s
+     *  hardcoded lookup name. */
+    private static final String SYSTEM_LOG_ACTOR = "outputMultiplexer";
+    private static final int SYSTEM_LOG_CAPACITY = 500;
+    private static final int TAB_LOG_CAPACITY = 200;
+
     private IIActorSystem actorSystem;
     private final Map<String, ActorRef<ConversationTab>> tabs = new ConcurrentHashMap<>();
     private final Map<String, ChatSessionIIAR> chatSessions = new ConcurrentHashMap<>();
+    private RecentEntriesAccumulator systemLogBuffer;
+    private final Map<String, RecentEntriesAccumulator> tabLogBuffers = new ConcurrentHashMap<>();
 
     /**
      * Initializes the actor system and seeds a small tree so the Actors tab has something to show.
@@ -63,9 +77,35 @@ public class ChatUiActorSystem {
     @PostConstruct
     void init() {
         actorSystem = new IIActorSystem("chat-ui");
+
+        // System-wide log multiplexer (150_TabScopedLogging_260826_oo01): the top of the tab-log
+        // hierarchy, and MultiplexerLogHandler's hardcoded forwarding target for framework/non-actor
+        // log records (Quarkus startup, HTTP layer, etc.) that never go through a ConversationTab.
+        systemLogBuffer = new RecentEntriesAccumulator(SYSTEM_LOG_CAPACITY);
+        MultiplexerAccumulator systemMux = new MultiplexerAccumulator();
+        systemMux.addTarget(systemLogBuffer);
+        actorSystem.addIIActor(new MultiplexerAccumulatorActor(SYSTEM_LOG_ACTOR, systemMux, actorSystem));
+        MultiplexerLogHandler logHandler = new MultiplexerLogHandler(actorSystem);
+        logHandler.setLevel(Level.ALL);
+        Logger.getLogger("").addHandler(logHandler);
+
         createTab("alpha");
         createTab("beta");
         LOG.info("Actor system initialised with " + tabs.size() + " conversation tabs");
+    }
+
+    /**
+     * @param tabId conversation tab identifier
+     * @return that tab's recent log entries (oldest first), or {@code null} if the tab does not exist
+     */
+    public List<RecentEntriesAccumulator.Entry> getTabLogEntries(String tabId) {
+        RecentEntriesAccumulator buf = tabLogBuffers.get(tabId);
+        return buf == null ? null : buf.recent();
+    }
+
+    /** @return the system-wide log's recent entries (oldest first) */
+    public List<RecentEntriesAccumulator.Entry> getSystemLogEntries() {
+        return systemLogBuffer.recent();
     }
 
     /**
@@ -84,6 +124,16 @@ public class ChatUiActorSystem {
                 actorSystem.getRoot().createChild("tab-" + tabId, new ConversationTab());
         tabs.put(tabId, tabRef);
 
+        // Tab log multiplexer (150_TabScopedLogging_260826_oo01): this tab's own recent-entries
+        // buffer, plus delegation up to the system-wide multiplexer via ForwardingAccumulator.
+        String tabLogActorName = tabRef.getName() + ".log";
+        RecentEntriesAccumulator tabLogBuffer = new RecentEntriesAccumulator(TAB_LOG_CAPACITY);
+        tabLogBuffers.put(tabId, tabLogBuffer);
+        MultiplexerAccumulator tabMux = new MultiplexerAccumulator();
+        tabMux.addTarget(tabLogBuffer);
+        tabMux.addTarget(new ForwardingAccumulator(actorSystem, SYSTEM_LOG_ACTOR, tabId));
+        actorSystem.addIIActor(new MultiplexerAccumulatorActor(tabLogActorName, tabMux, actorSystem));
+
         // ChatSessionIIAR — manual IIActorRef bridge, since ConversationTab is a plain POJO and
         // cannot call addChildActor itself (ChatSessionIIAR_260810_oo01 "ConversationTab への接続").
         OpenAiCompatProvider provider = new OpenAiCompatProvider(servers, defaultModel);
@@ -93,6 +143,7 @@ public class ChatUiActorSystem {
         tabRef.getNamesOfChildren().add(chatSessionIIAR.getName());
         actorSystem.addIIActor(chatSessionIIAR);
         chatSessions.put(tabId, chatSessionIIAR);
+        chatSessionIIAR.tell(a -> ((ChatSession) a).setTabId(tabId));
 
         // provider child — created by the generating side, not by ChatSession itself
         // (ChatSessionPorting_260823_oo01 "なぜ init を無くしたか").
@@ -110,6 +161,7 @@ public class ChatUiActorSystem {
         // of mutating `queue` directly from ChatSession's thread (see PromptQueueThreadSafety
         // fix — mirrors how ChatSession receives its own setActorSystem/setProviderName).
         promptQueueRef.tell(q -> q.setSelf(promptQueueRef));
+        promptQueueRef.tell(q -> q.setLogging(actorSystem, tabLogActorName));
 
         // SseConnection — plain createChild, same as PromptQueue (ChatResourceDesign_260823_oo01).
         tabRef.createChild(tabRef.getName() + ".sse", new SseConnection(objectMapper));

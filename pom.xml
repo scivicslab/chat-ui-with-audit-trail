@@ -91,6 +91,16 @@
         </exclusion>
       </exclusions>
     </dependency>
+    <!-- System Log (tab-scoped + system-wide): MultiplexerAccumulator/MultiplexerAccumulatorActor,
+         used as-is (150_TabScopedLogging_260826_oo01). Not excluded like plugin-log-db above — this
+         plugin's classes DO need to interoperate with this project's own pojo-actor/turing-workflow
+         instances (IIActorSystem, Accumulator), and Maven's nearest-wins mediation already resolves
+         its transitive pojo-actor/turing-workflow to the versions declared above. -->
+    <dependency>
+      <groupId>com.scivicslab.turingworkflow.plugins</groupId>
+      <artifactId>plugin-log-output</artifactId>
+      <version>1.5.0</version>
+    </dependency>
     <!-- Agent-loop tools (read/write/web_search/fetch/search_docs): jsoup for HTML parsing
          (DuckDuckGo results, fetched pages). Same version as quarkus-chat-ui3, which these
          tools are ported from. -->

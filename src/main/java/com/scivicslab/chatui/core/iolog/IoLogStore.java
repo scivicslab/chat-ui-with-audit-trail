@@ -11,6 +11,8 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -19,8 +21,11 @@ import java.util.logging.Logger;
  * conversation-scoped session id. Application-scoped so the store and the conversation session
  * outlive any single turn.
  *
- * <p>One H2 "session" = one conversation: opened on first use and reused across turns;
- * {@link #resetSession()} (a "new conversation" / {@code /clear}) ends it. The DB path is a startup
+ * <p>One H2 "session" = one conversation tab: opened on first use and reused across turns for that
+ * tab; {@link #resetSession(String)} (a "new conversation" / {@code /clear}) ends it. Each tab's
+ * session id is tracked separately (keyed by tab id) so tabs never share one H2 session — the tab id
+ * is also encoded into the session's {@code workflowName} ({@code "chat-ui-conversation-" + tabId}) so
+ * the Sessions view can filter by tab without a schema change. The DB path is a startup
  * property ({@code chat-ui.iolog.db-path}, default {@code chat-ui-iolog}) with the instance's HTTP
  * port appended, so each instance opens its own file (e.g. {@code ./chat-ui-iolog-18090.mv.db}). The
  * port suffix keeps two instances from sharing one H2 store via {@code AUTO_SERVER}.</p>
@@ -54,7 +59,7 @@ public class IoLogStore {
     }
 
     private DistributedLogStore store;
-    private long sessionId = -1;
+    private final Map<String, Long> sessionIds = new HashMap<>();
     private boolean failed = false;
 
     private synchronized void ensureStore() {
@@ -71,39 +76,47 @@ public class IoLogStore {
         }
     }
 
-    /** Returns the current conversation's session id, opening a session on first use; -1 if unavailable. */
-    public synchronized long ensureSession() {
+    /**
+     * Returns the given tab's session id, opening a session on first use; -1 if unavailable. Each tab
+     * gets its own session id (tabs never share one), tagged via {@code workflowName} so the Sessions
+     * view can filter by tab.
+     */
+    public synchronized long ensureSession(String tabId) {
         ensureStore();
         if (store == null) {
             return -1;
         }
-        if (sessionId < 0) {
-            try {
-                sessionId = store.startSession("chat-ui-conversation", 1);
-                LOG.info("I/O log session started: " + sessionId);
-            } catch (Exception e) {
-                LOG.log(Level.WARNING, "startSession failed", e);
-                return -1;
-            }
+        Long existing = sessionIds.get(tabId);
+        if (existing != null) {
+            return existing;
         }
-        return sessionId;
+        try {
+            long sid = store.startSession("chat-ui-conversation-" + tabId, 1);
+            sessionIds.put(tabId, sid);
+            LOG.info("I/O log session started for tab " + tabId + ": " + sid);
+            return sid;
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "startSession failed", e);
+            return -1;
+        }
     }
 
-    /** The current conversation's log session id, or -1 if none. */
-    public synchronized long currentSessionId() {
-        return sessionId;
+    /** The given tab's current log session id, or -1 if none. */
+    public synchronized long currentSessionId(String tabId) {
+        Long sid = sessionIds.get(tabId);
+        return sid != null ? sid : -1;
     }
 
-    /** Ends the current conversation session (called on "new conversation" / clear). */
-    public synchronized void resetSession() {
-        if (store != null && sessionId >= 0) {
+    /** Ends the given tab's current session (called on "new conversation" / clear). */
+    public synchronized void resetSession(String tabId) {
+        Long sid = sessionIds.remove(tabId);
+        if (store != null && sid != null && sid >= 0) {
             try {
-                store.endSession(sessionId, SessionStatus.COMPLETED);
+                store.endSession(sid, SessionStatus.COMPLETED);
             } catch (Exception e) {
                 LOG.log(Level.WARNING, "endSession failed", e);
             }
         }
-        sessionId = -1;
     }
 
     /** The shared store (read side for the Sessions view). May be null if logging is disabled. */
@@ -150,7 +163,7 @@ public class IoLogStore {
      */
     public synchronized int deleteSession(long id) {
         if (id < 0) return 0;
-        if (id == sessionId) {
+        if (sessionIds.containsValue(id)) {
             LOG.warning("Refusing to delete the active conversation session " + id);
             return 0;
         }
@@ -179,15 +192,22 @@ public class IoLogStore {
      */
     public synchronized int deleteSessionsOlderThan(int days) {
         if (days < 0) return 0;
-        String pred = "started_at < DATEADD('DAY', ?, CURRENT_TIMESTAMP) AND id <> ?";
+        // Excludes every tab's currently active session, not just one.
+        Long[] active = sessionIds.values().toArray(new Long[0]);
+        String placeholders = String.join(",", java.util.Collections.nCopies(active.length, "?"));
+        String pred = "started_at < DATEADD('DAY', ?, CURRENT_TIMESTAMP)"
+                + (active.length > 0 ? " AND id NOT IN (" + placeholders + ")" : "");
+        Object[] params = new Object[1 + active.length];
+        params[0] = -days;
+        System.arraycopy(active, 0, params, 1, active.length);
         try (Connection c = DriverManager.getConnection(jdbcUrl())) {
             c.setAutoCommit(false);
             try {
                 update(c, "DELETE FROM logs WHERE session_id IN (SELECT id FROM sessions WHERE " + pred + ")",
-                        -days, sessionId);
+                        params);
                 update(c, "DELETE FROM node_results WHERE session_id IN (SELECT id FROM sessions WHERE " + pred + ")",
-                        -days, sessionId);
-                int n = update(c, "DELETE FROM sessions WHERE " + pred, -days, sessionId);
+                        params);
+                int n = update(c, "DELETE FROM sessions WHERE " + pred, params);
                 c.commit();
                 LOG.info("Deleted " + n + " session(s) older than " + days + " day(s)");
                 return n;

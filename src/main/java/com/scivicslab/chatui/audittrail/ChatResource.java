@@ -7,6 +7,7 @@ import com.scivicslab.chatui.core.actor.PromptQueue;
 import com.scivicslab.chatui.core.actor.SseConnection;
 import com.scivicslab.chatui.core.provider.LlmProvider;
 import com.scivicslab.chatui.core.rest.ChatEvent;
+import com.scivicslab.chatui.logging.RecentEntriesAccumulator;
 import com.scivicslab.pojoactor.core.ActorRef;
 import io.smallrye.mutiny.Multi;
 import jakarta.inject.Inject;
@@ -145,6 +146,22 @@ public class ChatResource {
             LOG.warning("Failed to read queue state for tab " + tabId + ": " + e.getMessage());
             return Map.of("size", 0, "hasPending", false, "items", List.of());
         }
+    }
+
+    /**
+     * Returns one tab's recent log entries (the right-pane "System Log" tab, scoped to the
+     * currently active tab — {@code 150_TabScopedLogging_260826_oo01}).
+     *
+     * @param tabId conversation tab identifier
+     * @return recent entries from that tab's log multiplexer, oldest first; empty if the tab
+     *         doesn't exist yet (no messages sent, nothing logged)
+     */
+    @GET
+    @Path("/tabs/{tabId}/log")
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<RecentEntriesAccumulator.Entry> tabLog(@PathParam("tabId") String tabId) {
+        List<RecentEntriesAccumulator.Entry> entries = actorSystem.getTabLogEntries(tabId);
+        return entries != null ? entries : List.of();
     }
 
     /**

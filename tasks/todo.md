@@ -128,3 +128,26 @@
 - [x] サブワークフロー用の子アクターのライフサイクル——`Interpreter.call(...)`が既に4段階（子生成・YAML読込・実行・`finally`での子削除）を内蔵しており、自前で`removeChildActor`を書く必要は無かった（計画時点ではこの既存メソッドの中身を確認していなかった）
 - [x] ユニットテスト2本（`ChatSessionPromptWorkflowTest`）——既定サブワークフローが以前と同じテキストを組み立てることの確認、カスタムサブワークフロー（テスト専用YAML）が2件のプロンプトをそれぞれ別のLLM呼び出しとして順に送ることの確認
 - [x] 実機で、既定サブワークフロー経由でも実際のcalcツール呼び出し→最終回答という既存の挙動が壊れていないことを確認（Sessionsタブのトレースで`REQUEST:`にシステムプロンプト込みの全文が変わらず記録されていることも確認）。複数プロンプト分割の実機確認（本物のLLMでの動作）はユニットテストの範囲に留まり、まだ行っていない
+
+## 計画（タブ単位のログ階層 — 右ペインSessions・System Logの連動）
+
+設計文書: `doc_SCIVICS003/docs/chat-ui-with-audit-trail/030_development/010_skeleton/150_TabScopedLogging_260826_oo01`。
+`plugin-log-db`・`plugin-log-output`（`Turing-workflow-plugins`）を再利用する形に設計を直した経緯も同文書に記録。
+
+- [x] `IoLogStore`の`sessionId`を単一フィールドからタブIDキーの`Map`へ変更、`workflowName`にタブIDを乗せる
+- [x] `ChatSession`に`tabId`フィールド＋`setTabId`、`ChatUiActorSystem.createTab`から配線
+- [x] `SessionsResource`に`tabId`クエリパラメータを追加し`workflowName`で絞り込み
+- [x] `pom.xml`に`plugin-log-output`依存を追加
+- [x] `RecentEntriesAccumulator`（環状バッファAccumulator）・`ForwardingAccumulator`（タブ→システムへの委譲）を新規作成
+- [x] `ChatUiActorSystem`にシステム全体用`"outputMultiplexer"`＋タブごとの`"tab-<id>.log"`アクターを配線、`MultiplexerLogHandler`をルートロガーに追加
+- [x] `ChatSession`・`PromptQueue`の主要ログ箇所に、既存の`LOG.xxx()`はそのまま残しつつタブ用Multiplexerへの呼び出しを追加
+- [x] `GET /api/tabs/{tabId}/log`・`GET /api/system-log`を新設
+- [x] `console.js`：Sessionsは`tabId`クエリパラメータ付きで、System Logは`GET /api/tabs/{tabId}/log`（形式差は`fromTabLogShape()`で吸収）で取得するよう変更。タブ切替時に両方を即座に再取得
+- [x] `mvn install`（テスト含む）成功、ポート28019へ実機デプロイし、`curl`とPlaywrightでSessions・System Logがタブ追従することを確認
+
+## レビュー
+
+- 当初案（`TabLog`/`SystemLog`を新規のアクタークラスとして1から設計）は、既存の再利用可能プラグイン（`plugin-log-db`・`plugin-log-output`）を確認せずに進めていたと指摘を受け、破棄して書き直した。結果、新規に書いたのは`RecentEntriesAccumulator`・`ForwardingAccumulator`の2クラスのみで、残りは全て既存プラグインの再利用で済んだ。
+- Sessions側の直し方も、当初検討していた`node_id`活用案（`"agent"`固定値をタブIDに変える）から、`sessionId`自体をタブごとに分ける案へ変更した——`"agent"`という値はタブ混在バグと無関係な、別の情報（誰が出したログか）を表していたため。
+- `GET /api/system-log`（システム全体集約ビュー）は、明示的なタブ→システム転送と、`MultiplexerLogHandler`によるルートロガー経由の捕捉の両方で同じログが二重に入る既知の制限が残っている——現時点でこのエンドポイントを参照するUIが無いため実害は無いが、将来UIに繋ぐ際は要検討。
+- ポート28014（ユーザーの常用インスタンス）は今回未反映。デプロイする場合は要相談。

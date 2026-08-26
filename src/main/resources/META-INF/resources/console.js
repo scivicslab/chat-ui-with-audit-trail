@@ -1,8 +1,10 @@
 // Console script for chat-ui-with-audit-trail.
 //   - right-pane tab switching
 //   - Actors tab: fetch GET /api/actors and render the actor tree
-//   - Sessions tab: GET /api/sessions + trace view (ported from quarkus-chat-ui3)
-//   - System Log tab: GET /api/logs, backed by LogTap (ported from quarkus-chat-ui3)
+//   - Sessions tab: GET /api/sessions?tabId=<active tab>, trace view unchanged (ported from
+//     quarkus-chat-ui3)
+//   - System Log tab: GET /api/tabs/<active tab>/log (150_TabScopedLogging_260826_oo01); falls
+//     back to GET /api/logs (LogTap, server-wide) only if no tab is active yet
 // The Workflow tab has no backend yet.
 (function () {
     "use strict";
@@ -96,19 +98,41 @@
         return !!(node && el.contains(node));
     }
 
+    // Maps a tab log multiplexer's RecentEntriesAccumulator.Entry (time/source/type/data) into the
+    // shape renderLogs()/applyLevelFilter() already know (LogTap.Entry: time/level/levelValue/
+    // logger/message), so the existing rendering + severity filter keep working unchanged. `type`
+    // is "INFO" for entries ChatSession/PromptQueue log explicitly, or "log-<LEVEL>" for framework
+    // noise forwarded via MultiplexerLogHandler (150_TabScopedLogging_260826_oo01).
+    var JUL_LEVEL_VALUES = { SEVERE: 1000, WARNING: 900, INFO: 800, CONFIG: 700, FINE: 500, FINER: 400, FINEST: 300 };
+    function fromTabLogShape(entries) {
+        return entries.map(function (e) {
+            var level = (e.type && e.type.indexOf("log-") === 0) ? e.type.substring(4) : "INFO";
+            return {
+                time: e.time,
+                level: level,
+                levelValue: JUL_LEVEL_VALUES.hasOwnProperty(level) ? JUL_LEVEL_VALUES[level] : 800,
+                logger: e.source || "",
+                message: e.data || ""
+            };
+        });
+    }
+
     var logsRefreshing = false;
     var lastLogSig = null;
     function refreshLogs() {
         if (logsRefreshing) return;
         logsRefreshing = true;
         var status = document.getElementById("logs-status");
-        fetch("api/logs")
+        var tabId = (typeof window.chatUiGetActiveTabId === "function") ? window.chatUiGetActiveTabId() : null;
+        var url = tabId ? ("api/tabs/" + encodeURIComponent(tabId) + "/log") : "api/logs";
+        fetch(url)
             .then(function (r) {
                 if (!r.ok) throw new Error("HTTP " + r.status);
                 return r.json();
             })
             .then(function (entries) {
                 entries = Array.isArray(entries) ? entries : [];
+                if (tabId) entries = fromTabLogShape(entries);
                 var sig = JSON.stringify(entries);
                 if (sig === lastLogSig) return;   // unchanged (e.g. idle): do not touch the DOM
                 lastLogSig = sig;
@@ -237,6 +261,16 @@
                 e.stopPropagation(); // don't also trigger the fold/unfold toggle on the label
                 window.chatUiSwitchTab(tabMatch[1]);
                 refreshActors(); // re-render so the tab-active highlight moves immediately
+                // Right pane follows the newly active tab (150_TabScopedLogging_260826_oo01) —
+                // re-fetch immediately rather than waiting for the next poll/tab-open.
+                ioSessionsLoaded = false;
+                if (document.getElementById("tab-logdb") && document.getElementById("tab-logdb").classList.contains("active")) {
+                    ioLoadSessions();
+                }
+                lastLogSig = null;
+                if (document.getElementById("tab-syslog") && document.getElementById("tab-syslog").classList.contains("active")) {
+                    refreshLogs();
+                }
             });
         }
         var type = document.createElement("span");
@@ -359,7 +393,9 @@
                 if (d.dataset.sessionId) openIds[d.dataset.sessionId] = true;
             });
         }
-        return fetch("api/sessions").then(function (r) { return r.json(); }).then(function (list) {
+        var tabId = (typeof window.chatUiGetActiveTabId === "function") ? window.chatUiGetActiveTabId() : null;
+        var url = tabId ? ("api/sessions?tabId=" + encodeURIComponent(tabId)) : "api/sessions";
+        return fetch(url).then(function (r) { return r.json(); }).then(function (list) {
             if (!el) return;
             el.textContent = "";
             list = list || [];

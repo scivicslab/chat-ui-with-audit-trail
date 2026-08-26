@@ -16,8 +16,10 @@ import com.scivicslab.chatui.core.service.AuthMode;
 import com.scivicslab.pojoactor.core.ActionResult;
 import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.turingworkflow.examples.jshell.JShellCalculator;
+import com.scivicslab.turingworkflow.workflow.IIActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 import com.scivicslab.turingworkflow.workflow.Interpreter;
+import org.json.JSONObject;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -79,6 +81,8 @@ public class ChatSession extends Interpreter {
     private String watchdogName;
     /** Name of the sibling PromptQueue, or {@code null} until wired. */
     private String promptQueueName;
+    /** This session's conversation tab id (e.g. {@code "alpha"}), used to key its I/O-log session. */
+    private String tabId;
 
     private boolean busy;
     private String apiKey;
@@ -247,6 +251,34 @@ public class ChatSession extends Interpreter {
      * @param promptQueueName the name of the sibling PromptQueue
      */
     public void setPromptQueueName(String promptQueueName) { this.promptQueueName = promptQueueName; }
+
+    /**
+     * @param tabId this session's conversation tab id, used to key its I/O-log session
+     *              ({@link IoLogStore#ensureSession(String)})
+     */
+    public void setTabId(String tabId) { this.tabId = tabId; }
+
+    /**
+     * Forwards one entry to this session's tab log multiplexer ({@code tab-<tabId>.log}), in
+     * addition to (not instead of) the existing {@code logger.xxx(...)} calls near each call site —
+     * those keep flowing to {@link com.scivicslab.chatui.logging.LogTap} unchanged
+     * ({@code 150_TabScopedLogging_260826_oo01} "既存のLOG.xxx()を置き換えず"). Silently no-ops if
+     * the actor system or tab id isn't wired yet, or the tab log actor isn't found.
+     */
+    private void logToTab(String type, String message) {
+        if (system == null || tabId == null) return;
+        try {
+            IIActorRef<?> tabLog = system.getIIActor("tab-" + tabId + ".log");
+            if (tabLog == null) return;
+            JSONObject args = new JSONObject();
+            args.put("source", "ChatSession");
+            args.put("type", type);
+            args.put("data", message);
+            tabLog.callByActionName("add", args.toString());
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "Failed to forward log entry to tab log", e);
+        }
+    }
 
     /**
      * Swaps the prompt-construction sub-workflow (default: {@code prompt-construction-default.yaml}).
@@ -440,7 +472,7 @@ public class ChatSession extends Interpreter {
         busy = true;
         recordHistory("user", prompt);
         // Open (lazily) the conversation's I/O-log session and number this turn for the Sessions tab.
-        final long ioSession = (ioLog != null) ? ioLog.ensureSession() : -1;
+        final long ioSession = (ioLog != null) ? ioLog.ensureSession(tabId) : -1;
         final int ioTurnNo = ++ioTurn;
         if (resultKey != null) {
             pendingResultKeys.remove(resultKey);
@@ -572,7 +604,7 @@ public class ChatSession extends Interpreter {
         this.turnSelf = self;
         this.turnDone = done;
         this.turnNoThink = noThink;
-        this.ioSession = (ioLog != null) ? ioLog.ensureSession() : -1;
+        this.ioSession = (ioLog != null) ? ioLog.ensureSession(tabId) : -1;
         this.ioTurnNo = ++ioTurn;
         this.pendingCalls = null;
         this.finalAnswer = null;
@@ -725,6 +757,7 @@ public class ChatSession extends Interpreter {
             }
             m.append("\n\nUSAGE: promptTokens=0 completionTokens=0");
             ioLog.record(ioSession, "agent", "turn" + ioTurnNo + "/step" + stepCount + "/llm", m.toString());
+            logToTab("INFO", "turn" + ioTurnNo + "/step" + stepCount + "/llm");
         } catch (Exception e) {
             logger.log(Level.WARNING, "I/O log step record failed", e);
         }
@@ -771,6 +804,7 @@ public class ChatSession extends Interpreter {
             String m = "TOOL: " + tc.name() + "\nINPUT:\n" + tc.argumentsJson()
                     + "\nOBSERVATION:\n" + fullObservation;
             ioLog.record(ioSession, "agent", "turn" + ioTurnNo + "/step" + stepCount + "/tool", m);
+            logToTab("INFO", "turn" + ioTurnNo + "/step" + stepCount + "/tool: " + tc.name());
         } catch (Exception e) {
             logger.log(Level.WARNING, "I/O log tool record failed", e);
         }
@@ -847,7 +881,7 @@ public class ChatSession extends Interpreter {
         // Reserve the session so a user prompt cannot start while the autonomous turn streams.
         busy = true;
         emitToSse(ChatEvent.status(provider.getCurrentModel(), provider.getSessionId(), true));
-        final long ioSession = (ioLog != null) ? ioLog.ensureSession() : -1;
+        final long ioSession = (ioLog != null) ? ioLog.ensureSession(tabId) : -1;
         ActorRef<LlmProvider> providerRef = providerRef();
 
         providerRef.ask(p -> {
@@ -963,6 +997,7 @@ public class ChatSession extends Interpreter {
             }
             m.append("\n\nUSAGE: promptTokens=0 completionTokens=0");
             ioLog.record(ioSession, "agent", "turn" + turnNo + "/step1/llm", m.toString());
+            logToTab("INFO", "turn" + turnNo + "/step1/llm");
         } catch (Exception e) {
             logger.log(Level.WARNING, "I/O log turn record failed", e);
         }
@@ -984,7 +1019,7 @@ public class ChatSession extends Interpreter {
     public void clearHistory() {
         conversationHistory.clear();
         // New conversation: end the current I/O-log session and renumber turns from 1.
-        if (ioLog != null) ioLog.resetSession();
+        if (ioLog != null) ioLog.resetSession(tabId);
         ioTurn = 0;
     }
 

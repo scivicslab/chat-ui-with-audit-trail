@@ -2,6 +2,9 @@ package com.scivicslab.chatui.core.actor;
 
 import com.scivicslab.chatui.core.rest.ChatEvent;
 import com.scivicslab.pojoactor.core.ActorRef;
+import com.scivicslab.turingworkflow.workflow.IIActorRef;
+import com.scivicslab.turingworkflow.workflow.IIActorSystem;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -46,6 +49,39 @@ public class PromptQueue {
     private ActorRef<PromptQueue> self;
 
     public void setSelf(ActorRef<PromptQueue> self) { this.self = self; }
+
+    /** Actor system + this queue's tab log actor name, for {@link #logToTab}. Both null until wired. */
+    private IIActorSystem system;
+    private String tabLogActorName;
+
+    /**
+     * @param system          lets {@link #logToTab} resolve {@code tabLogActorName}
+     * @param tabLogActorName this queue's tab's log multiplexer actor name (e.g. {@code "tab-alpha.log"})
+     */
+    public void setLogging(IIActorSystem system, String tabLogActorName) {
+        this.system = system;
+        this.tabLogActorName = tabLogActorName;
+    }
+
+    /**
+     * Forwards one entry to this queue's tab log multiplexer, in addition to (not instead of) the
+     * existing {@code LOG.xxx(...)} calls near each call site (see
+     * {@code ChatSession.logToTab}/{@code 150_TabScopedLogging_260826_oo01}).
+     */
+    private void logToTab(String message) {
+        if (system == null || tabLogActorName == null) return;
+        try {
+            IIActorRef<?> tabLog = system.getIIActor(tabLogActorName);
+            if (tabLog == null) return;
+            JSONObject args = new JSONObject();
+            args.put("source", "PromptQueue");
+            args.put("type", "INFO");
+            args.put("data", message);
+            tabLog.callByActionName("add", args.toString());
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Failed to forward log entry to tab log", e);
+        }
+    }
 
     /**
      * Enqueues a prompt. Convenience overload without resultKey (resultKey defaults to null).
@@ -112,6 +148,7 @@ public class PromptQueue {
                 chatSessionRef.tell(ChatSession::cancel);
                 emitter.accept(ChatEvent.info("Current prompt cancelled. Your message is queued."));
                 LOG.info("cancel_and_send: cancelled current prompt, queued at front (queue size=" + queue.size() + ")");
+                logToTab("cancel_and_send: queued at front (queue size=" + queue.size() + ")");
             }
             default -> {
                 // "queue" mode (default)
@@ -119,6 +156,7 @@ public class PromptQueue {
                 queue.add(item);
                 emitter.accept(ChatEvent.info("Queued. Your message will be sent when the current prompt finishes."));
                 LOG.info("queue: queued prompt (queue size=" + queue.size() + ")");
+                logToTab("queue: queued prompt (queue size=" + queue.size() + ")");
             }
         }
 
@@ -139,6 +177,7 @@ public class PromptQueue {
         int removed = before - queue.size();
         if (removed > 0) {
             LOG.info("queue: cleared " + removed + " agent messages on cancel");
+            logToTab("queue: cleared " + removed + " agent messages on cancel");
         }
     }
 
@@ -302,6 +341,7 @@ public class PromptQueue {
         if (respectAuto && !queue.get(0).auto()) return null;
         QueueItem item = queue.remove(0);
         LOG.info("Dequeuing prompt (remaining=" + queue.size() + "): " + truncate(item.prompt(), 80));
+        logToTab("Dequeuing prompt (remaining=" + queue.size() + "): " + truncate(item.prompt(), 80));
         return item;
     }
 
