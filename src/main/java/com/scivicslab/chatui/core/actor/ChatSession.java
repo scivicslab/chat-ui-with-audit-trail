@@ -81,7 +81,7 @@ public class ChatSession extends Interpreter {
     private String watchdogName;
     /** Name of the sibling PromptQueue, or {@code null} until wired. */
     private String promptQueueName;
-    /** This session's conversation tab id (e.g. {@code "alpha"}), used to key its I/O-log session. */
+    /** This session's conversation tab id (e.g. {@code "01"}), used to key its I/O-log session. */
     private String tabId;
 
     private boolean busy;
@@ -259,7 +259,7 @@ public class ChatSession extends Interpreter {
     public void setTabId(String tabId) { this.tabId = tabId; }
 
     /**
-     * Forwards one entry to this session's tab log multiplexer ({@code tab-<tabId>.log}), in
+     * Forwards one entry to this session's tab log multiplexer ({@code chat-<tabId>.log}), in
      * addition to (not instead of) the existing {@code logger.xxx(...)} calls near each call site —
      * those keep flowing to {@link com.scivicslab.chatui.logging.LogTap} unchanged
      * ({@code 150_TabScopedLogging_260826_oo01} "既存のLOG.xxx()を置き換えず"). Silently no-ops if
@@ -268,7 +268,7 @@ public class ChatSession extends Interpreter {
     private void logToTab(String type, String message) {
         if (system == null || tabId == null) return;
         try {
-            IIActorRef<?> tabLog = system.getIIActor("tab-" + tabId + ".log");
+            IIActorRef<?> tabLog = system.getIIActor("chat-" + tabId + ".log");
             if (tabLog == null) return;
             JSONObject args = new JSONObject();
             args.put("source", "ChatSession");
@@ -287,6 +287,9 @@ public class ChatSession extends Interpreter {
      *                           {@link Interpreter#call(String)} resolves any sub-workflow
      */
     public void setPromptWorkflowFile(String promptWorkflowFile) { this.promptWorkflowFile = promptWorkflowFile; }
+
+    /** @return this session's prompt-construction sub-workflow file name (classpath-relative, under {@code /workflows/}) */
+    public String getPromptWorkflowFile() { return promptWorkflowFile; }
 
     /**
      * Looks up the sibling PromptQueue by name, on demand — not stored as a field.

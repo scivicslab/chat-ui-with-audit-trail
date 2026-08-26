@@ -35,7 +35,7 @@
       Two-pane console (chat-ui3-style).
         - #left-panel  : the existing Claude chat UI, embedded inline and unchanged (app.js owns it).
         - #splitter    : draggable divider.
-        - #right-panel : tabbed workspace (Sessions / Actors / System Log / Workflow).
+        - #right-panel : tabbed workspace (Sessions / System Log / Agent Loop).
       Everything from the original chat-ui <body> is kept verbatim inside #left-panel so app.js
       finds every element id it expects (header, chat, queue, log panel, input, overlays).
     -->
@@ -108,7 +108,7 @@
             <!-- ===== BEGIN chat-ui markup (unchanged: Claude features kept) ===== -->
             <div id="app">
                 <!-- Conversation-tab switching happens via the Actors tree (#left-dock) now —
-                     clicking a "tab-<id>" actor's name switches this pane (ActorTreeTabSwitcher_260826_oo01)
+                     clicking a "chat-<id>" actor's name switches this pane (ActorTreeTabSwitcher_260826_oo01)
                      — instead of a dedicated bar here. -->
                 <!-- Left-pane header: actions that operate only on this pane's chat (chat-ui3-style). -->
                 <header>
@@ -148,7 +148,7 @@
             <div id="right-tab-bar">
                 <button class="rtab-btn active" data-tab="logdb">Sessions</button>
                 <button class="rtab-btn" data-tab="syslog">System Log</button>
-                <button class="rtab-btn" data-tab="workflow">Workflow</button>
+                <button class="rtab-btn" data-tab="agentloop">Agent Loop</button>
                 <!-- Add new feature tabs here. -->
             </div>
 
@@ -186,19 +186,17 @@
                     <div id="logs-list"></div>
                 </section>
 
-                <section id="tab-workflow" class="rtab-content">
+                <section id="tab-agentloop" class="rtab-content">
+                    <!-- Read-only workflow YAML viewer, ported from quarkus-chat-ui3, made tab-scoped:
+                         the catalog is this tab's agent-loop workflow + prompt-construction sub-workflow
+                         (AgentLoopTab_260827_oo01). -->
                     <div class="tab-toolbar">
                         <label class="tab-auto">Workflow:
                             <select id="wf-select"></select>
                         </label>
                         <button id="wf-refresh" type="button">Refresh</button>
-                        <input id="wf-run-input" type="text"
-                               placeholder='input JSON, e.g. &#123;"path":"~/works/…/checklist.md"&#125;'
-                               style="flex:1;min-width:12em">
-                        <button id="wf-run" type="button" title="Run this workflow (drives Claude step by step)">Run</button>
                         <span id="wf-status"></span>
                     </div>
-                    <div id="wf-form" class="wf-form" style="display:none"></div>
                     <div id="wf-list"></div>
                 </section>
             </div>

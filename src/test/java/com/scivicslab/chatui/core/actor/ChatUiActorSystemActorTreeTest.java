@@ -26,7 +26,7 @@ class ChatUiActorSystemActorTreeTest {
         assertEquals("ROOT", root.name());
         assertTrue(root.alive());
         List<String> childNames = root.children().stream().map(ActorNode::name).toList();
-        assertTrue(childNames.contains("tab-alpha"), "expected tab-alpha under ROOT, got " + childNames);
-        assertTrue(childNames.contains("tab-beta"), "expected tab-beta under ROOT, got " + childNames);
+        assertTrue(childNames.contains("chat-01"), "expected chat-01 under ROOT, got " + childNames);
+        assertTrue(childNames.contains("chat-02"), "expected chat-02 under ROOT, got " + childNames);
     }
 }

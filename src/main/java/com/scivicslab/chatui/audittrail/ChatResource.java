@@ -276,6 +276,74 @@ public class ChatResource {
         }
     }
 
+    // ── Agent Loop tab (read-only workflow YAML viewer, tab-scoped) ─────────────
+
+    /** One entry in a tab's workflow catalog. {@code name} is the classpath basename (no {@code .yaml}). */
+    public record WorkflowInfo(String name, String title) {}
+
+    /**
+     * Lists the workflow YAML files configured for one tab: its agent-loop workflow ({@code
+     * ChatSessionIIAR.agentLoopWorkflowFile}) and its prompt-construction sub-workflow ({@code
+     * ChatSession.promptWorkflowFile}) — each tab can be configured independently (today both
+     * default to the same file since only one of each exists on the classpath).
+     *
+     * @param tabId conversation tab identifier
+     * @return this tab's workflow catalog, agent loop first
+     */
+    @GET
+    @Path("/tabs/{tabId}/workflows")
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<WorkflowInfo> workflows(@PathParam("tabId") String tabId) {
+        actorSystem.createTab(tabId);
+        ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(tabId);
+        String agentLoopFile = chatSessionIIAR.getAgentLoopWorkflowFile();
+        String promptFile;
+        try {
+            promptFile = chatSessionIIAR.ask(interp -> ((ChatSession) interp).getPromptWorkflowFile())
+                    .get(5, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOG.warning("Failed to read prompt workflow file for tab " + tabId + ": " + e.getMessage());
+            promptFile = null;
+        }
+        List<WorkflowInfo> catalog = new java.util.ArrayList<>();
+        catalog.add(new WorkflowInfo(stripYamlExt(agentLoopFile), "Agent Loop"));
+        if (promptFile != null) {
+            catalog.add(new WorkflowInfo(stripYamlExt(promptFile), "Prompt Construction"));
+        }
+        return catalog;
+    }
+
+    /**
+     * Returns one workflow's read-only YAML, read fresh from the classpath (so it always reflects
+     * the file actually bundled in this build — no per-tab in-memory copy).
+     *
+     * @param tabId conversation tab identifier (unused beyond confirming the tab exists — the YAML
+     *              itself is a classpath resource, not per-tab state)
+     * @param name  the workflow's classpath basename, as returned by {@link #workflows}
+     * @return {@code {"name": ..., "yaml": ..., "editable": false}}, or 404 if not found
+     */
+    @GET
+    @Path("/tabs/{tabId}/workflows/{name}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response workflowYaml(@PathParam("tabId") String tabId, @PathParam("name") String name) {
+        String resource = "/workflows/" + name + ".yaml";
+        try (java.io.InputStream in = getClass().getResourceAsStream(resource)) {
+            if (in == null) {
+                return Response.status(Response.Status.NOT_FOUND)
+                        .entity(Map.of("error", "unknown workflow: " + name)).build();
+            }
+            String yaml = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            return Response.ok(Map.of("name", name, "yaml", yaml, "editable", false)).build();
+        } catch (Exception e) {
+            LOG.warning("Failed to read workflow " + name + ": " + e.getMessage());
+            return Response.status(500).entity(Map.of("error", "read failed")).build();
+        }
+    }
+
+    private static String stripYamlExt(String fileName) {
+        return fileName.endsWith(".yaml") ? fileName.substring(0, fileName.length() - 5) : fileName;
+    }
+
     // ── Tab list (browser tab switcher) ─────────────────────────────────────────
 
     /**

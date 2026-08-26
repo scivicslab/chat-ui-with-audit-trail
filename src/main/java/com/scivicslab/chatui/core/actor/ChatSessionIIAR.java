@@ -25,7 +25,15 @@ import java.util.concurrent.CompletableFuture;
  */
 public class ChatSessionIIAR extends InterpreterIIAR {
 
-    private static final String AGENT_LOOP_YAML = "/workflows/chat-session-agent-loop.yaml";
+    /**
+     * This tab's agent-loop workflow, by classpath-relative file name under {@code /workflows/} —
+     * a per-instance setting (mirrors {@link ChatSession#promptWorkflowFile}), not a fixed value.
+     * Different reusable workflow files can exist (today only {@code chat-session-agent-loop.yaml},
+     * a plain tool-call loop; others — e.g. a paper-search loop — can be added later), and each tab
+     * picks which one it runs; multiple tabs may point at the same file. All tabs default to the
+     * same file today since it's the only one that exists, not because tabs are forced to share it.
+     */
+    private String agentLoopWorkflowFile = "chat-session-agent-loop.yaml";
 
     public ChatSessionIIAR(String actorName, LlmProvider provider, Optional<String> configApiKey,
                      IoLogStore ioLog, IIActorSystem system) {
@@ -35,15 +43,23 @@ public class ChatSessionIIAR extends InterpreterIIAR {
         // chat-session-agent-loop.yaml resolves through Interpreter.action()'s selfActorRef==null
         // fallback (system.getIIActor("this")), which finds nothing ("Actor not found: this").
         chatSession().setSelfActorRef(this);
-        try (InputStream yaml = getClass().getResourceAsStream(AGENT_LOOP_YAML)) {
+        loadAgentLoopWorkflow();
+    }
+
+    private void loadAgentLoopWorkflow() {
+        String resource = "/workflows/" + agentLoopWorkflowFile;
+        try (InputStream yaml = getClass().getResourceAsStream(resource)) {
             if (yaml == null) {
-                throw new IllegalStateException("Agent-loop workflow not found on classpath: " + AGENT_LOOP_YAML);
+                throw new IllegalStateException("Agent-loop workflow not found on classpath: " + resource);
             }
             chatSession().readYaml(yaml);
         } catch (java.io.IOException e) {
-            throw new IllegalStateException("Failed to load agent-loop workflow: " + AGENT_LOOP_YAML, e);
+            throw new IllegalStateException("Failed to load agent-loop workflow: " + resource, e);
         }
     }
+
+    /** @return this tab's agent-loop workflow file name (classpath-relative, under {@code /workflows/}) */
+    public String getAgentLoopWorkflowFile() { return agentLoopWorkflowFile; }
 
     private ChatSession chatSession() { return (ChatSession) object; }
 

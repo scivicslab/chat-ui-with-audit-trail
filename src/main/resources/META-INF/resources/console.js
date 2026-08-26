@@ -5,7 +5,8 @@
 //     quarkus-chat-ui3)
 //   - System Log tab: GET /api/tabs/<active tab>/log (150_TabScopedLogging_260826_oo01); falls
 //     back to GET /api/logs (LogTap, server-wide) only if no tab is active yet
-// The Workflow tab has no backend yet.
+//   - Agent Loop tab: GET /api/tabs/<active tab>/workflows[/<name>] (AgentLoopTab_260827_oo01),
+//     read-only YAML viewer ported from quarkus-chat-ui3's own "Agent Loop" tab
 (function () {
     "use strict";
 
@@ -28,6 +29,7 @@
             });
             if (tab === "logdb") ioOnShow();
             if (tab === "syslog") refreshLogs();
+            if (tab === "agentloop") wfOnShow();
         });
     }
 
@@ -171,6 +173,115 @@
         applyAuto();
     }
 
+    // ── Agent Loop tab (GET /api/tabs/<active tab>/workflows[/<name>]) — read-only YAML viewer,
+    // ported near-verbatim from quarkus-chat-ui3's console.js, made tab-scoped (AgentLoopTab_260827_oo01).
+    function wfStatus(msg) {
+        var s = document.getElementById("wf-status");
+        if (s) s.textContent = msg || "";
+    }
+
+    // Splits a workflow YAML into a preamble (everything before the first step) and the top-level
+    // step items (lines beginning with exactly "  - "). Display only — no reassembly.
+    function wfSplitSteps(yaml) {
+        var lines = (yaml || "").split("\n");
+        var preamble = [], steps = [], cur = null;
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            if (/^  - /.test(line)) {
+                if (cur) steps.push(cur.join("\n"));
+                cur = [line];
+            } else if (cur) {
+                cur.push(line);
+            } else {
+                preamble.push(line);
+            }
+        }
+        if (cur) steps.push(cur.join("\n"));
+        return { preamble: preamble.join("\n").replace(/\s+$/, ""), steps: steps };
+    }
+
+    // Box heading: the step's transition direction (the states array) plus its 0-based step number.
+    function wfStepTitle(text, idx) {
+        var m = text.match(/(^|\n)\s*-?\s*states:\s*(.+)/);
+        var states = m ? m[2].trim() : "";
+        return (states ? states + "   " : "") + "# step " + idx;
+    }
+
+    function wfRenderBox(parent, title, body, kind) {
+        var box = document.createElement("div");
+        box.className = "wf-box" + (kind ? " wf-" + kind : "");
+        var h = document.createElement("div");
+        h.className = "wf-box-title";
+        h.textContent = title;
+        var pre = document.createElement("pre");
+        pre.className = "wf-box-yaml";
+        pre.textContent = body;   // read-only; textContent => no HTML injection
+        box.appendChild(h);
+        box.appendChild(pre);
+        parent.appendChild(box);
+    }
+
+    function wfRender(yaml) {
+        var list = document.getElementById("wf-list");
+        if (!list) return;
+        list.textContent = "";
+        var parts = wfSplitSteps(yaml);
+        if (parts.preamble) wfRenderBox(list, "workflow header", parts.preamble, "head");
+        parts.steps.forEach(function (s, i) {
+            wfRenderBox(list, wfStepTitle(s, i), s, "step");
+        });
+        wfStatus(parts.steps.length + " step(s) — read-only");
+    }
+
+    function wfLoad(name) {
+        if (!name) return;
+        wfStatus("loading…");
+        var tabId = (typeof window.chatUiGetActiveTabId === "function") ? window.chatUiGetActiveTabId() : null;
+        if (!tabId) { wfStatus("no active tab"); return; }
+        fetch("api/tabs/" + encodeURIComponent(tabId) + "/workflows/" + encodeURIComponent(name))
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d || !d.yaml) { wfStatus("not found"); return; }
+                wfRender(d.yaml);
+            })
+            .catch(function (e) { wfStatus("error: " + e.message); });
+    }
+
+    function wfPopulate(then) {
+        var sel = document.getElementById("wf-select");
+        if (!sel) return;
+        var tabId = (typeof window.chatUiGetActiveTabId === "function") ? window.chatUiGetActiveTabId() : null;
+        if (!tabId) { wfStatus("no active tab"); return; }
+        fetch("api/tabs/" + encodeURIComponent(tabId) + "/workflows")
+            .then(function (r) { return r.json(); })
+            .then(function (arr) {
+                sel.textContent = "";
+                (arr || []).forEach(function (w) {
+                    var o = document.createElement("option");
+                    o.value = w.name;
+                    o.textContent = w.title || w.name;
+                    sel.appendChild(o);
+                });
+                if (then) then();
+            })
+            .catch(function (e) { wfStatus("error: " + e.message); });
+    }
+
+    // Always re-populates the catalog (not just on first show) so switching conversation tabs
+    // updates which workflow(s) are listed/selected — each tab can be configured with a different
+    // agent-loop workflow file (AgentLoopTab_260827_oo01 — tab-sync has no exceptions here).
+    function wfOnShow() {
+        var sel = document.getElementById("wf-select");
+        wfPopulate(function () { if (sel) wfLoad(sel.value); });
+    }
+
+    function initWorkflow() {
+        var sel = document.getElementById("wf-select");
+        if (sel) sel.addEventListener("change", function () { wfLoad(sel.value); });
+        var btn = document.getElementById("wf-refresh");
+        if (btn) btn.addEventListener("click", function () { wfLoad(sel ? sel.value : ""); });
+    }
+
     // ── (2) Collapsible left dock (actor tree) ──────────────────────────────
     function initDock() {
         var toggle = document.getElementById("dock-toggle");
@@ -246,10 +357,10 @@
         var name = document.createElement("span");
         name.className = "actor-name";
         name.textContent = node.name;
-        // "tab-<id>" (ConversationTab) nodes double as the tab switcher — click the name (not
+        // "chat-<id>" (ConversationTab) nodes double as the tab switcher — click the name (not
         // the fold toggle) to switch the chat pane, instead of a separate bar in that pane
-        // (ActorTreeTabSwitcher_260826_oo01). Children like "tab-<id>.chat" don't match.
-        var tabMatch = /^tab-([^.]+)$/.exec(node.name);
+        // (ActorTreeTabSwitcher_260826_oo01). Children like "chat-<id>.chat" don't match.
+        var tabMatch = /^chat-([^.]+)$/.exec(node.name);
         if (tabMatch && typeof window.chatUiSwitchTab === "function") {
             name.classList.add("tab-switchable");
             if (typeof window.chatUiGetActiveTabId === "function"
@@ -270,6 +381,9 @@
                 lastLogSig = null;
                 if (document.getElementById("tab-syslog") && document.getElementById("tab-syslog").classList.contains("active")) {
                     refreshLogs();
+                }
+                if (document.getElementById("tab-agentloop") && document.getElementById("tab-agentloop").classList.contains("active")) {
+                    wfOnShow();
                 }
             });
         }
@@ -612,6 +726,7 @@
         initLeftDockResize();
         initIo();
         initLogs();
+        initWorkflow();
         refreshActors();   // the actor dock is visible by default
         ioOnShow();         // Sessions is the default-active right-pane tab
     });

@@ -56,7 +56,7 @@ public class PromptQueue {
 
     /**
      * @param system          lets {@link #logToTab} resolve {@code tabLogActorName}
-     * @param tabLogActorName this queue's tab's log multiplexer actor name (e.g. {@code "tab-alpha.log"})
+     * @param tabLogActorName this queue's tab's log multiplexer actor name (e.g. {@code "chat-01.log"})
      */
     public void setLogging(IIActorSystem system, String tabLogActorName) {
         this.system = system;

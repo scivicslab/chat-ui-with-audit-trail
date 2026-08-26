@@ -7,7 +7,7 @@
     "use strict";
 
     var TAB_ID_KEY = "chat-ui-last-tab";
-    var TAB_ID = localStorage.getItem(TAB_ID_KEY) || "alpha";
+    var TAB_ID = localStorage.getItem(TAB_ID_KEY) || "01";
 
     function apiUrl(path) { return path; }
 
@@ -356,7 +356,7 @@
     }
 
     // ── Conversation tabs (switch which ConversationTab this pane talks to) ────
-    // Switching is triggered from the Actors tree in console.js (click a "tab-<id>" actor's
+    // Switching is triggered from the Actors tree in console.js (click a "chat-<id>" actor's
     // name), not a bar in this pane — ActorTreeTabSwitcher_260826_oo01. switchTab/TAB_ID are
     // exposed on window at the bottom of this file so console.js can call them.
 
@@ -431,7 +431,7 @@
     });
 
     // Exposed for console.js's Actors-tree click handler (ActorTreeTabSwitcher_260826_oo01) —
-    // clicking a "tab-<id>" actor's name calls window.chatUiSwitchTab(id) instead of a bar here.
+    // clicking a "chat-<id>" actor's name calls window.chatUiSwitchTab(id) instead of a bar here.
     window.chatUiSwitchTab = switchTab;
     window.chatUiGetActiveTabId = function () { return TAB_ID; };
 })();

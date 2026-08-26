@@ -79,7 +79,7 @@ public class ChatUiActorSystem {
     void init() {
         actorSystem = new IIActorSystem("chat-ui");
 
-        // System-wide log multiplexer (150_TabScopedLogging_260826_oo01): the top of the tab-log
+        // System-wide log multiplexer (150_TabScopedLogging_260826_oo01): the top of the chat-log
         // hierarchy, and MultiplexerLogHandler's hardcoded forwarding target for framework/non-actor
         // log records (Quarkus startup, HTTP layer, etc.) that never go through a ConversationTab.
         systemLogBuffer = new RecentEntriesAccumulator(SYSTEM_LOG_CAPACITY);
@@ -100,8 +100,8 @@ public class ChatUiActorSystem {
         });
         Logger.getLogger("").addHandler(logHandler);
 
-        createTab("alpha");
-        createTab("beta");
+        createTab("01");
+        createTab("02");
         LOG.info("Actor system initialised with " + tabs.size() + " conversation tabs");
     }
 
@@ -132,7 +132,7 @@ public class ChatUiActorSystem {
             return existing;
         }
         ActorRef<ConversationTab> tabRef =
-                actorSystem.getRoot().createChild("tab-" + tabId, new ConversationTab());
+                actorSystem.getRoot().createChild("chat-" + tabId, new ConversationTab());
         tabs.put(tabId, tabRef);
 
         // Tab log multiplexer (150_TabScopedLogging_260826_oo01): this tab's own recent-entries
@@ -188,7 +188,7 @@ public class ChatUiActorSystem {
      * @return the queue's actor reference, or {@code null}
      */
     public ActorRef<PromptQueue> getPromptQueue(String tabId) {
-        return actorSystem.getActor("tab-" + tabId + ".queue");
+        return actorSystem.getActor("chat-" + tabId + ".queue");
     }
 
     /**
@@ -199,7 +199,7 @@ public class ChatUiActorSystem {
      * @return the connection's actor reference, or {@code null}
      */
     public ActorRef<SseConnection> getSseConnection(String tabId) {
-        return actorSystem.getActor("tab-" + tabId + ".sse");
+        return actorSystem.getActor("chat-" + tabId + ".sse");
     }
 
     /**

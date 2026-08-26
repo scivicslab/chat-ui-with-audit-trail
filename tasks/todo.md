@@ -151,3 +151,18 @@
 - Sessions側の直し方も、当初検討していた`node_id`活用案（`"agent"`固定値をタブIDに変える）から、`sessionId`自体をタブごとに分ける案へ変更した——`"agent"`という値はタブ混在バグと無関係な、別の情報（誰が出したログか）を表していたため。
 - `GET /api/system-log`（システム全体集約ビュー）は、明示的なタブ→システム転送と、`MultiplexerLogHandler`によるルートロガー経由の捕捉の両方で同じログが二重に入る既知の制限が残っている——現時点でこのエンドポイントを参照するUIが無いため実害は無いが、将来UIに繋ぐ際は要検討。
 - ポート28014（ユーザーの常用インスタンス）は今回未反映。デプロイする場合は要相談。
+
+## 計画（アクター命名リネーム tab-*→chat-*、Agent Loopタブ新設）
+
+設計文書: `doc_SCIVICS003/docs/chat-ui-with-audit-trail/030_development/020_implementation/160_ChatIdRenameAndAgentLoopTab_260827_oo01`。
+
+- [x] `tab-alpha`/`tab-beta` → `chat-01`/`chat-02`（アクター名接頭辞`tab-`→`chat-`、既定ID`alpha`/`beta`→`01`/`02`）——`ChatUiActorSystem`・`ChatSession`・`app.js`・`console.js`・テスト
+- [x] `ChatSessionIIAR.AGENT_LOOP_YAML`（`static final`固定値）を、`ChatSession.promptWorkflowFile`と同じ形の、タブごとに持てる`agentLoopWorkflowFile`フィールドに変更
+- [x] `GET /api/tabs/{tabId}/workflows`・`GET /api/tabs/{tabId}/workflows/{name}`を新設（agent loop + プロンプト構築サブワークフローの2件をカタログとして返す）
+- [x] 死んでいた「Workflow」タブを削除、`quarkus-chat-ui3`の実装を移植した「Agent Loop」タブ（読み取り専用YAMLビューア）に差し替え、タブ連動を配線
+- [x] `mvn install`（テスト含む）成功、ポート28019へ実機デプロイし、Playwrightで一連の動作を確認
+
+## レビュー
+
+- 当初「タブごとに専用のagent loop YAMLファイルを作る」という誤解をしたまま実装を進めかけ、ユーザーから訂正を受けた。正しくは、既存の再利用可能なワークフローファイル群への参照をタブごとに持たせる、という`promptWorkflowFile`と同じ構造——複数タブが同じファイルを共有するのが自然な使い方。
+- ポート28014（ユーザーの常用インスタンス）は今回も未反映のまま。
