@@ -3,9 +3,9 @@
 //   - Actors tab: fetch GET /api/actors and render the actor tree
 //   - Sessions tab: GET /api/sessions?tabId=<active tab>, trace view unchanged (ported from
 //     quarkus-chat-ui3)
-//   - System Log tab: GET /api/tabs/<active tab>/log (150_TabScopedLogging_260826_oo01); falls
+//   - System Log tab: GET /api/chats/<active tab>/log (150_TabScopedLogging_260826_oo01); falls
 //     back to GET /api/logs (LogTap, server-wide) only if no tab is active yet
-//   - Agent Loop tab: GET /api/tabs/<active tab>/workflows[/<name>] (AgentLoopTab_260827_oo01),
+//   - Agent Loop tab: GET /api/chats/<active tab>/workflows[/<name>] (AgentLoopTab_260827_oo01),
 //     read-only YAML viewer ported from quarkus-chat-ui3's own "Agent Loop" tab
 (function () {
     "use strict";
@@ -126,7 +126,7 @@
         logsRefreshing = true;
         var status = document.getElementById("logs-status");
         var tabId = (typeof window.chatUiGetActiveTabId === "function") ? window.chatUiGetActiveTabId() : null;
-        var url = tabId ? ("api/tabs/" + encodeURIComponent(tabId) + "/log") : "api/logs";
+        var url = tabId ? ("api/chats/" + encodeURIComponent(tabId) + "/log") : "api/logs";
         fetch(url)
             .then(function (r) {
                 if (!r.ok) throw new Error("HTTP " + r.status);
@@ -173,7 +173,7 @@
         applyAuto();
     }
 
-    // ── Agent Loop tab (GET /api/tabs/<active tab>/workflows[/<name>]) — read-only YAML viewer,
+    // ── Agent Loop tab (GET /api/chats/<active tab>/workflows[/<name>]) — read-only YAML viewer,
     // ported near-verbatim from quarkus-chat-ui3's console.js, made tab-scoped (AgentLoopTab_260827_oo01).
     function wfStatus(msg) {
         var s = document.getElementById("wf-status");
@@ -238,7 +238,7 @@
         wfStatus("loading…");
         var tabId = (typeof window.chatUiGetActiveTabId === "function") ? window.chatUiGetActiveTabId() : null;
         if (!tabId) { wfStatus("no active tab"); return; }
-        fetch("api/tabs/" + encodeURIComponent(tabId) + "/workflows/" + encodeURIComponent(name))
+        fetch("api/chats/" + encodeURIComponent(tabId) + "/workflows/" + encodeURIComponent(name))
             .then(function (r) { return r.json(); })
             .then(function (d) {
                 if (!d || !d.yaml) { wfStatus("not found"); return; }
@@ -252,7 +252,7 @@
         if (!sel) return;
         var tabId = (typeof window.chatUiGetActiveTabId === "function") ? window.chatUiGetActiveTabId() : null;
         if (!tabId) { wfStatus("no active tab"); return; }
-        fetch("api/tabs/" + encodeURIComponent(tabId) + "/workflows")
+        fetch("api/chats/" + encodeURIComponent(tabId) + "/workflows")
             .then(function (r) { return r.json(); })
             .then(function (arr) {
                 sel.textContent = "";

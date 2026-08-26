@@ -166,3 +166,16 @@
 
 - 当初「タブごとに専用のagent loop YAMLファイルを作る」という誤解をしたまま実装を進めかけ、ユーザーから訂正を受けた。正しくは、既存の再利用可能なワークフローファイル群への参照をタブごとに持たせる、という`promptWorkflowFile`と同じ構造——複数タブが同じファイルを共有するのが自然な使い方。
 - ポート28014（ユーザーの常用インスタンス）は今回も未反映のまま。
+
+## 計画（REST側の名詞空間を /api/tabs から /api/chats へ）
+
+設計文書: `doc_SCIVICS003/docs/chat-ui-with-audit-trail/030_development/020_implementation/180_ChatRestNamespace_260827_oo01`。
+
+- [x] `ChatResource.java`の全エンドポイント（`/tabs/{tabId}/...`）を`/chats/{chatId}/...`へ改名、`@PathParam`・ローカル変数名も`chatId`に統一
+- [x] `app.js`・`console.js`の対応するfetch先を`api/chats/...`へ変更（`api/sessions?tabId=...`は対象外のまま維持）
+- [x] `mvn install`（テスト含む）成功、旧`GET /api/tabs`が404になることを確認、ポート28019へ実機デプロイしPlaywrightで全操作（会話履歴・送信・SSE応答・Sessions/System Log/Agent Loop各タブ・タブ切替）を確認——通信39件中`/api/tabs/...`は0件
+
+## レビュー
+
+- `SessionsResource.java`の`GET /api/sessions?tabId=...`（クエリパラメータ）は今回対象外のまま——ユーザーの指示が`ChatResource.java`とそのフロントエンド呼び出しに限定されていたため。語彙の不整合が残っており、別途検討の余地がある。
+- ポート28014（ユーザーの常用インスタンス）は今回も未反映のまま。

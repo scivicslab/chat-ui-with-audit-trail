@@ -1,6 +1,6 @@
 // Chat pane wiring for chat-ui-with-audit-trail (adapted from quarkus-chat-ui3's app.js).
 //   - one persistent EventSource per conversation tab
-//   - POST /api/tabs/{tabId}/chat only acknowledges; all content streams over SSE
+//   - POST /api/chats/{chatId}/chat only acknowledges; all content streams over SSE
 //   - renders delta/thinking/result/error/status ChatEvents into #chat-area
 //   - a tab bar (#conv-tab-bar) lets the user switch which ConversationTab this pane talks to
 (function () {
@@ -131,7 +131,7 @@
     // quarkus-chat-ui3's own single-browser queue effectively has too.
     function refreshQueue() {
         if (!queueArea) return;
-        fetch(apiUrl("api/tabs/" + TAB_ID + "/queue"))
+        fetch(apiUrl("api/chats/" + TAB_ID + "/queue"))
             .then(function (r) { return r.json(); })
             .then(function (q) {
                 var items = (q && q.items) || [];
@@ -165,7 +165,7 @@
                     autoCheckbox.type = "checkbox";
                     autoCheckbox.checked = !!item.auto;
                     autoCheckbox.addEventListener("change", function () {
-                        fetch(apiUrl("api/tabs/" + TAB_ID + "/queue/" + i + "/auto"), {
+                        fetch(apiUrl("api/chats/" + TAB_ID + "/queue/" + i + "/auto"), {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({ auto: autoCheckbox.checked })
@@ -206,7 +206,7 @@
                     removeBtn.title = "Remove";
                     removeBtn.innerHTML = "&times;";
                     removeBtn.addEventListener("click", function () {
-                        fetch(apiUrl("api/tabs/" + TAB_ID + "/queue/" + i), { method: "DELETE" }).then(refreshQueue);
+                        fetch(apiUrl("api/chats/" + TAB_ID + "/queue/" + i), { method: "DELETE" }).then(refreshQueue);
                     });
                     row.appendChild(removeBtn);
 
@@ -218,7 +218,7 @@
     }
 
     function moveQueueItem(index, direction) {
-        fetch(apiUrl("api/tabs/" + TAB_ID + "/queue/" + index + "/move"), {
+        fetch(apiUrl("api/chats/" + TAB_ID + "/queue/" + index + "/move"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ direction: direction })
@@ -229,7 +229,7 @@
 
     function connectSSE() {
         if (eventSource) eventSource.close();
-        eventSource = new EventSource(apiUrl("api/tabs/" + TAB_ID + "/chat/stream"));
+        eventSource = new EventSource(apiUrl("api/chats/" + TAB_ID + "/chat/stream"));
         eventSource.onopen = function () {
             if (connStatus) { connStatus.textContent = "connected"; connStatus.className = "connected"; }
         };
@@ -296,7 +296,7 @@
         if (!text) {
             // Empty send = "send the next one" (quarkus-chat-ui3's own semantics): force-dispatch
             // the queue's front item, ignoring its auto flag. No-ops server-side if empty.
-            fetch(apiUrl("api/tabs/" + TAB_ID + "/queue/advance"), { method: "POST" }).then(refreshQueue);
+            fetch(apiUrl("api/chats/" + TAB_ID + "/queue/advance"), { method: "POST" }).then(refreshQueue);
             return;
         }
         appendMessage("user", text);
@@ -306,7 +306,7 @@
         var payload = { text: text };
         if (modelSelect && modelSelect.value) payload.model = modelSelect.value;
 
-        fetch(apiUrl("api/tabs/" + TAB_ID + "/chat"), {
+        fetch(apiUrl("api/chats/" + TAB_ID + "/chat"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload)
@@ -337,7 +337,7 @@
 
     function loadModels() {
         if (!modelSelect) return;
-        fetch(apiUrl("api/tabs/" + TAB_ID + "/models"))
+        fetch(apiUrl("api/chats/" + TAB_ID + "/models"))
             .then(function (r) { return r.json(); })
             .then(function (models) {
                 modelSelect.textContent = "";
@@ -383,7 +383,7 @@
     // ── History hydration ────────────────────────────────────────────────────
 
     function hydrateConversation() {
-        fetch(apiUrl("api/tabs/" + TAB_ID + "/conversation"))
+        fetch(apiUrl("api/chats/" + TAB_ID + "/conversation"))
             .then(function (r) { return r.json(); })
             .then(function (turns) {
                 (turns || []).forEach(function (t) {
