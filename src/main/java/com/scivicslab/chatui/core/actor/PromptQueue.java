@@ -5,6 +5,7 @@ import com.scivicslab.pojoactor.core.ActorRef;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 import java.util.logging.Logger;
@@ -151,6 +152,23 @@ public class PromptQueue {
     public boolean hasPending() {
         return !queue.isEmpty();
     }
+
+    /**
+     * Returns the prompt text and source of every currently-queued item, oldest first — for
+     * display in the browser's Queue panel. {@code emitter}/{@code done} are deliberately left
+     * out (not JSON-serializable, and irrelevant to a read-only view).
+     */
+    public List<QueueEntry> snapshot() {
+        return queue.stream().map(i -> new QueueEntry(i.prompt(), i.source())).toList();
+    }
+
+    /**
+     * One queued item's browser-facing summary.
+     *
+     * @param prompt the prompt text
+     * @param source who queued it — {@code "human"} or {@code "agent:xxx"}
+     */
+    public record QueueEntry(String prompt, String source) {}
 
     // ---- Internal ----
 

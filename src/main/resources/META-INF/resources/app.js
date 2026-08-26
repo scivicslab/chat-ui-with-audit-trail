@@ -123,6 +123,16 @@
                     ? size + " prompt(s) queued (waiting for the current turn to finish)"
                     : "Queue is empty";
                 queueArea.appendChild(header);
+                // View-only: no reorder/edit controls. PromptQueue is server-side and shared with
+                // MCP-agent/workflow submitters, so a browser-editable list isn't as simple as
+                // chat-ui3's own client-side queue array (QueueContentsDisplay_260826_oo01).
+                (q && q.items || []).forEach(function (item) {
+                    var row = document.createElement("div");
+                    row.className = "queue-item";
+                    row.textContent = item.prompt;
+                    if (item.source && item.source !== "human") row.title = "source: " + item.source;
+                    queueArea.appendChild(row);
+                });
                 queueArea.style.display = (size > 0 || queueArea.dataset.forcedOpen === "1") ? "block" : "none";
             })
             .catch(function () { /* leave the last known state on failure */ });

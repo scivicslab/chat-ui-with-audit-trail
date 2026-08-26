@@ -138,11 +138,11 @@ public class ChatResource {
         actorSystem.createTab(tabId);
         ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(tabId);
         try {
-            int size = promptQueueRef.ask(PromptQueue::getQueueSize).get(5, TimeUnit.SECONDS);
-            return Map.of("size", size, "hasPending", size > 0);
+            List<PromptQueue.QueueEntry> items = promptQueueRef.ask(PromptQueue::snapshot).get(5, TimeUnit.SECONDS);
+            return Map.of("size", items.size(), "hasPending", !items.isEmpty(), "items", items);
         } catch (Exception e) {
             LOG.warning("Failed to read queue state for tab " + tabId + ": " + e.getMessage());
-            return Map.of("size", 0, "hasPending", false);
+            return Map.of("size", 0, "hasPending", false, "items", List.of());
         }
     }
 
