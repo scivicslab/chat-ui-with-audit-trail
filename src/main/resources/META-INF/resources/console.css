@@ -282,7 +282,11 @@
     padding-left: 12px;
     border-left: 1px solid var(--border-color, #2f2f2f);
 }
+.actor-children.collapsed { display: none; }
 .actor-label { display: flex; align-items: baseline; gap: 6px; padding: 1px 0; }
+.actor-label.actor-label-toggleable { cursor: pointer; }
+.actor-label.actor-label-toggleable:hover .actor-name { text-decoration: underline; }
+.actor-toggle { display: inline-block; width: 10px; flex-shrink: 0; text-align: center; color: var(--text-secondary, #8a8a8a); font-size: 10px; }
 .actor-dot { font-size: 9px; line-height: 1; }
 .actor-dot.alive { color: var(--dir-from-llm); }
 .actor-dot.dead  { color: var(--accent-red); }
@@ -421,6 +425,18 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
     transition: width .15s ease;
 }
 #left-dock.collapsed { width: 0; border-right: none; }
+#left-dock.resizing { transition: none; }
+#left-dock-resize-handle {
+    flex: 0 0 5px;
+    width: 5px;
+    cursor: ew-resize;
+    background: transparent;
+}
+#left-dock-resize-handle:hover,
+#left-dock-resize-handle.dragging {
+    background: var(--accent-blue, #6366f1);
+}
+#left-dock.collapsed + #left-dock-resize-handle { display: none; }
 .dock-head {
     display: flex;
     align-items: center;

@@ -158,13 +158,64 @@
         });
     }
 
+    // ── Left dock width resize (drag handle, persisted like Theme/model) ────
+    var LEFT_DOCK_WIDTH_KEY = "chat-ui-left-dock-width";
+
+    function initLeftDockResize() {
+        var dock = document.getElementById("left-dock");
+        var handle = document.getElementById("left-dock-resize-handle");
+        if (!dock || !handle) return;
+
+        var saved = parseInt(localStorage.getItem(LEFT_DOCK_WIDTH_KEY), 10);
+        if (saved && saved > 0) dock.style.width = saved + "px";
+
+        var dragging = false;
+        var startX = 0;
+        var startWidth = 0;
+
+        handle.addEventListener("mousedown", function (e) {
+            e.preventDefault();
+            dragging = true;
+            startX = e.clientX;
+            startWidth = dock.offsetWidth;
+            dock.classList.add("resizing");
+            handle.classList.add("dragging");
+            document.body.style.cursor = "ew-resize";
+            document.body.style.userSelect = "none";
+        });
+
+        document.addEventListener("mousemove", function (e) {
+            if (!dragging) return;
+            var newWidth = Math.max(120, Math.min(startWidth + (e.clientX - startX), 600));
+            dock.style.width = newWidth + "px";
+        });
+
+        document.addEventListener("mouseup", function () {
+            if (!dragging) return;
+            dragging = false;
+            dock.classList.remove("resizing");
+            handle.classList.remove("dragging");
+            document.body.style.cursor = "";
+            document.body.style.userSelect = "";
+            localStorage.setItem(LEFT_DOCK_WIDTH_KEY, dock.offsetWidth);
+        });
+    }
+
     // ── Actors tab ──────────────────────────────────────────────────────────
-    // Each node: {name, type, alive, children[]}.
+    // Each node: {name, type, alive, children[]}. Collapsed state is keyed by actor name (unique
+    // in this actor system) and kept outside the tree DOM, so it survives the full rebuild
+    // renderActorTree() does on every refresh (including the 3s auto-refresh timer).
+    var collapsedActorNodes = new Set();
+
     function actorNodeEl(node) {
         var wrap = document.createElement("div");
         wrap.className = "actor-node";
         var label = document.createElement("div");
         label.className = "actor-label" + (node.alive ? "" : " actor-dead");
+        var hasChildren = !!(node.children && node.children.length);
+        var toggle = document.createElement("span");
+        toggle.className = "actor-toggle";
+        if (hasChildren) toggle.textContent = collapsedActorNodes.has(node.name) ? "▸" : "▾";
         var dot = document.createElement("span");
         dot.className = "actor-dot " + (node.alive ? "alive" : "dead");
         dot.textContent = "●";
@@ -174,15 +225,25 @@
         var type = document.createElement("span");
         type.className = "actor-type";
         type.textContent = node.type ? "  " + node.type : "";
+        label.appendChild(toggle);
         label.appendChild(dot);
         label.appendChild(name);
         label.appendChild(type);
         wrap.appendChild(label);
-        if (node.children && node.children.length) {
+        if (hasChildren) {
             var kids = document.createElement("div");
-            kids.className = "actor-children";
+            kids.className = "actor-children" + (collapsedActorNodes.has(node.name) ? " collapsed" : "");
             node.children.forEach(function (c) { kids.appendChild(actorNodeEl(c)); });
             wrap.appendChild(kids);
+
+            label.classList.add("actor-label-toggleable");
+            label.addEventListener("click", function () {
+                var willCollapse = !collapsedActorNodes.has(node.name);
+                if (willCollapse) collapsedActorNodes.add(node.name);
+                else collapsedActorNodes.delete(node.name);
+                toggle.textContent = willCollapse ? "▸" : "▾";
+                kids.classList.toggle("collapsed", willCollapse);
+            });
         }
         return wrap;
     }
@@ -495,6 +556,7 @@
         initTabs();
         initActors();
         initDock();
+        initLeftDockResize();
         initIo();
         initLogs();
         refreshActors();   // the actor dock is visible by default
