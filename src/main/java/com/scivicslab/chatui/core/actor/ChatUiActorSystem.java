@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -87,6 +88,16 @@ public class ChatUiActorSystem {
         actorSystem.addIIActor(new MultiplexerAccumulatorActor(SYSTEM_LOG_ACTOR, systemMux, actorSystem));
         MultiplexerLogHandler logHandler = new MultiplexerLogHandler(actorSystem);
         logHandler.setLevel(Level.ALL);
+        // Excludes loggers that already reach outputMultiplexer via an explicit path (ChatSession/
+        // PromptQueue's own logToTab() calls, forwarded through their tab's own multiplexer) — one
+        // content stream, one path, matching the proven RunCLI.java wiring (explicit multiplexer.add
+        // for primary content; this root-logger bridge only for content with no other path). Without
+        // this filter every one of those log lines reached outputMultiplexer twice.
+        Set<String> explicitlyForwardedLoggers = Set.of(ChatSession.class.getName(), PromptQueue.class.getName());
+        logHandler.setFilter(record -> {
+            String loggerName = record.getLoggerName();
+            return loggerName == null || !explicitlyForwardedLoggers.contains(loggerName);
+        });
         Logger.getLogger("").addHandler(logHandler);
 
         createTab("alpha");
