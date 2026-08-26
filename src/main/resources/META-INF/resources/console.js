@@ -222,6 +222,23 @@
         var name = document.createElement("span");
         name.className = "actor-name";
         name.textContent = node.name;
+        // "tab-<id>" (ConversationTab) nodes double as the tab switcher — click the name (not
+        // the fold toggle) to switch the chat pane, instead of a separate bar in that pane
+        // (ActorTreeTabSwitcher_260826_oo01). Children like "tab-<id>.chat" don't match.
+        var tabMatch = /^tab-([^.]+)$/.exec(node.name);
+        if (tabMatch && typeof window.chatUiSwitchTab === "function") {
+            name.classList.add("tab-switchable");
+            if (typeof window.chatUiGetActiveTabId === "function"
+                    && window.chatUiGetActiveTabId() === tabMatch[1]) {
+                name.classList.add("tab-active");
+            }
+            name.title = "Switch to tab " + tabMatch[1];
+            name.addEventListener("click", function (e) {
+                e.stopPropagation(); // don't also trigger the fold/unfold toggle on the label
+                window.chatUiSwitchTab(tabMatch[1]);
+                refreshActors(); // re-render so the tab-active highlight moves immediately
+            });
+        }
         var type = document.createElement("span");
         type.className = "actor-type";
         type.textContent = node.type ? "  " + node.type : "";
