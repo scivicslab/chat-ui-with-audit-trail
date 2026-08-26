@@ -107,6 +107,12 @@
         });
     }
 
+    // ── Model selection (persisted the same way as Theme — otherwise loadModels()
+    // rebuilding the <select> on every load/tab-switch silently resets it to the first
+    // option, and that reset value gets sent as payload.model on the next prompt) ──
+
+    var MODEL_KEY = "chat-ui-model";
+
     // ── Queue status (server-side: chat-ui-with-audit-trail queues on the server whenever
     // ChatSession is busy, unlike chat-ui3's client-side-only draft queue) ─────
 
@@ -236,6 +242,13 @@
 
     // ── Models ───────────────────────────────────────────────────────────────
 
+    function initModelPersistence() {
+        if (!modelSelect) return;
+        modelSelect.addEventListener("change", function () {
+            localStorage.setItem(MODEL_KEY, modelSelect.value);
+        });
+    }
+
     function loadModels() {
         if (!modelSelect) return;
         fetch(apiUrl("api/tabs/" + TAB_ID + "/models"))
@@ -248,6 +261,10 @@
                     opt.textContent = m.name;
                     modelSelect.appendChild(opt);
                 });
+                var saved = localStorage.getItem(MODEL_KEY);
+                if (saved && (models || []).some(function (m) { return m.name === saved; })) {
+                    modelSelect.value = saved;
+                }
             })
             .catch(function () { /* leave the dropdown empty on failure */ });
     }
@@ -351,6 +368,7 @@
         if (convTabNewBtn) convTabNewBtn.addEventListener("click", createAndSwitchToNewTab);
 
         initTheme();
+        initModelPersistence();
         loadTabs();
         loadModels();
         hydrateConversation();
