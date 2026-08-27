@@ -218,3 +218,16 @@
 ## レビュー
 
 - `models`・`workflows`エンドポイントは今回のスコープ外のまま（`ask()`経由）——設計通り、めったに変わらない設定値のため優先度を下げた。
+
+## 計画（WorkerBabysitterOrchestrationの3課題の実装——timeoutSeconds・set_workflow）
+
+設計文書: `AskChatNestedTimeout_260828_oo01`・`WorkflowReloadReset_260828_oo01`・`BabysitterLoopWorkflowShape_260828_oo01`。
+
+- [x] `ask_chat`に`timeoutSeconds`（省略可、既定60秒）を追加
+- [x] `set_workflow(chatId, yaml)`ツールを新設——`Interpreter.reset()`を`readYaml`の直前に必ず呼ぶ
+- [x] `mvn install`（テスト含む）成功、ポート28014へ実機デプロイ。トリビアルなworkflow（`"think"`→`"end"`）をchat-02へ差し替え、次のターンが正しく（詰まらず・エラー無く）完了することを実機確認
+- [ ] babysitterループ本体（`requestDraft`・`judgeDraftAcceptable`・`judgeDraftNeedsRevision`・`revisionLimitReached`・`requestRevision`の5メソッド）は未着手——3エージェント構成の本番動作にはこれが必要
+
+## レビュー
+
+- `ChatSession.start()`が`transitionTo("think")`を固定で呼ぶため、`set_workflow`で差し替えるどんなworkflowも開始状態名は`"think"`固定という制約が実機確認で判明——`BabysitterLoopWorkflowShape_260828_oo01`の設計（当初`"draft"`）をこれに合わせて訂正した。

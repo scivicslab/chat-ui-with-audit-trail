@@ -6,6 +6,7 @@ import com.scivicslab.chatui.agent.DocSearchTool;
 import com.scivicslab.chatui.agent.FetchTool;
 import com.scivicslab.chatui.agent.FileReadTool;
 import com.scivicslab.chatui.agent.FileWriteTool;
+import com.scivicslab.chatui.agent.SetWorkflowTool;
 import com.scivicslab.chatui.agent.TextToolCallParser;
 import com.scivicslab.chatui.agent.ToolCall;
 import com.scivicslab.chatui.agent.WebSearchTool;
@@ -150,9 +151,15 @@ public class ChatSession extends Interpreter {
             - search_docs(query): search this team's internal documentation by meaning.
             - write(path, content): save text to a file under the working directory. Requires TWO
               <parameter> tags in the same invoke block: one named "path", one named "content".
-            - ask_chat(chatId, prompt): send an instruction to another conversation tab (e.g. "02")
-              and wait for its reply. Requires TWO <parameter> tags: one named "chatId", one named
-              "prompt". Use this to direct or review another tab's work.
+            - ask_chat(chatId, prompt, timeoutSeconds): send an instruction to another conversation
+              tab (e.g. "02") and wait for its reply. Requires "chatId" and "prompt" <parameter>
+              tags; "timeoutSeconds" is an optional third <parameter> tag (default 60) — pass a
+              larger value if you expect the target to take a while, e.g. because it will itself
+              call ask_chat on another tab. Use this to direct or review another tab's work.
+            - set_workflow(chatId, yaml): replace another conversation tab's agent-loop workflow
+              with the given Turing-workflow YAML text (not a file path). Requires TWO <parameter>
+              tags: "chatId" and "yaml". Use this to author a workflow for another tab to run,
+              then use ask_chat to actually kick off a turn under it.
 
             Call at most one tool per reply. After a tool result comes back, either call another tool \
             or give your final answer. When you have enough information, answer in plain text with NO \
@@ -874,7 +881,10 @@ public class ChatSession extends Interpreter {
             case "fetch" -> FetchTool.fetch(extractInput(args, "url"));
             case "search_docs" -> DocSearchTool.search(extractInput(args, "query"), 0);
             case "ask_chat" -> AskChatTool.ask(system, watchdogRef, tabId,
-                    extractInput(args, "chatId"), extractInput(args, "prompt"));
+                    extractInput(args, "chatId"), extractInput(args, "prompt"),
+                    parseIntOrNull(extractInput(args, "timeoutSeconds")));
+            case "set_workflow" -> SetWorkflowTool.setWorkflow(system,
+                    extractInput(args, "chatId"), extractInput(args, "yaml"));
             default -> "error: unknown tool '" + tc.name() + "'";
         };
     }
@@ -885,6 +895,16 @@ public class ChatSession extends Interpreter {
             return new org.json.JSONObject(argumentsJson == null ? "{}" : argumentsJson).optString(field, "");
         } catch (Exception e) {
             return "";
+        }
+    }
+
+    /** @return {@code text} parsed as an {@code Integer}, or {@code null} if blank/not a number. */
+    private static Integer parseIntOrNull(String text) {
+        if (text == null || text.isBlank()) return null;
+        try {
+            return Integer.valueOf(text.trim());
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 
