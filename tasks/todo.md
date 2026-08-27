@@ -190,3 +190,17 @@
 ## レビュー
 
 - ポート28014再起動時に発見——リネーム前から開いていたブラウザの`localStorage`に古い`"beta"`が残っており、`chat-beta`という空の新規アクターが実際に作られていた。ユーザーからの「tab-betaアクターが残ったままでは？」という指摘がきっかけ（実際の名前は`tab-beta`ではなく`chat-beta`だった）。
+
+## 計画（エージェント間連携ツール ask_chat と CallWatchdog）
+
+設計文書: `doc_SCIVICS003/docs/chat-ui-with-audit-trail/030_development/010_skeleton/160_AskChatToolAndWatchdog_260827_oo01`。
+
+- [x] `CallWatchdog`（循環呼び出しの事前拒否）を新設、`ChatUiActorSystem.init()`で1個だけROOTの子として生成
+- [x] `AskChatTool`（`ask_chat`ツールの実装、`CompletableFuture<Void> done`を直接待つ形）を新設
+- [x] `ChatSession`のツール一覧・`SYSTEM_PROMPT`に`ask_chat(chatId, prompt)`を追加
+- [x] `mvn install`（テスト含む）成功、ポート28019へ実機デプロイ、chat-01→chat-02への実際の指示・返答の往復と、自己参照拒否を実機確認
+
+## レビュー
+
+- 3タブ以上をまたぐ真の循環（chat-01→chat-02→chat-01）の実機確認はまだ——`CallWatchdog`のグラフ探索ロジック自体は自己参照チェック（`AskChatTool`側で先に弾かれる単純な1対1のケース）とは別経路なので、別途確認が要る。
+- ポート28014（ユーザーの常用インスタンス）は今回も未反映。

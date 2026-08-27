@@ -1,5 +1,6 @@
 package com.scivicslab.chatui.core.actor;
 
+import com.scivicslab.chatui.agent.AskChatTool;
 import com.scivicslab.chatui.agent.ContextBudget;
 import com.scivicslab.chatui.agent.DocSearchTool;
 import com.scivicslab.chatui.agent.FetchTool;
@@ -83,6 +84,9 @@ public class ChatSession extends Interpreter {
     private String promptQueueName;
     /** This session's conversation tab id (e.g. {@code "01"}), used to key its I/O-log session. */
     private String tabId;
+    /** The shared {@link CallWatchdog}, consulted by the {@code ask_chat} tool before it waits on
+     *  another tab — distinct from {@link #watchdogName} (an unrelated, unported StallMonitor field). */
+    private ActorRef<CallWatchdog> watchdogRef;
 
     private boolean busy;
     private String apiKey;
@@ -137,6 +141,9 @@ public class ChatSession extends Interpreter {
             - search_docs(query): search this team's internal documentation by meaning.
             - write(path, content): save text to a file under the working directory. Requires TWO
               <parameter> tags in the same invoke block: one named "path", one named "content".
+            - ask_chat(chatId, prompt): send an instruction to another conversation tab (e.g. "02")
+              and wait for its reply. Requires TWO <parameter> tags: one named "chatId", one named
+              "prompt". Use this to direct or review another tab's work.
 
             Call at most one tool per reply. After a tool result comes back, either call another tool \
             or give your final answer. When you have enough information, answer in plain text with NO \
@@ -257,6 +264,9 @@ public class ChatSession extends Interpreter {
      *              ({@link IoLogStore#ensureSession(String)})
      */
     public void setTabId(String tabId) { this.tabId = tabId; }
+
+    /** @param watchdogRef the shared {@link CallWatchdog}, for the {@code ask_chat} tool */
+    public void setWatchdogRef(ActorRef<CallWatchdog> watchdogRef) { this.watchdogRef = watchdogRef; }
 
     /**
      * Forwards one entry to this session's tab log multiplexer ({@code chat-<tabId>.log}), in
@@ -844,6 +854,8 @@ public class ChatSession extends Interpreter {
             case "web_search" -> WebSearchTool.searchAndFetch(extractInput(args, "query"));
             case "fetch" -> FetchTool.fetch(extractInput(args, "url"));
             case "search_docs" -> DocSearchTool.search(extractInput(args, "query"), 0);
+            case "ask_chat" -> AskChatTool.ask(system, watchdogRef, tabId,
+                    extractInput(args, "chatId"), extractInput(args, "prompt"));
             default -> "error: unknown tool '" + tc.name() + "'";
         };
     }
