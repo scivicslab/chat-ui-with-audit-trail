@@ -204,3 +204,17 @@
 
 - 3タブ以上をまたぐ真の循環（chat-01→chat-02→chat-01）の実機確認はまだ——`CallWatchdog`のグラフ探索ロジック自体は自己参照チェック（`AskChatTool`側で先に弾かれる単純な1対1のケース）とは別経路なので、別途確認が要る。
 - ポート28014（ユーザーの常用インスタンス）は今回も未反映。
+
+## 計画（busy中でも読める会話履歴スナップショット・busy表示）
+
+設計文書: `doc_SCIVICS003/docs/chat-ui-with-audit-trail/030_development/010_skeleton/180_BusyStateReadableSnapshot_260828_oo01`。
+
+- [x] `ChatSession.busy`を`volatile`に、会話履歴の`AtomicReference`スナップショットを新設（`recordHistory`・履歴クリア2箇所で更新）
+- [x] `ChatSessionIIAR`に`isBusyDirect()`・`getHistorySnapshotDirect()`（メールボックス非経由の直接読み取り）を追加
+- [x] `GET /api/chats/{chatId}/status`を新設、`conversation`エンドポイントをスナップショット直読みに変更
+- [x] `app.js`：タブ切替・初期ロード時に`refreshBusyStatus()`を呼び、busyなら既存の「thinking…」表示を出す
+- [x] `mvn install`（テスト含む）成功、ポート28014へ実機デプロイ。busy中の`status`・`conversation`が約10msで返ること、"Failed to read conversation"警告が消えたことを確認
+
+## レビュー
+
+- `models`・`workflows`エンドポイントは今回のスコープ外のまま（`ask()`経由）——設計通り、めったに変わらない設定値のため優先度を下げた。

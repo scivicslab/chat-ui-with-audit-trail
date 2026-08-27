@@ -88,9 +88,18 @@ public class ChatSession extends Interpreter {
      *  another tab — distinct from {@link #watchdogName} (an unrelated, unported StallMonitor field). */
     private ActorRef<CallWatchdog> watchdogRef;
 
-    private boolean busy;
+    // volatile: the only writer is this actor's own thread (PromptQueue.tryDispatch runs via
+    // chatSessionRef.tell(...)), but BusyStateReadableSnapshot_260828_oo01's isBusyDirect() reads it
+    // from any thread — safe publication of a single-writer/multi-reader flag, not a loosening of
+    // the actor-thread-exclusivity rule (writes stay exactly where they always were).
+    private volatile boolean busy;
     private String apiKey;
     private final LinkedList<HistoryEntry> conversationHistory = new LinkedList<>();
+    // Same safe-publication pattern as `busy`, for the same reason (BusyStateReadableSnapshot_260828_oo01):
+    // written only by recordHistory()/history-clear, both always on this actor's own thread; read from
+    // any thread via getHistorySnapshotDirect() without going through the actor's mailbox.
+    private final java.util.concurrent.atomic.AtomicReference<List<HistoryEntry>> historySnapshot =
+            new java.util.concurrent.atomic.AtomicReference<>(List.of());
 
     private final ChatEvent[] logBuffer = new ChatEvent[LOG_BUFFER_SIZE];
     private int logHead = 0;
@@ -365,6 +374,15 @@ public class ChatSession extends Interpreter {
     public boolean isBusy() { return busy; }
 
     /**
+     * The conversation history as of the last {@link #recordHistory} call, safe to read from any
+     * thread without going through this actor's mailbox (see {@code
+     * BusyStateReadableSnapshot_260828_oo01}).
+     *
+     * @return an immutable snapshot of the conversation history
+     */
+    public List<HistoryEntry> historySnapshot() { return historySnapshot.get(); }
+
+    /**
      * Returns the model identifier currently selected by the provider.
      *
      * @return the active model name
@@ -406,6 +424,7 @@ public class ChatSession extends Interpreter {
         List<ChatEvent> responses = new ArrayList<>(provider.handleCommand(input));
         if (input.trim().toLowerCase().startsWith("/clear")) {
             conversationHistory.clear();
+            historySnapshot.set(List.of());
         }
         responses.add(ChatEvent.status(provider.getCurrentModel(), provider.getSessionId(), busy));
         return responses;
@@ -990,6 +1009,7 @@ public class ChatSession extends Interpreter {
         if (content == null || content.isBlank()) return;
         conversationHistory.addLast(new HistoryEntry(role, content));
         while (conversationHistory.size() > MAX_HISTORY) conversationHistory.removeFirst();
+        historySnapshot.set(List.copyOf(conversationHistory));
     }
 
     /**
@@ -1033,6 +1053,7 @@ public class ChatSession extends Interpreter {
     /** Removes all entries from the conversation history. */
     public void clearHistory() {
         conversationHistory.clear();
+        historySnapshot.set(List.of());
         // New conversation: end the current I/O-log session and renumber turns from 1.
         if (ioLog != null) ioLog.resetSession(tabId);
         ioTurn = 0;

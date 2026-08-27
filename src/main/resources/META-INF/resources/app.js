@@ -384,7 +384,22 @@
         loadModels();
         hydrateConversation();
         refreshQueue();
+        refreshBusyStatus();
         connectSSE();
+    }
+
+    // Shows the existing "thinking…" activity label for the newly-active tab if it's busy —
+    // read directly (GET /api/chats/{id}/status), so this reflects reality even when the tab is
+    // busy with a long turn (e.g. ask_chat) that would otherwise make the conversation/models
+    // fetches queue up and silently fail (BusyStateReadableSnapshot_260828_oo01).
+    function refreshBusyStatus() {
+        var forTab = TAB_ID;
+        fetch(apiUrl("api/chats/" + forTab + "/status"))
+            .then(function (r) { return r.json(); })
+            .then(function (s) {
+                if (forTab === TAB_ID) setBusy(!!(s && s.busy));
+            })
+            .catch(function () { /* leave whatever setBusy(false) above already set */ });
     }
 
     // ── History hydration ────────────────────────────────────────────────────
@@ -434,6 +449,7 @@
         loadModels();
         hydrateConversation();
         refreshQueue();
+        refreshBusyStatus();
         connectSSE();
     });
 

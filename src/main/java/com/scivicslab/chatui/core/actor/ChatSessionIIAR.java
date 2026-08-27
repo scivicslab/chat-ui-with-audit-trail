@@ -61,6 +61,25 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     /** @return this tab's agent-loop workflow file name (classpath-relative, under {@code /workflows/}) */
     public String getAgentLoopWorkflowFile() { return agentLoopWorkflowFile; }
 
+    /**
+     * Reads this tab's busy flag directly, bypassing the actor's mailbox — safe even while a long
+     * turn (e.g. {@code ask_chat}) is in progress, since {@code ChatSession.busy} is {@code volatile}
+     * and only ever written from this actor's own thread ({@code BusyStateReadableSnapshot_260828_oo01}).
+     *
+     * @return {@code true} if this tab is currently processing a turn
+     */
+    public boolean isBusyDirect() { return chatSession().isBusy(); }
+
+    /**
+     * Reads this tab's conversation-history snapshot directly, bypassing the actor's mailbox — same
+     * rationale as {@link #isBusyDirect()}.
+     *
+     * @return an immutable snapshot of the conversation history as of the last recorded turn
+     */
+    public java.util.List<ChatSession.HistoryEntry> getHistorySnapshotDirect() {
+        return chatSession().historySnapshot();
+    }
+
     private ChatSession chatSession() { return (ChatSession) object; }
 
     /**

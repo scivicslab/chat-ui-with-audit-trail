@@ -106,7 +106,10 @@ public class ChatResource {
     }
 
     /**
-     * Returns one tab's committed conversation history, for hydrating the left pane on load.
+     * Returns one tab's committed conversation history, for hydrating the left pane on load. Reads
+     * a safely-published snapshot directly ({@code BusyStateReadableSnapshot_260828_oo01}) instead
+     * of asking the tab's actor — so this keeps working even while the tab is busy (e.g. mid
+     * {@code ask_chat} wait), rather than queueing behind it and timing out.
      *
      * @param chatId conversation tab identifier
      * @return up to the last 200 {@link ChatSession.HistoryEntry} records
@@ -117,12 +120,23 @@ public class ChatResource {
     public List<ChatSession.HistoryEntry> conversation(@PathParam("chatId") String chatId) {
         actorSystem.createTab(chatId);
         ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(chatId);
-        try {
-            return chatSessionIIAR.ask(interp -> ((ChatSession) interp).getHistory(200)).get(5, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            LOG.warning("Failed to read conversation for tab " + chatId + ": " + e.getMessage());
-            return List.of();
-        }
+        return chatSessionIIAR.getHistorySnapshotDirect();
+    }
+
+    /**
+     * Reports whether one tab is currently busy processing a turn — read directly, so it works even
+     * while the tab is busy ({@code BusyStateReadableSnapshot_260828_oo01}).
+     *
+     * @param chatId conversation tab identifier
+     * @return {@code {"busy": true|false}}
+     */
+    @GET
+    @Path("/chats/{chatId}/status")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Map<String, Object> status(@PathParam("chatId") String chatId) {
+        actorSystem.createTab(chatId);
+        ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(chatId);
+        return Map.of("busy", chatSessionIIAR.isBusyDirect());
     }
 
     /**
