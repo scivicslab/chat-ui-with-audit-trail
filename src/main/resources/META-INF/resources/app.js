@@ -7,7 +7,14 @@
     "use strict";
 
     var TAB_ID_KEY = "chat-ui-last-tab";
-    var TAB_ID = localStorage.getItem(TAB_ID_KEY) || "01";
+    // Migrates a browser's localStorage value from before ChatActorRename_260827_oo01 (when tab
+    // ids were "alpha"/"beta") to the current scheme ("01"/"02") — otherwise a returning browser
+    // would resend the stale id as chatId, and the server would lazily create a brand-new, empty
+    // "chat-alpha"/"chat-beta" actor instead of reconnecting to the browser's actual prior
+    // conversation (now correctly named "chat-01"/"chat-02").
+    var LEGACY_TAB_ID_MAP = { alpha: "01", beta: "02" };
+    var storedTabId = localStorage.getItem(TAB_ID_KEY);
+    var TAB_ID = LEGACY_TAB_ID_MAP[storedTabId] || storedTabId || "01";
 
     function apiUrl(path) { return path; }
 

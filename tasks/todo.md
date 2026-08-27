@@ -179,3 +179,14 @@
 
 - `SessionsResource.java`の`GET /api/sessions?tabId=...`（クエリパラメータ）は今回対象外のまま——ユーザーの指示が`ChatResource.java`とそのフロントエンド呼び出しに限定されていたため。語彙の不整合が残っており、別途検討の余地がある。
 - ポート28014（ユーザーの常用インスタンス）は今回も未反映のまま。
+
+## 計画（リネーム前のlocalStorage値をchat-01/chat-02へ読み替え）
+
+設計文書: `doc_SCIVICS003/docs/chat-ui-with-audit-trail/030_development/020_implementation/190_LegacyTabIdMigration_260827_oo01`。
+
+- [x] `app.js`にレガシーID（`alpha`/`beta`）→現行ID（`01`/`02`）の読み替えを追加
+- [x] `mvn install`（テスト含む）成功、Playwrightで読み替えを実機確認、ポート28019・28014双方へデプロイ
+
+## レビュー
+
+- ポート28014再起動時に発見——リネーム前から開いていたブラウザの`localStorage`に古い`"beta"`が残っており、`chat-beta`という空の新規アクターが実際に作られていた。ユーザーからの「tab-betaアクターが残ったままでは？」という指摘がきっかけ（実際の名前は`tab-beta`ではなく`chat-beta`だった）。
