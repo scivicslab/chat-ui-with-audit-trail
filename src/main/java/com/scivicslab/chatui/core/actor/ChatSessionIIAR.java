@@ -132,6 +132,19 @@ public class ChatSessionIIAR extends InterpreterIIAR {
             String prompt = new org.json.JSONArray(arg).getString(0);
             chatSession().appendConstructedPrompt(prompt);
             return new ActionResult(true, "");
+        } else if (actionName.equals("requestDraft")) {
+            // Dispatched by babysitter-loop.yaml ("actor: this") — BabysitterLoopWorkflowShape_260828_oo01.
+            return chatSession().requestDraft();
+        } else if (actionName.equals("judgeDraftAcceptable")) {
+            return chatSession().judgeDraftAcceptable();
+        } else if (actionName.equals("revisionLimitReached")) {
+            return chatSession().revisionLimitReached();
+        } else if (actionName.equals("judgeDraftNeedsRevision")) {
+            return chatSession().judgeDraftNeedsRevision();
+        } else if (actionName.equals("requestRevision")) {
+            return chatSession().requestRevision();
+        } else if (actionName.equals("reportCollaborationFailure")) {
+            return chatSession().reportCollaborationFailure();
         }
         // execCode / runUntilEnd / call / runWorkflow / readYaml / setCurrentState etc. are
         // handled by InterpreterIIAR itself, since ChatSession is an Interpreter.

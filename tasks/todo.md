@@ -231,3 +231,20 @@
 ## レビュー
 
 - `ChatSession.start()`が`transitionTo("think")`を固定で呼ぶため、`set_workflow`で差し替えるどんなworkflowも開始状態名は`"think"`固定という制約が実機確認で判明——`BabysitterLoopWorkflowShape_260828_oo01`の設計（当初`"draft"`）をこれに合わせて訂正した。
+
+## 計画（CollaborationGraph・set_collaborator・babysitterループ本体の実装）
+
+設計文書: `CollaborationGraph_260828_oo01`・`BabysitterLoopWorkflowShape_260828_oo01`。
+
+- [x] `CollaborationGraph`アクター新設（`CallWatchdog`と同様、システム全体で1個）
+- [x] `set_collaborator(chatId, role, collaboratorChatId)`ツール新設
+- [x] `ChatUiActorSystem`：`collaborationGraph`をROOT直下に登録し、各タブへ`setCollaborationGraphRef`で配布
+- [x] `ChatSession`：`requestDraft`・`judgeDraftAcceptable`・`judgeDraftNeedsRevision`・`revisionLimitReached`・`requestRevision`・`reportCollaborationFailure`の6メソッドを追加
+- [x] `babysitter-loop.yaml`新設——設計の6遷移に加え、`think`→`end`・`revise`→`end`の2フォールバック遷移を実装時に追加（`request-draft`・`request-revision`が失敗したまま詰まる経路を防ぐため）
+- [x] `mvn install`（テスト含む）成功
+- [x] ポート28014へ実機デプロイ。chat-01→chat-02→chat-03の3タブ構成で、`set_collaborator`→`set_workflow`→`ask_chat`のフルシナリオを実行し、`think`→`judge`→`end`（accept-draft）経路が正しく完走することを確認
+
+## レビュー
+
+- 実装直後の初回実行で、新規6メソッドを`ChatSessionIIAR.callByActionName`のディスパッチ表に登録し忘れていたため、babysitterループの全遷移が「アクション未発見」で一律失敗し、chat-02の`busy`がtrueのまま固まるバグを踏んだ——新しいTuring-workflowアクションをChatSessionに追加するたびに、この登録を対で行うことを`210_BabysitterLoopWorkflowShape_260828_oo01`に追記した。
+- `revise`ループ（複数回の改訂）・`give-up`パス・2つのフォールバック遷移は、今回の実機テストでは1回で受理される草稿だったため未通過——コードレビューは済んでいるが、実機確認は今後の課題として残る。

@@ -72,6 +72,7 @@ public class ChatUiActorSystem {
     private RecentEntriesAccumulator systemLogBuffer;
     private final Map<String, RecentEntriesAccumulator> tabLogBuffers = new ConcurrentHashMap<>();
     private ActorRef<CallWatchdog> callWatchdogRef;
+    private ActorRef<CollaborationGraph> collaborationGraphRef;
 
     /**
      * Initializes the actor system and seeds a small tree so the Actors tab has something to show.
@@ -104,6 +105,11 @@ public class ChatUiActorSystem {
         // ask_chat cross-tab tool support (AskChatToolAndWatchdog_260827_oo01): one CallWatchdog for
         // the whole system, refusing ask_chat calls that would create a circular wait.
         callWatchdogRef = actorSystem.getRoot().createChild("callWatchdog", new CallWatchdog());
+
+        // Graph-engineering role assignments (CollaborationGraph_260828_oo01): one CollaborationGraph
+        // for the whole system, so workflow logic (babysitter loops etc.) can resolve a collaborator
+        // tab by role instead of a hardcoded chat id.
+        collaborationGraphRef = actorSystem.getRoot().createChild("collaborationGraph", new CollaborationGraph());
 
         createTab("01");
         createTab("02");
@@ -161,6 +167,7 @@ public class ChatUiActorSystem {
         chatSessions.put(tabId, chatSessionIIAR);
         chatSessionIIAR.tell(a -> ((ChatSession) a).setTabId(tabId));
         chatSessionIIAR.tell(a -> ((ChatSession) a).setWatchdogRef(callWatchdogRef));
+        chatSessionIIAR.tell(a -> ((ChatSession) a).setCollaborationGraphRef(collaborationGraphRef));
 
         // provider child — created by the generating side, not by ChatSession itself
         // (ChatSessionPorting_260823_oo01 "なぜ init を無くしたか").

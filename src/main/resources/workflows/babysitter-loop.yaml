@@ -1,0 +1,102 @@
+name: babysitter-loop
+description: |
+  chat-02's babysitter workflow (WorkerBabysitterOrchestration_260828_oo01,
+  BabysitterLoopWorkflowShape_260828_oo01): ask the "worker" collaborator (resolved via
+  CollaborationGraph_260828_oo01, not a hardcoded id) for a first draft, judge it, and if it
+  needs work, ask the worker to revise — repeating judge/revise until the draft is judged
+  acceptable or the revision limit is reached.
+
+  Entry state must be named "think" — ChatSession.start() calls transitionTo("think")
+  unconditionally regardless of which workflow is installed (WorkflowReloadReset_260828_oo01
+  実機確認). Here "think" means "ask the worker for the first draft", not "the LLM reasons".
+
+  "think" -> "end" and "revise" -> "end" (report-*-failed below) are fallback transitions not in
+  BabysitterLoopWorkflowShape_260828_oo01's original design — added during implementation. Without
+  them, a failed requestDraft/requestRevision (no worker collaborator set, or the worker didn't
+  reply) would leave "think"/"revise" with no further transition to try, so runUntilEnd() would
+  stop there without ever calling finish() — busy would stay true forever. Every other state
+  already has a same-state always-succeeds catch-all (judgeDraftNeedsRevision for "judge", finish
+  for "give-up" -> "end"); these two give "think" and "revise" the same guarantee.
+
+  Every action below sets execution: direct, for the same reason as chat-session-agent-loop.yaml's
+  own note: these methods mutate ChatSession's own fields (currentDraft, revisionNote, ...) and
+  must stay on ChatSession's own actor thread, not IIActorSystem's ManagedThreadPool.
+
+steps:
+  - states: ["think", "judge"]
+    label: request-draft
+    note: Ask the worker collaborator for the first draft, via ask_chat. Entry point of this
+      workflow — must be named "think" (see description).
+    actions:
+      - actor: this
+        method: requestDraft
+        execution: direct
+
+  - states: ["think", "end"]
+    label: report-draft-request-failed
+    note: Reached only when request-draft just failed — no worker collaborator set, or it
+      didn't reply. Always succeeds; ends the turn with an explanatory answer instead of
+      leaving it stuck busy forever.
+    actions:
+      - actor: this
+        method: reportCollaborationFailure
+        execution: direct
+
+  - states: ["judge", "end"]
+    label: accept-draft
+    note: |
+      LLM reasoning step: read the current draft and judge whether it is acceptable.
+      Succeeds (-> end) when the judgment is "good enough" — and, on success, already finishes
+      the turn itself (see judgeDraftAcceptable's own note: "end" is terminal, there is no
+      later hop to call finish() from, unlike think-final in the base loop).
+    actions:
+      - actor: this
+        method: judgeDraftAcceptable
+        execution: direct
+
+  - states: ["judge", "give-up"]
+    label: revision-limit-reached
+    note: |
+      Reached only when accept-draft just failed AND the revision count already hit the cap —
+      stop asking the worker for more revisions and return the best draft so far.
+    actions:
+      - actor: this
+        method: revisionLimitReached
+        execution: direct
+
+  - states: ["judge", "revise"]
+    label: reject-draft
+    note: |
+      Reached only when accept-draft and revision-limit-reached both just failed — the judgment
+      was "needs work" and there is still budget for another revision round. Always succeeds
+      (judge's catch-all, same idiom as think-final/finish() in the base loop).
+    actions:
+      - actor: this
+        method: judgeDraftNeedsRevision
+        execution: direct
+
+  - states: ["revise", "judge"]
+    label: request-revision
+    note: Ask the worker collaborator to fix the specific issues found in judge, via ask_chat
+      again. Re-resolves the "worker" role rather than reusing request-draft's answer, so a
+      mid-flow set_collaborator reassignment takes effect on the next round.
+    actions:
+      - actor: this
+        method: requestRevision
+        execution: direct
+
+  - states: ["revise", "end"]
+    label: report-revision-request-failed
+    note: Reached only when request-revision just failed. Same fallback role as
+      report-draft-request-failed above, for the "revise" state.
+    actions:
+      - actor: this
+        method: reportCollaborationFailure
+        execution: direct
+
+  - states: ["give-up", "end"]
+    label: finish-with-best-effort
+    actions:
+      - actor: this
+        method: finish
+        execution: direct

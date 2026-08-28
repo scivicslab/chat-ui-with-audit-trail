@@ -6,6 +6,7 @@ import com.scivicslab.chatui.agent.DocSearchTool;
 import com.scivicslab.chatui.agent.FetchTool;
 import com.scivicslab.chatui.agent.FileReadTool;
 import com.scivicslab.chatui.agent.FileWriteTool;
+import com.scivicslab.chatui.agent.SetCollaboratorTool;
 import com.scivicslab.chatui.agent.SetWorkflowTool;
 import com.scivicslab.chatui.agent.TextToolCallParser;
 import com.scivicslab.chatui.agent.ToolCall;
@@ -37,6 +38,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -88,6 +90,9 @@ public class ChatSession extends Interpreter {
     /** The shared {@link CallWatchdog}, consulted by the {@code ask_chat} tool before it waits on
      *  another tab — distinct from {@link #watchdogName} (an unrelated, unported StallMonitor field). */
     private ActorRef<CallWatchdog> watchdogRef;
+    /** The shared {@link CollaborationGraph}, consulted (and updated) by the {@code set_collaborator}
+     *  tool and by babysitter-loop methods resolving a role (e.g. {@code "worker"}) to a chat id. */
+    private ActorRef<CollaborationGraph> collaborationGraphRef;
 
     // volatile: the only writer is this actor's own thread (PromptQueue.tryDispatch runs via
     // chatSessionRef.tell(...)), but BusyStateReadableSnapshot_260828_oo01's isBusyDirect() reads it
@@ -160,6 +165,11 @@ public class ChatSession extends Interpreter {
               with the given Turing-workflow YAML text (not a file path). Requires TWO <parameter>
               tags: "chatId" and "yaml". Use this to author a workflow for another tab to run,
               then use ask_chat to actually kick off a turn under it.
+            - set_collaborator(chatId, role, collaboratorChatId): record that, for tab "chatId",
+              the tab playing role "role" (e.g. "worker") is "collaboratorChatId". Requires THREE
+              <parameter> tags: "chatId", "role", "collaboratorChatId". A workflow installed via
+              set_workflow can then resolve that role instead of a hardcoded chat id, and you can
+              reassign it again later by calling this a second time.
 
             Call at most one tool per reply. After a tool result comes back, either call another tool \
             or give your final answer. When you have enough information, answer in plain text with NO \
@@ -184,6 +194,18 @@ public class ChatSession extends Interpreter {
     private String finalAnswer;
     private int stepCount;
     private volatile boolean cancelled;
+
+    // ---- Babysitter loop (BabysitterLoopWorkflowShape_260828_oo01) — per-turn, reset in start() ----
+    private static final int REVISION_LIMIT = 3;
+    /** The draft currently under review — set by requestDraft/requestRevision, read by judgeDraftAcceptable. */
+    private String currentDraft;
+    /** Raw text of judgeDraftAcceptable's one LLM call, consumed (not re-queried) by judgeDraftNeedsRevision. */
+    private String lastJudgment;
+    /** What to fix, extracted from lastJudgment by judgeDraftNeedsRevision, sent by requestRevision. */
+    private String revisionNote;
+    private int revisionCount;
+    /** Set by requestDraft/requestRevision on failure; consumed by reportCollaborationFailure. */
+    private String lastCollaborationError;
 
     // ---- Prompt construction (ChatSessionPorting_260823_oo01 2-b-i) ----
     // stepExpectingAction() delegates building the text it sends to provider.sendPrompt() to a
@@ -283,6 +305,11 @@ public class ChatSession extends Interpreter {
 
     /** @param watchdogRef the shared {@link CallWatchdog}, for the {@code ask_chat} tool */
     public void setWatchdogRef(ActorRef<CallWatchdog> watchdogRef) { this.watchdogRef = watchdogRef; }
+
+    /** @param collaborationGraphRef the shared {@link CollaborationGraph} */
+    public void setCollaborationGraphRef(ActorRef<CollaborationGraph> collaborationGraphRef) {
+        this.collaborationGraphRef = collaborationGraphRef;
+    }
 
     /**
      * Forwards one entry to this session's tab log multiplexer ({@code chat-<tabId>.log}), in
@@ -650,6 +677,11 @@ public class ChatSession extends Interpreter {
         this.stepCount = 0;
         this.cancelled = false;
         this.constructedPrompts.clear();
+        this.currentDraft = null;
+        this.lastJudgment = null;
+        this.revisionNote = null;
+        this.revisionCount = 0;
+        this.lastCollaborationError = null;
 
         emitter.accept(ChatEvent.status(provider.getCurrentModel(), provider.getSessionId(), true));
         // transitionTo (not setCurrentState) also repositions the transition-scan cursor, so a
@@ -869,6 +901,161 @@ public class ChatSession extends Interpreter {
         return new ActionResult(true, "finished");
     }
 
+    // ---- Babysitter loop (BabysitterLoopWorkflowShape_260828_oo01): think(=request-draft) ->
+    // judge -> (end | give-up -> end | revise -> judge)*. Driven by babysitter-loop.yaml, installed
+    // in place of chat-session-agent-loop.yaml via set_workflow. Every action below runs
+    // execution: direct, for the same reason as the base agent loop (see that YAML's own note).
+
+    /**
+     * Entry point ({@code "think"} -> {@code "judge"}): resolves this tab's {@code "worker"}
+     * collaborator via {@link CollaborationGraph} and asks it (via {@code ask_chat}) for a first
+     * draft addressing {@link #pendingPrompt} (the instruction this turn started with).
+     *
+     * @return {@link ActionResult} with {@code success=true} iff a worker was resolved and replied
+     */
+    public ActionResult requestDraft() {
+        String workerChatId = resolveWorker();
+        if (workerChatId == null) {
+            lastCollaborationError = "no collaborator with role 'worker' set for tab " + tabId
+                    + " (use set_collaborator first)";
+            return new ActionResult(false, lastCollaborationError);
+        }
+        String reply = AskChatTool.ask(system, watchdogRef, tabId, workerChatId, pendingPrompt, null);
+        if (reply == null || reply.startsWith("error:")) {
+            lastCollaborationError = reply != null ? reply : "no reply from worker";
+            return new ActionResult(false, lastCollaborationError);
+        }
+        currentDraft = reply;
+        return new ActionResult(true, "draft received");
+    }
+
+    /**
+     * ({@code "judge"} -> {@code "end"}): one LLM call judging {@link #currentDraft}. On
+     * acceptance, sets the turn's final answer to the draft and finishes the turn directly — this
+     * transition's target is a terminal state, so (unlike {@code think-final} in the base loop)
+     * there is no separate later hop to call {@link #finish()} from.
+     *
+     * @return {@link ActionResult} with {@code success=true} iff the draft was judged acceptable
+     */
+    public ActionResult judgeDraftAcceptable() {
+        lastJudgment = callJudgeLlm(currentDraft);
+        boolean acceptable = lastJudgment.trim().toUpperCase(java.util.Locale.ROOT).startsWith("ACCEPT");
+        if (acceptable) {
+            finalAnswer = currentDraft;
+            finish();
+        }
+        return new ActionResult(acceptable, acceptable ? "accepted" : "needs work");
+    }
+
+    /**
+     * ({@code "judge"} -> {@code "give-up"}): reached only once accept-draft has just failed.
+     * Cheap check, no LLM call. On reaching the limit, also sets the turn's final answer to the
+     * best draft obtained so far, for {@code give-up}'s own transition to {@code finish()} to emit.
+     *
+     * @return {@link ActionResult} with {@code success=true} iff the revision budget is exhausted
+     */
+    public ActionResult revisionLimitReached() {
+        boolean reached = revisionCount >= REVISION_LIMIT;
+        if (reached) finalAnswer = currentDraft;
+        return new ActionResult(reached, reached ? "revision limit reached" : "budget remains");
+    }
+
+    /**
+     * ({@code "judge"} -> {@code "revise"}): reached only once accept-draft and
+     * revision-limit-reached have both just failed — always succeeds (the judge state's
+     * catch-all, mirroring {@code think-final}/{@link #finish()} in the base loop). Extracts what
+     * to fix from {@link #lastJudgment}, already captured by {@link #judgeDraftAcceptable()}; makes
+     * no LLM call of its own.
+     *
+     * @return {@link ActionResult} with {@code success=true} always
+     */
+    public ActionResult judgeDraftNeedsRevision() {
+        revisionNote = lastJudgment;
+        return new ActionResult(true, "revision requested");
+    }
+
+    /**
+     * ({@code "revise"} -> {@code "judge"}): re-resolves the {@code "worker"} collaborator (not
+     * cached from {@link #requestDraft()} — the role may have been reassigned mid-flow, see
+     * {@code CollaborationGraph_260828_oo01}) and asks it to address {@link #revisionNote}.
+     *
+     * @return {@link ActionResult} with {@code success=true} iff the worker replied
+     */
+    public ActionResult requestRevision() {
+        String workerChatId = resolveWorker();
+        if (workerChatId == null) {
+            lastCollaborationError = "no collaborator with role 'worker' set for tab " + tabId
+                    + " (use set_collaborator first)";
+            return new ActionResult(false, lastCollaborationError);
+        }
+        String prompt = "Please revise the previous draft to address this feedback:\n" + revisionNote;
+        String reply = AskChatTool.ask(system, watchdogRef, tabId, workerChatId, prompt, null);
+        if (reply == null || reply.startsWith("error:")) {
+            lastCollaborationError = reply != null ? reply : "no reply from worker";
+            return new ActionResult(false, lastCollaborationError);
+        }
+        currentDraft = reply;
+        revisionCount++;
+        return new ActionResult(true, "revision received");
+    }
+
+    /**
+     * Fallback for {@code "think"} -> {@code "end"} and {@code "revise"} -> {@code "end"}: reached
+     * only when {@link #requestDraft()} or {@link #requestRevision()} has just failed (no worker
+     * resolved, or the worker didn't reply) — without this, either state would have no remaining
+     * transition to try and the turn would stay {@code busy} forever. Not in the original
+     * {@code BabysitterLoopWorkflowShape_260828_oo01} design; added during implementation as the
+     * same kind of always-succeeds terminal fallback the base loop's {@code finish()} already is.
+     *
+     * @return {@link ActionResult} with {@code success=true} always
+     */
+    public ActionResult reportCollaborationFailure() {
+        finalAnswer = "(babysitter loop stopped: " + lastCollaborationError + ")";
+        finish();
+        return new ActionResult(true, "reported failure");
+    }
+
+    /** Resolves this tab's {@code "worker"} collaborator via {@link CollaborationGraph}, or {@code null}. */
+    private String resolveWorker() {
+        if (collaborationGraphRef == null) return null;
+        try {
+            return collaborationGraphRef.ask(g -> g.getCollaborator(tabId, "worker")).get(5, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "resolveWorker: CollaborationGraph lookup failed", e);
+            return null;
+        }
+    }
+
+    /**
+     * One-shot blocking LLM call judging {@code draft}: replies {@code ACCEPT} if it is good
+     * enough, or {@code REVISE: <what to fix>} otherwise. Streams to {@code turnEmitter} as
+     * "thinking" (same treatment as {@link #stepExpectingAction()}'s own LLM call).
+     */
+    private String callJudgeLlm(String draft) {
+        String prompt = "Review the following draft. If it is acceptable as-is, reply with "
+                + "exactly:\nACCEPT\nOtherwise, reply with:\nREVISE: <a concise, specific "
+                + "description of what to fix>\n\nDraft:\n" + draft;
+        StringBuilder buf = new StringBuilder();
+        ProviderContext ctx = new ProviderContext(apiKey, List.of(), turnNoThink, () -> {});
+        ActorRef<LlmProvider> providerRef = providerRef();
+        try {
+            providerRef.ask(p -> {
+                Consumer<ChatEvent> wrapped = event -> {
+                    if ("delta".equals(event.type()) && event.content() != null) {
+                        buf.append(event.content());
+                        turnEmitter.accept(ChatEvent.thinking(event.content()));
+                    }
+                };
+                p.sendPrompt(prompt, turnModel, wrapped, ctx);
+                return null;
+            }, system.getManagedThreadPool()).get();
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "Babysitter judge LLM call failed", e);
+            return "REVISE: judge call failed: " + e.getMessage();
+        }
+        return buf.toString();
+    }
+
     /** Dispatches one tool call to its implementation and returns the raw (untruncated) observation. */
     private String executeTool(ToolCall tc) {
         String args = tc.argumentsJson();
@@ -885,6 +1072,9 @@ public class ChatSession extends Interpreter {
                     parseIntOrNull(extractInput(args, "timeoutSeconds")));
             case "set_workflow" -> SetWorkflowTool.setWorkflow(system,
                     extractInput(args, "chatId"), extractInput(args, "yaml"));
+            case "set_collaborator" -> SetCollaboratorTool.setCollaborator(collaborationGraphRef,
+                    extractInput(args, "chatId"), extractInput(args, "role"),
+                    extractInput(args, "collaboratorChatId"));
             default -> "error: unknown tool '" + tc.name() + "'";
         };
     }
