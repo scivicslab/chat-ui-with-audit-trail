@@ -298,3 +298,19 @@
 
 - 最初の実行は`error: chat not found: project1/chat-03`で失敗した。`CollaborationGraph`は完全修飾名を保存するのに、`AskChatTool.ask`は利用者が書く形（`03`）を前提にもう一度`resolveChatName`をかけるため、`project1/chat-chat-03`という存在しない名前を引いていた。エラーメッセージには解決前の文字列が出るので、正しい名前が見つからないように読めるのが厄介だった。修飾済みの名前をそのまま受け取る`AskChatTool.askQualified`を分けて解決した——「利用者が書いた参照」と「解決済みのアクター名」は別のものであり、同じ引数で受けてはいけない。
 - 書き直しの指摘は実際に内容を見たものだった（同じ言い回しの繰り返しを2度指摘）。判定基準を`judgeResult`の引数としてYAMLに書く形が、意図通りに効いている。
+
+## 計画（PlanRunnerとrun_planツール）
+
+設計文書: `PlanRunnerLifecycleManagement_260829_oo01`（および`BabysitterRealisticE2eScenario_260828_oo01`の「PlanRunnerのライフサイクル」）。
+
+- [x] `PlanRunner`（`Interpreter`のサブクラス、会話タブではない）と`PlanRunnerIIAR`を新設。アクションは`askChat`・`finish`・`reportFailure`
+- [x] `run_plan(yaml, timeoutSeconds)`ツールを新設。`<会話名>.plan`という固定名で1つだけ持ち、2回目以降は`reset()`して再利用（普通の`tell`で送るので、前回が走っていればメールボックスで順番待ちになる）
+- [x] `mvn install`（テスト含む）成功、ポート28014へ実機デプロイ
+- [x] chat-01→PlanRunner→chat-02（2問を順に）の計画が完走し、2問目の答えが返ることを確認
+- [x] 続けて別の計画を実行し、同じPlanRunnerが`reset()`されて再利用されることを確認
+
+## レビュー
+
+- 最初の実行で計画が1歩も進まなかった原因は、`PlanRunner`に`private final IIActorSystem system`を宣言して`Interpreter`の`protected system`を隠していたこと。`Interpreter.action()`が読むのは隠された側で、そちらは`null`だった。継承側へ代入する形に直した。
+- その`NullPointerException`が数回の実行でログに一切出なかったのは、`tell`が返す`CompletableFuture`に例外が入り、誰もその future を見ないまま消えていたため。ラムダ全体を`try`/`catch (Throwable)`で囲み、ログに出して待ち手を必ず解放するようにした（`Error`はメッセージループの`catch (Exception)`をすり抜けるので`Throwable`で受ける）。
+- `PlanRunner`が系統樹に出なかったのは、親を`getIIActor`で探していたため。会話タブは素の`ActorRef`側にあるので`getActor`で引く。
