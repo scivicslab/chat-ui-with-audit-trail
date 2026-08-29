@@ -89,12 +89,20 @@ public final class RunPlanTool {
                     runner.readYaml(new ByteArrayInputStream(yaml.getBytes(StandardCharsets.UTF_8)));
                     var result = runner.runUntilEnd();
                     // Reaching "end" through finish/reportFailure already completed `done`; this
-                    // covers a plan that stopped some other way (no matching transition,
-                    // requestStop, ...), so the caller is never left waiting on a runner that is no
-                    // longer running.
-                    runner.complete(result.isSuccess()
-                            ? (runner.lastReply() != null ? runner.lastReply() : "(plan finished with no result)")
-                            : "(plan did not finish: " + result.getResult() + ")");
+                    // covers a plan that stopped some other way, so the caller is never left
+                    // waiting on a runner that is no longer running.
+                    String outcome;
+                    if (runner.isStopRequested()) {
+                        // runUntilEnd's loop condition includes !stopRequested, so a stop falls out
+                        // of the loop and returns "Maximum iterations exceeded" — the wrong thing to
+                        // tell whoever asked for the stop.
+                        outcome = "(plan stopped by request after " + runner.getCurrentState() + ")";
+                    } else if (result.isSuccess()) {
+                        outcome = runner.lastReply() != null ? runner.lastReply() : "(plan finished with no result)";
+                    } else {
+                        outcome = "(plan did not finish: " + result.getResult() + ")";
+                    }
+                    runner.complete(outcome);
                 } catch (Throwable t) {
                     // The actor's message loop only catches Exception, so an Error thrown here would
                     // kill this runner's thread silently and leave the caller waiting for its full

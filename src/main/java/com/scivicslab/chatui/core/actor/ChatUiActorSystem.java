@@ -10,6 +10,7 @@ import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.turingworkflow.plugins.logoutput.MultiplexerAccumulator;
 import com.scivicslab.turingworkflow.plugins.logoutput.MultiplexerAccumulatorActor;
 import com.scivicslab.turingworkflow.plugins.logoutput.MultiplexerLogHandler;
+import com.scivicslab.turingworkflow.workflow.IIActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 import com.scivicslab.turingworkflow.workflow.RootIIAR;
 import jakarta.annotation.PostConstruct;
@@ -187,6 +188,24 @@ public class ChatUiActorSystem {
         return slash < 0
                 ? chatActorName(callerProjectId, target)
                 : chatActorName(target.substring(0, slash), target.substring(slash + 1));
+    }
+
+    /**
+     * Asks a conversation's plan runner to stop, if it has one. Sent with {@code tellNow} so it
+     * reaches the runner's {@code stopRequested} flag without queueing behind the run it is meant
+     * to stop; the runner then notices between transitions, so a plan waiting on another
+     * conversation stops once that wait returns, not instantly
+     * ({@code PlanRunnerLifecycleManagement_260829_oo01}).
+     *
+     * @param projectId owning project's id
+     * @param chatId    conversation id within that project
+     * @return {@code true} if a plan runner was found and asked to stop
+     */
+    public boolean stopPlan(String projectId, String chatId) {
+        IIActorRef<?> plan = actorSystem.getIIActor(chatActorName(projectId, chatId) + ".plan");
+        if (!(plan instanceof PlanRunnerIIAR planIIAR)) return false;
+        planIIAR.tellNow(interp -> interp.requestStop());
+        return true;
     }
 
     /**

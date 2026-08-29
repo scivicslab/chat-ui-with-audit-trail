@@ -41,7 +41,7 @@
     }
 
     var chatArea, promptInput, sendBtn, connStatus, activityLabel, modelSelect, notificationBar;
-    var themeSelect, queueBtn, queueArea;
+    var themeSelect, queueBtn, queueArea, stopPlanBtn;
     var eventSource = null;
     var streamingEl = null;   // the live assistant bubble currently receiving deltas
     var thinkingEl = null;    // the live "thinking" trace bubble, if any
@@ -384,6 +384,20 @@
             .catch(function () { /* leave the dropdown empty on failure */ });
     }
 
+    // Asks this conversation's plan runner to stop. The runner notices between transitions, so a
+    // plan waiting on another conversation stops once that wait returns, not instantly
+    // (PlanRunnerLifecycleManagement_260829_oo01).
+    function stopPlan() {
+        fetch(apiUrl(chatUrl("/plan/stop")), { method: "POST" })
+            .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+            .then(function (res) {
+                notify(res.ok && res.body && res.body.type === "stopping"
+                        ? "Stop requested — the plan stops after its current step."
+                        : "No running plan on this conversation.");
+            })
+            .catch(function (e) { notify("stop_plan failed: " + e.message); });
+    }
+
     // ── Conversation tabs (switch which ConversationTab this pane talks to) ────
     // Switching is triggered from the Actors tree in console.js (click a conversation actor's
     // name), not a bar in this pane — ActorTreeTabSwitcher_260826_oo01. switchChat is exposed on
@@ -453,6 +467,7 @@
         themeSelect = el("theme-select");
         queueBtn = el("queue-btn");
         queueArea = el("queue-area");
+        stopPlanBtn = el("stop-plan-btn");
 
         if (sendBtn) sendBtn.addEventListener("click", sendPrompt);
         if (promptInput) {
@@ -468,6 +483,7 @@
                 if (opening) refreshQueue(); else queueArea.style.display = "none";
             });
         }
+        if (stopPlanBtn) stopPlanBtn.addEventListener("click", stopPlan);
         initTheme();
         initModelPersistence();
         loadModels();

@@ -314,3 +314,18 @@
 - 最初の実行で計画が1歩も進まなかった原因は、`PlanRunner`に`private final IIActorSystem system`を宣言して`Interpreter`の`protected system`を隠していたこと。`Interpreter.action()`が読むのは隠された側で、そちらは`null`だった。継承側へ代入する形に直した。
 - その`NullPointerException`が数回の実行でログに一切出なかったのは、`tell`が返す`CompletableFuture`に例外が入り、誰もその future を見ないまま消えていたため。ラムダ全体を`try`/`catch (Throwable)`で囲み、ログに出して待ち手を必ず解放するようにした（`Error`はメッセージループの`catch (Exception)`をすり抜けるので`Throwable`で受ける）。
 - `PlanRunner`が系統樹に出なかったのは、親を`getIIActor`で探していたため。会話タブは素の`ActorRef`側にあるので`getActor`で引く。
+
+## 計画（実行中のPlanRunnerを外から止める）
+
+設計文書: `PlanRunnerLifecycleManagement_260829_oo01`（`BabysitterRealisticE2eScenario_260828_oo01`の「PlanRunnerのライフサイクル」で設計済みだった停止経路）。
+
+- [x] `ChatUiActorSystem.stopPlan(projectId, chatId)`：`<会話名>.plan`へ`tellNow`で`requestStop()`を送る（止めたい実行の後ろに並ばないため`tellNow`）
+- [x] `POST /api/projects/{projectId}/chats/{chatId}/plan/stop`（計画が無ければ404）
+- [x] チャットペインに「Stop plan」ボタン
+- [x] `mvn install`（テスト含む）成功、ポート28014へ実機デプロイ
+- [x] 6問の計画を開始直後に停止し、chat-02が受け取った質問が1問で打ち切られ、chat-01に`(plan stopped by request after 1)`が返ることを確認。計画の無い会話では404
+
+## レビュー
+
+- `Interpreter.runUntilEnd`のループ条件は`iteration < maxIterations && !stopRequested`なので、停止要求で抜けたときもループ外の`return`に落ち、戻り値は`Maximum iterations (10000) exceeded`になる。最初はこれをそのまま呼び出し元へ返していたため、自分で止めておきながら「最大反復数を超えた」と報告される形だった。`isStopRequested()`を見て分岐するようにした。
+- 3問の短い計画では、停止を送る前に完走してしまった。停止は遷移と遷移の合間にしか効かないという設計上の制約が、そのまま観測された形である。

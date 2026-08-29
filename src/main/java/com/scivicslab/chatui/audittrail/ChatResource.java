@@ -57,6 +57,23 @@ public class ChatResource {
         return Response.ok(Map.of("projectId", actorSystem.createProject())).build();
     }
 
+    /**
+     * Asks this conversation's plan runner to stop.
+     *
+     * @param projectId owning project's id
+     * @param chatId    conversation id within that project
+     * @return {@code {"type": "stopping"}}, or 404 if the conversation has no plan runner
+     */
+    @POST
+    @Path("/{projectId}/chats/{chatId}/plan/stop")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response stopPlan(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
+        if (!actorSystem.stopPlan(projectId, chatId)) {
+            return Response.status(404).entity(Map.of("type", "error", "message", "no plan running")).build();
+        }
+        return Response.ok(Map.of("type", "stopping")).build();
+    }
+
     // ── SSE stream ────────────────────────────────────────────────────────────
 
     /**
