@@ -26,6 +26,12 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
             String target = a.length() > 0 ? a.getString(0) : "";
             String prompt = a.length() > 1 ? a.getString(1) : "";
             return runner().askChat(target, prompt);
+        } else if (actionName.equals("addWorker")) {
+            org.json.JSONArray a = arguments(arg);
+            return runner().addWorker(a.length() > 0 ? a.getString(0) : "",
+                    a.length() > 1 ? a.getString(1) : "");
+        } else if (actionName.equals("collectWorkerReplies")) {
+            return runner().collectWorkerReplies();
         } else if (actionName.equals("finish")) {
             return runner().finish();
         } else if (actionName.equals("reportFailure")) {

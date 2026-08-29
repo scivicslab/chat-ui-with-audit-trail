@@ -1,0 +1,62 @@
+name: parallel-workers-plan
+description: |
+  Fans one question out to several conversations at once and gathers their replies
+  (ParallelWorkerPool_260829_oo01). Each conversation gets a worker slot — the plan's own child,
+  and an IIActorRef — because Interpreter.apply only reaches actors that are both.
+
+  apply runs the matched slots concurrently and waits for all of them, so the whole fan-out costs
+  about as long as its slowest conversation rather than the sum. A slot whose conversation fails
+  does not stop the others: apply reports the failures and carries on.
+
+  Submit this with POST /api/projects/{p}/chats/{c}/plan, editing the worker targets and the
+  question to suit. The first state must be named "0".
+
+steps:
+  - states: ["0", "1"]
+    label: add-worker-a
+    actions:
+      - actor: this
+        method: addWorker
+        arguments: ["a", "project1/chat-02"]
+        execution: direct
+
+  - states: ["1", "2"]
+    label: add-worker-b
+    actions:
+      - actor: this
+        method: addWorker
+        arguments: ["b", "project1/chat-03"]
+        execution: direct
+
+  - states: ["2", "3"]
+    label: ask-all-at-once
+    note: |
+      One apply, both slots running at the same time. The pattern matches this plan's own children
+      by name; "*.worker-*" avoids having to write the plan's full name into the file.
+    actions:
+      - actor: this
+        method: apply
+        arguments:
+          actor: "*.worker-*"
+          method: ask
+          arguments: ["Explain, in about 80 words, what makes actor-model concurrency different from locks."]
+        execution: direct
+
+  - states: ["2", "end"]
+    label: fan-out-failed
+    actions: [{actor: this, method: reportFailure, execution: direct}]
+
+  - states: ["3", "4"]
+    label: gather
+    actions:
+      - actor: this
+        method: collectWorkerReplies
+        execution: direct
+
+  - states: ["3", "end"]
+    label: nothing-gathered
+    actions: [{actor: this, method: reportFailure, execution: direct}]
+
+  - states: ["4", "end"]
+    label: done
+    actions: [{actor: this, method: finish, execution: direct}]

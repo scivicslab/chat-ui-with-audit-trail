@@ -86,6 +86,63 @@ public class PlanRunner extends Interpreter {
     }
 
     /**
+     * Plan step: gives this plan a worker slot standing in for one conversation, as its own child
+     * named {@code <plan>.worker-<id>}. Several slots can then be driven at once with {@code apply}
+     * and a pattern such as {@code *.worker-*} ({@code ParallelWorkerPool_260829_oo01}).
+     *
+     * @param workerId       short id for this slot, e.g. {@code "a"}
+     * @param targetChatName the conversation it forwards to, e.g. {@code project1/chat-03}
+     * @return {@link ActionResult} with {@code success=true} iff the slot was created
+     */
+    public ActionResult addWorker(String workerId, String targetChatName) {
+        if (workerId == null || workerId.isBlank()) return new ActionResult(false, "workerId is required");
+        if (targetChatName == null || targetChatName.isBlank()) {
+            return new ActionResult(false, "targetChatName is required");
+        }
+        if (selfActorRef == null || system == null) {
+            return new ActionResult(false, "plan runner is not wired to an actor system");
+        }
+        String workerName = myName + ".worker-" + workerId;
+        if (system.getIIActor(workerName) == null) {
+            PlanWorkerIIAR workerIIAR = new PlanWorkerIIAR(workerName,
+                    new PlanWorker(system, watchdog, myName, targetChatName), system);
+            workerIIAR.setParentName(myName);
+            system.addIIActor(workerIIAR);
+        }
+        // apply() matches against the caller's own child names, so the slot has to be recorded here.
+        selfActorRef.getNamesOfChildren().add(workerName);
+        return new ActionResult(true, "worker " + workerName + " -> " + targetChatName);
+    }
+
+    /**
+     * Plan step: gathers what every worker slot replied into this plan's result, in slot-name order
+     * so the output does not depend on which slot happened to finish first.
+     *
+     * @return {@link ActionResult} with {@code success=true} iff at least one slot had a reply
+     */
+    public ActionResult collectWorkerReplies() {
+        if (selfActorRef == null || system == null) {
+            return new ActionResult(false, "plan runner is not wired to an actor system");
+        }
+        StringBuilder joined = new StringBuilder();
+        int found = 0;
+        for (String childName : new java.util.TreeSet<>(selfActorRef.getNamesOfChildren())) {
+            // Object, not IIActorRef<?>: getIIActor's element type and PlanWorkerIIAR's differ, so
+            // the compiler rejects the pattern match on the narrower static type.
+            Object child = system.getIIActor(childName);
+            if (!(child instanceof PlanWorkerIIAR workerIIAR)) continue;
+            PlanWorker worker = workerIIAR.worker();
+            if (worker.lastReply() == null) continue;
+            found++;
+            joined.append("## ").append(worker.targetChatName()).append("\n")
+                  .append(worker.lastReply()).append("\n\n");
+        }
+        if (found == 0) return new ActionResult(false, "no worker replies to collect");
+        lastReply = joined.toString().stripTrailing();
+        return new ActionResult(true, "collected " + found + " worker reply/replies");
+    }
+
+    /**
      * Terminal step: hands the last reply back to whoever is waiting on this plan.
      *
      * @return {@link ActionResult} with {@code success=true} always

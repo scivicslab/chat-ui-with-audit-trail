@@ -345,3 +345,20 @@
 - 本文をJSONで包まずYAMLそのものにした。包むと、投げる側がYAMLをJSON文字列へエスケープする手間が増えるだけで、得るものが無い。
 - 待たない経路では`CallWatchdog`に待ちを登録しない。待つ主体が居ないので登録するものが無く、消し忘れも起きない。
 - 結果は会話履歴ではなくログへ書く。会話履歴はその会話のターン機構が書くものなので、外から書くと進行中のターンと衝突しうる。
+
+## 計画（applyによるworker並列化）
+
+設計文書: `ParallelWorkerPool_260829_oo01`。
+
+- [x] `apply`の制約をソースで確認——`findMatchingChildActors`は呼び出し元自身の子の名前しか見ず、その名前を`getIIActor`で引くので子は`IIActorRef`である必要がある。会話タブはどちらも満たさない
+- [x] `PlanWorker`（会話1つを受け持つworker枠）と`PlanWorkerIIAR`を新設——計画の子であり`IIActorRef`でもあるので、`apply`の条件を両方満たす
+- [x] `PlanRunner`に`addWorker`・`collectWorkerReplies`を追加
+- [x] `parallel-workers-plan.yaml`（worker枠2つを作り、`apply`で一斉に`ask`し、返事を集める）
+- [x] `mvn install`（テスト含む）成功、ポート28014へ実機デプロイ
+- [x] RESTで直接投入して実行。chat-02とchat-03が同時にbusyになり（並列動作の確認）、10秒で完了し、両方の返事が見出し付きでchat-01のログに届くことを確認
+
+## レビュー
+
+- `apply`のパターンは`*.worker-*`とした。`findMatchingChildActors`は子の登録名（`project1/chat-01.plan.worker-a`）に対して照合するので、この形なら計画の完全な名前をYAMLに書かずに済む。
+- `system.getIIActor(name) instanceof PlanWorkerIIAR`はコンパイルが通らない（戻り値の型引数と`PlanWorkerIIAR`の型引数が別なので、provably distinctと判定される）。`Object`で受けてからパターンマッチする。
+- 今回確認したのはworker枠の並列実行までで、1worker＋1babysitterの組を複数作る形はまだ組み立てていない。
