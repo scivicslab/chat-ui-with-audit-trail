@@ -71,8 +71,17 @@ public class ChatUiActorSystem {
     private final Map<String, ChatSessionIIAR> chatSessions = new ConcurrentHashMap<>();
     private RecentEntriesAccumulator systemLogBuffer;
     private final Map<String, RecentEntriesAccumulator> tabLogBuffers = new ConcurrentHashMap<>();
+
     private ActorRef<CallWatchdog> callWatchdogRef;
     private ActorRef<CollaborationGraph> collaborationGraphRef;
+
+    /** One {@link Project} grouping actor per project, keyed by project key — {@code ""} for the
+     *  default (first) project, {@code "project2"}, {@code "project3"}, ... for each one created
+     *  afterward via {@link #createProject()}. Purely an actor-tree grouping: a project is not a
+     *  behavioral boundary ({@code ProjectScopedActorTree_260829_oo01}). */
+    private final Map<String, ActorRef<Project>> projectsByKey = new ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicInteger nextProjectNumber =
+            new java.util.concurrent.atomic.AtomicInteger(2);
 
     /**
      * Initializes the actor system and seeds a small tree so the Actors tab has something to show.
@@ -84,6 +93,10 @@ public class ChatUiActorSystem {
         // System-wide log multiplexer (150_TabScopedLogging_260826_oo01): the top of the chat-log
         // hierarchy, and MultiplexerLogHandler's hardcoded forwarding target for framework/non-actor
         // log records (Quarkus startup, HTTP layer, etc.) that never go through a ConversationTab.
+        // Deliberately outside any Project's subtree — see ProjectScopedActorTree_260829_oo01 "なぜ
+        // outputMultiplexerはプロジェクトごとに分離しないか": MultiplexerLogHandler's lookup name is
+        // hardcoded, so only one such actor can ever exist, and framework logs (e.g. Quarkus startup)
+        // aren't inherently scoped to any one project anyway.
         systemLogBuffer = new RecentEntriesAccumulator(SYSTEM_LOG_CAPACITY);
         MultiplexerAccumulator systemMux = new MultiplexerAccumulator();
         systemMux.addTarget(systemLogBuffer);
@@ -103,17 +116,49 @@ public class ChatUiActorSystem {
         Logger.getLogger("").addHandler(logHandler);
 
         // ask_chat cross-tab tool support (AskChatToolAndWatchdog_260827_oo01): one CallWatchdog for
-        // the whole system, refusing ask_chat calls that would create a circular wait.
+        // the whole system, refusing ask_chat calls that would create a circular wait. Deliberately
+        // NOT per-project — a wait chain spans projects whenever a cross-project ask_chat happens, and
+        // detecting a cycle needs the whole chain in one place (ProjectScopedActorTree_260829_oo01
+        // "なぜCallWatchdog・CollaborationGraphもプロジェクトごとに分離しないか").
         callWatchdogRef = actorSystem.getRoot().createChild("callWatchdog", new CallWatchdog());
 
-        // Graph-engineering role assignments (CollaborationGraph_260828_oo01): one CollaborationGraph
-        // for the whole system, so workflow logic (babysitter loops etc.) can resolve a collaborator
-        // tab by role instead of a hardcoded chat id.
+        // Graph-engineering role assignments (CollaborationGraph_260828_oo01): likewise one for the
+        // whole system — split per project, a set_collaborator naming another project's tab would be
+        // written to one graph and read from another, silently losing the assignment.
         collaborationGraphRef = actorSystem.getRoot().createChild("collaborationGraph", new CollaborationGraph());
 
+        // Default (first) project: only chat-01 exists at startup — chat-02, chat-03, ... are
+        // created lazily as work actually needs them (ProjectScopedActorTree_260829_oo01 "開始状態
+        // が違う"), not pre-seeded.
+        projectsByKey.put("", actorSystem.getRoot().createChild("project1", new Project()));
         createTab("01");
-        createTab("02");
-        LOG.info("Actor system initialised with " + tabs.size() + " conversation tabs");
+        LOG.info("Actor system initialised with " + tabs.size() + " conversation tab(s)");
+    }
+
+    /**
+     * Creates a new project — its own {@link Project} grouping actor and that project's first
+     * conversation tab. Projects group tabs in the actor tree; they are not isolation boundaries,
+     * so a tab may still {@code ask_chat} a tab in another project.
+     *
+     * @return the new project's first tab's chat id (e.g. {@code "project2-01"})
+     */
+    public synchronized String createProject() {
+        int projectNumber = nextProjectNumber.getAndIncrement();
+        String projectKey = "project" + projectNumber;
+        projectsByKey.put(projectKey, actorSystem.getRoot().createChild(projectKey, new Project()));
+        String chatId = projectKey + "-01";
+        createTab(chatId);
+        return chatId;
+    }
+
+    /**
+     * @param chatId a tab's chat id (e.g. {@code "01"} or {@code "project2-01"})
+     * @return the project key that owns it — {@code ""} for the default project's bare-numbered
+     *         tabs, or the {@code "project<N>"} prefix embedded in {@code chatId} otherwise
+     */
+    private String projectKeyFor(String chatId) {
+        int dash = chatId.lastIndexOf('-');
+        return dash < 0 ? "" : chatId.substring(0, dash);
     }
 
     /**
@@ -132,9 +177,10 @@ public class ChatUiActorSystem {
 
     /**
      * Creates, or returns the existing, {@link ConversationTab} for {@code tabId} as a child of
-     * ROOT, together with its {@link ChatSessionIIAR} and {@link PromptQueue}.
+     * its owning project's {@link Project} actor (not ROOT directly), together with its {@link
+     * ChatSessionIIAR} and {@link PromptQueue}.
      *
-     * @param tabId conversation tab identifier
+     * @param tabId conversation tab identifier (e.g. {@code "01"} or {@code "project2-01"})
      * @return the tab's actor reference
      */
     public synchronized ActorRef<ConversationTab> createTab(String tabId) {
@@ -142,8 +188,12 @@ public class ChatUiActorSystem {
         if (existing != null) {
             return existing;
         }
+        ActorRef<Project> projectRef = projectsByKey.get(projectKeyFor(tabId));
+        if (projectRef == null) {
+            throw new IllegalArgumentException("Unknown project for chat id: " + tabId);
+        }
         ActorRef<ConversationTab> tabRef =
-                actorSystem.getRoot().createChild("chat-" + tabId, new ConversationTab());
+                projectRef.createChild("chat-" + tabId, new ConversationTab());
         tabs.put(tabId, tabRef);
 
         // Tab log multiplexer (150_TabScopedLogging_260826_oo01): this tab's own recent-entries

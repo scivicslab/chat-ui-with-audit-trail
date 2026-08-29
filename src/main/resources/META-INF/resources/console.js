@@ -454,10 +454,32 @@
             .finally(function () { actorsRefreshing = false; });
     }
 
+    // Creates a new, independent project (ProjectScopedActorTree_260829_oo01) and switches the
+    // right pane to its first tab.
+    function createProject() {
+        fetch("api/projects", { method: "POST" })
+            .then(function (r) {
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                return r.json();
+            })
+            .then(function (body) {
+                refreshActors();
+                if (body && body.chatId && window.chatUiSwitchTab) {
+                    window.chatUiSwitchTab(body.chatId);
+                }
+            })
+            .catch(function (err) {
+                var status = document.getElementById("actors-status");
+                if (status) status.textContent = "error: " + err.message;
+            });
+    }
+
     function initActors() {
         var btn = document.getElementById("actors-refresh");
         var auto = document.getElementById("actors-auto");
+        var newProjectBtn = document.getElementById("new-project-btn");
         if (btn) btn.addEventListener("click", refreshActors);
+        if (newProjectBtn) newProjectBtn.addEventListener("click", createProject);
 
         var timer = null;
         function applyAuto() {

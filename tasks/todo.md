@@ -248,3 +248,19 @@
 
 - 実装直後の初回実行で、新規6メソッドを`ChatSessionIIAR.callByActionName`のディスパッチ表に登録し忘れていたため、babysitterループの全遷移が「アクション未発見」で一律失敗し、chat-02の`busy`がtrueのまま固まるバグを踏んだ——新しいTuring-workflowアクションをChatSessionに追加するたびに、この登録を対で行うことを`210_BabysitterLoopWorkflowShape_260828_oo01`に追記した。
 - `revise`ループ（複数回の改訂）・`give-up`パス・2つのフォールバック遷移は、今回の実機テストでは1回で受理される草稿だったため未通過——コードレビューは済んでいるが、実機確認は今後の課題として残る。
+
+## 計画（アクター系統樹を「1 top actor = 1 project」に再構成）
+
+設計文書: `ProjectScopedActorTree_260829_oo01`。
+
+- [x] `Project`クラス新設（ふるまいを持たない、系統樹上の入れ物）
+- [x] `ChatUiActorSystem.init()`：`project1`を作り、その子に`chat-01`だけを作る（`createTab("02")`の事前呼び出しを削除）
+- [x] `createProject()`＋`POST /api/projects`：2つ目以降のプロジェクトと、その最初のタブ`chat-project<N>-01`を作る
+- [x] `console.html`/`console.js`：左ペインに「+」ボタンを追加し、新プロジェクトを作って画面を切り替える
+- [x] `ChatUiActorSystemActorTreeTest`：project入れ子構造・chat-01のみ起動・`createProject`の2ケースに更新
+- [x] `mvn install`（テスト含む）成功、ポート28014へ実機デプロイ。系統樹の形・`POST /api/projects`・chat-01の通常動作を確認
+
+## レビュー
+
+- `CallWatchdog`・`CollaborationGraph`を、いったんプロジェクトごとに1個ずつ作る形で実装したが、これは誤りだった——プロジェクトをまたぐ`ask_chat`を禁止しない以上、待ち行列の連鎖はプロジェクトをまたいで伸びるので、watchdogを分けると循環検知が連鎖の半分しか見えなくなり、またいだ循環を誰も検知できない（変更前は1個だったので検知できていた＝私が入れた退行）。`CollaborationGraph`も同様に、別プロジェクトのタブへの`set_collaborator`が、書いたグラフと読むグラフが別になって黙って消える。両方ともシステム全体で1個に戻し、`Project`は系統樹の見た目の整理だけを担う形にした。
+- `outputMultiplexer`をシングルトンにする本質的な理由は、ログDBへの書き込みが衝突するためであり、`MultiplexerLogHandler`の検索名がハードコードされている点は副次的な制約にすぎない——設計文書の理由づけをこの順に訂正した。
