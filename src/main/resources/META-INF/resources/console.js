@@ -3,9 +3,9 @@
 //   - Actors tab: fetch GET /api/actors and render the actor tree
 //   - Sessions tab: GET /api/sessions?tabId=<active tab>, trace view unchanged (ported from
 //     quarkus-chat-ui3)
-//   - System Log tab: GET /api/chats/<active tab>/log (150_TabScopedLogging_260826_oo01); falls
-//     back to GET /api/logs (LogTap, server-wide) only if no tab is active yet
-//   - Agent Loop tab: GET /api/chats/<active tab>/workflows[/<name>] (AgentLoopTab_260827_oo01),
+//   - System Log tab: GET /api/projects/{p}/chats/{c}/log (150_TabScopedLogging_260826_oo01);
+//     falls back to GET /api/logs (LogTap, server-wide) only if no conversation is active yet
+//   - Agent Loop tab: GET /api/projects/{p}/chats/{c}/workflows[/<name>] (AgentLoopTab_260827_oo01),
 //     read-only YAML viewer ported from quarkus-chat-ui3's own "Agent Loop" tab
 (function () {
     "use strict";
@@ -119,14 +119,22 @@
         });
     }
 
+    // Base path of the active conversation's endpoints, or null if app.js hasn't loaded yet.
+    function activeChatUrl(suffix) {
+        var c = (typeof window.chatUiGetActiveChat === "function") ? window.chatUiGetActiveChat() : null;
+        if (!c) return null;
+        return "api/projects/" + encodeURIComponent(c.projectId)
+                + "/chats/" + encodeURIComponent(c.chatId) + suffix;
+    }
+
     var logsRefreshing = false;
     var lastLogSig = null;
     function refreshLogs() {
         if (logsRefreshing) return;
         logsRefreshing = true;
         var status = document.getElementById("logs-status");
-        var tabId = (typeof window.chatUiGetActiveTabId === "function") ? window.chatUiGetActiveTabId() : null;
-        var url = tabId ? ("api/chats/" + encodeURIComponent(tabId) + "/log") : "api/logs";
+        var chatLogUrl = activeChatUrl("/log");
+        var url = chatLogUrl || "api/logs";
         fetch(url)
             .then(function (r) {
                 if (!r.ok) throw new Error("HTTP " + r.status);
@@ -134,7 +142,7 @@
             })
             .then(function (entries) {
                 entries = Array.isArray(entries) ? entries : [];
-                if (tabId) entries = fromTabLogShape(entries);
+                if (chatLogUrl) entries = fromTabLogShape(entries);
                 var sig = JSON.stringify(entries);
                 if (sig === lastLogSig) return;   // unchanged (e.g. idle): do not touch the DOM
                 lastLogSig = sig;
@@ -173,7 +181,7 @@
         applyAuto();
     }
 
-    // ── Agent Loop tab (GET /api/chats/<active tab>/workflows[/<name>]) — read-only YAML viewer,
+    // ── Agent Loop tab (GET /api/projects/{p}/chats/{c}/workflows[/<name>]) — read-only YAML viewer,
     // ported near-verbatim from quarkus-chat-ui3's console.js, made tab-scoped (AgentLoopTab_260827_oo01).
     function wfStatus(msg) {
         var s = document.getElementById("wf-status");
@@ -236,9 +244,9 @@
     function wfLoad(name) {
         if (!name) return;
         wfStatus("loading…");
-        var tabId = (typeof window.chatUiGetActiveTabId === "function") ? window.chatUiGetActiveTabId() : null;
-        if (!tabId) { wfStatus("no active tab"); return; }
-        fetch("api/chats/" + encodeURIComponent(tabId) + "/workflows/" + encodeURIComponent(name))
+        var wfUrl = activeChatUrl("/workflows/" + encodeURIComponent(name));
+        if (!wfUrl) { wfStatus("no active conversation"); return; }
+        fetch(wfUrl)
             .then(function (r) { return r.json(); })
             .then(function (d) {
                 if (!d || !d.yaml) { wfStatus("not found"); return; }
@@ -250,9 +258,9 @@
     function wfPopulate(then) {
         var sel = document.getElementById("wf-select");
         if (!sel) return;
-        var tabId = (typeof window.chatUiGetActiveTabId === "function") ? window.chatUiGetActiveTabId() : null;
-        if (!tabId) { wfStatus("no active tab"); return; }
-        fetch("api/chats/" + encodeURIComponent(tabId) + "/workflows")
+        var wfListUrl = activeChatUrl("/workflows");
+        if (!wfListUrl) { wfStatus("no active conversation"); return; }
+        fetch(wfListUrl)
             .then(function (r) { return r.json(); })
             .then(function (arr) {
                 sel.textContent = "";
@@ -360,17 +368,17 @@
         // "chat-<id>" (ConversationTab) nodes double as the tab switcher — click the name (not
         // the fold toggle) to switch the chat pane, instead of a separate bar in that pane
         // (ActorTreeTabSwitcher_260826_oo01). Children like "chat-<id>.chat" don't match.
-        var tabMatch = /^chat-([^.]+)$/.exec(node.name);
-        if (tabMatch && typeof window.chatUiSwitchTab === "function") {
+        var tabMatch = /^([^/]+)\/chat-([^.]+)$/.exec(node.name);
+        if (tabMatch && typeof window.chatUiSwitchChat === "function") {
             name.classList.add("tab-switchable");
-            if (typeof window.chatUiGetActiveTabId === "function"
-                    && window.chatUiGetActiveTabId() === tabMatch[1]) {
+            var active = (typeof window.chatUiGetActiveChat === "function") ? window.chatUiGetActiveChat() : null;
+            if (active && active.projectId === tabMatch[1] && active.chatId === tabMatch[2]) {
                 name.classList.add("tab-active");
             }
-            name.title = "Switch to tab " + tabMatch[1];
+            name.title = "Switch to " + tabMatch[1] + " / " + tabMatch[2];
             name.addEventListener("click", function (e) {
                 e.stopPropagation(); // don't also trigger the fold/unfold toggle on the label
-                window.chatUiSwitchTab(tabMatch[1]);
+                window.chatUiSwitchChat(tabMatch[1], tabMatch[2]);
                 refreshActors(); // re-render so the tab-active highlight moves immediately
                 // Right pane follows the newly active tab (150_TabScopedLogging_260826_oo01) —
                 // re-fetch immediately rather than waiting for the next poll/tab-open.
@@ -464,8 +472,8 @@
             })
             .then(function (body) {
                 refreshActors();
-                if (body && body.chatId && window.chatUiSwitchTab) {
-                    window.chatUiSwitchTab(body.chatId);
+                if (body && body.projectId && window.chatUiSwitchChat) {
+                    window.chatUiSwitchChat(body.projectId, "01");
                 }
             })
             .catch(function (err) {
@@ -529,8 +537,9 @@
                 if (d.dataset.sessionId) openIds[d.dataset.sessionId] = true;
             });
         }
-        var tabId = (typeof window.chatUiGetActiveTabId === "function") ? window.chatUiGetActiveTabId() : null;
-        var url = tabId ? ("api/sessions?tabId=" + encodeURIComponent(tabId)) : "api/sessions";
+        var c = (typeof window.chatUiGetActiveChat === "function") ? window.chatUiGetActiveChat() : null;
+        var url = c ? ("api/sessions?tabId=" + encodeURIComponent(c.projectId + "/chat-" + c.chatId))
+                    : "api/sessions";
         return fetch(url).then(function (r) { return r.json(); }).then(function (list) {
             if (!el) return;
             el.textContent = "";

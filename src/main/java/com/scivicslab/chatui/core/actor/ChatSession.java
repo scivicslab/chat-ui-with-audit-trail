@@ -85,8 +85,10 @@ public class ChatSession extends Interpreter {
     private String watchdogName;
     /** Name of the sibling PromptQueue, or {@code null} until wired. */
     private String promptQueueName;
-    /** This session's conversation tab id (e.g. {@code "01"}), used to key its I/O-log session. */
-    private String tabId;
+    /** This session's owning project id (e.g. {@code "project1"}) — see {@code Terminology_260829_oo01}. */
+    private String projectId;
+    /** This session's conversation id within its project (e.g. {@code "01"}), used to key its I/O-log session. */
+    private String chatId;
     /** The shared {@link CallWatchdog}, consulted by the {@code ask_chat} tool before it waits on
      *  another tab — distinct from {@link #watchdogName} (an unrelated, unported StallMonitor field). */
     private ActorRef<CallWatchdog> watchdogRef;
@@ -157,7 +159,8 @@ public class ChatSession extends Interpreter {
             - write(path, content): save text to a file under the working directory. Requires TWO
               <parameter> tags in the same invoke block: one named "path", one named "content".
             - ask_chat(chatId, prompt, timeoutSeconds): send an instruction to another conversation
-              tab (e.g. "02") and wait for its reply. Requires "chatId" and "prompt" <parameter>
+              (e.g. "02" for one in your own project, or "project2/02" to reach one in another
+              project) and wait for its reply. Requires "chatId" and "prompt" <parameter>
               tags; "timeoutSeconds" is an optional third <parameter> tag (default 60) — pass a
               larger value if you expect the target to take a while, e.g. because it will itself
               call ask_chat on another tab. Use this to direct or review another tab's work.
@@ -298,10 +301,17 @@ public class ChatSession extends Interpreter {
     public void setPromptQueueName(String promptQueueName) { this.promptQueueName = promptQueueName; }
 
     /**
-     * @param tabId this session's conversation tab id, used to key its I/O-log session
-     *              ({@link IoLogStore#ensureSession(String)})
+     * @param projectId this session's owning project id, e.g. {@code "project1"}
+     * @param chatId    this session's conversation id within that project, used to key its
+     *                  I/O-log session ({@link IoLogStore#ensureSession(String)})
      */
-    public void setTabId(String tabId) { this.tabId = tabId; }
+    public void setChatIdentity(String projectId, String chatId) {
+        this.projectId = projectId;
+        this.chatId = chatId;
+    }
+
+    /** @return this session's qualified conversation name, e.g. {@code "project1/chat-01"} */
+    private String myChatName() { return ChatUiActorSystem.chatActorName(projectId, chatId); }
 
     /** @param watchdogRef the shared {@link CallWatchdog}, for the {@code ask_chat} tool */
     public void setWatchdogRef(ActorRef<CallWatchdog> watchdogRef) { this.watchdogRef = watchdogRef; }
@@ -312,16 +322,16 @@ public class ChatSession extends Interpreter {
     }
 
     /**
-     * Forwards one entry to this session's tab log multiplexer ({@code chat-<tabId>.log}), in
+     * Forwards one entry to this session's tab log multiplexer ({@code <projectId>/chat-<chatId>.log}), in
      * addition to (not instead of) the existing {@code logger.xxx(...)} calls near each call site —
      * those keep flowing to {@link com.scivicslab.chatui.logging.LogTap} unchanged
      * ({@code 150_TabScopedLogging_260826_oo01} "既存のLOG.xxx()を置き換えず"). Silently no-ops if
      * the actor system or tab id isn't wired yet, or the tab log actor isn't found.
      */
     private void logToTab(String type, String message) {
-        if (system == null || tabId == null) return;
+        if (system == null || chatId == null) return;
         try {
-            IIActorRef<?> tabLog = system.getIIActor("chat-" + tabId + ".log");
+            IIActorRef<?> tabLog = system.getIIActor(myChatName() + ".log");
             if (tabLog == null) return;
             JSONObject args = new JSONObject();
             args.put("source", "ChatSession");
@@ -538,7 +548,7 @@ public class ChatSession extends Interpreter {
         busy = true;
         recordHistory("user", prompt);
         // Open (lazily) the conversation's I/O-log session and number this turn for the Sessions tab.
-        final long ioSession = (ioLog != null) ? ioLog.ensureSession(tabId) : -1;
+        final long ioSession = (ioLog != null) ? ioLog.ensureSession(myChatName()) : -1;
         final int ioTurnNo = ++ioTurn;
         if (resultKey != null) {
             pendingResultKeys.remove(resultKey);
@@ -670,7 +680,7 @@ public class ChatSession extends Interpreter {
         this.turnSelf = self;
         this.turnDone = done;
         this.turnNoThink = noThink;
-        this.ioSession = (ioLog != null) ? ioLog.ensureSession(tabId) : -1;
+        this.ioSession = (ioLog != null) ? ioLog.ensureSession(myChatName()) : -1;
         this.ioTurnNo = ++ioTurn;
         this.pendingCalls = null;
         this.finalAnswer = null;
@@ -916,11 +926,11 @@ public class ChatSession extends Interpreter {
     public ActionResult requestDraft() {
         String workerChatId = resolveWorker();
         if (workerChatId == null) {
-            lastCollaborationError = "no collaborator with role 'worker' set for tab " + tabId
+            lastCollaborationError = "no collaborator with role 'worker' set for " + myChatName()
                     + " (use set_collaborator first)";
             return new ActionResult(false, lastCollaborationError);
         }
-        String reply = AskChatTool.ask(system, watchdogRef, tabId, workerChatId, pendingPrompt, null);
+        String reply = AskChatTool.ask(system, watchdogRef, projectId, chatId, workerChatId, pendingPrompt, null);
         if (reply == null || reply.startsWith("error:")) {
             lastCollaborationError = reply != null ? reply : "no reply from worker";
             return new ActionResult(false, lastCollaborationError);
@@ -984,12 +994,12 @@ public class ChatSession extends Interpreter {
     public ActionResult requestRevision() {
         String workerChatId = resolveWorker();
         if (workerChatId == null) {
-            lastCollaborationError = "no collaborator with role 'worker' set for tab " + tabId
+            lastCollaborationError = "no collaborator with role 'worker' set for " + myChatName()
                     + " (use set_collaborator first)";
             return new ActionResult(false, lastCollaborationError);
         }
         String prompt = "Please revise the previous draft to address this feedback:\n" + revisionNote;
-        String reply = AskChatTool.ask(system, watchdogRef, tabId, workerChatId, prompt, null);
+        String reply = AskChatTool.ask(system, watchdogRef, projectId, chatId, workerChatId, prompt, null);
         if (reply == null || reply.startsWith("error:")) {
             lastCollaborationError = reply != null ? reply : "no reply from worker";
             return new ActionResult(false, lastCollaborationError);
@@ -1019,7 +1029,7 @@ public class ChatSession extends Interpreter {
     private String resolveWorker() {
         if (collaborationGraphRef == null) return null;
         try {
-            return collaborationGraphRef.ask(g -> g.getCollaborator(tabId, "worker")).get(5, TimeUnit.SECONDS);
+            return collaborationGraphRef.ask(g -> g.getCollaborator(myChatName(), "worker")).get(5, TimeUnit.SECONDS);
         } catch (Exception e) {
             logger.log(Level.WARNING, "resolveWorker: CollaborationGraph lookup failed", e);
             return null;
@@ -1067,13 +1077,13 @@ public class ChatSession extends Interpreter {
             case "web_search" -> WebSearchTool.searchAndFetch(extractInput(args, "query"));
             case "fetch" -> FetchTool.fetch(extractInput(args, "url"));
             case "search_docs" -> DocSearchTool.search(extractInput(args, "query"), 0);
-            case "ask_chat" -> AskChatTool.ask(system, watchdogRef, tabId,
+            case "ask_chat" -> AskChatTool.ask(system, watchdogRef, projectId, chatId,
                     extractInput(args, "chatId"), extractInput(args, "prompt"),
                     parseIntOrNull(extractInput(args, "timeoutSeconds")));
-            case "set_workflow" -> SetWorkflowTool.setWorkflow(system,
+            case "set_workflow" -> SetWorkflowTool.setWorkflow(system, projectId,
                     extractInput(args, "chatId"), extractInput(args, "yaml"));
             case "set_collaborator" -> SetCollaboratorTool.setCollaborator(collaborationGraphRef,
-                    extractInput(args, "chatId"), extractInput(args, "role"),
+                    myChatName(), extractInput(args, "chatId"), extractInput(args, "role"),
                     extractInput(args, "collaboratorChatId"));
             default -> "error: unknown tool '" + tc.name() + "'";
         };
@@ -1125,7 +1135,7 @@ public class ChatSession extends Interpreter {
         // Reserve the session so a user prompt cannot start while the autonomous turn streams.
         busy = true;
         emitToSse(ChatEvent.status(provider.getCurrentModel(), provider.getSessionId(), true));
-        final long ioSession = (ioLog != null) ? ioLog.ensureSession(tabId) : -1;
+        final long ioSession = (ioLog != null) ? ioLog.ensureSession(myChatName()) : -1;
         ActorRef<LlmProvider> providerRef = providerRef();
 
         providerRef.ask(p -> {
@@ -1265,7 +1275,7 @@ public class ChatSession extends Interpreter {
         conversationHistory.clear();
         historySnapshot.set(List.of());
         // New conversation: end the current I/O-log session and renumber turns from 1.
-        if (ioLog != null) ioLog.resetSession(tabId);
+        if (ioLog != null) ioLog.resetSession(myChatName());
         ioTurn = 0;
     }
 

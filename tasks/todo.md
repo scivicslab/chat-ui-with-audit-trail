@@ -264,3 +264,21 @@
 
 - `CallWatchdog`・`CollaborationGraph`を、いったんプロジェクトごとに1個ずつ作る形で実装したが、これは誤りだった——プロジェクトをまたぐ`ask_chat`を禁止しない以上、待ち行列の連鎖はプロジェクトをまたいで伸びるので、watchdogを分けると循環検知が連鎖の半分しか見えなくなり、またいだ循環を誰も検知できない（変更前は1個だったので検知できていた＝私が入れた退行）。`CollaborationGraph`も同様に、別プロジェクトのタブへの`set_collaborator`が、書いたグラフと読むグラフが別になって黙って消える。両方ともシステム全体で1個に戻し、`Project`は系統樹の見た目の整理だけを担う形にした。
 - `outputMultiplexer`をシングルトンにする本質的な理由は、ログDBへの書き込みが衝突するためであり、`MultiplexerLogHandler`の検索名がハードコードされている点は副次的な制約にすぎない——設計文書の理由づけをこの順に訂正した。
+
+## 計画（プロジェクト接頭辞・用語統一・RESTの2階層化）
+
+設計文書: `Terminology_260829_oo01`（用語定義）・`ProjectNamespacePrefix_260829_oo01`。
+
+- [x] 用語を決めてドキュメント化（ROOTアクター・プロジェクト・会話・アクター名・RESTのパス）
+- [x] `ChatUiActorSystem`：デフォルトのプロジェクトIDを`project1`に、アクター名を`project1/chat-01`形式に、`createTab(tabId)`を`createChat(projectId, chatId)`に
+- [x] `ChatSession`：`tabId`を`projectId`＋`chatId`に分離、`setChatIdentity`へ
+- [x] 3つのツール：接頭辞付きの名前で相手を解決し、越境を判定（`ask_chat`は記録のみ、`set_workflow`・`set_collaborator`は拒否）
+- [x] REST：`/api/projects/{projectId}/chats/{chatId}/...`の2階層へ
+- [x] `app.js`/`console.js`：会話の同一性を2座標（projectId＋chatId）に、`localStorage`も2つの値に、旧形式からの移行を含む
+- [x] テスト更新、`mvn install`（テスト含む）成功
+- [x] ポート28014へ実機デプロイ。系統樹・全エンドポイント・通常のチャット・越境`set_workflow`の拒否・ブラウザUI（Playwright）を確認
+
+## レビュー
+
+- プロジェクト作成を`@Path("/api/projects")`の別リソースクラスに置いたところ、会話のエンドポイント（`@Path("/api")`のクラス）が前方一致で覆い隠され、`/api/projects/{id}/chats/...`が全て404になった。JAX-RSはクラスの`@Path`が最も長く一致するリソースクラスを先に選ぶため。1つのリソースクラスにまとめて解決した。
+- プロジェクトをまたぐ呼び出しは禁止しない方針だが、相手の動き方を書き換える`set_workflow`・`set_collaborator`だけは、窓口（未設計）ができるまで拒否する形にした。`ask_chat`は相手の郵便受けに入れるだけなので越境を許し、ログに記録する。

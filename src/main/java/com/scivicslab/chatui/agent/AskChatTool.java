@@ -3,6 +3,7 @@ package com.scivicslab.chatui.agent;
 import com.scivicslab.chatui.core.actor.CallWatchdog;
 import com.scivicslab.chatui.core.actor.ChatSession;
 import com.scivicslab.chatui.core.actor.ChatSessionIIAR;
+import com.scivicslab.chatui.core.actor.ChatUiActorSystem;
 import com.scivicslab.chatui.core.actor.PromptQueue;
 import com.scivicslab.chatui.core.rest.ChatEvent;
 import com.scivicslab.pojoactor.core.ActorRef;
@@ -39,8 +40,10 @@ public final class AskChatTool {
     /**
      * @param system      this tab's actor system, used to resolve the target tab's actors
      * @param watchdog    the shared {@link CallWatchdog}
-     * @param myTabId     the calling tab's own id (the caller of {@code ask_chat})
-     * @param targetTabId the tab id to send {@code prompt} to
+     * @param myProjectId the calling conversation's project id
+     * @param myChatId    the calling conversation's own id within that project
+     * @param target      the target as written by the caller — a bare id ({@code "02"}) for this
+     *                    project, or a qualified one ({@code "project2/02"}) to cross into another
      * @param prompt      the instruction to send
      * @param timeoutSeconds how long to wait for the target's reply, or {@code null}/non-positive to
      *                       use {@link #DEFAULT_WAIT_TIMEOUT_SECONDS} — callers directing a target
@@ -49,31 +52,40 @@ public final class AskChatTool {
      * @return the target tab's reply text, or an {@code error: ...} string
      */
     public static String ask(IIActorSystem system, ActorRef<CallWatchdog> watchdog,
-                              String myTabId, String targetTabId, String prompt, Integer timeoutSeconds) {
+                              String myProjectId, String myChatId, String target,
+                              String prompt, Integer timeoutSeconds) {
         int waitTimeoutSeconds = (timeoutSeconds != null && timeoutSeconds > 0)
                 ? timeoutSeconds : DEFAULT_WAIT_TIMEOUT_SECONDS;
-        if (targetTabId == null || targetTabId.isBlank()) return "error: chatId is required";
+        if (target == null || target.isBlank()) return "error: chatId is required";
         if (prompt == null || prompt.isBlank()) return "error: prompt is required";
-        if (targetTabId.equals(myTabId)) return "error: cannot ask_chat yourself";
 
-        IIActorRef<?> targetIIActor = system.getIIActor("chat-" + targetTabId + ".chat");
-        if (!(targetIIActor instanceof ChatSessionIIAR targetChatSessionIIAR)) {
-            return "error: chat not found: " + targetTabId;
+        String myName = ChatUiActorSystem.chatActorName(myProjectId, myChatId);
+        String targetName = ChatUiActorSystem.resolveChatName(myProjectId, target);
+        if (targetName.equals(myName)) return "error: cannot ask_chat yourself";
+        if (!targetName.startsWith(myProjectId + "/")) {
+            // Allowed, but recorded: ask_chat only puts a message in the target's mailbox, so it
+            // needs no gateway — crossing is still worth noting (ProjectNamespacePrefix_260829_oo01).
+            LOG.info("ask_chat crosses projects: " + myName + " -> " + targetName);
         }
-        ActorRef<PromptQueue> targetQueueRef = system.getActor("chat-" + targetTabId + ".queue");
+
+        IIActorRef<?> targetIIActor = system.getIIActor(targetName + ".chat");
+        if (!(targetIIActor instanceof ChatSessionIIAR targetChatSessionIIAR)) {
+            return "error: chat not found: " + target;
+        }
+        ActorRef<PromptQueue> targetQueueRef = system.getActor(targetName + ".queue");
         if (targetQueueRef == null) {
-            return "error: chat not found: " + targetTabId;
+            return "error: chat not found: " + target;
         }
 
         boolean allowed;
         try {
-            allowed = watchdog.ask(w -> w.beginWait(myTabId, targetTabId)).get(5, TimeUnit.SECONDS);
+            allowed = watchdog.ask(w -> w.beginWait(myName, targetName)).get(5, TimeUnit.SECONDS);
         } catch (Exception e) {
             LOG.log(Level.WARNING, "ask_chat: watchdog check failed", e);
             return "error: watchdog check failed: " + e.getMessage();
         }
         if (!allowed) {
-            return "error: refused — asking " + targetTabId + " would create a circular wait";
+            return "error: refused — asking " + target + " would create a circular wait";
         }
 
         try {
@@ -81,22 +93,22 @@ public final class AskChatTool {
             String resultKey = UUID.randomUUID().toString();
             targetQueueRef.tell(q -> q.enqueue(prompt, null, "queue",
                     (ChatEvent event) -> {},
-                    targetChatSessionIIAR.asChatSessionRef(), "agent:ask_chat:" + myTabId, resultKey,
+                    targetChatSessionIIAR.asChatSessionRef(), "agent:ask_chat:" + myName, resultKey,
                     done));
             try {
                 done.get(waitTimeoutSeconds, TimeUnit.SECONDS);
             } catch (TimeoutException e) {
-                return "error: chat " + targetTabId + " did not respond within " + waitTimeoutSeconds + "s";
+                return "error: chat " + target + " did not respond within " + waitTimeoutSeconds + "s";
             }
             String reply = targetChatSessionIIAR
                     .ask(interp -> ((ChatSession) interp).getCompletedResult(resultKey))
                     .get(5, TimeUnit.SECONDS);
-            return reply != null ? reply : "error: no result from chat " + targetTabId;
+            return reply != null ? reply : "error: no result from chat " + target;
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "ask_chat: call to " + targetTabId + " failed", e);
+            LOG.log(Level.WARNING, "ask_chat: call to " + target + " failed", e);
             return "error: ask_chat failed: " + e.getMessage();
         } finally {
-            watchdog.tell(w -> w.endWait(myTabId));
+            watchdog.tell(w -> w.endWait(myName));
         }
     }
 }

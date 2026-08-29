@@ -35,13 +35,27 @@ import java.util.logging.Logger;
  * relevant actor through {@link ChatUiActorSystem} on each call, the same shape the reference
  * {@code ChatResource} (quarkus-chat-ui/core) uses for its single global conversation.</p>
  */
-@Path("/api")
+@Path("/api/projects")
 public class ChatResource {
 
     private static final Logger LOG = Logger.getLogger(ChatResource.class.getName());
 
     @Inject
     ChatUiActorSystem actorSystem;
+
+    // ── Projects ──────────────────────────────────────────────────────────────
+
+    /**
+     * Creates a new project and its first conversation
+     * ({@code ProjectScopedActorTree_260829_oo01}).
+     *
+     * @return {@code {"projectId": "project<N>"}}; its first conversation's id is {@code "01"}
+     */
+    @POST
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response createProject() {
+        return Response.ok(Map.of("projectId", actorSystem.createProject())).build();
+    }
 
     // ── SSE stream ────────────────────────────────────────────────────────────
 
@@ -52,12 +66,12 @@ public class ChatResource {
      * @return the event stream, each element a JSON-serialized {@link ChatEvent}
      */
     @GET
-    @Path("/chats/{chatId}/chat/stream")
+    @Path("/{projectId}/chats/{chatId}/chat/stream")
     @Produces(MediaType.SERVER_SENT_EVENTS)
     @RestSseElementType(MediaType.TEXT_PLAIN)
-    public Multi<String> stream(@PathParam("chatId") String chatId) {
-        actorSystem.createTab(chatId);
-        ActorRef<SseConnection> sseRef = actorSystem.getSseConnection(chatId);
+    public Multi<String> stream(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
+        actorSystem.createChat(projectId, chatId);
+        ActorRef<SseConnection> sseRef = actorSystem.getSseConnection(projectId, chatId);
         try {
             return sseRef.ask(SseConnection::openStream).get(5, TimeUnit.SECONDS);
         } catch (Exception e) {
@@ -79,10 +93,10 @@ public class ChatResource {
      * @return {@code {"type":"accepted"}}, or a 400 if {@code text} is missing/blank
      */
     @POST
-    @Path("/chats/{chatId}/chat")
+    @Path("/{projectId}/chats/{chatId}/chat")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
-    public Response chat(@PathParam("chatId") String chatId, Map<String, Object> body) {
+    public Response chat(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId, Map<String, Object> body) {
         Object textVal = body != null ? body.get("text") : null;
         Object modelVal = body != null ? body.get("model") : null;
         Object noThinkVal = body != null ? body.get("noThink") : null;
@@ -93,10 +107,10 @@ public class ChatResource {
             return Response.status(400).entity(Map.of("type", "error", "message", "text is required")).build();
         }
 
-        actorSystem.createTab(chatId);
-        ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(chatId);
-        ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(chatId);
-        ActorRef<SseConnection> sseRef = actorSystem.getSseConnection(chatId);
+        actorSystem.createChat(projectId, chatId);
+        ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
+        ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(projectId, chatId);
+        ActorRef<SseConnection> sseRef = actorSystem.getSseConnection(projectId, chatId);
 
         java.util.function.Consumer<ChatEvent> emitter = event -> sseRef.tell(a -> a.emit(event));
         promptQueueRef.tell(q -> q.enqueue(text, model, "queue", emitter,
@@ -115,11 +129,11 @@ public class ChatResource {
      * @return up to the last 200 {@link ChatSession.HistoryEntry} records
      */
     @GET
-    @Path("/chats/{chatId}/conversation")
+    @Path("/{projectId}/chats/{chatId}/conversation")
     @Produces(MediaType.APPLICATION_JSON)
-    public List<ChatSession.HistoryEntry> conversation(@PathParam("chatId") String chatId) {
-        actorSystem.createTab(chatId);
-        ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(chatId);
+    public List<ChatSession.HistoryEntry> conversation(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
+        actorSystem.createChat(projectId, chatId);
+        ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
         return chatSessionIIAR.getHistorySnapshotDirect();
     }
 
@@ -131,11 +145,11 @@ public class ChatResource {
      * @return {@code {"busy": true|false}}
      */
     @GET
-    @Path("/chats/{chatId}/status")
+    @Path("/{projectId}/chats/{chatId}/status")
     @Produces(MediaType.APPLICATION_JSON)
-    public Map<String, Object> status(@PathParam("chatId") String chatId) {
-        actorSystem.createTab(chatId);
-        ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(chatId);
+    public Map<String, Object> status(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
+        actorSystem.createChat(projectId, chatId);
+        ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
         return Map.of("busy", chatSessionIIAR.isBusyDirect());
     }
 
@@ -148,11 +162,11 @@ public class ChatResource {
      * @return {@code {"size": N, "hasPending": bool}}
      */
     @GET
-    @Path("/chats/{chatId}/queue")
+    @Path("/{projectId}/chats/{chatId}/queue")
     @Produces(MediaType.APPLICATION_JSON)
-    public Map<String, Object> queue(@PathParam("chatId") String chatId) {
-        actorSystem.createTab(chatId);
-        ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(chatId);
+    public Map<String, Object> queue(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
+        actorSystem.createChat(projectId, chatId);
+        ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(projectId, chatId);
         try {
             List<PromptQueue.QueueEntry> items = promptQueueRef.ask(PromptQueue::snapshot).get(5, TimeUnit.SECONDS);
             return Map.of("size", items.size(), "hasPending", !items.isEmpty(), "items", items);
@@ -171,10 +185,10 @@ public class ChatResource {
      *         doesn't exist yet (no messages sent, nothing logged)
      */
     @GET
-    @Path("/chats/{chatId}/log")
+    @Path("/{projectId}/chats/{chatId}/log")
     @Produces(MediaType.APPLICATION_JSON)
-    public List<RecentEntriesAccumulator.Entry> tabLog(@PathParam("chatId") String chatId) {
-        List<RecentEntriesAccumulator.Entry> entries = actorSystem.getTabLogEntries(chatId);
+    public List<RecentEntriesAccumulator.Entry> tabLog(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
+        List<RecentEntriesAccumulator.Entry> entries = actorSystem.getChatLogEntries(projectId, chatId);
         return entries != null ? entries : List.of();
     }
 
@@ -187,10 +201,10 @@ public class ChatResource {
      * @param index position in the queue (0 = next to send)
      */
     @DELETE
-    @Path("/chats/{chatId}/queue/{index}")
+    @Path("/{projectId}/chats/{chatId}/queue/{index}")
     @Produces(MediaType.APPLICATION_JSON)
-    public Response removeQueueItem(@PathParam("chatId") String chatId, @PathParam("index") int index) {
-        ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(chatId);
+    public Response removeQueueItem(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId, @PathParam("index") int index) {
+        ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(projectId, chatId);
         if (promptQueueRef == null) return Response.status(404).build();
         try {
             boolean removed = promptQueueRef.ask(q -> q.removeAt(index)).get(5, TimeUnit.SECONDS);
@@ -209,12 +223,12 @@ public class ChatResource {
      * @param body  {@code {"direction": "up"|"down"}}
      */
     @POST
-    @Path("/chats/{chatId}/queue/{index}/move")
+    @Path("/{projectId}/chats/{chatId}/queue/{index}/move")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
-    public Response moveQueueItem(@PathParam("chatId") String chatId, @PathParam("index") int index,
+    public Response moveQueueItem(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId, @PathParam("index") int index,
                                    Map<String, Object> body) {
-        ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(chatId);
+        ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(projectId, chatId);
         if (promptQueueRef == null) return Response.status(404).build();
         int direction = "down".equals(body != null ? body.get("direction") : null) ? 1 : -1;
         try {
@@ -235,12 +249,12 @@ public class ChatResource {
      * @param body  {@code {"auto": true|false}}
      */
     @POST
-    @Path("/chats/{chatId}/queue/{index}/auto")
+    @Path("/{projectId}/chats/{chatId}/queue/{index}/auto")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
-    public Response setQueueItemAuto(@PathParam("chatId") String chatId, @PathParam("index") int index,
+    public Response setQueueItemAuto(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId, @PathParam("index") int index,
                                       Map<String, Object> body) {
-        ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(chatId);
+        ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(projectId, chatId);
         if (promptQueueRef == null) return Response.status(404).build();
         boolean auto = !Boolean.FALSE.equals(body != null ? body.get("auto") : null);
         try {
@@ -260,11 +274,11 @@ public class ChatResource {
      * @param chatId conversation tab identifier
      */
     @POST
-    @Path("/chats/{chatId}/queue/advance")
+    @Path("/{projectId}/chats/{chatId}/queue/advance")
     @Produces(MediaType.APPLICATION_JSON)
-    public Response advanceQueue(@PathParam("chatId") String chatId) {
-        ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(chatId);
-        ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(chatId);
+    public Response advanceQueue(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
+        ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(projectId, chatId);
+        ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
         if (promptQueueRef == null || chatSessionIIAR == null) return Response.status(404).build();
         promptQueueRef.tell(q -> q.advance(chatSessionIIAR.asChatSessionRef()));
         return Response.ok(Map.of("type", "accepted")).build();
@@ -277,11 +291,11 @@ public class ChatResource {
      * @return the provider's {@link LlmProvider.ModelEntry} list
      */
     @GET
-    @Path("/chats/{chatId}/models")
+    @Path("/{projectId}/chats/{chatId}/models")
     @Produces(MediaType.APPLICATION_JSON)
-    public List<LlmProvider.ModelEntry> models(@PathParam("chatId") String chatId) {
-        actorSystem.createTab(chatId);
-        ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(chatId);
+    public List<LlmProvider.ModelEntry> models(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
+        actorSystem.createChat(projectId, chatId);
+        ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
         try {
             return chatSessionIIAR.ask(interp -> ((ChatSession) interp).getAvailableModels()).get(5, TimeUnit.SECONDS);
         } catch (Exception e) {
@@ -305,11 +319,11 @@ public class ChatResource {
      * @return this tab's workflow catalog, agent loop first
      */
     @GET
-    @Path("/chats/{chatId}/workflows")
+    @Path("/{projectId}/chats/{chatId}/workflows")
     @Produces(MediaType.APPLICATION_JSON)
-    public List<WorkflowInfo> workflows(@PathParam("chatId") String chatId) {
-        actorSystem.createTab(chatId);
-        ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(chatId);
+    public List<WorkflowInfo> workflows(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
+        actorSystem.createChat(projectId, chatId);
+        ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
         String agentLoopFile = chatSessionIIAR.getAgentLoopWorkflowFile();
         String promptFile;
         try {
@@ -337,9 +351,9 @@ public class ChatResource {
      * @return {@code {"name": ..., "yaml": ..., "editable": false}}, or 404 if not found
      */
     @GET
-    @Path("/chats/{chatId}/workflows/{name}")
+    @Path("/{projectId}/chats/{chatId}/workflows/{name}")
     @Produces(MediaType.APPLICATION_JSON)
-    public Response workflowYaml(@PathParam("chatId") String chatId, @PathParam("name") String name) {
+    public Response workflowYaml(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId, @PathParam("name") String name) {
         String resource = "/workflows/" + name + ".yaml";
         try (java.io.InputStream in = getClass().getResourceAsStream(resource)) {
             if (in == null) {
@@ -361,30 +375,37 @@ public class ChatResource {
     // ── Tab list (browser tab switcher) ─────────────────────────────────────────
 
     /**
-     * Lists the ids of all conversation tabs created so far, for the browser's tab switcher.
+     * Lists the ids of one project's conversations, for the browser's switcher.
      *
-     * @return tab ids, sorted for a stable display order
+     * @param projectId owning project's id
+     * @return conversation ids within that project, sorted for a stable display order
      */
     @GET
-    @Path("/chats")
+    @Path("/{projectId}/chats")
     @Produces(MediaType.APPLICATION_JSON)
-    public List<String> tabs() {
-        return actorSystem.getTabIds().stream().sorted().toList();
+    public List<String> chats(@PathParam("projectId") String projectId) {
+        String prefix = projectId + "/chat-";
+        return actorSystem.getChatNames().stream()
+                .filter(name -> name.startsWith(prefix))
+                .map(name -> name.substring(prefix.length()))
+                .sorted()
+                .toList();
     }
 
     /**
-     * Creates {@code chatId} if it does not already exist. {@code POST /tabs/{chatId}/chat} also
-     * creates the tab lazily on first prompt, so this exists only for the "+ New Tab" button,
-     * which needs the (initially empty) tab to appear in the tab list before any prompt is sent.
+     * Creates the conversation if it does not already exist. Sending a prompt also creates it
+     * lazily, so this exists only for the "+ New Chat" button, which needs the (initially empty)
+     * conversation to appear in the list before any prompt is sent.
      *
-     * @param chatId conversation tab identifier
+     * @param projectId owning project's id
+     * @param chatId    conversation id within that project
      * @return {@code {"type": "created"}}
      */
     @POST
-    @Path("/chats/{chatId}")
+    @Path("/{projectId}/chats/{chatId}")
     @Produces(MediaType.APPLICATION_JSON)
-    public Response createTab(@PathParam("chatId") String chatId) {
-        actorSystem.createTab(chatId);
+    public Response createChat(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
+        actorSystem.createChat(projectId, chatId);
         return Response.ok(Map.of("type", "created")).build();
     }
 }

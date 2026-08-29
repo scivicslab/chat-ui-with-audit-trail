@@ -36,9 +36,11 @@ class ChatUiActorSystemActorTreeTest {
         ActorNode project1 = root.children().stream()
                 .filter(n -> "project1".equals(n.name())).findFirst().orElseThrow();
         List<String> project1ChildNames = project1.children().stream().map(ActorNode::name).toList();
-        assertTrue(project1ChildNames.contains("chat-01"), "expected chat-01 under project1, got " + project1ChildNames);
+        assertTrue(project1ChildNames.contains("project1/chat-01"),
+                "expected project1/chat-01 under project1, got " + project1ChildNames);
         // chat-02 no longer pre-seeded — only created lazily once actual work needs it.
-        assertTrue(!project1ChildNames.contains("chat-02"), "chat-02 should not be pre-seeded, got " + project1ChildNames);
+        assertTrue(!project1ChildNames.contains("project1/chat-02"),
+                "chat-02 should not be pre-seeded, got " + project1ChildNames);
     }
 
     @Test
@@ -46,8 +48,8 @@ class ChatUiActorSystemActorTreeTest {
         ChatUiActorSystem system = new ChatUiActorSystem();
         system.init();
 
-        String newChatId = system.createProject();
-        assertEquals("project2-01", newChatId);
+        String newProjectId = system.createProject();
+        assertEquals("project2", newProjectId);
 
         ActorNode root = system.getActorTree();
         List<String> rootChildNames = root.children().stream().map(ActorNode::name).toList();
@@ -56,7 +58,7 @@ class ChatUiActorSystemActorTreeTest {
         ActorNode project2 = root.children().stream()
                 .filter(n -> "project2".equals(n.name())).findFirst().orElseThrow();
         List<String> project2ChildNames = project2.children().stream().map(ActorNode::name).toList();
-        assertTrue(project2ChildNames.contains("chat-project2-01"),
-                "expected chat-project2-01 under project2, got " + project2ChildNames);
+        assertTrue(project2ChildNames.contains("project2/chat-01"),
+                "expected project2/chat-01 under project2, got " + project2ChildNames);
     }
 }

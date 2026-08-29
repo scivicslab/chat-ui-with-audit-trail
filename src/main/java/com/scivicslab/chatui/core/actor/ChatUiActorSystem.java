@@ -66,22 +66,37 @@ public class ChatUiActorSystem {
     private static final int SYSTEM_LOG_CAPACITY = 500;
     private static final int TAB_LOG_CAPACITY = 200;
 
+    /** Project id of the project created at startup ({@code Terminology_260829_oo01}). */
+    public static final String DEFAULT_PROJECT_ID = "project1";
+
     private IIActorSystem actorSystem;
-    private final Map<String, ActorRef<ConversationTab>> tabs = new ConcurrentHashMap<>();
+    /** Keyed by qualified chat name ({@code project1/chat-01}), the same string used in the registry. */
+    private final Map<String, ActorRef<ConversationTab>> chats = new ConcurrentHashMap<>();
     private final Map<String, ChatSessionIIAR> chatSessions = new ConcurrentHashMap<>();
     private RecentEntriesAccumulator systemLogBuffer;
-    private final Map<String, RecentEntriesAccumulator> tabLogBuffers = new ConcurrentHashMap<>();
+    private final Map<String, RecentEntriesAccumulator> chatLogBuffers = new ConcurrentHashMap<>();
 
     private ActorRef<CallWatchdog> callWatchdogRef;
     private ActorRef<CollaborationGraph> collaborationGraphRef;
 
-    /** One {@link Project} grouping actor per project, keyed by project key — {@code ""} for the
-     *  default (first) project, {@code "project2"}, {@code "project3"}, ... for each one created
-     *  afterward via {@link #createProject()}. Purely an actor-tree grouping: a project is not a
-     *  behavioral boundary ({@code ProjectScopedActorTree_260829_oo01}). */
-    private final Map<String, ActorRef<Project>> projectsByKey = new ConcurrentHashMap<>();
+    /** One {@link Project} grouping actor per project id. Purely an actor-tree grouping plus a
+     *  naming prefix: a project is not a behavioral boundary
+     *  ({@code ProjectScopedActorTree_260829_oo01}, {@code ProjectNamespacePrefix_260829_oo01}). */
+    private final Map<String, ActorRef<Project>> projects = new ConcurrentHashMap<>();
     private final java.util.concurrent.atomic.AtomicInteger nextProjectNumber =
             new java.util.concurrent.atomic.AtomicInteger(2);
+
+    /**
+     * The registry name of a conversation's {@link ConversationTab} actor: the project id, a
+     * {@code /}, then {@code chat-} and the chat id ({@code Terminology_260829_oo01} "アクター名").
+     *
+     * @param projectId the owning project's id, e.g. {@code "project1"}
+     * @param chatId    the conversation's id within that project, e.g. {@code "01"}
+     * @return e.g. {@code "project1/chat-01"}
+     */
+    public static String chatActorName(String projectId, String chatId) {
+        return projectId + "/chat-" + chatId;
+    }
 
     /**
      * Initializes the actor system and seeds a small tree so the Actors tab has something to show.
@@ -130,43 +145,57 @@ public class ChatUiActorSystem {
         // Default (first) project: only chat-01 exists at startup — chat-02, chat-03, ... are
         // created lazily as work actually needs them (ProjectScopedActorTree_260829_oo01 "開始状態
         // が違う"), not pre-seeded.
-        projectsByKey.put("", actorSystem.getRoot().createChild("project1", new Project()));
-        createTab("01");
-        LOG.info("Actor system initialised with " + tabs.size() + " conversation tab(s)");
+        projects.put(DEFAULT_PROJECT_ID,
+                actorSystem.getRoot().createChild(DEFAULT_PROJECT_ID, new Project()));
+        createChat(DEFAULT_PROJECT_ID, "01");
+        LOG.info("Actor system initialised with " + chats.size() + " conversation(s)");
     }
 
     /**
      * Creates a new project — its own {@link Project} grouping actor and that project's first
-     * conversation tab. Projects group tabs in the actor tree; they are not isolation boundaries,
-     * so a tab may still {@code ask_chat} a tab in another project.
+     * conversation. Projects group conversations in the actor tree and prefix their names; they
+     * are not isolation boundaries, so a conversation may still {@code ask_chat} one in another
+     * project.
      *
-     * @return the new project's first tab's chat id (e.g. {@code "project2-01"})
+     * @return the new project's id (e.g. {@code "project2"}); its first conversation is {@code "01"}
      */
     public synchronized String createProject() {
-        int projectNumber = nextProjectNumber.getAndIncrement();
-        String projectKey = "project" + projectNumber;
-        projectsByKey.put(projectKey, actorSystem.getRoot().createChild(projectKey, new Project()));
-        String chatId = projectKey + "-01";
-        createTab(chatId);
-        return chatId;
+        String projectId = "project" + nextProjectNumber.getAndIncrement();
+        projects.put(projectId, actorSystem.getRoot().createChild(projectId, new Project()));
+        createChat(projectId, "01");
+        return projectId;
+    }
+
+    /** @return the ids of all projects created so far */
+    public List<String> getProjectIds() {
+        return new ArrayList<>(projects.keySet());
     }
 
     /**
-     * @param chatId a tab's chat id (e.g. {@code "01"} or {@code "project2-01"})
-     * @return the project key that owns it — {@code ""} for the default project's bare-numbered
-     *         tabs, or the {@code "project<N>"} prefix embedded in {@code chatId} otherwise
+     * Resolves the target of a cross-conversation tool call ({@code ask_chat}/{@code set_workflow})
+     * into a qualified conversation name. A bare id ({@code "02"}) names a conversation in the
+     * caller's own project; a qualified one ({@code "project2/02"}) names one in another project,
+     * so crossing a project boundary is visible in the argument itself
+     * ({@code ProjectNamespacePrefix_260829_oo01}).
+     *
+     * @param callerProjectId the calling conversation's project id
+     * @param target          the {@code chatId} argument as written by the caller
+     * @return e.g. {@code "project1/chat-02"}
      */
-    private String projectKeyFor(String chatId) {
-        int dash = chatId.lastIndexOf('-');
-        return dash < 0 ? "" : chatId.substring(0, dash);
+    public static String resolveChatName(String callerProjectId, String target) {
+        int slash = target.indexOf('/');
+        return slash < 0
+                ? chatActorName(callerProjectId, target)
+                : chatActorName(target.substring(0, slash), target.substring(slash + 1));
     }
 
     /**
-     * @param tabId conversation tab identifier
-     * @return that tab's recent log entries (oldest first), or {@code null} if the tab does not exist
+     * @param projectId owning project's id
+     * @param chatId    conversation id within that project
+     * @return that conversation's recent log entries (oldest first), or {@code null} if it does not exist
      */
-    public List<RecentEntriesAccumulator.Entry> getTabLogEntries(String tabId) {
-        RecentEntriesAccumulator buf = tabLogBuffers.get(tabId);
+    public List<RecentEntriesAccumulator.Entry> getChatLogEntries(String projectId, String chatId) {
+        RecentEntriesAccumulator buf = chatLogBuffers.get(chatActorName(projectId, chatId));
         return buf == null ? null : buf.recent();
     }
 
@@ -176,34 +205,35 @@ public class ChatUiActorSystem {
     }
 
     /**
-     * Creates, or returns the existing, {@link ConversationTab} for {@code tabId} as a child of
+     * Creates, or returns the existing, conversation {@code projectId/chat-<chatId>} as a child of
      * its owning project's {@link Project} actor (not ROOT directly), together with its {@link
      * ChatSessionIIAR} and {@link PromptQueue}.
      *
-     * @param tabId conversation tab identifier (e.g. {@code "01"} or {@code "project2-01"})
-     * @return the tab's actor reference
+     * @param projectId owning project's id, e.g. {@code "project1"}
+     * @param chatId    conversation id within that project, e.g. {@code "01"}
+     * @return the conversation's actor reference
      */
-    public synchronized ActorRef<ConversationTab> createTab(String tabId) {
-        ActorRef<ConversationTab> existing = tabs.get(tabId);
+    public synchronized ActorRef<ConversationTab> createChat(String projectId, String chatId) {
+        String qualifiedName = chatActorName(projectId, chatId);
+        ActorRef<ConversationTab> existing = chats.get(qualifiedName);
         if (existing != null) {
             return existing;
         }
-        ActorRef<Project> projectRef = projectsByKey.get(projectKeyFor(tabId));
+        ActorRef<Project> projectRef = projects.get(projectId);
         if (projectRef == null) {
-            throw new IllegalArgumentException("Unknown project for chat id: " + tabId);
+            throw new IllegalArgumentException("Unknown project: " + projectId);
         }
-        ActorRef<ConversationTab> tabRef =
-                projectRef.createChild("chat-" + tabId, new ConversationTab());
-        tabs.put(tabId, tabRef);
+        ActorRef<ConversationTab> tabRef = projectRef.createChild(qualifiedName, new ConversationTab());
+        chats.put(qualifiedName, tabRef);
 
         // Tab log multiplexer (150_TabScopedLogging_260826_oo01): this tab's own recent-entries
         // buffer, plus delegation up to the system-wide multiplexer via ForwardingAccumulator.
         String tabLogActorName = tabRef.getName() + ".log";
         RecentEntriesAccumulator tabLogBuffer = new RecentEntriesAccumulator(TAB_LOG_CAPACITY);
-        tabLogBuffers.put(tabId, tabLogBuffer);
+        chatLogBuffers.put(qualifiedName, tabLogBuffer);
         MultiplexerAccumulator tabMux = new MultiplexerAccumulator();
         tabMux.addTarget(tabLogBuffer);
-        tabMux.addTarget(new ForwardingAccumulator(actorSystem, SYSTEM_LOG_ACTOR, tabId));
+        tabMux.addTarget(new ForwardingAccumulator(actorSystem, SYSTEM_LOG_ACTOR, qualifiedName));
         actorSystem.addIIActor(new MultiplexerAccumulatorActor(tabLogActorName, tabMux, actorSystem));
 
         // ChatSessionIIAR — manual IIActorRef bridge, since ConversationTab is a plain POJO and
@@ -214,8 +244,8 @@ public class ChatUiActorSystem {
         chatSessionIIAR.setParentName(tabRef.getName());
         tabRef.getNamesOfChildren().add(chatSessionIIAR.getName());
         actorSystem.addIIActor(chatSessionIIAR);
-        chatSessions.put(tabId, chatSessionIIAR);
-        chatSessionIIAR.tell(a -> ((ChatSession) a).setTabId(tabId));
+        chatSessions.put(qualifiedName, chatSessionIIAR);
+        chatSessionIIAR.tell(a -> ((ChatSession) a).setChatIdentity(projectId, chatId));
         chatSessionIIAR.tell(a -> ((ChatSession) a).setWatchdogRef(callWatchdogRef));
         chatSessionIIAR.tell(a -> ((ChatSession) a).setCollaborationGraphRef(collaborationGraphRef));
 
@@ -244,55 +274,49 @@ public class ChatUiActorSystem {
     }
 
     /**
-     * Returns the {@link ActorRef} for {@code tabId}'s {@link PromptQueue}, or {@code null} if
-     * the tab does not exist.
-     *
-     * @param tabId conversation tab identifier
-     * @return the queue's actor reference, or {@code null}
+     * @param projectId owning project's id
+     * @param chatId    conversation id within that project
+     * @return the conversation's {@link PromptQueue}, or {@code null} if it does not exist
      */
-    public ActorRef<PromptQueue> getPromptQueue(String tabId) {
-        return actorSystem.getActor("chat-" + tabId + ".queue");
+    public ActorRef<PromptQueue> getPromptQueue(String projectId, String chatId) {
+        return actorSystem.getActor(chatActorName(projectId, chatId) + ".queue");
     }
 
     /**
-     * Returns the {@link ActorRef} for {@code tabId}'s {@link SseConnection}, or {@code null} if
-     * the tab does not exist.
-     *
-     * @param tabId conversation tab identifier
-     * @return the connection's actor reference, or {@code null}
+     * @param projectId owning project's id
+     * @param chatId    conversation id within that project
+     * @return the conversation's {@link SseConnection}, or {@code null} if it does not exist
      */
-    public ActorRef<SseConnection> getSseConnection(String tabId) {
-        return actorSystem.getActor("chat-" + tabId + ".sse");
+    public ActorRef<SseConnection> getSseConnection(String projectId, String chatId) {
+        return actorSystem.getActor(chatActorName(projectId, chatId) + ".sse");
     }
 
     /**
-     * Returns the {@link ChatSessionIIAR} for {@code tabId}, or {@code null} if none was created.
-     *
-     * @param tabId conversation tab identifier
-     * @return the session's IIActorRef, or {@code null}
+     * @param projectId owning project's id
+     * @param chatId    conversation id within that project
+     * @return the conversation's {@link ChatSessionIIAR}, or {@code null} if none was created
      */
-    public ChatSessionIIAR getChatSession(String tabId) {
-        return chatSessions.get(tabId);
+    public ChatSessionIIAR getChatSession(String projectId, String chatId) {
+        return chatSessions.get(chatActorName(projectId, chatId));
     }
 
     /**
-     * Returns the {@link ConversationTab} for {@code tabId}, or {@code null} if none was created.
-     *
-     * @param tabId conversation tab identifier
-     * @return the tab's actor reference, or {@code null}
+     * @param projectId owning project's id
+     * @param chatId    conversation id within that project
+     * @return the conversation's {@link ConversationTab}, or {@code null} if none was created
      */
-    public ActorRef<ConversationTab> getTab(String tabId) {
-        return tabs.get(tabId);
+    public ActorRef<ConversationTab> getChat(String projectId, String chatId) {
+        return chats.get(chatActorName(projectId, chatId));
     }
 
     /**
-     * Returns the ids of all conversation tabs created so far (insertion order not guaranteed —
-     * callers that need a stable display order should sort).
+     * Returns the qualified names ({@code project1/chat-01}) of all conversations created so far
+     * (insertion order not guaranteed — callers that need a stable display order should sort).
      *
-     * @return tab ids
+     * @return qualified conversation names
      */
-    public List<String> getTabIds() {
-        return new ArrayList<>(tabs.keySet());
+    public List<String> getChatNames() {
+        return new ArrayList<>(chats.keySet());
     }
 
     /**

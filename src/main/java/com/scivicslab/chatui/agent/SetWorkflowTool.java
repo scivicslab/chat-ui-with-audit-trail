@@ -2,6 +2,7 @@ package com.scivicslab.chatui.agent;
 
 import com.scivicslab.chatui.core.actor.ChatSession;
 import com.scivicslab.chatui.core.actor.ChatSessionIIAR;
+import com.scivicslab.chatui.core.actor.ChatUiActorSystem;
 import com.scivicslab.turingworkflow.workflow.IIActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 
@@ -33,18 +34,29 @@ public final class SetWorkflowTool {
     private static final int TIMEOUT_SECONDS = 60;
 
     /**
-     * @param system      this tab's actor system, used to resolve the target tab's actor
-     * @param targetTabId the tab id whose agent-loop workflow to replace
+     * @param system      this conversation's actor system, used to resolve the target's actor
+     * @param myProjectId the calling conversation's project id
+     * @param target      the target as written by the caller — a bare id ({@code "02"}) for this
+     *                    project, or a qualified one ({@code "project2/02"}) to cross into another
      * @param yaml        the new workflow's YAML text
      * @return {@code "ok: ..."} on success, or an {@code error: ...} string
      */
-    public static String setWorkflow(IIActorSystem system, String targetTabId, String yaml) {
-        if (targetTabId == null || targetTabId.isBlank()) return "error: chatId is required";
+    public static String setWorkflow(IIActorSystem system, String myProjectId, String target, String yaml) {
+        if (target == null || target.isBlank()) return "error: chatId is required";
         if (yaml == null || yaml.isBlank()) return "error: yaml is required";
 
-        IIActorRef<?> targetIIActor = system.getIIActor("chat-" + targetTabId + ".chat");
+        String targetName = ChatUiActorSystem.resolveChatName(myProjectId, target);
+        if (!targetName.startsWith(myProjectId + "/")) {
+            // set_workflow rewrites how the target runs its own work, so crossing a project needs
+            // the target project's consent. The gateway that grants it is not designed yet, so
+            // refuse for now rather than silently reaching in (ProjectNamespacePrefix_260829_oo01).
+            return "error: refused — " + target + " belongs to another project; set_workflow across"
+                    + " projects must go through that project's gateway (not implemented yet)";
+        }
+
+        IIActorRef<?> targetIIActor = system.getIIActor(targetName + ".chat");
         if (!(targetIIActor instanceof ChatSessionIIAR targetChatSessionIIAR)) {
-            return "error: chat not found: " + targetTabId;
+            return "error: chat not found: " + target;
         }
 
         try {
@@ -54,9 +66,9 @@ public final class SetWorkflowTool {
                 chat.readYaml(new ByteArrayInputStream(yaml.getBytes(StandardCharsets.UTF_8)));
                 return null;
             }).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            return "ok: workflow installed on chat " + targetTabId;
+            return "ok: workflow installed on chat " + target;
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "set_workflow: failed for " + targetTabId, e);
+            LOG.log(Level.WARNING, "set_workflow: failed for " + target, e);
             return "error: set_workflow failed: " + e.getMessage();
         }
     }

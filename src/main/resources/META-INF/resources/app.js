@@ -1,22 +1,44 @@
 // Chat pane wiring for chat-ui-with-audit-trail (adapted from quarkus-chat-ui3's app.js).
 //   - one persistent EventSource per conversation tab
-//   - POST /api/chats/{chatId}/chat only acknowledges; all content streams over SSE
+//   - POST /api/projects/{projectId}/chats/{chatId}/chat only acknowledges; content streams over SSE
 //   - renders delta/thinking/result/error/status ChatEvents into #chat-area
 //   - a tab bar (#conv-tab-bar) lets the user switch which ConversationTab this pane talks to
 (function () {
     "use strict";
 
-    var TAB_ID_KEY = "chat-ui-last-tab";
-    // Migrates a browser's localStorage value from before ChatActorRename_260827_oo01 (when tab
-    // ids were "alpha"/"beta") to the current scheme ("01"/"02") — otherwise a returning browser
-    // would resend the stale id as chatId, and the server would lazily create a brand-new, empty
-    // "chat-alpha"/"chat-beta" actor instead of reconnecting to the browser's actual prior
-    // conversation (now correctly named "chat-01"/"chat-02").
+    // A conversation is identified by two coordinates, not one string (Terminology_260829_oo01):
+    // the owning project's id and the conversation's id within it.
+    var PROJECT_ID_KEY = "chat-ui-last-project";
+    var CHAT_ID_KEY = "chat-ui-last-chat";
+    var LEGACY_TAB_ID_KEY = "chat-ui-last-tab";
+    // Migrates what earlier versions stored under the single legacy key: first "alpha"/"beta"
+    // (before ChatActorRename_260827_oo01), then bare "01"/"02" and the short-lived combined
+    // "project2-01" form. Without this a returning browser would resend a stale id, and the
+    // server would lazily create a brand-new empty conversation instead of reconnecting to the
+    // one the browser was actually using.
     var LEGACY_TAB_ID_MAP = { alpha: "01", beta: "02" };
-    var storedTabId = localStorage.getItem(TAB_ID_KEY);
-    var TAB_ID = LEGACY_TAB_ID_MAP[storedTabId] || storedTabId || "01";
+    var PROJECT_ID = localStorage.getItem(PROJECT_ID_KEY);
+    var CHAT_ID = localStorage.getItem(CHAT_ID_KEY);
+    if (!PROJECT_ID || !CHAT_ID) {
+        var legacy = localStorage.getItem(LEGACY_TAB_ID_KEY);
+        legacy = LEGACY_TAB_ID_MAP[legacy] || legacy || "01";
+        var dash = legacy.lastIndexOf("-");
+        if (legacy.indexOf("project") === 0 && dash > 0) {
+            PROJECT_ID = legacy.substring(0, dash);
+            CHAT_ID = legacy.substring(dash + 1);
+        } else {
+            PROJECT_ID = "project1";
+            CHAT_ID = legacy;
+        }
+    }
 
     function apiUrl(path) { return path; }
+
+    // Base path of the active conversation's endpoints.
+    function chatUrl(suffix) {
+        return "api/projects/" + encodeURIComponent(PROJECT_ID)
+                + "/chats/" + encodeURIComponent(CHAT_ID) + suffix;
+    }
 
     var chatArea, promptInput, sendBtn, connStatus, activityLabel, modelSelect, notificationBar;
     var themeSelect, queueBtn, queueArea;
@@ -138,7 +160,7 @@
     // quarkus-chat-ui3's own single-browser queue effectively has too.
     function refreshQueue() {
         if (!queueArea) return;
-        fetch(apiUrl("api/chats/" + TAB_ID + "/queue"))
+        fetch(apiUrl(chatUrl("/queue")))
             .then(function (r) { return r.json(); })
             .then(function (q) {
                 var items = (q && q.items) || [];
@@ -172,7 +194,7 @@
                     autoCheckbox.type = "checkbox";
                     autoCheckbox.checked = !!item.auto;
                     autoCheckbox.addEventListener("change", function () {
-                        fetch(apiUrl("api/chats/" + TAB_ID + "/queue/" + i + "/auto"), {
+                        fetch(apiUrl(chatUrl("/queue/" + i + "/auto")), {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({ auto: autoCheckbox.checked })
@@ -213,7 +235,7 @@
                     removeBtn.title = "Remove";
                     removeBtn.innerHTML = "&times;";
                     removeBtn.addEventListener("click", function () {
-                        fetch(apiUrl("api/chats/" + TAB_ID + "/queue/" + i), { method: "DELETE" }).then(refreshQueue);
+                        fetch(apiUrl(chatUrl("/queue/" + i)), { method: "DELETE" }).then(refreshQueue);
                     });
                     row.appendChild(removeBtn);
 
@@ -225,7 +247,7 @@
     }
 
     function moveQueueItem(index, direction) {
-        fetch(apiUrl("api/chats/" + TAB_ID + "/queue/" + index + "/move"), {
+        fetch(apiUrl(chatUrl("/queue/" + index + "/move")), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ direction: direction })
@@ -236,7 +258,7 @@
 
     function connectSSE() {
         if (eventSource) eventSource.close();
-        eventSource = new EventSource(apiUrl("api/chats/" + TAB_ID + "/chat/stream"));
+        eventSource = new EventSource(apiUrl(chatUrl("/chat/stream")));
         eventSource.onopen = function () {
             if (connStatus) { connStatus.textContent = "connected"; connStatus.className = "connected"; }
         };
@@ -303,7 +325,7 @@
         if (!text) {
             // Empty send = "send the next one" (quarkus-chat-ui3's own semantics): force-dispatch
             // the queue's front item, ignoring its auto flag. No-ops server-side if empty.
-            fetch(apiUrl("api/chats/" + TAB_ID + "/queue/advance"), { method: "POST" }).then(refreshQueue);
+            fetch(apiUrl(chatUrl("/queue/advance")), { method: "POST" }).then(refreshQueue);
             return;
         }
         appendMessage("user", text);
@@ -313,7 +335,7 @@
         var payload = { text: text };
         if (modelSelect && modelSelect.value) payload.model = modelSelect.value;
 
-        fetch(apiUrl("api/chats/" + TAB_ID + "/chat"), {
+        fetch(apiUrl(chatUrl("/chat")), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload)
@@ -344,7 +366,7 @@
 
     function loadModels() {
         if (!modelSelect) return;
-        fetch(apiUrl("api/chats/" + TAB_ID + "/models"))
+        fetch(apiUrl(chatUrl("/models")))
             .then(function (r) { return r.json(); })
             .then(function (models) {
                 modelSelect.textContent = "";
@@ -363,18 +385,20 @@
     }
 
     // ── Conversation tabs (switch which ConversationTab this pane talks to) ────
-    // Switching is triggered from the Actors tree in console.js (click a "chat-<id>" actor's
-    // name), not a bar in this pane — ActorTreeTabSwitcher_260826_oo01. switchTab/TAB_ID are
-    // exposed on window at the bottom of this file so console.js can call them.
+    // Switching is triggered from the Actors tree in console.js (click a conversation actor's
+    // name), not a bar in this pane — ActorTreeTabSwitcher_260826_oo01. switchChat is exposed on
+    // window at the bottom of this file so console.js can call it.
 
-    // Tears down the current tab's live state and rebuilds the pane for `tabId` — same sequence
-    // as the initial page load (hydrate history, load models, check queue, open SSE), just run
-    // again against a different tabId instead of only once at DOMContentLoaded.
-    function switchTab(tabId) {
-        if (tabId === TAB_ID) return;
+    // Tears down the current conversation's live state and rebuilds the pane for another one —
+    // same sequence as the initial page load (hydrate history, load models, check queue, open
+    // SSE), just run again against different coordinates instead of only once at DOMContentLoaded.
+    function switchChat(projectId, chatId) {
+        if (projectId === PROJECT_ID && chatId === CHAT_ID) return;
         if (eventSource) { eventSource.close(); eventSource = null; }
-        TAB_ID = tabId;
-        localStorage.setItem(TAB_ID_KEY, tabId);
+        PROJECT_ID = projectId;
+        CHAT_ID = chatId;
+        localStorage.setItem(PROJECT_ID_KEY, projectId);
+        localStorage.setItem(CHAT_ID_KEY, chatId);
         chatArea.textContent = "";
         streamingEl = null;
         thinkingEl = null;
@@ -389,15 +413,15 @@
     }
 
     // Shows the existing "thinking…" activity label for the newly-active tab if it's busy —
-    // read directly (GET /api/chats/{id}/status), so this reflects reality even when the tab is
+    // read directly (GET /api/projects/{p}/chats/{c}/status), so this reflects reality even when busy
     // busy with a long turn (e.g. ask_chat) that would otherwise make the conversation/models
     // fetches queue up and silently fail (BusyStateReadableSnapshot_260828_oo01).
     function refreshBusyStatus() {
-        var forTab = TAB_ID;
-        fetch(apiUrl("api/chats/" + forTab + "/status"))
+        var forChat = PROJECT_ID + "/" + CHAT_ID;
+        fetch(apiUrl(chatUrl("/status")))
             .then(function (r) { return r.json(); })
             .then(function (s) {
-                if (forTab === TAB_ID) setBusy(!!(s && s.busy));
+                if (forChat === PROJECT_ID + "/" + CHAT_ID) setBusy(!!(s && s.busy));
             })
             .catch(function () { /* leave whatever setBusy(false) above already set */ });
     }
@@ -405,7 +429,7 @@
     // ── History hydration ────────────────────────────────────────────────────
 
     function hydrateConversation() {
-        fetch(apiUrl("api/chats/" + TAB_ID + "/conversation"))
+        fetch(apiUrl(chatUrl("/conversation")))
             .then(function (r) { return r.json(); })
             .then(function (turns) {
                 (turns || []).forEach(function (t) {
@@ -454,7 +478,7 @@
     });
 
     // Exposed for console.js's Actors-tree click handler (ActorTreeTabSwitcher_260826_oo01) —
-    // clicking a "chat-<id>" actor's name calls window.chatUiSwitchTab(id) instead of a bar here.
-    window.chatUiSwitchTab = switchTab;
-    window.chatUiGetActiveTabId = function () { return TAB_ID; };
+    // clicking a conversation actor's name calls window.chatUiSwitchChat(projectId, chatId).
+    window.chatUiSwitchChat = switchChat;
+    window.chatUiGetActiveChat = function () { return { projectId: PROJECT_ID, chatId: CHAT_ID }; };
 })();
