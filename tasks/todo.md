@@ -282,3 +282,19 @@
 
 - プロジェクト作成を`@Path("/api/projects")`の別リソースクラスに置いたところ、会話のエンドポイント（`@Path("/api")`のクラス）が前方一致で覆い隠され、`/api/projects/{id}/chats/...`が全て404になった。JAX-RSはクラスの`@Path`が最も長く一致するリソースクラスを先に選ぶため。1つのリソースクラスにまとめて解決した。
 - プロジェクトをまたぐ呼び出しは禁止しない方針だが、相手の動き方を書き換える`set_workflow`・`set_collaborator`だけは、窓口（未設計）ができるまで拒否する形にした。`ask_chat`は相手の郵便受けに入れるだけなので越境を許し、ログに記録する。
+
+## 計画（babysitterのフェーズを汎用化し、検索＋執筆の2段階を実機で通す）
+
+設計文書: `GenericBabysitterPhases_260829_oo01`（`BabysitterRealisticE2eScenario_260828_oo01`の前提条件2件を解消）。
+
+- [x] `ChatSession`：フェーズ固有の6メソッドを、指示文と判定基準をYAMLの引数で受け取る汎用メソッド（`requestFromWorker`・`judgeResult`・`retryLimitReached`・`judgeNeedsRedo`・`requestRedo`）に置き換え。判定メソッドは`finish()`を呼ばず、`accepted`/`give-up`状態から`finish`へ遷移する形に
+- [x] `ChatSessionIIAR`：`arguments`のJSON配列から第1引数を取り出して渡すディスパッチ
+- [x] `babysitter-loop.yaml`を汎用メソッドで書き直し、2段階の`research-babysitter-loop.yaml`を追加
+- [x] babysitterがworkerを待つ時間を600秒に（`AskChatTool`の既定60秒では、workerのagent loopが終わる前に切れる）
+- [x] `mvn install`（テスト含む）成功、ポート28014へ実機デプロイ
+- [x] chat-01/02/03で「AIによるセキュリティ防御の現状調査」を実行。検索フェーズ→執筆フェーズが完走し、書き直しループが実際に2回踏まれて3度目で受理されることを確認
+
+## レビュー
+
+- 最初の実行は`error: chat not found: project1/chat-03`で失敗した。`CollaborationGraph`は完全修飾名を保存するのに、`AskChatTool.ask`は利用者が書く形（`03`）を前提にもう一度`resolveChatName`をかけるため、`project1/chat-chat-03`という存在しない名前を引いていた。エラーメッセージには解決前の文字列が出るので、正しい名前が見つからないように読めるのが厄介だった。修飾済みの名前をそのまま受け取る`AskChatTool.askQualified`を分けて解決した——「利用者が書いた参照」と「解決済みのアクター名」は別のものであり、同じ引数で受けてはいけない。
+- 書き直しの指摘は実際に内容を見たものだった（同じ言い回しの繰り返しを2度指摘）。判定基準を`judgeResult`の引数としてYAMLに書く形が、意図通りに効いている。

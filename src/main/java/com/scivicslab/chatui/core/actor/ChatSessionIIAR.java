@@ -132,23 +132,42 @@ public class ChatSessionIIAR extends InterpreterIIAR {
             String prompt = new org.json.JSONArray(arg).getString(0);
             chatSession().appendConstructedPrompt(prompt);
             return new ActionResult(true, "");
-        } else if (actionName.equals("requestDraft")) {
-            // Dispatched by babysitter-loop.yaml ("actor: this") — BabysitterLoopWorkflowShape_260828_oo01.
-            return chatSession().requestDraft();
-        } else if (actionName.equals("judgeDraftAcceptable")) {
-            return chatSession().judgeDraftAcceptable();
-        } else if (actionName.equals("revisionLimitReached")) {
-            return chatSession().revisionLimitReached();
-        } else if (actionName.equals("judgeDraftNeedsRevision")) {
-            return chatSession().judgeDraftNeedsRevision();
-        } else if (actionName.equals("requestRevision")) {
-            return chatSession().requestRevision();
+        } else if (actionName.equals("requestFromWorker")) {
+            // Dispatched by the babysitter workflows ("actor: this"). What differs between phases
+            // is the YAML `arguments`, not the method name (GenericBabysitterPhases_260829_oo01);
+            // Interpreter.convertArgumentsToJson delivers them as a JSON array.
+            return chatSession().requestFromWorker(firstArgument(arg));
+        } else if (actionName.equals("judgeResult")) {
+            return chatSession().judgeResult(firstArgument(arg));
+        } else if (actionName.equals("retryLimitReached")) {
+            return chatSession().retryLimitReached();
+        } else if (actionName.equals("judgeNeedsRedo")) {
+            return chatSession().judgeNeedsRedo();
+        } else if (actionName.equals("requestRedo")) {
+            return chatSession().requestRedo();
         } else if (actionName.equals("reportCollaborationFailure")) {
             return chatSession().reportCollaborationFailure();
         }
         // execCode / runUntilEnd / call / runWorkflow / readYaml / setCurrentState etc. are
         // handled by InterpreterIIAR itself, since ChatSession is an Interpreter.
         return super.callByActionName(actionName, arg);
+    }
+
+    /**
+     * The first element of an action's {@code arguments}, or {@code ""} if it has none — the shape
+     * {@code Interpreter.convertArgumentsToJson} produces for a single string argument.
+     *
+     * @param arg the raw arguments JSON handed to {@link #callByActionName}
+     * @return the first argument, or {@code ""}
+     */
+    private static String firstArgument(String arg) {
+        if (arg == null || arg.isBlank()) return "";
+        try {
+            org.json.JSONArray a = new org.json.JSONArray(arg);
+            return a.isEmpty() ? "" : a.getString(0);
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     /**

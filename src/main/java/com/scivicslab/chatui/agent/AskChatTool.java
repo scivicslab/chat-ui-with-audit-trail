@@ -61,12 +61,35 @@ public final class AskChatTool {
 
         String myName = ChatUiActorSystem.chatActorName(myProjectId, myChatId);
         String targetName = ChatUiActorSystem.resolveChatName(myProjectId, target);
-        if (targetName.equals(myName)) return "error: cannot ask_chat yourself";
         if (!targetName.startsWith(myProjectId + "/")) {
             // Allowed, but recorded: ask_chat only puts a message in the target's mailbox, so it
             // needs no gateway — crossing is still worth noting (ProjectNamespacePrefix_260829_oo01).
             LOG.info("ask_chat crosses projects: " + myName + " -> " + targetName);
         }
+        return askQualified(system, watchdog, myName, targetName, prompt, timeoutSeconds);
+    }
+
+    /**
+     * Same call, but with both conversations already named in full ({@code project1/chat-03}) —
+     * for callers that hold qualified names rather than what a user typed, such as the babysitter
+     * phases resolving their {@code "worker"} through {@link com.scivicslab.chatui.core.actor.CollaborationGraph}
+     * (which stores qualified names). Resolving such a name a second time would mangle it.
+     *
+     * @param system     the actor system used to resolve the target's actors
+     * @param watchdog   the shared {@link CallWatchdog}
+     * @param myName     the calling conversation's qualified name
+     * @param targetName the target conversation's qualified name
+     * @param prompt     the instruction to send
+     * @param timeoutSeconds how long to wait, or {@code null}/non-positive for the default
+     * @return the target's reply text, or an {@code error: ...} string
+     */
+    public static String askQualified(IIActorSystem system, ActorRef<CallWatchdog> watchdog,
+                                       String myName, String targetName, String prompt,
+                                       Integer timeoutSeconds) {
+        int waitTimeoutSeconds = (timeoutSeconds != null && timeoutSeconds > 0)
+                ? timeoutSeconds : DEFAULT_WAIT_TIMEOUT_SECONDS;
+        String target = targetName;
+        if (targetName.equals(myName)) return "error: cannot ask_chat yourself";
 
         IIActorRef<?> targetIIActor = system.getIIActor(targetName + ".chat");
         if (!(targetIIActor instanceof ChatSessionIIAR targetChatSessionIIAR)) {

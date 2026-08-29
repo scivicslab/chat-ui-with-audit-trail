@@ -1,0 +1,152 @@
+name: research-babysitter-loop
+description: |
+  Two-phase babysitter workflow for the research scenario
+  (BabysitterRealisticE2eScenario_260828_oo01): first make the "worker" collaborator search until
+  the material is broad enough, then make it write until the text is good enough.
+
+  Both phases run the same machinery (GenericBabysitterPhases_260829_oo01) — request, judge, redo —
+  and differ only in this file's `arguments`: what to ask for, and what to judge against. The redo
+  budget is per phase, because requestFromWorker (each phase's entry) resets it.
+
+  Entry state must be named "think" (WorkflowReloadReset_260828_oo01 実機確認). Every action sets
+  execution: direct, for the same reason as chat-session-agent-loop.yaml's own note.
+
+steps:
+  # ── Search phase ─────────────────────────────────────────────────────────────
+  - states: ["think", "judge-search"]
+    label: request-search
+    note: Ask the worker to search only — not to write yet.
+    actions:
+      - actor: this
+        method: requestFromWorker
+        arguments: >-
+          Search for sources on the current state of AI-based security defence. Do not write the
+          report yet — just gather and list what you find, with a one-line note on each source.
+        execution: direct
+
+  - states: ["think", "end"]
+    label: report-search-request-failed
+    actions:
+      - actor: this
+        method: reportCollaborationFailure
+        execution: direct
+
+  - states: ["judge-search", "write"]
+    label: search-adequate
+    note: Judged broad enough — move on to the writing phase (this does NOT end the turn).
+    actions:
+      - actor: this
+        method: judgeResult
+        arguments: >-
+          The search results must cover several distinct angles, not just one: detection
+          technology, what attackers are doing, and organisational or process-level measures. A
+          list of vendor product pages alone is not enough.
+        execution: direct
+
+  - states: ["judge-search", "give-up"]
+    label: search-redo-limit-reached
+    actions:
+      - actor: this
+        method: retryLimitReached
+        execution: direct
+
+  - states: ["judge-search", "redo-search"]
+    label: search-inadequate
+    actions:
+      - actor: this
+        method: judgeNeedsRedo
+        execution: direct
+
+  - states: ["redo-search", "judge-search"]
+    label: request-more-search
+    actions:
+      - actor: this
+        method: requestRedo
+        execution: direct
+
+  - states: ["redo-search", "end"]
+    label: report-search-redo-failed
+    actions:
+      - actor: this
+        method: reportCollaborationFailure
+        execution: direct
+
+  # ── Writing phase ────────────────────────────────────────────────────────────
+  - states: ["write", "judge-write"]
+    label: request-writing
+    note: Ask the worker to turn what it found into one structured piece of writing.
+    actions:
+      - actor: this
+        method: requestFromWorker
+        arguments: >-
+          Now write the report on the current state of AI-based security defence, using what you
+          found. Summarise and group the sources, and give the text a structure the reader can
+          follow.
+        execution: direct
+
+  - states: ["write", "end"]
+    label: report-writing-request-failed
+    actions:
+      - actor: this
+        method: reportCollaborationFailure
+        execution: direct
+
+  - states: ["judge-write", "accepted"]
+    label: writing-acceptable
+    note: |
+      The criteria are the LLM writing defects the scenario's Problem Definition names: unrelated
+      material added without connection, a broken line of argument, hedging that blurs the
+      conclusion, redundancy, and excuses. Judge by whether cutting is needed, not by whether
+      something is missing.
+    actions:
+      - actor: this
+        method: judgeResult
+        arguments: >-
+          Nothing unrelated may be added without connection to the argument; the line of argument
+          must not break; conclusions must not be blurred by hedging; nothing may be said twice in
+          different words; there must be no excuses. Where any of these appear, the fix is to cut
+          that part, not to add more.
+        execution: direct
+
+  - states: ["judge-write", "give-up"]
+    label: writing-redo-limit-reached
+    actions:
+      - actor: this
+        method: retryLimitReached
+        execution: direct
+
+  - states: ["judge-write", "redo-write"]
+    label: writing-needs-work
+    actions:
+      - actor: this
+        method: judgeNeedsRedo
+        execution: direct
+
+  - states: ["redo-write", "judge-write"]
+    label: request-rewrite
+    actions:
+      - actor: this
+        method: requestRedo
+        execution: direct
+
+  - states: ["redo-write", "end"]
+    label: report-rewrite-failed
+    actions:
+      - actor: this
+        method: reportCollaborationFailure
+        execution: direct
+
+  # ── Exits ────────────────────────────────────────────────────────────────────
+  - states: ["accepted", "end"]
+    label: finish-accepted
+    actions:
+      - actor: this
+        method: finish
+        execution: direct
+
+  - states: ["give-up", "end"]
+    label: finish-with-best-effort
+    actions:
+      - actor: this
+        method: finish
+        execution: direct

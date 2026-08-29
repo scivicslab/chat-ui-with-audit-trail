@@ -198,16 +198,25 @@ public class ChatSession extends Interpreter {
     private int stepCount;
     private volatile boolean cancelled;
 
-    // ---- Babysitter loop (BabysitterLoopWorkflowShape_260828_oo01) — per-turn, reset in start() ----
-    private static final int REVISION_LIMIT = 3;
-    /** The draft currently under review — set by requestDraft/requestRevision, read by judgeDraftAcceptable. */
-    private String currentDraft;
-    /** Raw text of judgeDraftAcceptable's one LLM call, consumed (not re-queried) by judgeDraftNeedsRevision. */
+    // ---- Babysitter loop (BabysitterLoopWorkflowShape_260828_oo01, made phase-agnostic by
+    // GenericBabysitterPhases_260829_oo01) — per-turn, reset in start() ----
+    private static final int REDO_LIMIT = 3;
+    /**
+     * How long a babysitter phase waits for its worker. Far above {@code AskChatTool}'s 60s default,
+     * because the worker runs its own multi-step agent loop (web searches, then writing) inside this
+     * one call — at 60s the wait would expire before the judging logic ever ran
+     * ({@code BabysitterRealisticE2eScenario_260828_oo01} "前提条件：内部タイムアウトの引き上げが必要").
+     */
+    private static final int WORKER_WAIT_TIMEOUT_SECONDS = 600;
+    /** The worker's latest reply — search results in one phase, a draft in another; one field serves both. */
+    private String lastWorkerReply;
+    /** Raw text of judgeResult's one LLM call, consumed (not re-queried) by judgeNeedsRedo. */
     private String lastJudgment;
-    /** What to fix, extracted from lastJudgment by judgeDraftNeedsRevision, sent by requestRevision. */
-    private String revisionNote;
-    private int revisionCount;
-    /** Set by requestDraft/requestRevision on failure; consumed by reportCollaborationFailure. */
+    /** What to fix, taken from lastJudgment by judgeNeedsRedo, sent by requestRedo. */
+    private String redoNote;
+    /** Redos used in the current phase — reset by requestFromWorker, which every phase starts with. */
+    private int redoCount;
+    /** Set by requestFromWorker/requestRedo on failure; consumed by reportCollaborationFailure. */
     private String lastCollaborationError;
 
     // ---- Prompt construction (ChatSessionPorting_260823_oo01 2-b-i) ----
@@ -687,10 +696,10 @@ public class ChatSession extends Interpreter {
         this.stepCount = 0;
         this.cancelled = false;
         this.constructedPrompts.clear();
-        this.currentDraft = null;
+        this.lastWorkerReply = null;
         this.lastJudgment = null;
-        this.revisionNote = null;
-        this.revisionCount = 0;
+        this.redoNote = null;
+        this.redoCount = 0;
         this.lastCollaborationError = null;
 
         emitter.accept(ChatEvent.status(provider.getCurrentModel(), provider.getSessionId(), true));
@@ -911,111 +920,111 @@ public class ChatSession extends Interpreter {
         return new ActionResult(true, "finished");
     }
 
-    // ---- Babysitter loop (BabysitterLoopWorkflowShape_260828_oo01): think(=request-draft) ->
-    // judge -> (end | give-up -> end | revise -> judge)*. Driven by babysitter-loop.yaml, installed
-    // in place of chat-session-agent-loop.yaml via set_workflow. Every action below runs
-    // execution: direct, for the same reason as the base agent loop (see that YAML's own note).
+    // ---- Babysitter loop (BabysitterLoopWorkflowShape_260828_oo01, made phase-agnostic by
+    // GenericBabysitterPhases_260829_oo01). Each phase is the same shape — ask the worker, judge
+    // the reply, redo it if the judgment says so — so what differs between phases (the instruction
+    // to send, the criteria to judge against) arrives as the action's YAML `arguments`, not baked
+    // into a method name. Every action runs execution: direct, for the same reason as the base
+    // agent loop (see chat-session-agent-loop.yaml's own note).
 
     /**
-     * Entry point ({@code "think"} -> {@code "judge"}): resolves this tab's {@code "worker"}
-     * collaborator via {@link CollaborationGraph} and asks it (via {@code ask_chat}) for a first
-     * draft addressing {@link #pendingPrompt} (the instruction this turn started with).
+     * Entry point of a phase: resolves this conversation's {@code "worker"} collaborator via
+     * {@link CollaborationGraph} and sends it {@code instruction}. Resets the redo budget, so each
+     * phase gets its own (a phase that used up its redos does not starve the next one).
      *
+     * @param instruction what to ask the worker to do in this phase
      * @return {@link ActionResult} with {@code success=true} iff a worker was resolved and replied
      */
-    public ActionResult requestDraft() {
+    public ActionResult requestFromWorker(String instruction) {
+        redoCount = 0;
+        redoNote = null;
         String workerChatId = resolveWorker();
         if (workerChatId == null) {
             lastCollaborationError = "no collaborator with role 'worker' set for " + myChatName()
                     + " (use set_collaborator first)";
             return new ActionResult(false, lastCollaborationError);
         }
-        String reply = AskChatTool.ask(system, watchdogRef, projectId, chatId, workerChatId, pendingPrompt, null);
+        String prompt = (instruction == null || instruction.isBlank()) ? pendingPrompt : instruction;
+        String reply = AskChatTool.askQualified(system, watchdogRef, myChatName(), workerChatId, prompt,
+                WORKER_WAIT_TIMEOUT_SECONDS);
         if (reply == null || reply.startsWith("error:")) {
             lastCollaborationError = reply != null ? reply : "no reply from worker";
             return new ActionResult(false, lastCollaborationError);
         }
-        currentDraft = reply;
-        return new ActionResult(true, "draft received");
+        lastWorkerReply = reply;
+        return new ActionResult(true, "reply received");
     }
 
     /**
-     * ({@code "judge"} -> {@code "end"}): one LLM call judging {@link #currentDraft}. On
-     * acceptance, sets the turn's final answer to the draft and finishes the turn directly — this
-     * transition's target is a terminal state, so (unlike {@code think-final} in the base loop)
-     * there is no separate later hop to call {@link #finish()} from.
+     * One LLM call judging {@link #lastWorkerReply} against {@code criteria}. Does not finish the
+     * turn even when it accepts — reaching {@code "end"} is the state machine's job, so a phase
+     * that is accepted can simply move on to the next one.
      *
-     * @return {@link ActionResult} with {@code success=true} iff the draft was judged acceptable
+     * @param criteria what makes the reply good enough in this phase
+     * @return {@link ActionResult} with {@code success=true} iff the reply was judged acceptable
      */
-    public ActionResult judgeDraftAcceptable() {
-        lastJudgment = callJudgeLlm(currentDraft);
+    public ActionResult judgeResult(String criteria) {
+        lastJudgment = callJudgeLlm(criteria, lastWorkerReply);
         boolean acceptable = lastJudgment.trim().toUpperCase(java.util.Locale.ROOT).startsWith("ACCEPT");
-        if (acceptable) {
-            finalAnswer = currentDraft;
-            finish();
-        }
+        if (acceptable) finalAnswer = lastWorkerReply;
         return new ActionResult(acceptable, acceptable ? "accepted" : "needs work");
     }
 
     /**
-     * ({@code "judge"} -> {@code "give-up"}): reached only once accept-draft has just failed.
-     * Cheap check, no LLM call. On reaching the limit, also sets the turn's final answer to the
-     * best draft obtained so far, for {@code give-up}'s own transition to {@code finish()} to emit.
+     * Reached only once {@link #judgeResult} has just failed. Cheap check, no LLM call. On reaching
+     * the limit, keeps the best reply so far as the turn's answer for {@code finish()} to emit.
      *
-     * @return {@link ActionResult} with {@code success=true} iff the revision budget is exhausted
+     * @return {@link ActionResult} with {@code success=true} iff this phase's redo budget is exhausted
      */
-    public ActionResult revisionLimitReached() {
-        boolean reached = revisionCount >= REVISION_LIMIT;
-        if (reached) finalAnswer = currentDraft;
-        return new ActionResult(reached, reached ? "revision limit reached" : "budget remains");
+    public ActionResult retryLimitReached() {
+        boolean reached = redoCount >= REDO_LIMIT;
+        if (reached) finalAnswer = lastWorkerReply;
+        return new ActionResult(reached, reached ? "redo limit reached" : "budget remains");
     }
 
     /**
-     * ({@code "judge"} -> {@code "revise"}): reached only once accept-draft and
-     * revision-limit-reached have both just failed — always succeeds (the judge state's
-     * catch-all, mirroring {@code think-final}/{@link #finish()} in the base loop). Extracts what
-     * to fix from {@link #lastJudgment}, already captured by {@link #judgeDraftAcceptable()}; makes
-     * no LLM call of its own.
+     * Reached only once {@link #judgeResult} and {@link #retryLimitReached} have both just failed —
+     * always succeeds (the judge state's catch-all). Takes what to fix from the judgment already
+     * captured by {@link #judgeResult}; makes no LLM call of its own.
      *
      * @return {@link ActionResult} with {@code success=true} always
      */
-    public ActionResult judgeDraftNeedsRevision() {
-        revisionNote = lastJudgment;
-        return new ActionResult(true, "revision requested");
+    public ActionResult judgeNeedsRedo() {
+        redoNote = lastJudgment;
+        return new ActionResult(true, "redo requested");
     }
 
     /**
-     * ({@code "revise"} -> {@code "judge"}): re-resolves the {@code "worker"} collaborator (not
-     * cached from {@link #requestDraft()} — the role may have been reassigned mid-flow, see
-     * {@code CollaborationGraph_260828_oo01}) and asks it to address {@link #revisionNote}.
+     * Sends the judgment's specifics back to the worker. Re-resolves the {@code "worker"} role
+     * rather than reusing what {@link #requestFromWorker} found, so a mid-flow {@code
+     * set_collaborator} reassignment takes effect ({@code CollaborationGraph_260828_oo01}).
      *
      * @return {@link ActionResult} with {@code success=true} iff the worker replied
      */
-    public ActionResult requestRevision() {
+    public ActionResult requestRedo() {
         String workerChatId = resolveWorker();
         if (workerChatId == null) {
             lastCollaborationError = "no collaborator with role 'worker' set for " + myChatName()
                     + " (use set_collaborator first)";
             return new ActionResult(false, lastCollaborationError);
         }
-        String prompt = "Please revise the previous draft to address this feedback:\n" + revisionNote;
-        String reply = AskChatTool.ask(system, watchdogRef, projectId, chatId, workerChatId, prompt, null);
+        String prompt = "Please revise your previous answer to address this feedback:\n" + redoNote;
+        String reply = AskChatTool.askQualified(system, watchdogRef, myChatName(), workerChatId, prompt,
+                WORKER_WAIT_TIMEOUT_SECONDS);
         if (reply == null || reply.startsWith("error:")) {
             lastCollaborationError = reply != null ? reply : "no reply from worker";
             return new ActionResult(false, lastCollaborationError);
         }
-        currentDraft = reply;
-        revisionCount++;
-        return new ActionResult(true, "revision received");
+        lastWorkerReply = reply;
+        redoCount++;
+        return new ActionResult(true, "revised reply received");
     }
 
     /**
-     * Fallback for {@code "think"} -> {@code "end"} and {@code "revise"} -> {@code "end"}: reached
-     * only when {@link #requestDraft()} or {@link #requestRevision()} has just failed (no worker
-     * resolved, or the worker didn't reply) — without this, either state would have no remaining
-     * transition to try and the turn would stay {@code busy} forever. Not in the original
-     * {@code BabysitterLoopWorkflowShape_260828_oo01} design; added during implementation as the
-     * same kind of always-succeeds terminal fallback the base loop's {@code finish()} already is.
+     * Fallback for every phase entry and redo state: reached only when {@link #requestFromWorker}
+     * or {@link #requestRedo} has just failed (no worker resolved, or it didn't reply). Without it
+     * those states would have no remaining transition to try and the turn would stay {@code busy}
+     * forever ({@code BabysitterLoopWorkflowShape_260828_oo01} 追記).
      *
      * @return {@link ActionResult} with {@code success=true} always
      */
@@ -1037,14 +1046,14 @@ public class ChatSession extends Interpreter {
     }
 
     /**
-     * One-shot blocking LLM call judging {@code draft}: replies {@code ACCEPT} if it is good
-     * enough, or {@code REVISE: <what to fix>} otherwise. Streams to {@code turnEmitter} as
+     * One-shot blocking LLM call judging {@code reply} against {@code criteria}: answers {@code
+     * ACCEPT} if it is good enough, or {@code REVISE: ...} otherwise. Streams to {@code turnEmitter} as
      * "thinking" (same treatment as {@link #stepExpectingAction()}'s own LLM call).
      */
-    private String callJudgeLlm(String draft) {
-        String prompt = "Review the following draft. If it is acceptable as-is, reply with "
-                + "exactly:\nACCEPT\nOtherwise, reply with:\nREVISE: <a concise, specific "
-                + "description of what to fix>\n\nDraft:\n" + draft;
+    private String callJudgeLlm(String criteria, String reply) {
+        String prompt = "Judge the text below against these criteria:\n" + criteria
+                + "\n\nIf it meets them as-is, reply with exactly:\nACCEPT\nOtherwise, reply "
+                + "with:\nREVISE: <a concise, specific description of what to fix>\n\nText:\n" + reply;
         StringBuilder buf = new StringBuilder();
         ProviderContext ctx = new ProviderContext(apiKey, List.of(), turnNoThink, () -> {});
         ActorRef<LlmProvider> providerRef = providerRef();
