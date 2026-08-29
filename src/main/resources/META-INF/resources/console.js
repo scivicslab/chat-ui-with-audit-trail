@@ -750,6 +750,165 @@
         // Tab-switch-triggered lazy load is wired once, in initTabs()'s own #right-tab-bar handler.
     }
 
+
+    // ── Extensions panel (SkillAndAgentsFile_260830_oo01) ─────────────────────
+    // Two tabs, each backed by an endpoint that exists: Skills lists what
+    // GET /api/skills indexed, Project sets the working directory whose AGENTS.md
+    // (or CLAUDE.md) every conversation in that project receives.
+    function extSetContent(node) {
+        var content = document.getElementById("ext-content");
+        if (!content) return;
+        content.textContent = "";
+        content.appendChild(node);
+    }
+
+    function extMessage(text, cls) {
+        var d = document.createElement("div");
+        d.className = cls || "ext-loading";
+        d.textContent = text;
+        return d;
+    }
+
+    function extShowDialog(title, body) {
+        var overlay = document.getElementById("ext-dialog-overlay");
+        var t = document.getElementById("ext-dialog-title");
+        var b = document.getElementById("ext-dialog-body");
+        if (!overlay || !t || !b) return;
+        t.textContent = title;
+        b.textContent = body;
+        overlay.style.display = "flex";
+    }
+
+    function extRenderSkills() {
+        extSetContent(extMessage("Loading…"));
+        fetch("api/skills")
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+                var wrap = document.createElement("div");
+                var roots = document.createElement("div");
+                roots.className = "ext-roots";
+                roots.textContent = "roots: " + (j.roots || []).join(", ");
+                wrap.appendChild(roots);
+                if (!j.skills || j.skills.length === 0) {
+                    wrap.appendChild(extMessage("No skill was indexed.", "ext-loading"));
+                }
+                (j.skills || []).forEach(function (s) {
+                    var row = document.createElement("div");
+                    row.className = "ext-item";
+                    var name = document.createElement("div");
+                    name.className = "ext-item-name";
+                    name.textContent = s.name;
+                    var desc = document.createElement("div");
+                    desc.className = "ext-item-desc";
+                    desc.textContent = s.description;
+                    var dir = document.createElement("div");
+                    dir.className = "ext-item-dir";
+                    dir.textContent = s.directory;
+                    row.appendChild(name);
+                    row.appendChild(desc);
+                    row.appendChild(dir);
+                    row.addEventListener("click", function () {
+                        fetch("api/skills/" + encodeURIComponent(s.name))
+                            .then(function (r) { return r.text(); })
+                            .then(function (text) { extShowDialog(s.name, text); })
+                            .catch(function (e) { extShowDialog(s.name, "error: " + e); });
+                    });
+                    wrap.appendChild(row);
+                });
+                (j.problems || []).forEach(function (p) {
+                    wrap.appendChild(extMessage(p, "ext-problem"));
+                });
+                var rescan = document.createElement("button");
+                rescan.className = "ext-action";
+                rescan.textContent = "Rescan";
+                rescan.addEventListener("click", function () {
+                    fetch("api/skills/rescan", { method: "POST" }).then(extRenderSkills);
+                });
+                wrap.appendChild(rescan);
+                extSetContent(wrap);
+            })
+            .catch(function (e) { extSetContent(extMessage("error: " + e, "ext-problem")); });
+    }
+
+    function extRenderProject() {
+        var c = (typeof window.chatUiGetActiveChat === "function") ? window.chatUiGetActiveChat() : null;
+        if (!c) { extSetContent(extMessage("No conversation is active.")); return; }
+        var wrap = document.createElement("div");
+        var label = document.createElement("div");
+        label.className = "ext-roots";
+        label.textContent = "Working directory of " + c.projectId
+            + " — its AGENTS.md (or CLAUDE.md) is given to every conversation here.";
+        var input = document.createElement("input");
+        input.type = "text";
+        input.className = "ext-input";
+        input.placeholder = "/home/devteam/works/<repository>";
+        var apply = document.createElement("button");
+        apply.className = "ext-action";
+        apply.textContent = "Apply";
+        var result = document.createElement("div");
+        result.className = "ext-roots";
+        apply.addEventListener("click", function () {
+            result.textContent = "applying…";
+            fetch("api/projects/" + encodeURIComponent(c.projectId) + "/working-dir", {
+                method: "POST",
+                headers: { "Content-Type": "text/plain" },
+                body: input.value
+            })
+                .then(function (r) { return r.json(); })
+                .then(function (j) { result.textContent = j.message || JSON.stringify(j); })
+                .catch(function (e) { result.textContent = "error: " + e; });
+        });
+        wrap.appendChild(label);
+        wrap.appendChild(input);
+        wrap.appendChild(apply);
+        wrap.appendChild(result);
+        extSetContent(wrap);
+    }
+
+    function extRender(tab) {
+        if (tab === "project") extRenderProject();
+        else extRenderSkills();
+    }
+
+    function initExtensions() {
+        var btn = document.getElementById("extensions-btn");
+        var panel = document.getElementById("extensions-panel");
+        var tabs = document.querySelector("#extensions-panel .ext-tabs");
+        if (!btn || !panel) return;
+        btn.addEventListener("click", function (e) {
+            e.stopPropagation();
+            var showing = panel.style.display === "none" || panel.style.display === "";
+            panel.style.display = showing ? "block" : "none";
+            if (showing) {
+                var active = panel.querySelector(".ext-tab.active");
+                extRender(active ? active.getAttribute("data-tab") : "skills");
+            }
+        });
+        // A click anywhere else closes the panel — except inside the skill dialog, which is a
+        // sibling of the panel in the DOM, so dismissing the dialog would otherwise take the panel
+        // with it and leave the reader back at the chat with no list to return to.
+        document.addEventListener("click", function (e) {
+            if (panel.style.display !== "block") return;
+            if (panel.contains(e.target) || e.target === btn) return;
+            if (e.target.closest && e.target.closest("#ext-dialog-overlay")) return;
+            panel.style.display = "none";
+        });
+        if (tabs) tabs.addEventListener("click", function (e) {
+            var t = e.target.closest(".ext-tab");
+            if (!t) return;
+            tabs.querySelectorAll(".ext-tab").forEach(function (b) { b.classList.toggle("active", b === t); });
+            extRender(t.getAttribute("data-tab"));
+        });
+        var close = document.getElementById("ext-dialog-close");
+        var overlay = document.getElementById("ext-dialog-overlay");
+        if (close && overlay) {
+            close.addEventListener("click", function () { overlay.style.display = "none"; });
+            overlay.addEventListener("click", function (e) {
+                if (e.target === overlay) overlay.style.display = "none";
+            });
+        }
+    }
+
     document.addEventListener("DOMContentLoaded", function () {
         initTabs();
         initActors();
@@ -758,6 +917,7 @@
         initIo();
         initLogs();
         initWorkflow();
+        initExtensions();
         refreshActors();   // the actor dock is visible by default
         ioOnShow();         // Sessions is the default-active right-pane tab
     });

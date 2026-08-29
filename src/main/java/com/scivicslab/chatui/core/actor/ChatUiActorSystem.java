@@ -19,6 +19,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -56,6 +57,14 @@ public class ChatUiActorSystem {
     @ConfigProperty(name = "chat-ui.default-model", defaultValue = "default")
     String defaultModel = "default";
 
+    // Optional, not a defaultValue: an unset property and an empty one must both mean "use the
+    // built-in default" (see the Quarkus empty-string trap). Adding a root here grants whoever can
+    // write files there the power to change how every conversation behaves, so the list is a
+    // deliberate configuration act rather than something discovered at runtime
+    // (SkillAndAgentsFile_260830_oo01 "スキル置き場を足すことは権限を与えることである").
+    @ConfigProperty(name = "chat-ui.skill-roots")
+    Optional<List<String>> skillRoots = Optional.empty();
+
     @Inject
     IoLogStore ioLogStore;
 
@@ -80,6 +89,7 @@ public class ChatUiActorSystem {
 
     private ActorRef<CallWatchdog> callWatchdogRef;
     private ActorRef<CollaborationGraph> collaborationGraphRef;
+    private ActorRef<SkillRegistry> skillRegistryRef;
 
     /** One {@link Project} grouping actor per project id. Purely an actor-tree grouping plus a
      *  naming prefix: a project is not a behavioral boundary
@@ -143,6 +153,17 @@ public class ChatUiActorSystem {
         // whole system — split per project, a set_collaborator naming another project's tab would be
         // written to one graph and read from another, silently losing the assignment.
         collaborationGraphRef = actorSystem.getRoot().createChild("collaborationGraph", new CollaborationGraph());
+
+        // Skill catalog (SkillAndAgentsFile_260830_oo01): likewise one for the whole system. A skill
+        // is instructions for a kind of work, not for a project, so which conversation will want one
+        // cannot be known in advance — every conversation carries the same catalog.
+        SkillRegistry registry = new SkillRegistry(resolveSkillRoots());
+        skillRegistryRef = actorSystem.getRoot().createChild("skillRegistry", registry);
+        LOG.info("Skill registry indexed " + registry.getSkills().size() + " skill(s) from "
+                + registry.getRoots());
+        for (String problem : registry.getProblems()) {
+            LOG.warning("Skill ignored: " + problem);
+        }
 
         // Default (first) project: only chat-01 exists at startup — chat-02, chat-03, ... are
         // created lazily as work actually needs them (ProjectScopedActorTree_260829_oo01 "開始状態
@@ -297,6 +318,12 @@ public class ChatUiActorSystem {
         chatSessionIIAR.tell(a -> ((ChatSession) a).setChatIdentity(projectId, chatId));
         chatSessionIIAR.tell(a -> ((ChatSession) a).setWatchdogRef(callWatchdogRef));
         chatSessionIIAR.tell(a -> ((ChatSession) a).setCollaborationGraphRef(collaborationGraphRef));
+        chatSessionIIAR.tell(a -> ((ChatSession) a).setSkillRegistryRef(skillRegistryRef));
+        // A conversation created after its project's working directory was set must still receive
+        // that project's instructions, so they are pulled from the Project actor here rather than
+        // pushed only at the moment setProjectWorkingDir runs.
+        String projectInstructions = readProjectInstructions(projectRef);
+        chatSessionIIAR.tell(a -> ((ChatSession) a).setProjectInstructions(projectInstructions));
 
         // provider child — created by the generating side, not by ChatSession itself
         // (ChatSessionPorting_260823_oo01 "なぜ init を無くしたか").
@@ -320,6 +347,67 @@ public class ChatUiActorSystem {
         tabRef.createChild(tabRef.getName() + ".sse", new SseConnection(objectMapper));
 
         return tabRef;
+    }
+
+    /** @return the configured skill roots, or {@code ~/.claude/skills} when none is configured */
+    private List<Path> resolveSkillRoots() {
+        List<String> configured = skillRoots.orElse(List.of()).stream()
+                .map(String::strip).filter(s -> !s.isEmpty()).toList();
+        if (configured.isEmpty()) {
+            return List.of(Path.of(System.getProperty("user.home"), ".claude", "skills"));
+        }
+        return configured.stream().map(Path::of).map(Path::toAbsolutePath).toList();
+    }
+
+    /** @return the given project's instructions, or {@code null} if it has none */
+    private String readProjectInstructions(ActorRef<Project> projectRef) {
+        try {
+            return projectRef.ask(Project::getInstructions).get(5, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Failed to read project instructions", e);
+            return null;
+        }
+    }
+
+    /**
+     * Points a project at a working directory, reads that directory's {@code AGENTS.md} (or
+     * {@code CLAUDE.md}), and hands the result to every conversation already in that project
+     * ({@code SkillAndAgentsFile_260830_oo01}).
+     *
+     * @param projectId  the project to point
+     * @param workingDir the directory, or {@code null} to clear it
+     * @return a one-line account of what was loaded, or an {@code error: ...} string
+     */
+    public String setProjectWorkingDir(String projectId, Path workingDir) {
+        ActorRef<Project> projectRef = projects.get(projectId);
+        if (projectRef == null) return "error: unknown project: " + projectId;
+        String outcome;
+        try {
+            outcome = projectRef.ask(p -> p.setWorkingDir(workingDir)).get(10, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Failed to set working directory for " + projectId, e);
+            return "error: " + e.getMessage();
+        }
+        String instructions = readProjectInstructions(projectRef);
+        String prefix = projectId + "/";
+        for (Map.Entry<String, ChatSessionIIAR> entry : chatSessions.entrySet()) {
+            if (!entry.getKey().startsWith(prefix)) continue;
+            entry.getValue().tell(a -> ((ChatSession) a).setProjectInstructions(instructions));
+        }
+        return outcome;
+    }
+
+    /**
+     * @param projectId the project to describe
+     * @return that project's {@link Project} actor, or {@code null} if there is no such project
+     */
+    public ActorRef<Project> getProject(String projectId) {
+        return projects.get(projectId);
+    }
+
+    /** @return the shared {@link SkillRegistry}, or {@code null} before the system is initialised */
+    public ActorRef<SkillRegistry> getSkillRegistry() {
+        return skillRegistryRef;
     }
 
     /**

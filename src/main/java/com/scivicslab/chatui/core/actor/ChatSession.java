@@ -6,6 +6,7 @@ import com.scivicslab.chatui.agent.DocSearchTool;
 import com.scivicslab.chatui.agent.FetchTool;
 import com.scivicslab.chatui.agent.FileReadTool;
 import com.scivicslab.chatui.agent.FileWriteTool;
+import com.scivicslab.chatui.agent.LoadSkillTool;
 import com.scivicslab.chatui.agent.RunPlanTool;
 import com.scivicslab.chatui.agent.SetCollaboratorTool;
 import com.scivicslab.chatui.agent.SetWorkflowTool;
@@ -96,6 +97,12 @@ public class ChatSession extends Interpreter {
     /** The shared {@link CollaborationGraph}, consulted (and updated) by the {@code set_collaborator}
      *  tool and by babysitter-loop methods resolving a role (e.g. {@code "worker"}) to a chat id. */
     private ActorRef<CollaborationGraph> collaborationGraphRef;
+    /** The shared {@link SkillRegistry}, backing the {@code load_skill} tool and the skill catalog
+     *  carried in this session's system prompt ({@code SkillAndAgentsFile_260830_oo01}). */
+    private ActorRef<SkillRegistry> skillRegistryRef;
+    /** This session's project's {@code AGENTS.md} (or {@code CLAUDE.md}) text, or {@code null} when
+     *  the project has no working directory or that directory holds neither file. */
+    private String projectInstructions;
 
     // volatile: the only writer is this actor's own thread (PromptQueue.tryDispatch runs via
     // chatSessionRef.tell(...)), but BusyStateReadableSnapshot_260828_oo01's isBusyDirect() reads it
@@ -177,6 +184,10 @@ public class ChatSession extends Interpreter {
               every asking state a fallback transition to "end" with method reportFailure. The first
               state must be named "0". Use this when a task needs several conversations driven in a
               fixed order, rather than you asking each one yourself.
+            - load_skill(name): read one of the skills listed after this tool list in full — its
+              step-by-step instructions, the routes it says to call, its own files. Requires a
+              "name" <parameter> tag. Each skill's description says when it applies; when one
+              applies to the task at hand, load it before you act rather than after.
             - set_collaborator(chatId, role, collaboratorChatId): record that, for tab "chatId",
               the tab playing role "role" (e.g. "worker") is "collaboratorChatId". Requires THREE
               <parameter> tags: "chatId", "role", "collaboratorChatId". A workflow installed via
@@ -337,6 +348,21 @@ public class ChatSession extends Interpreter {
     /** @param collaborationGraphRef the shared {@link CollaborationGraph} */
     public void setCollaborationGraphRef(ActorRef<CollaborationGraph> collaborationGraphRef) {
         this.collaborationGraphRef = collaborationGraphRef;
+    }
+
+    /** @param skillRegistryRef the shared {@link SkillRegistry}, for {@code load_skill} */
+    public void setSkillRegistryRef(ActorRef<SkillRegistry> skillRegistryRef) {
+        this.skillRegistryRef = skillRegistryRef;
+    }
+
+    /**
+     * @param projectInstructions this session's project's instructions, or {@code null} for none.
+     *                            Re-sent whenever the project's working directory changes, so a
+     *                            session that outlives that change follows the new text from its
+     *                            next turn onwards.
+     */
+    public void setProjectInstructions(String projectInstructions) {
+        this.projectInstructions = projectInstructions;
     }
 
     /**
@@ -751,7 +777,39 @@ public class ChatSession extends Interpreter {
      * tool-observation-appended {@code pendingPrompt} verbatim on later steps.
      */
     public void buildDefaultPrompt() {
-        appendConstructedPrompt((stepCount == 1) ? (SYSTEM_PROMPT + "\n\n" + pendingPrompt) : pendingPrompt);
+        appendConstructedPrompt((stepCount == 1) ? (firstStepPrompt() + "\n\n" + pendingPrompt) : pendingPrompt);
+    }
+
+    /**
+     * The turn's opening text: the fixed tool instructions, then the two things that vary between
+     * conversations — the skill catalog and this project's instructions
+     * ({@code SkillAndAgentsFile_260830_oo01}). Both are assembled here rather than compiled into
+     * {@link #SYSTEM_PROMPT} because both are read from files that can change while the system runs.
+     *
+     * @return the text prefixed to this turn's first prompt
+     */
+    private String firstStepPrompt() {
+        StringBuilder buf = new StringBuilder(SYSTEM_PROMPT);
+        String catalog = skillCatalogText();
+        if (!catalog.isEmpty()) {
+            buf.append("\n\n").append(catalog);
+        }
+        if (projectInstructions != null && !projectInstructions.isBlank()) {
+            buf.append("\n\nInstructions for this project, from its working directory. They govern"
+                    + " the work you do here:\n\n").append(projectInstructions);
+        }
+        return buf.toString();
+    }
+
+    /** @return the skill catalog, or {@code ""} when no registry is wired or none could be read */
+    private String skillCatalogText() {
+        if (skillRegistryRef == null) return "";
+        try {
+            return skillRegistryRef.ask(SkillRegistry::catalogText).get(5, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "Could not read the skill catalog", e);
+            return "";
+        }
     }
 
     /**
@@ -1103,6 +1161,7 @@ public class ChatSession extends Interpreter {
             case "run_plan" -> RunPlanTool.runPlan(system, watchdogRef, myChatName(),
                     extractInput(args, "yaml"),
                     parseIntOrNull(extractInput(args, "timeoutSeconds")));
+            case "load_skill" -> LoadSkillTool.load(skillRegistryRef, extractInput(args, "name"));
             case "set_collaborator" -> SetCollaboratorTool.setCollaborator(collaborationGraphRef,
                     myChatName(), extractInput(args, "chatId"), extractInput(args, "role"),
                     extractInput(args, "collaboratorChatId"));

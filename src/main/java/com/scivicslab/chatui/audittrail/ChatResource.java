@@ -58,6 +58,29 @@ public class ChatResource {
     }
 
     /**
+     * Points a project at a working directory and loads that directory's {@code AGENTS.md} — or
+     * {@code CLAUDE.md} when there is no {@code AGENTS.md} — as instructions for every conversation
+     * in that project ({@code SkillAndAgentsFile_260830_oo01}).
+     *
+     * @param projectId  the project to point
+     * @param workingDir the directory's path; an empty body clears it
+     * @return {@code {"type":"ok","message":...}}, or 400 with the reason
+     */
+    @POST
+    @Path("/{projectId}/working-dir")
+    @Consumes(MediaType.TEXT_PLAIN)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response setWorkingDir(@PathParam("projectId") String projectId, String workingDir) {
+        String trimmed = workingDir == null ? "" : workingDir.strip();
+        String outcome = actorSystem.setProjectWorkingDir(projectId,
+                trimmed.isEmpty() ? null : java.nio.file.Path.of(trimmed).toAbsolutePath());
+        if (outcome.startsWith("error:")) {
+            return Response.status(400).entity(Map.of("type", "error", "message", outcome)).build();
+        }
+        return Response.ok(Map.of("type", "ok", "message", outcome)).build();
+    }
+
+    /**
      * Starts a plan on this conversation from a YAML body, without going through its LLM
      * ({@code DirectPlanSubmission_260830_oo01}). Returns as soon as the plan has been handed to
      * its runner; the result appears in this conversation's log when it finishes.
