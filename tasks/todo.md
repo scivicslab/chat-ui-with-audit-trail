@@ -329,3 +329,19 @@
 
 - `Interpreter.runUntilEnd`のループ条件は`iteration < maxIterations && !stopRequested`なので、停止要求で抜けたときもループ外の`return`に落ち、戻り値は`Maximum iterations (10000) exceeded`になる。最初はこれをそのまま呼び出し元へ返していたため、自分で止めておきながら「最大反復数を超えた」と報告される形だった。`isStopRequested()`を見て分岐するようにした。
 - 3問の短い計画では、停止を送る前に完走してしまった。停止は遷移と遷移の合間にしか効かないという設計上の制約が、そのまま観測された形である。
+
+## 計画（外で書いた計画をLLMを通さず投げ込む）
+
+設計文書: `DirectPlanSubmission_260830_oo01`。
+
+- [x] `RunPlanTool`を、待つ経路（`runPlan`、`run_plan`ツール用）と待たない経路（`submit`）に分け、`PlanRunner`の取得・起動を共通化
+- [x] `ChatUiActorSystem.submitPlan(projectId, chatId, yaml)`：結果が出たらその会話のログへ`plan finished: ...`と書く
+- [x] `POST /api/projects/{projectId}/chats/{chatId}/plan`（本文はYAMLそのもの、`text/plain`）
+- [x] `mvn install`（テスト含む）成功、ポート28014へ実機デプロイ
+- [x] YAMLを直接投げて24msで`accepted`が返り、裏で計画が回ってchat-02が応答し、結果がchat-01のログに現れることを確認。chat-01の会話履歴は空のまま（LLM未使用）
+
+## レビュー
+
+- 本文をJSONで包まずYAMLそのものにした。包むと、投げる側がYAMLをJSON文字列へエスケープする手間が増えるだけで、得るものが無い。
+- 待たない経路では`CallWatchdog`に待ちを登録しない。待つ主体が居ないので登録するものが無く、消し忘れも起きない。
+- 結果は会話履歴ではなくログへ書く。会話履歴はその会話のターン機構が書くものなので、外から書くと進行中のターンと衝突しうる。

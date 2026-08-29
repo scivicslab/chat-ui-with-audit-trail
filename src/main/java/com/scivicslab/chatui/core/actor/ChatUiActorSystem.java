@@ -1,6 +1,7 @@
 package com.scivicslab.chatui.core.actor;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.scivicslab.chatui.agent.RunPlanTool;
 import com.scivicslab.chatui.core.iolog.IoLogStore;
 import com.scivicslab.chatui.core.provider.LlmProvider;
 import com.scivicslab.chatui.logging.ForwardingAccumulator;
@@ -188,6 +189,35 @@ public class ChatUiActorSystem {
         return slash < 0
                 ? chatActorName(callerProjectId, target)
                 : chatActorName(target.substring(0, slash), target.substring(slash + 1));
+    }
+
+    /**
+     * Starts a plan on a conversation without waiting for it — the entry point for a plan written
+     * outside this system and handed in over REST, rather than by a conversation's own LLM
+     * ({@code DirectPlanSubmission_260830_oo01}). The result is written to that conversation's log
+     * when it arrives, since nobody is blocked waiting for it.
+     *
+     * @param projectId owning project's id
+     * @param chatId    conversation id within that project
+     * @param yaml      the plan, as Turing-workflow YAML text
+     * @return {@code null} on success, or an {@code error: ...} string
+     */
+    public String submitPlan(String projectId, String chatId, String yaml) {
+        String chatName = chatActorName(projectId, chatId);
+        String logActor = chatName + ".log";
+        return RunPlanTool.submit(actorSystem, callWatchdogRef, chatName, yaml, result -> {
+            IIActorRef<?> log = actorSystem.getIIActor(logActor);
+            if (log == null) return;
+            try {
+                org.json.JSONObject args = new org.json.JSONObject();
+                args.put("source", "PlanRunner");
+                args.put("type", "INFO");
+                args.put("data", "plan finished: " + result);
+                log.callByActionName("add", args.toString());
+            } catch (Exception e) {
+                LOG.log(Level.WARNING, "Failed to log plan result for " + chatName, e);
+            }
+        });
     }
 
     /**

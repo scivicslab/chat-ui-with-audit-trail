@@ -58,6 +58,30 @@ public class ChatResource {
     }
 
     /**
+     * Starts a plan on this conversation from a YAML body, without going through its LLM
+     * ({@code DirectPlanSubmission_260830_oo01}). Returns as soon as the plan has been handed to
+     * its runner; the result appears in this conversation's log when it finishes.
+     *
+     * @param projectId owning project's id
+     * @param chatId    conversation id within that project
+     * @param yaml      the plan, as Turing-workflow YAML text
+     * @return {@code {"type": "accepted"}}, or 400 with the reason
+     */
+    @POST
+    @Path("/{projectId}/chats/{chatId}/plan")
+    @Consumes(MediaType.TEXT_PLAIN)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response submitPlan(@PathParam("projectId") String projectId,
+                                @PathParam("chatId") String chatId, String yaml) {
+        actorSystem.createChat(projectId, chatId);
+        String error = actorSystem.submitPlan(projectId, chatId, yaml);
+        if (error != null) {
+            return Response.status(400).entity(Map.of("type", "error", "message", error)).build();
+        }
+        return Response.ok(Map.of("type", "accepted")).build();
+    }
+
+    /**
      * Asks this conversation's plan runner to stop.
      *
      * @param projectId owning project's id
