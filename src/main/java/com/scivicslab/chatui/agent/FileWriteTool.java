@@ -22,16 +22,16 @@ public final class FileWriteTool {
      * needed. Returns a confirmation, or an {@code error: ...} string the agent feeds back as the
      * Observation.
      */
-    public static String write(Path root, String path, String content) {
+    public static String write(FileAccessScope scope, String path, String content) {
         if (path == null || path.isBlank()) return "error: path required";
         try {
-            Path base = root.toAbsolutePath().normalize();
+            Path base = scope.writeRoot();
             // Expand ~ / $HOME the same way the read tool does; confinement below still restricts the result.
             String p = FileReadTool.expandHome(path.trim());
             Path target = base.resolve(p).normalize();
             // Reject escapes on the normalized path BEFORE creating anything.
-            if (!target.startsWith(base)) {
-                return "error: path escapes working directory: " + path;
+            if (!scope.canWrite(target)) {
+                return "error: path is outside the writable directory (" + base + "): " + path;
             }
             if (Files.isDirectory(target)) {
                 return "error: path is a directory: " + path;

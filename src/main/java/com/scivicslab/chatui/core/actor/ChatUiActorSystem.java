@@ -1,6 +1,7 @@
 package com.scivicslab.chatui.core.actor;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.scivicslab.chatui.agent.FileAccessScope;
 import com.scivicslab.chatui.agent.RunPlanTool;
 import com.scivicslab.chatui.core.iolog.IoLogStore;
 import com.scivicslab.chatui.core.provider.LlmProvider;
@@ -65,6 +66,15 @@ public class ChatUiActorSystem {
     @ConfigProperty(name = "chat-ui.skill-roots")
     Optional<List<String>> skillRoots = Optional.empty();
 
+    // The range of the file system a conversation's read/write may touch
+    // (FileAccessScope_260830_oo01). Unset means what this system did before the range became
+    // configurable: both confined to the directory the process was started in.
+    @ConfigProperty(name = "chat-ui.write-root")
+    Optional<String> writeRoot = Optional.empty();
+
+    @ConfigProperty(name = "chat-ui.read-roots")
+    Optional<List<String>> readRoots = Optional.empty();
+
     @Inject
     IoLogStore ioLogStore;
 
@@ -90,6 +100,7 @@ public class ChatUiActorSystem {
     private ActorRef<CallWatchdog> callWatchdogRef;
     private ActorRef<CollaborationGraph> collaborationGraphRef;
     private ActorRef<SkillRegistry> skillRegistryRef;
+    private FileAccessScope fileScope;
 
     /** One {@link Project} grouping actor per project id. Purely an actor-tree grouping plus a
      *  naming prefix: a project is not a behavioral boundary
@@ -157,7 +168,11 @@ public class ChatUiActorSystem {
         // Skill catalog (SkillAndAgentsFile_260830_oo01): likewise one for the whole system. A skill
         // is instructions for a kind of work, not for a project, so which conversation will want one
         // cannot be known in advance — every conversation carries the same catalog.
-        SkillRegistry registry = new SkillRegistry(resolveSkillRoots());
+        List<Path> skillRootPaths = resolveSkillRoots();
+        fileScope = resolveFileScope(skillRootPaths);
+        LOG.info("File access: write root " + fileScope.writeRoot()
+                + ", readable " + fileScope.describeReadRoots());
+        SkillRegistry registry = new SkillRegistry(skillRootPaths);
         skillRegistryRef = actorSystem.getRoot().createChild("skillRegistry", registry);
         LOG.info("Skill registry indexed " + registry.getSkills().size() + " skill(s) from "
                 + registry.getRoots());
@@ -319,6 +334,7 @@ public class ChatUiActorSystem {
         chatSessionIIAR.tell(a -> ((ChatSession) a).setWatchdogRef(callWatchdogRef));
         chatSessionIIAR.tell(a -> ((ChatSession) a).setCollaborationGraphRef(collaborationGraphRef));
         chatSessionIIAR.tell(a -> ((ChatSession) a).setSkillRegistryRef(skillRegistryRef));
+        chatSessionIIAR.tell(a -> ((ChatSession) a).setFileScope(fileScope));
         // A conversation created after its project's working directory was set must still receive
         // that project's instructions, so they are pulled from the Project actor here rather than
         // pushed only at the moment setProjectWorkingDir runs.
@@ -357,6 +373,31 @@ public class ChatUiActorSystem {
             return List.of(Path.of(System.getProperty("user.home"), ".claude", "skills"));
         }
         return configured.stream().map(Path::of).map(Path::toAbsolutePath).toList();
+    }
+
+    /**
+     * Builds the file range from configuration. A skill root is readable without being listed
+     * again: {@code load_skill}'s third loading level is the {@code read} tool, so configuring a
+     * skill root already declares the intent to read what is in it
+     * ({@code FileAccessScope_260830_oo01}).
+     *
+     * @param skillRootPaths the configured skill roots
+     * @return the range every conversation gets
+     */
+    private FileAccessScope resolveFileScope(List<Path> skillRootPaths) {
+        Path write = writeRoot.map(String::strip).filter(v -> !v.isEmpty())
+                .map(Path::of).orElseGet(() -> Path.of("").toAbsolutePath());
+        List<Path> extra = new ArrayList<>(skillRootPaths);
+        for (String configured : readRoots.orElse(List.of())) {
+            String stripped = configured.strip();
+            if (!stripped.isEmpty()) extra.add(Path.of(stripped));
+        }
+        return new FileAccessScope(write, extra);
+    }
+
+    /** @return the range every conversation's read/write is confined to */
+    public FileAccessScope getFileScope() {
+        return fileScope;
     }
 
     /** @return the given project's instructions, or {@code null} if it has none */

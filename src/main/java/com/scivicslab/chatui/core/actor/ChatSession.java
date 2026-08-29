@@ -4,6 +4,7 @@ import com.scivicslab.chatui.agent.AskChatTool;
 import com.scivicslab.chatui.agent.ContextBudget;
 import com.scivicslab.chatui.agent.DocSearchTool;
 import com.scivicslab.chatui.agent.FetchTool;
+import com.scivicslab.chatui.agent.FileAccessScope;
 import com.scivicslab.chatui.agent.FileReadTool;
 import com.scivicslab.chatui.agent.FileWriteTool;
 import com.scivicslab.chatui.agent.LoadSkillTool;
@@ -137,7 +138,12 @@ public class ChatSession extends Interpreter {
 
     // ---- Agent loop (ChatSessionAgentLoop_260823_oo01): start -> (stepExpectingAction -> runTool)* -> finish ----
     private static final int MAX_STEPS = 6;
-    private static final Path WORKING_DIR = Path.of("").toAbsolutePath();
+    /**
+     * The range of the file system this conversation's {@code read}/{@code write} may touch. The
+     * default keeps both confined to the directory the process was started in; the generating side
+     * replaces it with the configured range ({@code FileAccessScope_260830_oo01}).
+     */
+    private FileAccessScope fileScope = FileAccessScope.processDirectory();
 
     private static final String SYSTEM_PROMPT = """
             You are a helpful assistant with access to tools. To call a tool, write EXACTLY this format \
@@ -348,6 +354,11 @@ public class ChatSession extends Interpreter {
     /** @param collaborationGraphRef the shared {@link CollaborationGraph} */
     public void setCollaborationGraphRef(ActorRef<CollaborationGraph> collaborationGraphRef) {
         this.collaborationGraphRef = collaborationGraphRef;
+    }
+
+    /** @param fileScope the range of the file system {@code read}/{@code write} may touch */
+    public void setFileScope(FileAccessScope fileScope) {
+        this.fileScope = fileScope;
     }
 
     /** @param skillRegistryRef the shared {@link SkillRegistry}, for {@code load_skill} */
@@ -790,6 +801,10 @@ public class ChatSession extends Interpreter {
      */
     private String firstStepPrompt() {
         StringBuilder buf = new StringBuilder(SYSTEM_PROMPT);
+        buf.append("\n\nread may read files under: ").append(fileScope.describeReadRoots())
+           .append("\nwrite may only write under: ").append(fileScope.writeRoot())
+           .append("\nA relative path is taken from the write directory. When a skill's text points"
+                 + " at a file in its own directory, read it — that directory is readable.");
         String catalog = skillCatalogText();
         if (!catalog.isEmpty()) {
             buf.append("\n\n").append(catalog);
@@ -1146,8 +1161,8 @@ public class ChatSession extends Interpreter {
     private String executeTool(ToolCall tc) {
         String args = tc.argumentsJson();
         return switch (tc.name()) {
-            case "read" -> FileReadTool.read(WORKING_DIR, extractInput(args, "path"));
-            case "write" -> FileWriteTool.write(WORKING_DIR,
+            case "read" -> FileReadTool.read(fileScope, extractInput(args, "path"));
+            case "write" -> FileWriteTool.write(fileScope,
                     extractInput(args, "path"), extractInput(args, "content"));
             case "calc" -> calculator().evaluate(extractInput(args, "expression"));
             case "web_search" -> WebSearchTool.searchAndFetch(extractInput(args, "query"));

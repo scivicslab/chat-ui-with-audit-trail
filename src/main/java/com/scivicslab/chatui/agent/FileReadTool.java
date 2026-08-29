@@ -38,15 +38,25 @@ public final class FileReadTool {
             "mp4", "mp3", "wav", "lock", "p12", "jks", "keystore");
 
     /**
-     * Reads {@code input} (a path relative to {@code root}). Returns file/directory text, or an
-     * {@code error: ...} string the agent feeds back as the Observation.
+     * Reads {@code input}, a path relative to the scope's write root or an absolute one. Returns
+     * file/directory text, or an {@code error: ...} string the agent feeds back as the Observation.
+     *
+     * @param scope the conversation's file range ({@code FileAccessScope_260830_oo01})
+     * @param input the path as the model wrote it
+     * @return the text, or {@code error: ...}
      */
-    public static String read(Path root, String input) {
-        return read(root, input, MAX_TOTAL_CHARS, MAX_FILES);
+    public static String read(FileAccessScope scope, String input) {
+        return read(scope, input, MAX_TOTAL_CHARS, MAX_FILES);
     }
 
-    /** As {@link #read(Path, String)} but with explicit caps (used by tests). */
-    static String read(Path root, String input, long maxChars, int maxFiles) {
+    /** As {@link #read(FileAccessScope, String)} but confined to one directory (used by tests). */
+    public static String read(Path root, String input) {
+        return read(new FileAccessScope(root, java.util.List.of()), input, MAX_TOTAL_CHARS, MAX_FILES);
+    }
+
+    /** As {@link #read(FileAccessScope, String)} but with explicit caps (used by tests). */
+    static String read(FileAccessScope scope, String input, long maxChars, int maxFiles) {
+        Path root = scope.writeRoot();
         if (input == null || input.isBlank()) {
             return "error: path required";
         }
@@ -61,13 +71,15 @@ public final class FileReadTool {
                 return "error: not found: " + input;
             }
             // Resolve symlinks and confirm the target stays inside the working directory.
-            Path realBase = base.toRealPath();
             Path realTarget = target.toRealPath();
-            if (!realTarget.startsWith(realBase)) {
-                return "error: path escapes working directory: " + input;
+            if (!scope.canRead(realTarget)) {
+                return "error: path is outside the readable directories (" + scope.describeReadRoots()
+                        + "): " + input;
             }
             if (Files.isDirectory(realTarget)) {
-                return readDirectory(realBase, realTarget, maxChars, maxFiles);
+                Path label = scope.matchingReadRoot(realTarget);
+                return readDirectory(label == null ? realTarget : label.toRealPath(),
+                        realTarget, maxChars, maxFiles);
             }
             return Files.readString(realTarget);
         } catch (IOException e) {
