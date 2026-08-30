@@ -81,13 +81,19 @@ public final class DocSearchTool {
      * is queried on its own and their top hits are merged, rather than one standing in for another
      * ({@code DocRetrievalAgentLoop_260830_oo01}).</p>
      *
+     * <p>Which routes to run is not the caller's choice. Offering it as a tool argument was tried
+     * and measured: given the choice, the conversation asked for the embedding route alone in six
+     * of ten searches, and every question it got wrong that way had a candidate list one route
+     * deep ({@code DocRetrievalAgentLoop_260830_oo01}). The {@code route} parameter stays for
+     * tests and for callers inside this system, not for the model.</p>
+     *
      * @param query      what to search for
      * @param maxResults hits taken from each route; at or below zero the default is used
      * @param route      {@code "all"}, or one route on its own: {@code "fulltext"},
      *                   {@code "tfidf"}, {@code "semantic"}
      * @return the merged list as the Observation text, or a message saying nothing was found
      */
-    public static String search(String query, int maxResults, String route) {
+    static String search(String query, int maxResults, String route) {
         if (query == null || query.isBlank()) return "error: query required";
         int limit = maxResults > 0 ? maxResults : DEFAULT_MAX_RESULTS;
         String q = URLEncoder.encode(query.trim(), StandardCharsets.UTF_8);
