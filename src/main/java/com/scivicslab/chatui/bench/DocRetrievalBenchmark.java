@@ -42,6 +42,12 @@ public final class DocRetrievalBenchmark {
     private static final String PROJECT_ID = envOr("BENCH_PROJECT", "project1");
     /** Generous: one task is a whole multi-step turn with searches and reads in it. */
     private static final int TASK_TIMEOUT_SECONDS = 300;
+    /**
+     * Distinguishes this run's conversations from an earlier run's. Without it a re-run reuses the
+     * conversation of the same name, whose history already holds the previous run's answer — the
+     * agent could then repeat that answer without searching at all.
+     */
+    private static final String RUN_ID = String.valueOf(System.currentTimeMillis() % 1_000_000);
 
     private static final HttpClient HTTP = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10)).build();
@@ -86,7 +92,7 @@ public final class DocRetrievalBenchmark {
     private static Result run(Task task, String variant) throws Exception {
         // A fresh conversation per task: reusing one would leave the previous answer in history,
         // and the agent could answer from that instead of searching.
-        String chatId = "bench-" + variant + "-" + task.id;
+        String chatId = "bench-" + variant + "-" + RUN_ID + "-" + task.id;
         String chatBase = CHAT_UI + "/api/projects/" + PROJECT_ID + "/chats/" + enc(chatId);
         post(chatBase, "");
 
@@ -148,10 +154,11 @@ public final class DocRetrievalBenchmark {
                 stepLabels.add(step.optString("label", ""));
                 String tool = step.optString("toolName", "");
                 if (tool.equals("read")) {
-                    t.readInputs.add(step.optString("toolInput", "") + "\n" + step.optString("observation", ""));
+                    t.readInputs.add(step.optString("toolInput", "") + "\n"
+                            + fullObservation(sessionId, step));
                 } else if (tool.equals("search_docs")) {
                     t.searches++;
-                    t.searchObservations.add(step.optString("observation", ""));
+                    t.searchObservations.add(fullObservation(sessionId, step));
                 }
                 if (step.optString("finalAnswer", "").contains("step limit")) t.stepLimitReached = true;
             }
@@ -159,6 +166,32 @@ public final class DocRetrievalBenchmark {
         // One agent-loop step writes one "turnN/stepM/llm" label; count those, not the tool records.
         t.steps = (int) stepLabels.stream().filter(l -> l.endsWith("/llm")).count();
         return t;
+    }
+
+    /**
+     * The whole observation, fetched from the log entry the trace step points at.
+     *
+     * <p>The trace's own {@code observation} field is a 240-character digest for the Sessions view
+     * ({@code IoLogView.OBS_DIGEST}); a search observation is around 7000 characters, so scoring
+     * against the digest asks only whether the answer was the first hit. The full text is in the
+     * log database and comes back from {@code /api/sessions/{id}/entry/{logId}}.</p>
+     *
+     * @param sessionId the I/O-log session the step belongs to
+     * @param step      one trace step
+     * @return the observation as the tool produced it, or the digest if the entry cannot be read
+     */
+    private static String fullObservation(long sessionId, JSONObject step) {
+        long logId = step.optLong("id", -1);
+        if (logId < 0) return step.optString("observation", "");
+        try {
+            JSONObject entry = new JSONObject(
+                    get(CHAT_UI + "/api/sessions/" + sessionId + "/entry/" + logId));
+            String message = entry.optString("message", "");
+            return message.isEmpty() ? step.optString("observation", "") : message;
+        } catch (Exception e) {
+            System.err.println("could not read log entry " + logId + ": " + e.getMessage());
+            return step.optString("observation", "");
+        }
     }
 
     /**
