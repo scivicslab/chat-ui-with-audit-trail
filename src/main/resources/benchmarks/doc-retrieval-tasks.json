@@ -1,55 +1,85 @@
 {
-  "_comment": "Tasks for DocRetrievalBenchmark_260830_oo01. Every question must be answerable ONLY from this team's own documents — a question answerable from general knowledge would score a hit without the agent ever searching. answer_docs ids must be present in html-saurus's index (check with /api/resolve?id=...); documents written today are typically not indexed yet.",
+  "_comment": "Tasks for DocRetrievalBenchmark_260830_oo01. Every question must be answerable ONLY from this team's own documents — a question answerable from general knowledge would score a hit without the agent ever searching. answer_docs ids must be present in html-saurus's index (check with /api/resolve?id=...); documents written today are typically not indexed yet. answer_key は LLMJudge が正誤を判定する基準である。文書idを読んだかどうか（read-hit）とは別に、答えの内容が合っているかを測る。",
   "tasks": [
     {
       "id": "port-convention",
       "question": "私たちの取り決めでは、html-saurus は何番のポートで動かすことになっていますか。その番号を定めている文書はどれですか。",
-      "answer_docs": ["PortConvention_260719_oo01"]
+      "answer_docs": [
+        "PortConvention_260719_oo01"
+      ],
+      "answer_key": "28001番ポート。28001〜28009が検索系サービス用の予約された固定ポートであること、およびその取り決めがPortConvention文書にあることに触れていれば十分。"
     },
     {
       "id": "prerequisite-section",
       "question": "ある文書が「これを先に読め」と別の文書を指す関係は、markdown のどの見出しの節に、どういう書き方で書くことになっていますか。",
-      "answer_docs": ["PrerequisiteDocument_260728_oo01"]
+      "answer_docs": [
+        "PrerequisiteDocument_260728_oo01"
+      ],
+      "answer_key": "文書末尾の `## 参考文献` という見出しの節に、HTMLの `<span data-doc-id=\"...\">` 形式で文書idを並べて書く。見出し名と、data-doc-id を持つHTML要素で書くことの両方に触れていること。"
     },
     {
       "id": "prerequisite-reverse",
       "question": "html-saurus で、ある文書を前提として名指ししている文書を逆に引く仕組みは、索引をいつ作り直していますか。",
-      "answer_docs": ["PrerequisiteOf_260806_oo01"]
+      "answer_docs": [
+        "PrerequisiteOf_260806_oo01"
+      ],
+      "answer_key": "逆引きの索引はビルド／再索引のときと、サーバ起動時の2つのタイミングで、markdownの `## 参考文献` から毎回作り直す。少なくとも「起動時に作り直す」ことに触れていること。"
     },
     {
       "id": "collaboration-graph",
       "question": "chat-ui-with-audit-trail で、ある会話の「worker」役が誰かを登録しておく仕組みは何という名前で、どのツールから設定しますか。",
-      "answer_docs": ["CollaborationGraph_260828_oo01"]
+      "answer_docs": [
+        "CollaborationGraph_260828_oo01"
+      ],
+      "answer_key": "CollaborationGraph という仕組みで、set_collaborator ツールから設定する。名前とツール名の両方に触れていること。"
     },
     {
       "id": "workflow-entry-state",
       "question": "set_workflow で会話に別のワークフローを入れるとき、その最初の状態の名前は何でなければなりませんか。またそれはなぜですか。",
-      "answer_docs": ["WorkflowReloadReset_260828_oo01"]
+      "answer_docs": [
+        "WorkflowReloadReset_260828_oo01"
+      ],
+      "answer_key": "最初の状態の名前は \"think\" でなければならない。理由は ChatSession.start() が、どのワークフローが入っていても無条件に transitionTo(\"think\") を呼ぶため。名前と理由の両方に触れていること。"
     },
     {
       "id": "benchmark-skeleton",
       "question": "AI-benchmark プロジェクトが定めた共通の骨組みは、どの4つの部品からできていますか。",
-      "answer_docs": ["AIBenchmarkVisionStatement_260805_oo01"]
+      "answer_docs": [
+        "AIBenchmarkVisionStatement_260805_oo01"
+      ],
+      "answer_key": "Task・Runner・Grader・Battery の4つ。4つとも挙がっていること。"
     },
     {
       "id": "call-watchdog",
       "question": "ある会話が別の会話へ依頼して待つとき、待ちが一周して戻る循環を検知する仕組みは何という名前ですか。",
-      "answer_docs": ["AskChatToolAndWatchdog_260827_oo01"]
+      "answer_docs": [
+        "AskChatToolAndWatchdog_260827_oo01"
+      ],
+      "answer_key": "CallWatchdog。名前が挙がっていること。"
     },
     {
       "id": "busy-snapshot",
       "question": "会話が長い処理で塞がっている間でも会話履歴を読めるようにするために、どういう手を打ちましたか。",
-      "answer_docs": ["BusyStateReadableSnapshot_260828_oo01"]
+      "answer_docs": [
+        "BusyStateReadableSnapshot_260828_oo01"
+      ],
+      "answer_key": "書き込み時に更新するスレッドセーフな読み取り専用のスナップショットを別に持ち、対象のアクターのメールボックスを経由せずに読めるようにした。「スナップショットを別に持つ」「メールボックスを経由しない」の趣旨に触れていること。"
     },
     {
       "id": "apply-fanout",
       "question": "Turing workflow で、パターンに一致する複数の子アクターへ同じメソッドを一斉に実行する仕組みは何という名前で、一部が失敗したときどう振る舞いますか。",
-      "answer_docs": ["SubworkflowApply_260509_oo01"]
+      "answer_docs": [
+        "SubworkflowApply_260509_oo01"
+      ],
+      "answer_key": "apply という仕組み。一部のアクターが失敗しても実行を続行し、失敗したアクター名をまとめて報告する。名前と失敗時の振る舞いの両方に触れていること。"
     },
     {
       "id": "tab-scoped-logging",
       "question": "chat-ui-with-audit-trail で、会話ごとのログとシステム全体のログはどういう構造で集約されていますか。",
-      "answer_docs": ["TabScopedLogging_260826_oo01"]
+      "answer_docs": [
+        "TabScopedLogging_260826_oo01"
+      ],
+      "answer_key": "各会話タブが自分専用のログ記録先（multiplexer）を持ち、そこからシステム全体のログへ委譲する、アクターツリーの階層構造。「会話ごとの記録先」と「システム全体へ委譲する階層」の両方に触れていること。"
     }
   ]
 }

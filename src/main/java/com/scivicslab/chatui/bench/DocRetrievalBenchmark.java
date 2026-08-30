@@ -42,6 +42,10 @@ public final class DocRetrievalBenchmark {
     private static final String PROJECT_ID = envOr("BENCH_PROJECT", "project1");
     /** Generous: one task is a whole multi-step turn with searches and reads in it. */
     private static final int TASK_TIMEOUT_SECONDS = 300;
+    /** Where the answer-correctness judge runs — the same OpenAI-compatible server the conversations use. */
+    private static final String JUDGE_URL =
+            envOr("BENCH_JUDGE_URL", "http://localhost:28005/v1/chat/completions");
+    private static final String JUDGE_MODEL = envOr("BENCH_JUDGE_MODEL", "google/gemma-4-26B-A4B-it");
     /**
      * Distinguishes this run's conversations from an earlier run's. Without it a re-run reuses the
      * conversation of the same name, whose history already holds the previous run's answer — the
@@ -80,7 +84,8 @@ public final class DocRetrievalBenchmark {
             System.out.flush();
             Result r = run(task, variant);
             results.add(r);
-            System.out.println(r.readHit ? "read-hit" : (r.searchHit ? "search-hit only" : "miss")
+            System.out.println((r.answerHit ? "PASS" : "FAIL")
+                    + "  " + (r.readHit ? "read-hit" : (r.searchHit ? "search-hit only" : "miss"))
                     + "  steps=" + r.steps + " searches=" + r.searches + " " + r.seconds + "s"
                     + (r.truncated ? " (step limit)" : ""));
         }
@@ -112,6 +117,12 @@ public final class DocRetrievalBenchmark {
             if (mentions(trace.readInputs, want)) r.readHit = true;
             if (mentions(trace.searchObservations, want)) r.searchHit = true;
         }
+        r.answer = lastAssistantMessage(chatBase);
+        if (!task.answerKey.isEmpty()) {
+            String verdict = judge(task, r.answer);
+            r.answerHit = verdict.startsWith("PASS");
+            r.judgeReason = verdict;
+        }
         return r;
     }
 
@@ -123,6 +134,56 @@ public final class DocRetrievalBenchmark {
             if (!status.optBoolean("busy", false)) return true;
         }
         return false;
+    }
+
+    /** @return the conversation's most recent assistant message, or {@code ""} */
+    private static String lastAssistantMessage(String chatBase) {
+        try {
+            JSONArray msgs = new JSONArray(get(chatBase + "/conversation"));
+            for (int i = msgs.length() - 1; i >= 0; i--) {
+                JSONObject m = msgs.getJSONObject(i);
+                if ("assistant".equals(m.optString("role"))) return m.optString("content", "");
+            }
+        } catch (Exception e) {
+            System.err.println("could not read the answer: " + e.getMessage());
+        }
+        return "";
+    }
+
+    /**
+     * Asks an LLM whether the answer says what the task's answer key requires.
+     *
+     * <p>Reading the right document and answering correctly are different things, and once
+     * retrieval works they come apart: a loop told to open three documents scores a read-hit
+     * whether or not it understood any of them. This is the {@code LLMJudge} grader named in
+     * {@code AIBenchmarkVisionStatement_260805_oo01}.</p>
+     *
+     * @param task   the question and its answer key
+     * @param answer what the conversation replied
+     * @return {@code "PASS"} or {@code "FAIL"} followed by one sentence of reason
+     */
+    private static String judge(Task task, String answer) {
+        if (answer == null || answer.isBlank()) return "FAIL: no answer";
+        String prompt = "次の解答が、採点基準を満たしているかを判定してください。\n\n"
+                + "【設問】\n" + task.question + "\n\n"
+                + "【採点基準】\n" + task.answerKey + "\n\n"
+                + "【解答】\n" + answer + "\n\n"
+                + "基準を満たしていれば PASS、満たしていなければ FAIL とだけ最初に書き、"
+                + "その後に理由を1文で書いてください。言い回しの違いは問いません。"
+                + "基準が求めている事実がすべて含まれているかどうかだけを見てください。";
+        try {
+            JSONObject body = new JSONObject()
+                    .put("model", JUDGE_MODEL)
+                    .put("temperature", 0)
+                    .put("messages", new JSONArray()
+                            .put(new JSONObject().put("role", "user").put("content", prompt)));
+            String res = postJson(JUDGE_URL, body.toString());
+            String text = new JSONObject(res).getJSONArray("choices").getJSONObject(0)
+                    .getJSONObject("message").getString("content").strip();
+            return text.length() > 200 ? text.substring(0, 200) : text;
+        } catch (Exception e) {
+            return "FAIL: judge call failed: " + e.getMessage();
+        }
     }
 
     // ── scoring from the I/O log ──────────────────────────────────────────────
@@ -209,11 +270,12 @@ public final class DocRetrievalBenchmark {
     // ── reporting ─────────────────────────────────────────────────────────────
 
     private static void report(String variant, List<Result> results) {
-        int readHits = 0, searchHits = 0, truncated = 0, steps = 0, searches = 0;
+        int readHits = 0, searchHits = 0, answerHits = 0, truncated = 0, steps = 0, searches = 0;
         long seconds = 0;
         for (Result r : results) {
             if (r.readHit) readHits++;
             if (r.searchHit) searchHits++;
+            if (r.answerHit) answerHits++;
             if (r.truncated) truncated++;
             steps += r.steps;
             searches += r.searches;
@@ -221,17 +283,24 @@ public final class DocRetrievalBenchmark {
         }
         int n = results.size();
         System.out.println();
-        System.out.printf("%-24s %-10s %-12s %6s %9s %6s%n",
-                "task", "read", "search", "steps", "searches", "sec");
+        System.out.printf("%-24s %-8s %-8s %-8s %6s %9s %6s%n",
+                "task", "answer", "read", "search", "steps", "searches", "sec");
         for (Result r : results) {
-            System.out.printf("%-24s %-10s %-12s %6d %9d %6d%s%n",
-                    r.task.id, r.readHit ? "hit" : "miss", r.searchHit ? "hit" : "miss",
+            System.out.printf("%-24s %-8s %-8s %-8s %6d %9d %6d%s%n",
+                    r.task.id, r.answerHit ? "PASS" : "FAIL",
+                    r.readHit ? "hit" : "miss", r.searchHit ? "hit" : "miss",
                     r.steps, r.searches, r.seconds, r.truncated ? "  (step limit)" : "");
         }
         System.out.println();
-        System.out.printf("variant=%s  read-hit %d/%d  search-hit %d/%d  "
+        for (Result r : results) {
+            if (!r.answerHit && !r.judgeReason.isEmpty()) {
+                System.out.println("  " + r.task.id + ": " + r.judgeReason);
+            }
+        }
+        System.out.println();
+        System.out.printf("variant=%s  answer %d/%d  read-hit %d/%d  search-hit %d/%d  "
                         + "avg steps %.1f  avg searches %.1f  avg %.0fs  step-limited %d%n",
-                variant, readHits, n, searchHits, n,
+                variant, answerHits, n, readHits, n, searchHits, n,
                 n == 0 ? 0.0 : (double) steps / n,
                 n == 0 ? 0.0 : (double) searches / n,
                 n == 0 ? 0.0 : (double) seconds / n,
@@ -246,6 +315,7 @@ public final class DocRetrievalBenchmark {
     private static final class Task {
         String id;
         String question;
+        String answerKey;
         List<String> answerDocs = new ArrayList<>();
     }
 
@@ -253,6 +323,9 @@ public final class DocRetrievalBenchmark {
         Task task;
         boolean readHit;
         boolean searchHit;
+        boolean answerHit;
+        String answer = "";
+        String judgeReason = "";
         boolean truncated;
         int steps;
         int searches;
@@ -271,6 +344,7 @@ public final class DocRetrievalBenchmark {
                 Task t = new Task();
                 t.id = o.getString("id");
                 t.question = o.getString("question");
+                t.answerKey = o.optString("answer_key", "");
                 JSONArray docs = o.getJSONArray("answer_docs");
                 for (int j = 0; j < docs.length(); j++) t.answerDocs.add(docs.getString(j));
                 tasks.add(t);
