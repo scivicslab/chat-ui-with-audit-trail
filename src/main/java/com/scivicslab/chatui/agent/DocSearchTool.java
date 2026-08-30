@@ -41,7 +41,10 @@ public final class DocSearchTool {
     private DocSearchTool() {}
 
     private static final Logger LOG = Logger.getLogger(DocSearchTool.class.getName());
-    static final int DEFAULT_MAX_RESULTS = 8;
+    static final int DEFAULT_MAX_RESULTS = 20;
+    /** Characters kept from each hit's summary, so 20 hits stay under ContextBudget's observation
+     *  threshold and the model sees the whole ranking rather than its head and tail. */
+    static final int SUMMARY_CHARS = 150;
 
     private static final String BASE_URL = resolveBaseUrl();
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -89,26 +92,6 @@ public final class DocSearchTool {
             if (seen.add(dedupeKey(h))) { merged.add(h); recallAdded++; }
         }
 
-        // Table-of-contents proximity: add the top hit's same-folder neighbours (deterministic,
-        // from the directory tree). Tagged "[same folder]" so the agent knows why they are here.
-        if (!merged.isEmpty()) {
-            String topId = merged.get(0).path("id").asText("");
-            if (!topId.isBlank()) {
-                List<JsonNode> sibs = fetchHits(BASE_URL + "/api/siblings?id="
-                        + URLEncoder.encode(topId, StandardCharsets.UTF_8), "siblings", query);
-                int sibAdded = 0;
-                for (JsonNode h : sibs) {
-                    if (sibAdded >= 5) break;
-                    if (seen.add(dedupeKey(h))) {
-                        if (h instanceof ObjectNode on) {
-                            on.put("summary", "[same folder] " + on.path("summary").asText(""));
-                        }
-                        merged.add(h);
-                        sibAdded++;
-                    }
-                }
-            }
-        }
         return formatHits(merged);
     }
 
@@ -193,8 +176,11 @@ public final class DocSearchTool {
             // Full source path (what the doc-site "Path" button shows).
             if (!srcPath.isBlank()) sb.append("   path: ").append(srcPath).append("\n");
             // Directly-fetchable URL, so the agent can read the full document with the 'fetch' tool.
-            if (!served.isBlank()) sb.append("   url: ").append(toUrl(served)).append("\n");
-            if (!summary.isBlank()) sb.append("   ").append(summary).append("\n");
+            if (!summary.isBlank()) {
+                sb.append("   ")
+                  .append(summary.length() > SUMMARY_CHARS ? summary.substring(0, SUMMARY_CHARS) + "…" : summary)
+                  .append("\n");
+            }
             sb.append("\n");
             count++;
         }
