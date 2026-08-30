@@ -28,12 +28,18 @@ public final class ContextBudget {
     /** Per-message overhead (role + formatting) added to each message's content estimate. */
     static final int PER_MESSAGE_OVERHEAD = 4;
 
-    /** A tool observation larger than this many characters is truncated before the model sees it. */
+    /**
+     * Observation size used when the workflow's {@code runTool} action names none
+     * ({@code TurnResourceLimits_260830_oo01}). Not the limit itself — the limit is whatever the
+     * workflow says, bounded by the ceiling the model's context length implies.
+     */
     public static final int OBS_THRESHOLD = 8000;
-    /** Characters kept from the head of a truncated observation. */
-    public static final int OBS_HEAD = 6000;
-    /** Characters kept from the tail of a truncated observation. */
-    public static final int OBS_TAIL = 1000;
+    /** Fraction of a truncated observation kept from its head; the rest of the kept text is its tail. */
+    private static final double HEAD_SHARE = 0.75;
+    /** Characters kept from the head of an observation truncated at {@link #OBS_THRESHOLD}. */
+    public static final int OBS_HEAD = (int) (OBS_THRESHOLD * HEAD_SHARE);
+    /** Characters kept from the tail of an observation truncated at {@link #OBS_THRESHOLD}. */
+    public static final int OBS_TAIL = OBS_THRESHOLD - OBS_HEAD;
 
     /** Rough token estimate from character count. */
     public static int estimateTokens(String s) {
@@ -74,12 +80,24 @@ public final class ContextBudget {
      * are returned unchanged.
      */
     public static String truncateObservation(String obs) {
-        if (obs == null || obs.length() <= OBS_THRESHOLD) {
-            return obs;
-        }
-        int omitted = obs.length() - OBS_HEAD - OBS_TAIL;
-        return obs.substring(0, OBS_HEAD)
-                + "\n…(" + omitted + " chars omitted)…\n"
-                + obs.substring(obs.length() - OBS_TAIL);
+        return truncateObservation(obs, OBS_THRESHOLD);
+    }
+
+    /**
+     * Truncates a large tool observation to head + tail with an elision marker, for the copy the
+     * model sees. The whole observation is kept in the I/O log either way.
+     *
+     * @param obs   the observation as the tool produced it
+     * @param limit how many characters the model may see; at or below zero, the default is used
+     * @return the observation, or its head and tail with a marker between them
+     */
+    public static String truncateObservation(String obs, int limit) {
+        int cap = limit > 0 ? limit : OBS_THRESHOLD;
+        if (obs == null || obs.length() <= cap) return obs;
+        int head = (int) (cap * HEAD_SHARE);
+        int tail = cap - head;
+        return obs.substring(0, head)
+                + "\n…(" + (obs.length() - cap) + " characters elided)…\n"
+                + obs.substring(obs.length() - tail);
     }
 }

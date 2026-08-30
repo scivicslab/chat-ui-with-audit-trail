@@ -115,7 +115,12 @@ public class ChatSessionIIAR extends InterpreterIIAR {
             // actor thread, not on IIActorSystem's ManagedThreadPool.
             return chatSession().stepExpectingAction();
         } else if (actionName.equals("runTool")) {
-            return chatSession().runTool();
+            // The workflow's argument is how much of each observation the model may see
+            // (TurnResourceLimits_260830_oo01); absent, ChatSession falls back to its default.
+            return chatSession().runTool(firstArgument(arg));
+        } else if (actionName.equals("stepLimitReached")) {
+            // The step-limit transition's guard. The number is the workflow's, not Java's.
+            return chatSession().stepLimitReached(firstArgument(arg));
         } else if (actionName.equals("finish")) {
             return chatSession().finish();
         } else if (actionName.equals("hasMoreConstructedPrompts")) {
@@ -140,7 +145,7 @@ public class ChatSessionIIAR extends InterpreterIIAR {
         } else if (actionName.equals("judgeResult")) {
             return chatSession().judgeResult(firstArgument(arg));
         } else if (actionName.equals("retryLimitReached")) {
-            return chatSession().retryLimitReached();
+            return chatSession().retryLimitReached(firstArgument(arg));
         } else if (actionName.equals("judgeNeedsRedo")) {
             return chatSession().judgeNeedsRedo();
         } else if (actionName.equals("requestRedo")) {

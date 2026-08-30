@@ -35,6 +35,9 @@ public class OpenAiCompatProvider implements LlmProvider {
     // Conversation history for context (not managed by actor — provider owns it)
     private final LinkedList<ChatMessage> history = new LinkedList<>();
     private static final int MAX_HISTORY_MESSAGES = 20;
+    /** How many leading messages are collapsed turns rather than the running turn's steps
+     *  ({@code TurnResourceLimits_260830_oo01}). */
+    private int collapsedCount = 0;
 
     /**
      * Creates a provider that connects to one or more OpenAI-compatible servers.
@@ -153,7 +156,7 @@ public class OpenAiCompatProvider implements LlmProvider {
 
         List<String> imageDataUrls = ctx.imageDataUrls() != null ? ctx.imageDataUrls() : List.of();
         history.addLast(new ChatMessage.User(prompt, imageDataUrls));
-        if (history.size() > MAX_HISTORY_MESSAGES) history.removeFirst();
+        if (history.size() > MAX_HISTORY_MESSAGES) evictOldest();
 
         // Delegate to agent loop if the plugin is present and enabled
         if (agentLoopExtension != null && agentLoopExtension.isEnabled()) {
@@ -184,7 +187,7 @@ public class OpenAiCompatProvider implements LlmProvider {
                         @Override public void onComplete(long durationMs) {
                             String response = assistantBuf.toString();
                             history.addLast(new ChatMessage.Assistant(response));
-                            if (history.size() > MAX_HISTORY_MESSAGES) history.removeFirst();
+                            if (history.size() > MAX_HISTORY_MESSAGES) evictOldest();
                             if (currentRetry > 0) {
                                 logger.info("Context overflow recovered after " + currentRetry
                                         + " trim(s). Session preserved with "
@@ -217,6 +220,27 @@ public class OpenAiCompatProvider implements LlmProvider {
      * Signals that the current streaming request should be cancelled.
      */
     @Override
+    public void collapseTurn(String question, String answer) {
+        if (question == null || question.isBlank()) return;
+        // Everything before collapsedCount is already (question, answer) pairs of earlier turns;
+        // everything after it is the turn that just ended, one prompt/response per agent-loop step.
+        // Only the latter is replaced — earlier turns are what a chat UI is expected to remember.
+        while (history.size() > collapsedCount) history.removeLast();
+        history.addLast(new ChatMessage.User(question, List.of()));
+        if (answer != null && !answer.isBlank()) {
+            history.addLast(new ChatMessage.Assistant(answer));
+        }
+        collapsedCount = history.size();
+        while (history.size() > MAX_HISTORY_MESSAGES) evictOldest();
+    }
+
+    /** Drops the oldest message, keeping {@link #collapsedCount} pointing at the same boundary. */
+    private void evictOldest() {
+        history.removeFirst();
+        if (collapsedCount > 0) collapsedCount--;
+    }
+
+    @Override
     public void cancel() {
         cancelled = true;
         Thread t = sendingThread;
@@ -226,8 +250,8 @@ public class OpenAiCompatProvider implements LlmProvider {
 
     private void trimHistory() {
         // Remove oldest non-system messages (keep at least the last user message)
-        if (history.size() > 2) history.removeFirst();
-        if (history.size() > 2) history.removeFirst();
+        if (history.size() > 2) evictOldest();
+        if (history.size() > 2) evictOldest();
     }
 
     private OpenAiCompatClient selectClient(String model) {

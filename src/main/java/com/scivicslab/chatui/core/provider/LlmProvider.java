@@ -53,6 +53,22 @@ public interface LlmProvider {
     /** Returns the current session ID, or null if not applicable (e.g., HTTP-based providers). */
     default String getSessionId() { return null; }
 
+    /**
+     * Replaces the messages a just-finished turn added to this provider's conversation history
+     * with the two that a later turn can still use: what was asked, and what was answered
+     * ({@code TurnResourceLimits_260830_oo01}).
+     *
+     * <p>An agent loop calls {@code sendPrompt} once per step, and every one of those calls adds
+     * the step's prompt — tool observations included — to the history. Those observations are
+     * needed while the turn runs, since that history is where a later step sees what an earlier
+     * step found; they are of no use afterwards, and they push earlier turns out of a
+     * fixed-size history. Providers that keep no history do nothing.</p>
+     *
+     * @param question the prompt the turn started from
+     * @param answer   the turn's final answer, or {@code null} if it produced none
+     */
+    default void collapseTurn(String question, String answer) { }
+
     /** True if this provider supports interactive user prompts (tool permission dialogs, etc.). */
     default boolean supportsInteractivePrompts() { return false; }
 

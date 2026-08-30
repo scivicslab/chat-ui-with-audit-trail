@@ -1,4 +1,4 @@
-name: chat-session-agent-loop
+name: step-limit-2
 description: |
   ChatSession's own agent loop: (think -> act)* -> end, i.e. (stepExpectingAction -> runTool)*
   -> finish. See ChatSessionAgentLoop_260823_oo01.
@@ -37,7 +37,7 @@ steps:
     actions:
       - actor: this
         method: stepLimitReached
-        arguments: "6"
+        arguments: "2"
         execution: direct
       - actor: this
         method: finish

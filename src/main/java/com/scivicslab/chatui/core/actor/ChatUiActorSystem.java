@@ -75,6 +75,15 @@ public class ChatUiActorSystem {
     @ConfigProperty(name = "chat-ui.read-roots")
     Optional<List<String>> readRoots = Optional.empty();
 
+    // Ceiling on what a workflow may ask to keep of one tool observation
+    // (TurnResourceLimits_260830_oo01). Derived from the convention that this system's models have
+    // at least a 128K-token context: 128K tokens is 256K characters at ContextBudget's
+    // conservative 2.0 chars/token, half of that is a turn's share, and a turn holds at most its
+    // own step limit's worth of raw observations because finished turns are collapsed to their
+    // question and answer.
+    @ConfigProperty(name = "chat-ui.max-observation-chars", defaultValue = "20000")
+    int maxObservationChars = 20000;
+
     @Inject
     IoLogStore ioLogStore;
 
@@ -335,6 +344,7 @@ public class ChatUiActorSystem {
         chatSessionIIAR.tell(a -> ((ChatSession) a).setCollaborationGraphRef(collaborationGraphRef));
         chatSessionIIAR.tell(a -> ((ChatSession) a).setSkillRegistryRef(skillRegistryRef));
         chatSessionIIAR.tell(a -> ((ChatSession) a).setFileScope(fileScope));
+        chatSessionIIAR.tell(a -> ((ChatSession) a).setMaxObservationChars(maxObservationChars));
         // A conversation created after its project's working directory was set must still receive
         // that project's instructions, so they are pulled from the Project actor here rather than
         // pushed only at the moment setProjectWorkingDir runs.

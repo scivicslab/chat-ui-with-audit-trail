@@ -137,7 +137,16 @@ public class ChatSession extends Interpreter {
     private String activeResultKey;
 
     // ---- Agent loop (ChatSessionAgentLoop_260823_oo01): start -> (stepExpectingAction -> runTool)* -> finish ----
-    private static final int MAX_STEPS = 6;
+    /**
+     * Steps allowed when the workflow's step-limit transition names no number
+     * ({@code TurnResourceLimits_260830_oo01}). Not the limit itself: the limit is what the
+     * workflow says. This value exists so that a workflow installed by {@code set_workflow} that
+     * forgot its step-limit transition still stops, instead of running to
+     * {@code Interpreter.runUntilEnd}'s 10000-iteration backstop.
+     */
+    private static final int DEFAULT_STEP_LIMIT = 6;
+    /** Ceiling on the observation size a workflow may ask for; set from configuration. */
+    private int maxObservationChars = ContextBudget.OBS_THRESHOLD;
     /**
      * The range of the file system this conversation's {@code read}/{@code write} may touch. The
      * default keeps both confined to the directory the process was started in; the generating side
@@ -232,7 +241,8 @@ public class ChatSession extends Interpreter {
 
     // ---- Babysitter loop (BabysitterLoopWorkflowShape_260828_oo01, made phase-agnostic by
     // GenericBabysitterPhases_260829_oo01) — per-turn, reset in start() ----
-    private static final int REDO_LIMIT = 3;
+    /** Redos allowed when the workflow names no number ({@code TurnResourceLimits_260830_oo01}). */
+    private static final int DEFAULT_REDO_LIMIT = 3;
     /**
      * How long a babysitter phase waits for its worker. Far above {@code AskChatTool}'s 60s default,
      * because the worker runs its own multi-step agent loop (web searches, then writing) inside this
@@ -845,10 +855,7 @@ public class ChatSession extends Interpreter {
             finalAnswer = null;
             return new ActionResult(false, "cancelled");
         }
-        if (++stepCount > MAX_STEPS) {
-            finalAnswer = "(step limit reached)";
-            return new ActionResult(false, "step limit");
-        }
+        stepCount++;
 
         if (constructedPrompts.isEmpty()) {
             ActionResult built = call(promptWorkflowFile);
@@ -942,12 +949,58 @@ public class ChatSession extends Interpreter {
     }
 
     /**
+     * The step-limit transition's guard: succeeds once this turn has used its steps, so the
+     * workflow moves to its end state; fails while steps remain, so the scan falls through to the
+     * transition that actually calls the LLM ({@code TurnResourceLimits_260830_oo01}). Makes no
+     * LLM call either way.
+     *
+     * @param limit the workflow's step limit; blank or unparsable falls back to
+     *              {@link #DEFAULT_STEP_LIMIT}
+     * @return {@link ActionResult} with {@code success=true} iff the limit has been reached
+     */
+    public ActionResult stepLimitReached(String limit) {
+        int max = parsePositiveOr(limit, DEFAULT_STEP_LIMIT);
+        boolean reached = stepCount >= max;
+        if (reached && finalAnswer == null) {
+            finalAnswer = "(step limit of " + max + " reached)";
+        }
+        return new ActionResult(reached, reached ? "step limit " + max + " reached"
+                                                 : stepCount + "/" + max + " steps used");
+    }
+
+    /** @param text a workflow argument; @param fallback used when it is blank or not a positive number */
+    private static int parsePositiveOr(String text, int fallback) {
+        if (text == null || text.isBlank()) return fallback;
+        try {
+            int v = Integer.parseInt(text.strip());
+            return v > 0 ? v : fallback;
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    /** @param maxObservationChars ceiling on what a workflow may ask to keep of one observation */
+    public void setMaxObservationChars(int maxObservationChars) {
+        if (maxObservationChars > 0) this.maxObservationChars = maxObservationChars;
+    }
+
+    /**
      * Executes every pending tool call, appends the observations to the scratchpad prompt for
      * the next {@code stepExpectingAction()} call, then clears {@code pendingCalls}.
      *
      * @return {@link ActionResult} with {@code success=true} (this transition never fails)
      */
     public ActionResult runTool() {
+        return runTool("");
+    }
+
+    /**
+     * @param observationChars how much of each observation the model may see, as the workflow
+     *                         wrote it; blank falls back to {@link ContextBudget#OBS_THRESHOLD},
+     *                         and any value is capped at this session's ceiling
+     * @return {@link ActionResult} with {@code success=true} (this transition never fails)
+     */
+    public ActionResult runTool(String observationChars) {
         if (pendingCalls == null || pendingCalls.isEmpty()) {
             return new ActionResult(true, "observed");
         }
@@ -959,7 +1012,9 @@ public class ChatSession extends Interpreter {
             } catch (Exception e) {
                 fullObservation = "error: " + e.getMessage();
             }
-            String forModel = ContextBudget.truncateObservation(fullObservation);
+            String forModel = ContextBudget.truncateObservation(fullObservation,
+                    Math.min(parsePositiveOr(observationChars, ContextBudget.OBS_THRESHOLD),
+                             maxObservationChars));
             recordToolIo(tc, fullObservation);
             turnEmitter.accept(ChatEvent.thinking("Observation (" + tc.name() + "): "
                     + forModel.substring(0, Math.min(200, forModel.length())) + "\n"));
@@ -1003,6 +1058,15 @@ public class ChatSession extends Interpreter {
             }
             turnEmitter.accept(ChatEvent.delta(answer));
             turnEmitter.accept(ChatEvent.result(provider.getSessionId(), 0.0, 0));
+        }
+        // The turn's step-by-step messages — each carrying that step's whole observation — are of
+        // no further use once the answer exists, and they crowd out earlier turns in the provider's
+        // fixed-size history (TurnResourceLimits_260830_oo01). Replace them with what a later turn
+        // actually needs: what was asked, and what was answered.
+        try {
+            providerRef().tell(p -> p.collapseTurn(question, finalAnswer));
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "Could not collapse this turn's provider history", e);
         }
         onPromptComplete(turnEmitter, turnDone, turnSelf);
         return new ActionResult(true, "finished");
@@ -1064,8 +1128,8 @@ public class ChatSession extends Interpreter {
      *
      * @return {@link ActionResult} with {@code success=true} iff this phase's redo budget is exhausted
      */
-    public ActionResult retryLimitReached() {
-        boolean reached = redoCount >= REDO_LIMIT;
+    public ActionResult retryLimitReached(String limit) {
+        boolean reached = redoCount >= parsePositiveOr(limit, DEFAULT_REDO_LIMIT);
         if (reached) finalAnswer = lastWorkerReply;
         return new ActionResult(reached, reached ? "redo limit reached" : "budget remains");
     }
