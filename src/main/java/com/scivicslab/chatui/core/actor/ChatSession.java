@@ -178,13 +178,20 @@ public class ChatSession extends Interpreter {
             - calc(expression): evaluate a Java arithmetic expression, e.g. 23*47 or Math.sqrt(16).
             - web_search(query): search the web and fetch the top results' page content.
             - fetch(url): fetch one specific URL you already have and return its readable text.
-            - search_docs(query): search this team's internal documentation. It returns a ranked
+            - search_docs(query, route): search this team's internal documentation. It returns a ranked
               list of CANDIDATE documents — title, id, source path and a short summary each — not
               the answer to your question. A summary says what a document is about, not what it
               says, so to actually answer you must then call read on the "path" of the candidates
               that look relevant, and read more than one when the summaries do not settle which is
               right. Answering straight from a summary, or from a single top-ranked candidate you
-              did not open, is how you get the answer wrong.
+              did not open, is how you get the answer wrong. Three different searches run and their
+              results are merged, and each candidate says which of them found it; a candidate found
+              by more than one is the strongest signal in the list. The optional "route" <parameter>
+              tag runs just one of them: "fulltext" matches words and is the one that finds an exact
+              class or document name, "semantic" matches meaning and is the one that finds a
+              document worded differently from your question, "tfidf" sits between them. Omit it to
+              run all three. Search in the language the documents are written in — these are mostly
+              Japanese.
             - write(path, content): save text to a file under the working directory. Requires TWO
               <parameter> tags in the same invoke block: one named "path", one named "content".
             - ask_chat(chatId, prompt, timeoutSeconds): send an instruction to another conversation
@@ -1237,7 +1244,8 @@ public class ChatSession extends Interpreter {
             case "calc" -> calculator().evaluate(extractInput(args, "expression"));
             case "web_search" -> WebSearchTool.searchAndFetch(extractInput(args, "query"));
             case "fetch" -> FetchTool.fetch(extractInput(args, "url"));
-            case "search_docs" -> DocSearchTool.search(extractInput(args, "query"), 0);
+            case "search_docs" -> DocSearchTool.search(extractInput(args, "query"), 0,
+                    extractInput(args, "route"));
             case "ask_chat" -> AskChatTool.ask(system, watchdogRef, projectId, chatId,
                     extractInput(args, "chatId"), extractInput(args, "prompt"),
                     parseIntOrNull(extractInput(args, "timeoutSeconds")));

@@ -16,8 +16,10 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.logging.Logger;
 
@@ -66,33 +68,112 @@ public final class DocSearchTool {
      *  by document. (quarkus-chat-ui3's curated "/api/keyword-map" step is dropped here — that
      *  endpoint does not exist in html-saurus's published API, HtmlSaurusApi_260802_oo01.) */
     public static String search(String query, int maxResults) {
+        return search(query, maxResults, "all");
+    }
+
+    /**
+     * Searches the internal documentation and returns a ranked list of candidate documents.
+     *
+     * <p>html-saurus answers the same question three unrelated ways — a Lucene inverted index over
+     * the words, Lucene MoreLikeThis over term frequencies, and cosine similarity over embeddings —
+     * and they disagree. The inverted index is the one that finds a class name at rank 1; the
+     * embedding one is the one that finds a document whose wording differs from the question. Each
+     * is queried on its own and their top hits are merged, rather than one standing in for another
+     * ({@code DocRetrievalAgentLoop_260830_oo01}).</p>
+     *
+     * @param query      what to search for
+     * @param maxResults hits taken from each route; at or below zero the default is used
+     * @param route      {@code "all"}, or one route on its own: {@code "fulltext"},
+     *                   {@code "tfidf"}, {@code "semantic"}
+     * @return the merged list as the Observation text, or a message saying nothing was found
+     */
+    public static String search(String query, int maxResults, String route) {
         if (query == null || query.isBlank()) return "error: query required";
         int limit = maxResults > 0 ? maxResults : DEFAULT_MAX_RESULTS;
         String q = URLEncoder.encode(query.trim(), StandardCharsets.UTF_8);
+        String which = (route == null || route.isBlank()) ? "all" : route.strip().toLowerCase();
 
-        // Recall: semantic (the RAG path); fall back to JSON full-text.
-        List<JsonNode> recall = fetchHits(BASE_URL + "/api/search-semantic?q=" + q, "semantic", query);
-        if (recall.isEmpty())
-            recall = fetchHits(BASE_URL + "/api/search?q=" + q + "&lang=ja", "fulltext", query);
+        Map<String, List<JsonNode>> byRoute = new LinkedHashMap<>();
+        if (which.equals("all") || which.equals("fulltext")) {
+            byRoute.put("fulltext",
+                    fetchHits(BASE_URL + "/api/search?q=" + q + "&lang=ja", "fulltext", query));
+        }
+        if (which.equals("all") || which.equals("tfidf")) {
+            byRoute.put("tfidf", postHits(BASE_URL + "/api/find-related", query));
+        }
+        if (which.equals("all") || which.equals("semantic")) {
+            byRoute.put("semantic",
+                    fetchHits(BASE_URL + "/api/search-semantic?q=" + q, "semantic", query));
+        }
+        if (byRoute.isEmpty()) {
+            return "error: unknown route '" + route + "' (use all, fulltext, tfidf or semantic)";
+        }
 
-        if (recall.isEmpty()) {
+        List<JsonNode> merged = interleave(byRoute, limit);
+        if (merged.isEmpty()) {
             // Last resort for an old html-saurus without the JSON APIs: scrape the /search HTML page.
             String scraped = scrapeSearchPage(BASE_URL + "/search?q=" + q, limit, query);
             if (scraped != null) return scraped;
             return "No documents found for '" + query + "' (the internal doc-search server returned nothing "
                  + "or is unavailable at " + BASE_URL + ").";
         }
-
-        // Recall up to 'limit', de-duplicated by document.
-        List<JsonNode> merged = new ArrayList<>();
-        Set<String> seen = new LinkedHashSet<>();
-        int recallAdded = 0;
-        for (JsonNode h : recall) {
-            if (recallAdded >= limit) break;
-            if (seen.add(dedupeKey(h))) { merged.add(h); recallAdded++; }
-        }
-
         return formatHits(merged);
+    }
+
+    /**
+     * Merges the routes' hits by taking each route's rank-1, then each route's rank-2, and so on,
+     * so no route's best hit is pushed down by another route's long tail. A document found by more
+     * than one route keeps its earliest position and records every route that found it, which is
+     * the strongest signal in the list: the three routes agree on almost nothing by accident.
+     *
+     * @param byRoute  each route's hits, in that route's own rank order
+     * @param perRoute how many hits to take from each route
+     * @return the merged hits, each annotated with the routes that found it
+     */
+    private static List<JsonNode> interleave(Map<String, List<JsonNode>> byRoute, int perRoute) {
+        List<JsonNode> merged = new ArrayList<>();
+        Map<String, ObjectNode> seen = new LinkedHashMap<>();
+        for (int rank = 0; rank < perRoute; rank++) {
+            for (Map.Entry<String, List<JsonNode>> e : byRoute.entrySet()) {
+                List<JsonNode> hits = e.getValue();
+                if (rank >= hits.size()) continue;
+                JsonNode hit = hits.get(rank);
+                String key = dedupeKey(hit);
+                String found = e.getKey() + " #" + (rank + 1);
+                ObjectNode already = seen.get(key);
+                if (already != null) {
+                    already.put("foundBy", already.path("foundBy").asText("") + ", " + found);
+                    continue;
+                }
+                if (hit instanceof ObjectNode on) {
+                    on.put("foundBy", found);
+                    seen.put(key, on);
+                }
+                merged.add(hit);
+            }
+        }
+        return merged;
+    }
+
+    /** POSTs {@code body} as plain text and reads the hit array (the MoreLikeThis route's shape). */
+    private static List<JsonNode> postHits(String url, String body) {
+        List<JsonNode> hits = new ArrayList<>();
+        try {
+            LOG.info("search_docs (tfidf): " + body);
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofSeconds(8))
+                    .header("Content-Type", "text/plain; charset=UTF-8")
+                    .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+                    .build();
+            HttpResponse<String> response = HTTP.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() >= 400) throw new RuntimeException("HTTP " + response.statusCode());
+            JsonNode arr = MAPPER.readTree(response.body());
+            if (arr.isArray()) arr.forEach(hits::add);
+        } catch (Exception e) {
+            LOG.warning("search_docs tfidf failed for '" + body + "': " + e.getMessage());
+        }
+        return hits;
     }
 
     /** Fallback: scrape the html-saurus {@code /search} HTML results page (jsoup) — used when the JSON
@@ -171,7 +252,10 @@ public final class DocSearchTool {
             String srcPath = hit.path("srcPath").asText("");   // absolute source .md path
             String summary = hit.path("summary").asText("");
             if (title.isBlank() && served.isBlank() && srcPath.isBlank()) continue;
-            sb.append(count + 1).append(". ").append(title).append("\n");
+            String foundBy = hit.path("foundBy").asText("");
+            sb.append(count + 1).append(". ").append(title);
+            if (!foundBy.isEmpty()) sb.append("  [").append(foundBy).append("]");
+            sb.append("\n");
             if (!id.isBlank()) sb.append("   id: ").append(id).append("\n");
             // Full source path (what the doc-site "Path" button shows).
             if (!srcPath.isBlank()) sb.append("   path: ").append(srcPath).append("\n");
