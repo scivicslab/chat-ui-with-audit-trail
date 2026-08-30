@@ -80,6 +80,168 @@
         "TabScopedLogging_260826_oo01"
       ],
       "answer_key": "各会話タブが自分専用のログ記録先（multiplexer）を持ち、そこからシステム全体のログへ委譲する、アクターツリーの階層構造。「会話ごとの記録先」と「システム全体へ委譲する階層」の両方に触れていること。"
+    },
+    {
+      "id": "logging-library",
+      "question": "Java のプログラムにログ出力を足すとき、私たちの規約ではどのロギングライブラリを使うことになっていますか。",
+      "answer_docs": [
+        "LoggingConvention_260809_oo01"
+      ],
+      "answer_key": "JDK標準の java.util.logging.Logger だけを使う。SLF4J・Log4J・JBoss Logging といったロギングライブラリを pom.xml に足さないこと。「java.util.logging を使う」と「他のライブラリを追加しない」の両方に触れていること。"
+    },
+    {
+      "id": "logger-field",
+      "question": "規約では、Logger のインスタンスはクラスの中にどういう形で持ちますか。getLogger に何を渡しますか。",
+      "answer_docs": [
+        "LoggingConvention_260809_oo01"
+      ],
+      "answer_key": "private static final のフィールドとしてクラスごとに1つ持ち、Logger.getLogger() には対象クラスの getName() の戻り値（完全修飾クラス名）を渡す。フィールドの修飾子と、getName() を渡すことの両方に触れていること。"
+    },
+    {
+      "id": "log-levels",
+      "question": "規約では、通常のログ出力と、回復不能な障害のログ出力に、それぞれどのログレベルを使いますか。",
+      "answer_docs": [
+        "LoggingConvention_260809_oo01"
+      ],
+      "answer_key": "通常は Level.INFO、処理の失敗・回復不能なエラーは Level.SEVERE。両方が挙がっていること。"
+    },
+    {
+      "id": "exception-rethrow",
+      "question": "規約では、例外を catch したあと何をすることになっていますか。禁止されている書き方は何ですか。",
+      "answer_docs": [
+        "LoggingConvention_260809_oo01"
+      ],
+      "answer_key": "何が失敗したかを示す文脈付きのメッセージとスタックトレースを記録してから、その例外を再送出する。ログを出すだけで例外を握りつぶす（再送出しない）実装は禁止。記録してから再送出することと、握りつぶしが禁止であることの両方に触れていること。"
+    },
+    {
+      "id": "uberjar-filename",
+      "question": "uber-jar の正式なファイル名は、規約ではどう決まっていますか。やってはいけない付け方を2つ挙げてください。",
+      "answer_docs": [
+        "CodingStandard_260401_oo01",
+        "PomXmlConventions_260809_oo01"
+      ],
+      "answer_key": "{artifact-id}-{version}.jar 形式。バージョン番号に v を付けない、-runner サフィックスを付けない（artifact-id を勝手に変えないでもよい）。形式と、禁止されている付け方2つに触れていること。"
+    },
+    {
+      "id": "uberjar-symlink",
+      "question": "デプロイ先には、バージョン付きの jar のほかに何を置くことになっていますか。",
+      "answer_docs": [
+        "CodingStandard_260401_oo01"
+      ],
+      "answer_key": "{artifact-id}.jar というシンボリックリンクを置き、バージョン付きの実体へ向ける。シンボリックリンクであることと、その名前にバージョンが入らないことに触れていること。"
+    },
+    {
+      "id": "shade-pure-library",
+      "question": "他プロジェクトから依存されるだけで CLI として実行しない純粋ライブラリの pom.xml では、maven-shade-plugin をどう設定しますか。",
+      "answer_docs": [
+        "PomXmlConventions_260809_oo01"
+      ],
+      "answer_key": "maven-shade-plugin を <build> に一切書かない。既定のビルドがそのまま依存同梱なしの jar を作る。「使わない・書かない」と言っていること。"
+    },
+    {
+      "id": "shade-risk",
+      "question": "ライブラリとしても使われるプロジェクトで maven-shade-plugin の既定設定のまま uber-jar を作ると、何が起きますか。",
+      "answer_docs": [
+        "PomXmlConventions_260809_oo01"
+      ],
+      "answer_key": "他プロジェクトのクラスパス上でクラスの重複解決が起き、実行時にしか発覚しないエラー（あるはずのメソッドが見つからない等）になる。クラスパス上の重複と、実行時に初めて分かる形で壊れることに触れていること。"
+    },
+    {
+      "id": "version-cadence",
+      "question": "成果物のバージョン番号は、規約ではどういう周期で確定し、確定と確定の間はどう名乗りますか。番号を上げる判断は誰がしますか。",
+      "answer_docs": [
+        "CodingStandard_260401_oo01"
+      ],
+      "answer_key": "4ヶ月に一度だけ確定し、その間は次に確定する予定の番号に -SNAPSHOT を付けて名乗る。確定（番号を上げる判断）は人間が行い、開発者（AI）が勝手にインクリメントしない。周期・-SNAPSHOT・人間が決めることの3つに触れていること。"
+    },
+    {
+      "id": "docker-tag",
+      "question": "Docker イメージのタグは、規約ではどういう形式にしますか。禁止されていることを2つ挙げてください。",
+      "answer_docs": [
+        "CodingStandard_260401_oo01"
+      ],
+      "answer_key": "<app>:<MAJOR.MINOR.PATCH>-<YYMMDDHHmm> の形式。latest や dev のような可変タグの使用が禁止、既存タグを上書きして push することも禁止。形式と禁止事項2つに触れていること。"
+    },
+    {
+      "id": "datetime-format",
+      "question": "ログや Web UI に日時を表示するとき、規約ではどの形式で表示しますか。データベースには何時で保存しますか。",
+      "answer_docs": [
+        "CodingStandard_260401_oo01"
+      ],
+      "answer_key": "表示は ISO 8601 形式でタイムゾーンオフセット付き（例 2025-11-18T16:18:01+09:00）。データベースには UTC で保存し、表示する箇所でタイムゾーンを適用する。表示形式と UTC 保存の両方に触れていること。"
+    },
+    {
+      "id": "cli-parser",
+      "question": "Java の CLI プログラムを書くとき、コマンドライン引数の解析には何を使うことになっていますか。",
+      "answer_docs": [
+        "PluggableCliUsage_260809_oo01"
+      ],
+      "answer_key": "pluggable-cli という自前の Java ライブラリを使う。自前でパーサを書かないこと。ライブラリ名が挙がっていること。"
+    },
+    {
+      "id": "doc-three-parts",
+      "question": "私たちの文書は、どういう3つの部分から構成することになっていますか。",
+      "answer_docs": [
+        "DocumentStructureAndStateMachine_260404_oo01"
+      ],
+      "answer_key": "Problem Definition、How to do it、Under the Hood の3部構成。3つとも挙がっていること。"
+    },
+    {
+      "id": "doc-explanation-axis",
+      "question": "文書の1つの節を書くとき、説明の軸は何種類の中からいくつ選ぶことになっていますか。その種類を挙げてください。",
+      "answer_docs": [
+        "DocumentationStandard_260401_oo01"
+      ],
+      "answer_key": "時系列・構造・集合（部分集合）の3種類しかなく、1つの節につき1つだけ選ぶ。3種類と「節ごとに1つ」の両方に触れていること。"
+    },
+    {
+      "id": "doc-type-annotation",
+      "question": "文書に名詞を書くとき、規約では何を併記することになっていますか。",
+      "answer_docs": [
+        "DocumentationStandard_260401_oo01"
+      ],
+      "answer_key": "その名詞の種別（クラス・カテゴリ）を併記する。例えば「pojo-actor」ではなく「pojo-actor Java ライブラリ」のように書く。種別を併記することに触れていること。"
+    },
+    {
+      "id": "naming-formula",
+      "question": "文書に登場する実体（登場人物）の名前は、どういう組み立てで付けることになっていますか。",
+      "answer_docs": [
+        "NamingByTypeAndInstance_260628_oo01",
+        "DocumentationStandard_260401_oo01"
+      ],
+      "answer_key": "インスタンス識別子（限定修飾子）＋名称＋種別（クラス名）の順に組み立てる。3つの要素からなることに触れていること。"
+    },
+    {
+      "id": "unit-vs-integration",
+      "question": "ユニットテストとインテグレーションテストは、何を境界にして分けることになっていますか。ファイル名はそれぞれどうしますか。",
+      "answer_docs": [
+        "TestingStandard_260404_oo01"
+      ],
+      "answer_key": "外部サービス（DB・LDAP・Keycloak・メール等）に触れるかどうかが境界。触れないものがユニットテストで *Test.java、触れるものがインテグレーションテストで *IT.java。境界とファイル名の両方に触れていること。"
+    },
+    {
+      "id": "testing-absolute-rule",
+      "question": "テストの絶対ルールとして、使ってはいけないものは何ですか。またその理由は何ですか。",
+      "answer_docs": [
+        "TestingStandard_260404_oo01"
+      ],
+      "answer_key": "Quarkus DevServices・Docker・Docker Compose を使わない。理由は本番環境（k8s）と構成が違うため、テストが通っても本番で動く保証にならないから。禁止対象と理由の両方に触れていること。"
+    },
+    {
+      "id": "oop-order",
+      "question": "手順を文書に書くとき、規約では何を先に書くことになっていますか。各ステップに必ず書くものは何ですか。",
+      "answer_docs": [
+        "OopSubjectClarity_260810_oo01"
+      ],
+      "answer_key": "登場するオブジェクトとその関係（構造）を先に書き、そのあとに時系列を書く。各ステップには動作主体（誰がやるのか）を書く。順序と動作主体の両方に触れていること。"
+    },
+    {
+      "id": "state-naming-optional",
+      "question": "State Machine Mind Set では、state の名前の付け方は決まっていますか。代わりに各遷移に必ず書くものは何ですか。",
+      "answer_docs": [
+        "DocumentStructureAndStateMachine_260404_oo01"
+      ],
+      "answer_key": "state の命名は任意で強制しない。必須なのは各遷移の事前条件と達成確認（達成条件）の対であり、機械的に検証できる形で書くこと。命名が任意であることと、事前条件・達成確認が必須であることの両方に触れていること。"
     }
   ]
 }
