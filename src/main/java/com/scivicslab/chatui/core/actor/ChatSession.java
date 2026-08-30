@@ -808,7 +808,22 @@ public class ChatSession extends Interpreter {
      * tool-observation-appended {@code pendingPrompt} verbatim on later steps.
      */
     public void buildDefaultPrompt() {
-        appendConstructedPrompt((stepCount == 1) ? (firstStepPrompt() + "\n\n" + pendingPrompt) : pendingPrompt);
+        appendConstructedPrompt(currentPromptText().getResult());
+    }
+
+    /**
+     * The same text {@link #buildDefaultPrompt()} would queue, returned instead of queued
+     * ({@code DocRetrievalAgentLoop_260830_oo01}).
+     *
+     * <p>A prompt-construction sub-workflow that wraps this turn's text in something else — the
+     * constraints {@code PromptBuilderActor} puts under {@code [Constraints]}, for instance — needs
+     * the text as a value it can pass on, not as an entry already in the queue.</p>
+     *
+     * @return {@link ActionResult} carrying the turn's text, always successful
+     */
+    public ActionResult currentPromptText() {
+        String text = (stepCount == 1) ? (firstStepPrompt() + "\n\n" + pendingPrompt) : pendingPrompt;
+        return new ActionResult(true, text == null ? "" : text);
     }
 
     /**

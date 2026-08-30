@@ -12,6 +12,7 @@ import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.turingworkflow.plugins.logoutput.MultiplexerAccumulator;
 import com.scivicslab.turingworkflow.plugins.logoutput.MultiplexerAccumulatorActor;
 import com.scivicslab.turingworkflow.plugins.logoutput.MultiplexerLogHandler;
+import com.scivicslab.turingworkflow.plugins.promptbuilder.PromptBuilderActor;
 import com.scivicslab.turingworkflow.workflow.IIActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 import com.scivicslab.turingworkflow.workflow.RootIIAR;
@@ -357,6 +358,16 @@ public class ChatUiActorSystem {
         ActorRef<LlmProvider> providerRef = chatSessionIIAR.<LlmProvider>createChild(
                 chatSessionIIAR.getName() + ".provider", providerAsLlmProvider);
         chatSessionIIAR.tell(a -> ((ChatSession) a).setProviderName(providerRef.getName()));
+
+        // Prompt builder — a child of the ChatSession, so a prompt-construction sub-workflow (also
+        // registered as a child of the ChatSession by Interpreter.call) reaches it as its own
+        // sibling and never touches another conversation's buffer
+        // (DocRetrievalAgentLoop_260830_oo01).
+        PromptBuilderActor promptBuilder =
+                new PromptBuilderActor(chatSessionIIAR.getName() + ".promptBuilder", actorSystem);
+        promptBuilder.setParentName(chatSessionIIAR.getName());
+        chatSessionIIAR.getNamesOfChildren().add(promptBuilder.getName());
+        actorSystem.addIIActor(promptBuilder);
 
         // PromptQueue — plain createChild, same as any other ConversationTab sibling.
         ActorRef<PromptQueue> promptQueueRef =

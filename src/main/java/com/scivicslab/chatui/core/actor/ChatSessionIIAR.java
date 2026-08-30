@@ -131,6 +131,10 @@ public class ChatSessionIIAR extends InterpreterIIAR {
             // Interpreter.call() creates — see ChatSessionPorting_260823_oo01 2-b-i.
             chatSession().buildDefaultPrompt();
             return new ActionResult(true, "");
+        } else if (actionName.equals("currentPromptText")) {
+            // Dispatched by a prompt-construction sub-workflow that wraps this turn's text
+            // (DocRetrievalAgentLoop_260830_oo01); the text arrives in the workflow's ${result}.
+            return chatSession().currentPromptText();
         } else if (actionName.equals("appendConstructedPrompt")) {
             // Generic primitive any prompt-construction sub-workflow (default or swapped-in) can
             // call, possibly more than once, to hand back the prompt(s) it built.

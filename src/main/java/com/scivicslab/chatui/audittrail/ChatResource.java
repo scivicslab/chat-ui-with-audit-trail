@@ -81,6 +81,34 @@ public class ChatResource {
     }
 
     /**
+     * Switches this conversation's prompt-construction sub-workflow — the file that decides what
+     * text each agent-loop step sends ({@code DocRetrievalAgentLoop_260830_oo01} 型2).
+     *
+     * @param projectId owning project's id
+     * @param chatId    conversation id within that project
+     * @param file      classpath file name under {@code /workflows/}, e.g.
+     *                  {@code prompt-construction-doc-retrieval.yaml}
+     * @return {@code {"type":"ok","promptWorkflow":...}}, or 404 if the conversation does not exist
+     */
+    @POST
+    @Path("/{projectId}/chats/{chatId}/prompt-workflow")
+    @Consumes(MediaType.TEXT_PLAIN)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response setPromptWorkflow(@PathParam("projectId") String projectId,
+                                       @PathParam("chatId") String chatId, String file) {
+        ChatSessionIIAR session = actorSystem.getChatSession(projectId, chatId);
+        if (session == null) {
+            return Response.status(404).entity(Map.of("type", "error", "message", "no such conversation")).build();
+        }
+        String name = file == null ? "" : file.strip();
+        if (name.isEmpty()) {
+            return Response.status(400).entity(Map.of("type", "error", "message", "file name required")).build();
+        }
+        session.tell(a -> ((ChatSession) a).setPromptWorkflowFile(name));
+        return Response.ok(Map.of("type", "ok", "promptWorkflow", name)).build();
+    }
+
+    /**
      * Starts a plan on this conversation from a YAML body, without going through its LLM
      * ({@code DirectPlanSubmission_260830_oo01}). Returns as soon as the plan has been handed to
      * its runner; the result appears in this conversation's log when it finishes.

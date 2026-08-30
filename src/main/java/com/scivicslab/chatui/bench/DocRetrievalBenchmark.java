@@ -60,8 +60,8 @@ public final class DocRetrievalBenchmark {
 
     public static void main(String[] args) throws Exception {
         String variant = args.length > 0 ? args[0] : "baseline";
-        if (!variant.equals("baseline")) {
-            System.err.println("variant '" + variant + "' is not implemented yet; only 'baseline' runs today");
+        if (!variant.equals("baseline") && !variant.equals("prompt")) {
+            System.err.println("unknown variant '" + variant + "' (baseline | prompt)");
             System.exit(2);
         }
         // A dead embedding server makes html-saurus return an empty array rather than fail, which
@@ -100,6 +100,10 @@ public final class DocRetrievalBenchmark {
         String chatId = "bench-" + variant + "-" + RUN_ID + "-" + task.id;
         String chatBase = CHAT_UI + "/api/projects/" + PROJECT_ID + "/chats/" + enc(chatId);
         post(chatBase, "");
+        // 型2 (DocRetrievalAgentLoop_260830_oo01): same agent loop, different text at every step.
+        if (variant.equals("prompt")) {
+            post(chatBase + "/prompt-workflow", "prompt-construction-doc-retrieval.yaml");
+        }
 
         long start = System.currentTimeMillis();
         postJson(chatBase + "/chat", new JSONObject().put("text", task.question).toString());

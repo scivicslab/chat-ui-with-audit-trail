@@ -101,6 +101,14 @@
       <artifactId>plugin-log-output</artifactId>
       <version>1.6.0-SNAPSHOT</version>
     </dependency>
+    <!-- Prompt construction (TurnResourceLimits/DocRetrievalAgentLoop): PromptBuilderActor keeps
+         the constraints sent with every step in the workflow YAML rather than in Java, which is
+         what lets one conversation run under a different set of constraints from another. -->
+    <dependency>
+      <groupId>com.scivicslab.turingworkflow.plugins</groupId>
+      <artifactId>plugin-prompt-builder</artifactId>
+      <version>1.6.0-SNAPSHOT</version>
+    </dependency>
     <!-- Agent-loop tools (read/write/web_search/fetch/search_docs): jsoup for HTML parsing
          (DuckDuckGo results, fetched pages). Same version as quarkus-chat-ui3, which these
          tools are ported from. -->

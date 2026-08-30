@@ -1,0 +1,81 @@
+name: prompt-construction-doc-retrieval
+description: |
+  型2（DocRetrievalAgentLoop_260830_oo01）: the agent loop's shape is unchanged; only the text sent
+  at each step changes. PromptBuilderActor puts this file's constraints under a [Constraints]
+  heading ahead of the turn's own text, so what the conversation is told every step is written
+  here rather than compiled into Java.
+
+  Measured failures this is aimed at: the conversation opened one candidate, picked the wrong one
+  and answered anyway; it answered from what it already believed without opening anything; it wrote
+  its search terms in English while the documents are Japanese.
+
+  "../*promptBuilder" is this sub-workflow's sibling — Interpreter.call() registers the
+  sub-workflow as a child of the calling ChatSession, and the prompt builder is another of that
+  conversation's children, so the wildcard resolves within one conversation and never reaches
+  another's buffer.
+
+steps:
+  - states: ["0", "1"]
+    label: constraints
+    note: Reset the buffer and state what every step of this turn must obey.
+    actions:
+      - actor: ../*promptBuilder
+        method: clear
+        execution: direct
+      - actor: ../*promptBuilder
+        method: addWarning
+        arguments: >-
+          search_docs returns a list of candidate documents, not an answer. Before answering, open
+          the candidates that could hold the answer with the read tool — more than one when their
+          summaries do not settle which is right.
+        execution: direct
+      - actor: ../*promptBuilder
+        method: addWarning
+        arguments: >-
+          If the document you opened does not contain the answer, open the next candidate. Do not
+          answer from a summary, and do not answer from what you already believe without opening a
+          document that says it.
+        execution: direct
+      - actor: ../*promptBuilder
+        method: addWarning
+        arguments: >-
+          Write search terms in the language the documents are written in. These documents are
+          mostly Japanese.
+        execution: direct
+      - actor: ../*promptBuilder
+        method: addWarning
+        arguments: >-
+          Name the document you took the answer from.
+        execution: direct
+
+  - states: ["1", "2"]
+    label: take-turn-text
+    note: The turn's own text (system prompt on the first step, tool observations after) into ${result}.
+    actions:
+      - actor: ..
+        method: currentPromptText
+        execution: direct
+
+  - states: ["2", "3"]
+    label: set-message
+    actions:
+      - actor: ../*promptBuilder
+        method: addMessage
+        arguments: "${result}"
+        execution: direct
+
+  - states: ["3", "4"]
+    label: build
+    note: Produces "[Constraints] ... [Message] ..." into ${result}.
+    actions:
+      - actor: ../*promptBuilder
+        method: build
+        execution: direct
+
+  - states: ["4", "end"]
+    label: queue
+    actions:
+      - actor: ..
+        method: appendConstructedPrompt
+        arguments: "${result}"
+        execution: direct
