@@ -107,6 +107,10 @@ public class ChatUiActorSystem {
     private RecentEntriesAccumulator systemLogBuffer;
     private final Map<String, RecentEntriesAccumulator> chatLogBuffers = new ConcurrentHashMap<>();
 
+    /** Name of the branch holding the actors that exist once regardless of the work. */
+    public static final String HOUSEKEEPER = "housekeeper";
+
+    private ActorRef<Housekeeper> housekeeperRef;
     private ActorRef<CallWatchdog> callWatchdogRef;
     private ActorRef<CollaborationGraph> collaborationGraphRef;
     private ActorRef<SkillRegistry> skillRegistryRef;
@@ -145,10 +149,20 @@ public class ChatUiActorSystem {
         // outputMultiplexerはプロジェクトごとに分離しないか": MultiplexerLogHandler's lookup name is
         // hardcoded, so only one such actor can ever exist, and framework logs (e.g. Quarkus startup)
         // aren't inherently scoped to any one project anyway.
+        // Housekeeper: the actors that exist once regardless of what work is being done. They are
+        // grouped under one branch so the Actors pane shows the shape of the work, not the
+        // machinery around it (NestedConversationTree_260830_oo01). Grouping changes only the tree
+        // edge — the registry stays flat, so MultiplexerLogHandler's hardcoded "outputMultiplexer"
+        // lookup and every getIIActor(name) call are unaffected.
+        housekeeperRef = actorSystem.getRoot().createChild(HOUSEKEEPER, new Housekeeper());
+
         systemLogBuffer = new RecentEntriesAccumulator(SYSTEM_LOG_CAPACITY);
         MultiplexerAccumulator systemMux = new MultiplexerAccumulator();
         systemMux.addTarget(systemLogBuffer);
-        actorSystem.addIIActor(new MultiplexerAccumulatorActor(SYSTEM_LOG_ACTOR, systemMux, actorSystem));
+        MultiplexerAccumulatorActor systemLogActor =
+                new MultiplexerAccumulatorActor(SYSTEM_LOG_ACTOR, systemMux, actorSystem);
+        adopt(HOUSEKEEPER, systemLogActor);
+        actorSystem.addIIActor(systemLogActor);
         MultiplexerLogHandler logHandler = new MultiplexerLogHandler(actorSystem);
         logHandler.setLevel(Level.ALL);
         // Excludes loggers that already reach outputMultiplexer via an explicit path (ChatSession/
@@ -168,12 +182,12 @@ public class ChatUiActorSystem {
         // NOT per-project — a wait chain spans projects whenever a cross-project ask_chat happens, and
         // detecting a cycle needs the whole chain in one place (ProjectScopedActorTree_260829_oo01
         // "なぜCallWatchdog・CollaborationGraphもプロジェクトごとに分離しないか").
-        callWatchdogRef = actorSystem.getRoot().createChild("callWatchdog", new CallWatchdog());
+        callWatchdogRef = housekeeperRef.createChild("callWatchdog", new CallWatchdog());
 
         // Graph-engineering role assignments (CollaborationGraph_260828_oo01): likewise one for the
         // whole system — split per project, a set_collaborator naming another project's tab would be
         // written to one graph and read from another, silently losing the assignment.
-        collaborationGraphRef = actorSystem.getRoot().createChild("collaborationGraph", new CollaborationGraph());
+        collaborationGraphRef = housekeeperRef.createChild("collaborationGraph", new CollaborationGraph());
 
         // Skill catalog (SkillAndAgentsFile_260830_oo01): likewise one for the whole system. A skill
         // is instructions for a kind of work, not for a project, so which conversation will want one
@@ -183,7 +197,7 @@ public class ChatUiActorSystem {
         LOG.info("File access: write root " + fileScope.writeRoot()
                 + ", readable " + fileScope.describeReadRoots());
         SkillRegistry registry = new SkillRegistry(skillRootPaths);
-        skillRegistryRef = actorSystem.getRoot().createChild("skillRegistry", registry);
+        skillRegistryRef = housekeeperRef.createChild("skillRegistry", registry);
         LOG.info("Skill registry indexed " + registry.getSkills().size() + " skill(s) from "
                 + registry.getRoots());
         for (String problem : registry.getProblems()) {
@@ -309,6 +323,25 @@ public class ChatUiActorSystem {
      * @return the conversation's actor reference
      */
     public synchronized ActorRef<ConversationTab> createChat(String projectId, String chatId) {
+        return createChat(projectId, chatId, null);
+    }
+
+    /**
+     * Creates the conversation under another conversation instead of directly under its project
+     * ({@code NestedConversationTree_260830_oo01}).
+     *
+     * <p>Who a conversation is addressed as does not change — the registry is flat and every
+     * lookup is by name. What changes is the set operations: an actor can act on all of its own
+     * descendants at once ({@code apply} over {@code ./*}), and the Actors pane shows which
+     * conversation is working for which.</p>
+     *
+     * @param projectId    owning project's id
+     * @param chatId       conversation id within that project
+     * @param parentChatId the conversation to place this one under, or {@code null} for the project
+     * @return the conversation's actor reference
+     */
+    public synchronized ActorRef<ConversationTab> createChat(String projectId, String chatId,
+                                                              String parentChatId) {
         String qualifiedName = chatActorName(projectId, chatId);
         ActorRef<ConversationTab> existing = chats.get(qualifiedName);
         if (existing != null) {
@@ -318,7 +351,16 @@ public class ChatUiActorSystem {
         if (projectRef == null) {
             throw new IllegalArgumentException("Unknown project: " + projectId);
         }
-        ActorRef<ConversationTab> tabRef = projectRef.createChild(qualifiedName, new ConversationTab());
+        ActorRef<?> parentRef = projectRef;
+        if (parentChatId != null && !parentChatId.isBlank()) {
+            ActorRef<ConversationTab> parentChat =
+                    chats.get(resolveChatName(projectId, parentChatId));
+            if (parentChat == null) {
+                throw new IllegalArgumentException("Unknown parent conversation: " + parentChatId);
+            }
+            parentRef = parentChat;
+        }
+        ActorRef<ConversationTab> tabRef = parentRef.createChild(qualifiedName, new ConversationTab());
         chats.put(qualifiedName, tabRef);
 
         // Tab log multiplexer (150_TabScopedLogging_260826_oo01): this tab's own recent-entries
@@ -329,7 +371,10 @@ public class ChatUiActorSystem {
         MultiplexerAccumulator tabMux = new MultiplexerAccumulator();
         tabMux.addTarget(tabLogBuffer);
         tabMux.addTarget(new ForwardingAccumulator(actorSystem, SYSTEM_LOG_ACTOR, qualifiedName));
-        actorSystem.addIIActor(new MultiplexerAccumulatorActor(tabLogActorName, tabMux, actorSystem));
+        MultiplexerAccumulatorActor tabLogActor =
+                new MultiplexerAccumulatorActor(tabLogActorName, tabMux, actorSystem);
+        adopt(tabRef.getName(), tabLogActor);
+        actorSystem.addIIActor(tabLogActor);
 
         // ChatSessionIIAR — manual IIActorRef bridge, since ConversationTab is a plain POJO and
         // cannot call addChildActor itself (ChatSessionIIAR_260810_oo01 "ConversationTab への接続").
@@ -384,6 +429,22 @@ public class ChatUiActorSystem {
         tabRef.createChild(tabRef.getName() + ".sse", new SseConnection(objectMapper));
 
         return tabRef;
+    }
+
+    /**
+     * Puts an actor that registers itself ({@code addIIActor}) into the tree under {@code parent}.
+     * {@code createChild} does this for actors it creates; one that arrives ready-made needs both
+     * halves — its own parent name, and its entry in the parent's child list — or it shows up at
+     * the top of the Actors pane with no owner.
+     *
+     * @param parentName the owning actor's registry name
+     * @param child      the actor to place under it
+     */
+    private void adopt(String parentName, IIActorRef<?> child) {
+        child.setParentName(parentName);
+        ActorRef<?> parent = actorSystem.getActor(parentName);
+        if (parent == null) parent = actorSystem.getIIActor(parentName);
+        if (parent != null) parent.getNamesOfChildren().add(child.getName());
     }
 
     /** @return the configured skill roots, or {@code ~/.claude/skills} when none is configured */

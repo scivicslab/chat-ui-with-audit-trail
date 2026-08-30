@@ -496,8 +496,14 @@ public class ChatResource {
     @POST
     @Path("/{projectId}/chats/{chatId}")
     @Produces(MediaType.APPLICATION_JSON)
-    public Response createChat(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
-        actorSystem.createChat(projectId, chatId);
+    public Response createChat(@PathParam("projectId") String projectId,
+                               @PathParam("chatId") String chatId,
+                               @jakarta.ws.rs.QueryParam("under") String under) {
+        try {
+            actorSystem.createChat(projectId, chatId, under);
+        } catch (IllegalArgumentException e) {
+            return Response.status(400).entity(Map.of("type", "error", "message", e.getMessage())).build();
+        }
         return Response.ok(Map.of("type", "created")).build();
     }
 }

@@ -3,6 +3,7 @@ package com.scivicslab.chatui.core.actor;
 import com.scivicslab.chatui.core.iolog.IoLogStore;
 import com.scivicslab.chatui.core.provider.LlmProvider;
 import com.scivicslab.chatui.core.rest.ChatEvent;
+import com.scivicslab.pojoactor.core.Action;
 import com.scivicslab.pojoactor.core.ActionResult;
 import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
@@ -102,65 +103,186 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      */
     public ActorRef<ChatSession> asChatSessionRef() { return self(); }
 
-    @Override
-    public ActionResult callByActionName(String actionName, String arg) {
-        if (actionName.equals("sendPrompt")) {
-            return sendPrompt(arg);
-        } else if (actionName.equals("getResult")) {
-            return getResult(arg);
-        } else if (actionName.equals("stepExpectingAction")) {
-            // Dispatched by chat-session-agent-loop.yaml ("actor: this") from inside
-            // Interpreter.execCode(), itself only ever invoked as a plain runUntilEnd() call
-            // from within an existing tell() closure — so this runs on ChatSession's own
-            // actor thread, not on IIActorSystem's ManagedThreadPool.
-            return chatSession().stepExpectingAction();
-        } else if (actionName.equals("runTool")) {
-            // The workflow's argument is how much of each observation the model may see
-            // (TurnResourceLimits_260830_oo01); absent, ChatSession falls back to its default.
-            return chatSession().runTool(firstArgument(arg));
-        } else if (actionName.equals("stepLimitReached")) {
-            // The step-limit transition's guard. The number is the workflow's, not Java's.
-            return chatSession().stepLimitReached(firstArgument(arg));
-        } else if (actionName.equals("finish")) {
-            return chatSession().finish();
-        } else if (actionName.equals("hasMoreConstructedPrompts")) {
-            // Dispatched by chat-session-agent-loop.yaml's "think-continue" transition.
-            return chatSession().hasMoreConstructedPrompts();
-        } else if (actionName.equals("buildDefaultPrompt")) {
-            // Dispatched by prompt-construction-default.yaml ("actor: ..") from a sub-workflow
-            // Interpreter.call() creates — see ChatSessionPorting_260823_oo01 2-b-i.
-            chatSession().buildDefaultPrompt();
-            return new ActionResult(true, "");
-        } else if (actionName.equals("currentPromptText")) {
-            // Dispatched by a prompt-construction sub-workflow that wraps this turn's text
-            // (DocRetrievalAgentLoop_260830_oo01); the text arrives in the workflow's ${result}.
-            return chatSession().currentPromptText();
-        } else if (actionName.equals("appendConstructedPrompt")) {
-            // Generic primitive any prompt-construction sub-workflow (default or swapped-in) can
-            // call, possibly more than once, to hand back the prompt(s) it built.
-            String prompt = new org.json.JSONArray(arg).getString(0);
-            chatSession().appendConstructedPrompt(prompt);
-            return new ActionResult(true, "");
-        } else if (actionName.equals("requestFromWorker")) {
-            // Dispatched by the babysitter workflows ("actor: this"). What differs between phases
-            // is the YAML `arguments`, not the method name (GenericBabysitterPhases_260829_oo01);
-            // Interpreter.convertArgumentsToJson delivers them as a JSON array.
-            return chatSession().requestFromWorker(firstArgument(arg));
-        } else if (actionName.equals("judgeResult")) {
-            return chatSession().judgeResult(firstArgument(arg));
-        } else if (actionName.equals("retryLimitReached")) {
-            return chatSession().retryLimitReached(firstArgument(arg));
-        } else if (actionName.equals("judgeNeedsRedo")) {
-            return chatSession().judgeNeedsRedo();
-        } else if (actionName.equals("requestRedo")) {
-            return chatSession().requestRedo();
-        } else if (actionName.equals("reportCollaborationFailure")) {
-            return chatSession().reportCollaborationFailure();
-        }
-        // execCode / runUntilEnd / call / runWorkflow / readYaml / setCurrentState etc. are
-        // handled by InterpreterIIAR itself, since ChatSession is an Interpreter.
-        return super.callByActionName(actionName, arg);
+    // ── Actions the workflow YAML names ──────────────────────────────────────
+    // Annotated rather than dispatched by an overridden callByActionName: IIActorRef's own
+    // javadoc names that override as the pattern not to use, and it costs a registration step
+    // that is easy to forget — a method added without its entry fails as "action not found",
+    // which from outside is indistinguishable from a transition whose condition simply did not
+    // hold. IIActorRef's dispatcher looks for @Action on this adapter, and InterpreterIIAR
+    // passes anything it does not handle itself (execCode / runUntilEnd / call / readYaml /
+    // setCurrentState ...) down to it.
+
+    /**
+     * @param arg the prompt, as the workflow wrote it
+     * @return the result key to poll {@link #getResult} with
+     */
+    @Action("sendPrompt")
+    public ActionResult sendPromptAction(String arg) {
+        return sendPrompt(arg);
     }
+
+    /**
+     * @param arg the result key returned by {@code sendPrompt}
+     * @return the answer once the turn has finished
+     */
+    @Action("getResult")
+    public ActionResult getResultAction(String arg) {
+        return getResult(arg);
+    }
+
+    /**
+     * One LLM call. Runs on ChatSession's own actor thread: the workflow reaches this from
+     * inside {@code Interpreter.execCode()}, itself only ever invoked as a plain
+     * {@code runUntilEnd()} call from within an existing {@code tell()} closure.
+     *
+     * @param arg unused
+     * @return success when the reply asked for a tool
+     */
+    @Action("stepExpectingAction")
+    public ActionResult stepExpectingActionAction(String arg) {
+        return chatSession().stepExpectingAction();
+    }
+
+    /**
+     * @param arg how much of each observation the model may see; absent, the session's default
+     *            applies ({@code TurnResourceLimits_260830_oo01})
+     * @return always successful
+     */
+    @Action("runTool")
+    public ActionResult runToolAction(String arg) {
+        return chatSession().runTool(firstArgument(arg));
+    }
+
+    /**
+     * The step-limit transition's guard. The number is the workflow's, not Java's.
+     *
+     * @param arg the step limit
+     * @return success once the turn has used its steps
+     */
+    @Action("stepLimitReached")
+    public ActionResult stepLimitReachedAction(String arg) {
+        return chatSession().stepLimitReached(firstArgument(arg));
+    }
+
+    /**
+     * @param arg unused
+     * @return always successful
+     */
+    @Action("finish")
+    public ActionResult finishAction(String arg) {
+        return chatSession().finish();
+    }
+
+    /**
+     * The "think-continue" transition's guard.
+     *
+     * @param arg unused
+     * @return success while constructed prompts remain queued
+     */
+    @Action("hasMoreConstructedPrompts")
+    public ActionResult hasMoreConstructedPromptsAction(String arg) {
+        return chatSession().hasMoreConstructedPrompts();
+    }
+
+    /**
+     * Dispatched by {@code prompt-construction-default.yaml} ({@code actor: ..}) from the
+     * sub-workflow {@code Interpreter.call()} creates.
+     *
+     * @param arg unused
+     * @return always successful
+     */
+    @Action("buildDefaultPrompt")
+    public ActionResult buildDefaultPromptAction(String arg) {
+        chatSession().buildDefaultPrompt();
+        return new ActionResult(true, "");
+    }
+
+    /**
+     * The turn's own text, for a sub-workflow that wraps it in something else
+     * ({@code DocRetrievalAgentLoop_260830_oo01}); it arrives in the workflow's {@code ${result}}.
+     *
+     * @param arg unused
+     * @return the text
+     */
+    @Action("currentPromptText")
+    public ActionResult currentPromptTextAction(String arg) {
+        return chatSession().currentPromptText();
+    }
+
+    /**
+     * The primitive any prompt-construction sub-workflow can call, more than once if it splits
+     * one turn into several prompts.
+     *
+     * @param arg the constructed prompt
+     * @return always successful
+     */
+    @Action("appendConstructedPrompt")
+    public ActionResult appendConstructedPromptAction(String arg) {
+        chatSession().appendConstructedPrompt(new org.json.JSONArray(arg).getString(0));
+        return new ActionResult(true, "");
+    }
+
+    /**
+     * Entry point of a babysitter phase. What differs between phases is this argument, not the
+     * method name ({@code GenericBabysitterPhases_260829_oo01}).
+     *
+     * @param arg what to ask the worker to do
+     * @return success when the worker replied
+     */
+    @Action("requestFromWorker")
+    public ActionResult requestFromWorkerAction(String arg) {
+        return chatSession().requestFromWorker(firstArgument(arg));
+    }
+
+    /**
+     * @param arg the criteria to judge the worker's reply against
+     * @return success when the reply meets them
+     */
+    @Action("judgeResult")
+    public ActionResult judgeResultAction(String arg) {
+        return chatSession().judgeResult(firstArgument(arg));
+    }
+
+    /**
+     * @param arg this phase's redo budget
+     * @return success once the budget is spent
+     */
+    @Action("retryLimitReached")
+    public ActionResult retryLimitReachedAction(String arg) {
+        return chatSession().retryLimitReached(firstArgument(arg));
+    }
+
+    /**
+     * The judging state's catch-all.
+     *
+     * @param arg unused
+     * @return always successful
+     */
+    @Action("judgeNeedsRedo")
+    public ActionResult judgeNeedsRedoAction(String arg) {
+        return chatSession().judgeNeedsRedo();
+    }
+
+    /**
+     * @param arg unused
+     * @return success when the worker replied to the redo request
+     */
+    @Action("requestRedo")
+    public ActionResult requestRedoAction(String arg) {
+        return chatSession().requestRedo();
+    }
+
+    /**
+     * Ends the turn with an explanation instead of leaving it stuck busy.
+     *
+     * @param arg unused
+     * @return always successful
+     */
+    @Action("reportCollaborationFailure")
+    public ActionResult reportCollaborationFailureAction(String arg) {
+        return chatSession().reportCollaborationFailure();
+    }
+
 
     /**
      * The first element of an action's {@code arguments}, or {@code ""} if it has none — the shape
