@@ -184,7 +184,14 @@ public final class DocSearchTool {
             sb.append("\n");
             count++;
         }
-        return count == 0 ? "No documents found." : sb.toString().stripTrailing();
+        if (count == 0) return "No documents found.";
+        // Restated next to the list itself, not only in the system prompt: by the time these hits
+        // are read the tool description is many messages back, and a bare ranked list reads as an
+        // answer (SkillAndAgentsFile/DocRetrievalAgentLoop 実測 — the agent answered from summaries
+        // without opening anything in 7 of 10 questions).
+        return count + " candidate documents, best match first. These are candidates, not an answer"
+                + " — call read on a candidate's path to see what it actually says.\n\n"
+                + sb.toString().stripTrailing();
     }
 
     /** De-duplication key for a hit: source path, else served path, else id, else title. */

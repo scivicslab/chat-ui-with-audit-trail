@@ -169,7 +169,13 @@ public class ChatSession extends Interpreter {
             - calc(expression): evaluate a Java arithmetic expression, e.g. 23*47 or Math.sqrt(16).
             - web_search(query): search the web and fetch the top results' page content.
             - fetch(url): fetch one specific URL you already have and return its readable text.
-            - search_docs(query): search this team's internal documentation by meaning.
+            - search_docs(query): search this team's internal documentation. It returns a ranked
+              list of CANDIDATE documents — title, id, source path and a short summary each — not
+              the answer to your question. A summary says what a document is about, not what it
+              says, so to actually answer you must then call read on the "path" of the candidates
+              that look relevant, and read more than one when the summaries do not settle which is
+              right. Answering straight from a summary, or from a single top-ranked candidate you
+              did not open, is how you get the answer wrong.
             - write(path, content): save text to a file under the working directory. Requires TWO
               <parameter> tags in the same invoke block: one named "path", one named "content".
             - ask_chat(chatId, prompt, timeoutSeconds): send an instruction to another conversation
