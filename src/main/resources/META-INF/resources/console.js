@@ -350,7 +350,18 @@
     // renderActorTree() does on every refresh (including the 3s auto-refresh timer).
     var collapsedActorNodes = new Set();
 
-    function actorNodeEl(node) {
+    // Actor names are absolute ("project1/chat-01.chat.promptBuilder"), so every row would repeat
+    // its ancestors. The tree's indentation already shows the hierarchy: strip the parent's name
+    // from the front and show only what this node adds. The full name stays in the tooltip.
+    function actorDisplayName(node, parentName) {
+        var n = node.name;
+        if (parentName && n.indexOf(parentName) === 0 && n.length > parentName.length) {
+            n = n.substring(parentName.length).replace(/^[./]+/, "");
+        }
+        return n || node.name;
+    }
+
+    function actorNodeEl(node, parentName) {
         var wrap = document.createElement("div");
         wrap.className = "actor-node";
         var label = document.createElement("div");
@@ -364,7 +375,12 @@
         dot.textContent = "●";
         var name = document.createElement("span");
         name.className = "actor-name";
-        name.textContent = node.name;
+        name.textContent = actorDisplayName(node, parentName);
+        // The note of the workflow transition that created this actor, if a workflow created it:
+        // what its author said that step was for (ActorPurposeFromWorkflowNote_260831_oo01).
+        // Actors Java created carry none, and then the tooltip falls back to the class name.
+        label.title = node.note ? (node.name + "\n\n" + node.note) : (node.name + "\n\n" + (node.type || ""));
+        if (node.note) label.classList.add("actor-has-note");
         // "chat-<id>" (ConversationTab) nodes double as the tab switcher — click the name (not
         // the fold toggle) to switch the chat pane, instead of a separate bar in that pane
         // (ActorTreeTabSwitcher_260826_oo01). Children like "chat-<id>.chat" don't match.
@@ -406,7 +422,7 @@
         if (hasChildren) {
             var kids = document.createElement("div");
             kids.className = "actor-children" + (collapsedActorNodes.has(node.name) ? " collapsed" : "");
-            node.children.forEach(function (c) { kids.appendChild(actorNodeEl(c)); });
+            node.children.forEach(function (c) { kids.appendChild(actorNodeEl(c, node.name)); });
             wrap.appendChild(kids);
 
             label.classList.add("actor-label-toggleable");

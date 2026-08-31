@@ -8,7 +8,9 @@ import java.util.List;
  *
  * @param name     the actor's registered name
  * @param type     the simple class name of the actor's held object
+ * @param note     what the workflow that created this actor said it was doing, or {@code null}
+ *                 for actors Java created ({@code ActorPurposeFromWorkflowNote_260831_oo01})
  * @param alive    whether the actor is currently alive
  * @param children the child actor nodes
  */
-public record ActorNode(String name, String type, boolean alive, List<ActorNode> children) {}
+public record ActorNode(String name, String type, String note, boolean alive, List<ActorNode> children) {}

@@ -586,7 +586,7 @@ public class ChatUiActorSystem {
      */
     public ActorNode getActorTree() {
         if (actorSystem == null) {
-            return new ActorNode("chat-ui", "IIActorSystem", false, List.of());
+            return new ActorNode("chat-ui", "IIActorSystem", null, false, List.of());
         }
         RootIIAR root = actorSystem.getRoot();
         return buildActorNode(root.getName(), root);
@@ -614,6 +614,6 @@ public class ChatUiActorSystem {
             }
             children.add(buildActorNode(childName, childRef));
         }
-        return new ActorNode(name, type, ref.isAlive(), children);
+        return new ActorNode(name, type, ActorNotes.noteOf(name), ref.isAlive(), children);
     }
 }

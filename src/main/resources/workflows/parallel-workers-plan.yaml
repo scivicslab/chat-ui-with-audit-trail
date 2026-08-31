@@ -14,6 +14,9 @@ description: |
 steps:
   - states: ["0", "1"]
     label: add-worker-a
+    note: |
+      Slot that hands this plan's questions to chat-02. One slot per conversation the plan drives,
+      so that apply can reach them all at once.
     actions:
       - actor: this
         method: addWorker
@@ -22,6 +25,9 @@ steps:
 
   - states: ["1", "2"]
     label: add-worker-b
+    note: |
+      The same for chat-03. Two slots make the two conversations run at the same time rather than
+      one after the other.
     actions:
       - actor: this
         method: addWorker

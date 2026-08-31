@@ -94,6 +94,30 @@ public class PlanRunner extends Interpreter {
      * @param targetChatName the conversation it forwards to, e.g. {@code project1/chat-03}
      * @return {@link ActionResult} with {@code success=true} iff the slot was created
      */
+    /**
+     * Runs one transition, with its {@code note} available to anything the transition creates
+     * ({@code ActorPurposeFromWorkflowNote_260831_oo01}). {@code code} and
+     * {@code currentTransitionIndex} are {@code Interpreter}'s own protected fields, so a subclass
+     * can read the transition it is about to execute without changing the library.
+     *
+     * @return whatever the transition's actions returned
+     */
+    @Override
+    public ActionResult action() {
+        String note = null;
+        try {
+            note = code.getTransitions().get(currentTransitionIndex).getNote();
+        } catch (Exception e) {
+            // No transition to read: fall through with no note.
+        }
+        ActorNotes.enterTransition(note);
+        try {
+            return super.action();
+        } finally {
+            ActorNotes.leaveTransition();
+        }
+    }
+
     public ActionResult addWorker(String workerId, String targetChatName) {
         if (workerId == null || workerId.isBlank()) return new ActionResult(false, "workerId is required");
         if (targetChatName == null || targetChatName.isBlank()) {
@@ -108,6 +132,7 @@ public class PlanRunner extends Interpreter {
                     new PlanWorker(system, watchdog, myName, targetChatName), system);
             workerIIAR.setParentName(myName);
             system.addIIActor(workerIIAR);
+            ActorNotes.record(workerName);
         }
         // apply() matches against the caller's own child names, so the slot has to be recorded here.
         selfActorRef.getNamesOfChildren().add(workerName);
