@@ -412,6 +412,73 @@ public class ChatSession extends Interpreter {
     }
 
     /**
+     * Checks the draft answer against the question: does it state everything that was asked? Reading
+     * the right document and stating everything it says are different things — measured over 30
+     * questions, three of the five the state machine got wrong had opened the right document and
+     * left part of the answer out ({@code DocRetrievalBenchmark_260830_oo01}).
+     *
+     * @param args unused
+     * @return {@link ActionResult} with {@code success=true} iff nothing asked for is missing
+     */
+    public ActionResult answerComplete(String args) {
+        if (finalAnswer == null || finalAnswer.isBlank()) {
+            return new ActionResult(false, "no draft answer");
+        }
+        String verdict = askLlm("Below is a question and an answer to it. Check only one thing: does "
+                + "the answer state everything the question asked for? A question that asks for two "
+                + "things needs both; a question that asks for a name and a reason needs both.\n\n"
+                + "If nothing asked for is missing, reply with exactly:\nCOMPLETE\nOtherwise reply "
+                + "with:\nMISSING: <what was asked for and not stated, in one sentence>\n\n"
+                + "Question:\n" + question + "\n\nAnswer:\n" + finalAnswer);
+        boolean complete = verdict != null && verdict.strip().toUpperCase().startsWith("COMPLETE");
+        answerShortfall = complete ? null : verdict;
+        return new ActionResult(complete, complete ? "answer covers the question" : "answer is short");
+    }
+
+    /**
+     * The verifying state's give-up guard: keep the draft as it stands.
+     *
+     * @param limit how many rewrites this turn may make; blank falls back to 2
+     * @return {@link ActionResult} with {@code success=true} iff that many have been made
+     */
+    public ActionResult answerLimitReached(String limit) {
+        int max = parsePositiveOr(limit, 2);
+        boolean reached = rewriteCount >= max;
+        return new ActionResult(reached, reached ? "rewrite limit " + max + " reached"
+                                                 : rewriteCount + "/" + max + " rewrites used");
+    }
+
+    /**
+     * The verifying state's catch-all, reached once the check has failed and rewrites remain.
+     * Keeps what is missing; makes no LLM call.
+     *
+     * @param args unused
+     * @return {@link ActionResult} with {@code success=true} always
+     */
+    public ActionResult answerNeedsMore(String args) {
+        if (answerShortfall == null) answerShortfall = "part of what was asked is not stated";
+        return new ActionResult(true, "rewrite requested");
+    }
+
+    /**
+     * Writes the answer again from the same documents, told what the previous draft left out.
+     *
+     * @param args unused
+     * @return {@link ActionResult} with {@code success=true} always
+     */
+    public ActionResult rewriteAnswer(String args) {
+        rewriteCount++;
+        String rewritten = askLlm("Your previous answer left something out. Write it again, from the "
+                + "documents below and nothing else, stating everything the question asks for. Keep "
+                + "what was already right.\n\nQuestion:\n" + question
+                + "\n\nWhat was missing:\n" + answerShortfall
+                + "\n\nYour previous answer:\n" + finalAnswer
+                + "\n\nDocuments:\n" + readSourcesText);
+        if (rewritten != null && !rewritten.isBlank()) finalAnswer = rewritten;
+        return new ActionResult(true, "answer rewritten");
+    }
+
+    /**
      * One blocking LLM call whose whole reply is returned. Streams to the turn's emitter as
      * "thinking", like {@link #callJudgeLlm}.
      *
@@ -473,6 +540,10 @@ public class ChatSession extends Interpreter {
     private String hitsShortfall;
     /** The text of every document opened in this turn, in the order they were opened. */
     private String readSourcesText;
+    /** What the verification said the draft answer was missing, consumed by rewriteAnswer. */
+    private String answerShortfall;
+    /** Rewrites used in this turn, counted against the workflow's limit. */
+    private int rewriteCount;
 
     // ---- Prompt construction (ChatSessionPorting_260823_oo01 2-b-i) ----
     // stepExpectingAction() delegates building the text it sends to provider.sendPrompt() to a
@@ -1322,6 +1393,8 @@ public class ChatSession extends Interpreter {
         searchCount = 0;
         hitsShortfall = null;
         readSourcesText = null;
+        answerShortfall = null;
+        rewriteCount = 0;
         redoNote = null;
         String workerChatId = resolveWorker();
         if (workerChatId == null) {

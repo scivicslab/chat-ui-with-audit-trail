@@ -369,6 +369,42 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     }
 
     /**
+     * @param arg unused
+     * @return success when the draft states everything the question asked for
+     */
+    @Action("answerComplete")
+    public ActionResult answerCompleteAction(String arg) {
+        return chatSession().answerComplete(arg);
+    }
+
+    /**
+     * @param arg how many rewrites this turn may make
+     * @return success once that many have been made
+     */
+    @Action("answerLimitReached")
+    public ActionResult answerLimitReachedAction(String arg) {
+        return chatSession().answerLimitReached(firstArgument(arg));
+    }
+
+    /**
+     * @param arg unused
+     * @return always successful
+     */
+    @Action("answerNeedsMore")
+    public ActionResult answerNeedsMoreAction(String arg) {
+        return chatSession().answerNeedsMore(arg);
+    }
+
+    /**
+     * @param arg unused
+     * @return always successful
+     */
+    @Action("rewriteAnswer")
+    public ActionResult rewriteAnswerAction(String arg) {
+        return chatSession().rewriteAnswer(arg);
+    }
+
+    /**
      * Ends the turn with an explanation instead of leaving it stuck busy.
      *
      * @param arg unused

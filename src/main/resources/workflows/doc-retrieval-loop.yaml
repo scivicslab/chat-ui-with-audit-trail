@@ -104,15 +104,56 @@ steps:
         method: finish
         execution: direct
 
-  - states: ["answer", "end"]
-    label: answer
+  - states: ["answer", "verify"]
+    label: draft-answer
     note: Answer from the documents that were opened, and from nothing else.
     actions:
       - actor: this
         method: answerFromSources
         execution: direct
+
+  - states: ["verify", "end"]
+    label: answer-complete
+    note: |
+      Does the draft state everything the question asked for? Reading the right document and
+      stating everything it says are different things: of the five questions this loop got wrong
+      over thirty, three had opened the right document and left part of the answer out.
+    actions:
+      - actor: this
+        method: answerComplete
+        execution: direct
       - actor: this
         method: finish
+        execution: direct
+
+  - states: ["verify", "end"]
+    label: rewrite-limit
+    note: Reached only when the check just failed AND the rewrite budget is spent. Keep the draft.
+    actions:
+      - actor: this
+        method: answerLimitReached
+        arguments: "2"
+        execution: direct
+      - actor: this
+        method: finish
+        execution: direct
+
+  - states: ["verify", "rewrite"]
+    label: answer-short
+    note: |
+      The verifying state's catch-all, reached when something is missing and rewrites remain.
+      Always succeeds; keeps what the check said was left out.
+    actions:
+      - actor: this
+        method: answerNeedsMore
+        execution: direct
+
+  - states: ["rewrite", "verify"]
+    label: write-again
+    note: Write it again from the same documents, told what the previous draft left out, then check again.
+    actions:
+      - actor: this
+        method: rewriteAnswer
         execution: direct
 
   - states: ["give-up", "end"]
