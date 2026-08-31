@@ -81,6 +81,37 @@ public class ChatResource {
     }
 
     /**
+     * Replaces this conversation's agent loop with another workflow — the state machine it runs for
+     * one turn ({@code DocRetrievalAgentLoop_260830_oo01} 型3).
+     *
+     * @param projectId owning project's id
+     * @param chatId    conversation id within that project
+     * @param file      classpath file name under {@code /workflows/}, e.g.
+     *                  {@code doc-retrieval-loop.yaml}
+     * @return {@code {"type":"ok","agentLoop":...}}, or 400/404 with the reason
+     */
+    @POST
+    @Path("/{projectId}/chats/{chatId}/agent-loop-workflow")
+    @Consumes(MediaType.TEXT_PLAIN)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response setAgentLoopWorkflow(@PathParam("projectId") String projectId,
+                                          @PathParam("chatId") String chatId, String file) {
+        ChatSessionIIAR session = actorSystem.getChatSession(projectId, chatId);
+        if (session == null) {
+            return Response.status(404).entity(Map.of("type", "error", "message", "no such conversation")).build();
+        }
+        String name = file == null ? "" : file.strip();
+        if (name.isEmpty()) {
+            return Response.status(400).entity(Map.of("type", "error", "message", "file name required")).build();
+        }
+        String error = session.setAgentLoopWorkflowFile(name);
+        if (error != null) {
+            return Response.status(400).entity(Map.of("type", "error", "message", error)).build();
+        }
+        return Response.ok(Map.of("type", "ok", "agentLoop", name)).build();
+    }
+
+    /**
      * Switches this conversation's prompt-construction sub-workflow — the file that decides what
      * text each agent-loop step sends ({@code DocRetrievalAgentLoop_260830_oo01} 型2).
      *

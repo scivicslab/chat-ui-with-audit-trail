@@ -60,8 +60,8 @@ public final class DocRetrievalBenchmark {
 
     public static void main(String[] args) throws Exception {
         String variant = args.length > 0 ? args[0] : "baseline";
-        if (!variant.equals("baseline") && !variant.equals("prompt")) {
-            System.err.println("unknown variant '" + variant + "' (baseline | prompt)");
+        if (!variant.equals("baseline") && !variant.equals("prompt") && !variant.equals("statemachine")) {
+            System.err.println("unknown variant '" + variant + "' (baseline | prompt | statemachine)");
             System.exit(2);
         }
         // A dead embedding server makes html-saurus return an empty array rather than fail, which
@@ -103,6 +103,10 @@ public final class DocRetrievalBenchmark {
         // 型2 (DocRetrievalAgentLoop_260830_oo01): same agent loop, different text at every step.
         if (variant.equals("prompt")) {
             post(chatBase + "/prompt-workflow", "prompt-construction-doc-retrieval.yaml");
+        }
+        // 型3: the agent loop itself becomes the retrieval procedure.
+        if (variant.equals("statemachine")) {
+            post(chatBase + "/agent-loop-workflow", "doc-retrieval-loop.yaml");
         }
 
         long start = System.currentTimeMillis();

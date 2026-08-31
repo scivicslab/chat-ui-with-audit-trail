@@ -1,0 +1,129 @@
+name: doc-retrieval-loop
+description: |
+  型3（DocRetrievalAgentLoop_260830_oo01）: the agent loop itself becomes the procedure for finding
+  a document and answering from it. The default loop leaves every decision — search again? read
+  what? answer now? — inside one LLM reply; here each is a state, and how many searches and how
+  many documents to open are this file's arguments.
+
+  Measured failures this is aimed at: the conversation opened one candidate, picked the wrong one
+  and answered anyway; it answered from what it already believed without opening anything.
+
+  Entry state must be named "think" — ChatSession.start() calls transitionTo("think")
+  unconditionally regardless of which workflow is installed (WorkflowReloadReset_260828_oo01).
+
+  Every action sets execution: direct, so the whole turn stays on this conversation's own actor
+  thread (same reason as chat-session-agent-loop.yaml's own note).
+
+steps:
+  - states: ["think", "judge-hits"]
+    label: search
+    note: Turn the question into search terms and run one search.
+    actions:
+      - actor: this
+        method: searchDocs
+        execution: direct
+
+  - states: ["think", "end"]
+    label: search-failed
+    note: |
+      Reached only when the very first search returned nothing at all. Always succeeds; ends the
+      turn with an explanation instead of leaving it stuck busy.
+    actions:
+      - actor: this
+        method: reportRetrievalFailure
+        execution: direct
+      - actor: this
+        method: finish
+        execution: direct
+
+  - states: ["judge-hits", "read-sources"]
+    label: hits-sufficient
+    note: One LLM call, no reading — does the candidate list hold something that can answer?
+    actions:
+      - actor: this
+        method: judgeHitsSufficient
+        execution: direct
+
+  - states: ["judge-hits", "give-up"]
+    label: search-limit
+    note: Reached only when judging just failed AND the search budget is spent.
+    actions:
+      - actor: this
+        method: searchLimitReached
+        arguments: "3"
+        execution: direct
+
+  - states: ["judge-hits", "refine"]
+    label: hits-thin
+    note: |
+      Judging's catch-all, reached when the candidates look thin and searches remain. Always
+      succeeds; keeps what the judgement said was missing.
+    actions:
+      - actor: this
+        method: judgeHitsNeedRefinement
+        execution: direct
+
+  - states: ["refine", "judge-hits"]
+    label: search-again
+    note: Different terms, told what the previous attempt missed, then judge the new candidates.
+    actions:
+      - actor: this
+        method: refineQueryAndSearch
+        execution: direct
+
+  - states: ["refine", "end"]
+    label: refine-failed
+    note: Reached only when searching again returned nothing. Ends the turn with an explanation.
+    actions:
+      - actor: this
+        method: reportRetrievalFailure
+        execution: direct
+      - actor: this
+        method: finish
+        execution: direct
+
+  - states: ["read-sources", "answer"]
+    label: read
+    note: |
+      The model picks which candidates to open — it has the titles and summaries — and this step
+      opens them. Choosing stays a judgement; opening stays mechanical. The argument is how many.
+    actions:
+      - actor: this
+        method: readSources
+        arguments: "3"
+        execution: direct
+
+  - states: ["read-sources", "end"]
+    label: read-failed
+    note: Reached only when nothing could be opened. Ends the turn saying so.
+    actions:
+      - actor: this
+        method: reportRetrievalFailure
+        execution: direct
+      - actor: this
+        method: finish
+        execution: direct
+
+  - states: ["answer", "end"]
+    label: answer
+    note: Answer from the documents that were opened, and from nothing else.
+    actions:
+      - actor: this
+        method: answerFromSources
+        execution: direct
+      - actor: this
+        method: finish
+        execution: direct
+
+  - states: ["give-up", "end"]
+    label: answer-unconfirmed
+    note: |
+      The search budget ran out without a usable candidate. Answer from the candidate list and say
+      plainly that it could not be confirmed against a document.
+    actions:
+      - actor: this
+        method: answerFromSources
+        execution: direct
+      - actor: this
+        method: finish
+        execution: direct

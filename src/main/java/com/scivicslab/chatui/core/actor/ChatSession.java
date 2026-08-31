@@ -243,6 +243,201 @@ public class ChatSession extends Interpreter {
     private int stepCount;
     private volatile boolean cancelled;
 
+    // ---- 型3: 文書検索の状態機械 (DocRetrievalAgentLoop_260830_oo01) ------------------
+    // The default agent loop leaves every decision — search again? read what? answer now? — inside
+    // one LLM reply. These methods split that into states, so the order is written in the YAML and
+    // the number of searches and documents read are its arguments.
+
+    /**
+     * Turns the turn's question into search terms and runs one search. Entry state of
+     * {@code doc-retrieval-loop.yaml}.
+     *
+     * @param args unused
+     * @return {@link ActionResult} with {@code success=true} iff the search returned candidates
+     */
+    public ActionResult searchDocs(String args) {
+        String query = askLlm("Write the search terms for finding, in this team's internal "
+                + "documentation, what answers the question below. Reply with the terms only — no "
+                + "explanation, no quotes. Write them in the language the documents are written in "
+                + "(these are mostly Japanese).\n\nQuestion:\n" + question);
+        return runSearch(query);
+    }
+
+    /** Runs one search and keeps what came back. */
+    private ActionResult runSearch(String query) {
+        if (query == null || query.isBlank()) {
+            return new ActionResult(false, "no search terms");
+        }
+        lastQuery = query.strip();
+        searchCount++;
+        lastHits = DocSearchTool.search(lastQuery, 0);
+        boolean found = lastHits != null && !lastHits.startsWith("No documents found");
+        // Written to the I/O log in the same shape the default loop uses for a tool call, so the
+        // same reading of the log measures both loops (DocRetrievalBenchmark_260830_oo01).
+        stepCount++;
+        recordToolIo(new ToolCall("search-" + searchCount, "search_docs",
+                new JSONObject().put("query", lastQuery).toString()), lastHits);
+        return new ActionResult(found, found ? "candidates returned" : "nothing found");
+    }
+
+    /**
+     * Judges whether the candidate list holds something that can answer the question. Makes one LLM
+     * call and keeps its reasoning for {@link #refineQueryAndSearch()}.
+     *
+     * @param args unused
+     * @return {@link ActionResult} with {@code success=true} iff the list looks sufficient
+     */
+    public ActionResult judgeHitsSufficient(String args) {
+        if (lastHits == null) return new ActionResult(false, "no candidates yet");
+        String verdict = askLlm("Below is a question and a list of candidate documents returned by "
+                + "a search. Decide whether any of them is likely to contain the answer. Judge from "
+                + "the titles and summaries; you cannot open them here.\n\nIf at least one candidate "
+                + "is likely to answer it, reply with exactly:\nENOUGH\nOtherwise reply with:\n"
+                + "MISSING: <what the search failed to find, in one sentence>\n\nQuestion:\n"
+                + question + "\n\nCandidates:\n" + lastHits);
+        boolean enough = verdict != null && verdict.strip().toUpperCase().startsWith("ENOUGH");
+        hitsShortfall = enough ? null : verdict;
+        return new ActionResult(enough, enough ? "candidates look sufficient" : "candidates look thin");
+    }
+
+    /**
+     * The searching state's give-up guard.
+     *
+     * @param limit how many searches this turn may run; blank falls back to 3
+     * @return {@link ActionResult} with {@code success=true} iff that many have been run
+     */
+    public ActionResult searchLimitReached(String limit) {
+        int max = parsePositiveOr(limit, 3);
+        boolean reached = searchCount >= max;
+        return new ActionResult(reached, reached ? "search limit " + max + " reached"
+                                                 : searchCount + "/" + max + " searches used");
+    }
+
+    /**
+     * The searching state's catch-all, reached once judging and the limit guard have both failed.
+     * Keeps what is missing; makes no LLM call.
+     *
+     * @param args unused
+     * @return {@link ActionResult} with {@code success=true} always
+     */
+    public ActionResult judgeHitsNeedRefinement(String args) {
+        if (hitsShortfall == null) hitsShortfall = "the candidates do not answer the question";
+        return new ActionResult(true, "refinement requested");
+    }
+
+    /**
+     * Writes different search terms and searches again, told what the previous attempt missed and
+     * what it already tried.
+     *
+     * @param args unused
+     * @return {@link ActionResult} with {@code success=true} iff the new search returned candidates
+     */
+    public ActionResult refineQueryAndSearch(String args) {
+        String query = askLlm("A search of this team's internal documentation did not find what was "
+                + "needed. Write different search terms. Do not repeat the previous ones. Reply with "
+                + "the terms only. Write them in the language the documents are written in (these "
+                + "are mostly Japanese).\n\nQuestion:\n" + question
+                + "\n\nPrevious terms:\n" + lastQuery
+                + "\n\nWhat was missing:\n" + hitsShortfall);
+        return runSearch(query);
+    }
+
+    /**
+     * Opens the candidates worth reading. The model chooses which — it has the titles and summaries
+     * — and this method reads them, so choosing stays a judgement and reading stays mechanical.
+     *
+     * @param howMany how many documents to open at most; blank falls back to 3
+     * @return {@link ActionResult} with {@code success=true} iff at least one document was read
+     */
+    public ActionResult readSources(String howMany) {
+        int max = parsePositiveOr(howMany, 3);
+        String picked = askLlm("Below is a question and a list of candidate documents. Choose the "
+                + "ones worth opening to answer it — at most " + max + ". Reply with their \"path\" "
+                + "values, one per line, and nothing else.\n\nQuestion:\n" + question
+                + "\n\nCandidates:\n" + lastHits);
+
+        StringBuilder read = new StringBuilder();
+        int opened = 0;
+        for (String line : (picked == null ? "" : picked).split("\n")) {
+            if (opened >= max) break;
+            String path = line.strip().replaceAll("^[-*0-9.\\s]+", "");
+            if (path.isEmpty() || !path.startsWith("/")) continue;
+            String text = FileReadTool.read(fileScope, path);
+            if (text.startsWith("error:")) {
+                logToTab("INFO", "readSources: " + text);
+                continue;
+            }
+            read.append("===== ").append(path).append(" =====\n").append(text).append("\n\n");
+            stepCount++;
+            recordToolIo(new ToolCall("read-" + opened, "read",
+                    new JSONObject().put("path", path).toString()), text);
+            opened++;
+        }
+        readSourcesText = read.toString();
+        return new ActionResult(opened > 0, opened + " document(s) read");
+    }
+
+    /**
+     * The reading state's catch-all: nothing could be opened, so say that instead of leaving the
+     * turn stuck.
+     *
+     * @param args unused
+     * @return {@link ActionResult} with {@code success=true} always
+     */
+    public ActionResult reportRetrievalFailure(String args) {
+        finalAnswer = "I could not open any document that answers this. The search terms I tried "
+                + "were: " + lastQuery + ".";
+        return new ActionResult(true, "retrieval failure reported");
+    }
+
+    /**
+     * Answers from what was opened, and from nothing else. When nothing was opened (the give-up
+     * path), answers from the candidate list and says so.
+     *
+     * @param args unused
+     * @return {@link ActionResult} with {@code success=true} always
+     */
+    public ActionResult answerFromSources(String args) {
+        boolean haveSources = readSourcesText != null && !readSourcesText.isBlank();
+        String prompt = haveSources
+                ? "Answer the question using only the documents below. State the name of the "
+                  + "document the answer came from. If they do not contain the answer, say so.\n\n"
+                  + "Question:\n" + question + "\n\nDocuments:\n" + readSourcesText
+                : "The search did not find documents that answer the question, and none were "
+                  + "opened. Answer as best you can from the candidate list below, and say plainly "
+                  + "that you could not confirm it against a document.\n\nQuestion:\n" + question
+                  + "\n\nCandidates:\n" + lastHits;
+        finalAnswer = askLlm(prompt);
+        return new ActionResult(true, "answered");
+    }
+
+    /**
+     * One blocking LLM call whose whole reply is returned. Streams to the turn's emitter as
+     * "thinking", like {@link #callJudgeLlm}.
+     *
+     * @param prompt what to send
+     * @return the reply, or {@code ""} if the call failed
+     */
+    private String askLlm(String prompt) {
+        StringBuilder buf = new StringBuilder();
+        ProviderContext ctx = new ProviderContext(apiKey, List.of(), turnNoThink, () -> {});
+        try {
+            providerRef().ask(p -> {
+                p.sendPrompt(prompt, turnModel, event -> {
+                    if ("delta".equals(event.type()) && event.content() != null) {
+                        buf.append(event.content());
+                        turnEmitter.accept(ChatEvent.thinking(event.content()));
+                    }
+                }, ctx);
+                return null;
+            }, system.getManagedThreadPool()).get();
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "LLM call failed", e);
+            return "";
+        }
+        return buf.toString();
+    }
+
     // ---- Babysitter loop (BabysitterLoopWorkflowShape_260828_oo01, made phase-agnostic by
     // GenericBabysitterPhases_260829_oo01) — per-turn, reset in start() ----
     /** Redos allowed when the workflow names no number ({@code TurnResourceLimits_260830_oo01}). */
@@ -264,6 +459,20 @@ public class ChatSession extends Interpreter {
     private int redoCount;
     /** Set by requestFromWorker/requestRedo on failure; consumed by reportCollaborationFailure. */
     private String lastCollaborationError;
+
+    // ---- 型3: 文書検索を状態機械にする (DocRetrievalAgentLoop_260830_oo01) ----
+    // Per-turn, reset in start(). The loop is search -> judge -> (refine -> judge)* -> read -> answer,
+    // so each state's result has to outlive the transition that produced it.
+    /** The candidate list search_docs returned, as the model sees it. */
+    private String lastHits;
+    /** The search terms last used, so a refinement can say how it differs. */
+    private String lastQuery;
+    /** Searches run in this turn, counted against the workflow's limit. */
+    private int searchCount;
+    /** What judgeHitsSufficient said was missing, consumed by refineQueryAndSearch. */
+    private String hitsShortfall;
+    /** The text of every document opened in this turn, in the order they were opened. */
+    private String readSourcesText;
 
     // ---- Prompt construction (ChatSessionPorting_260823_oo01 2-b-i) ----
     // stepExpectingAction() delegates building the text it sends to provider.sendPrompt() to a
@@ -1108,6 +1317,11 @@ public class ChatSession extends Interpreter {
      */
     public ActionResult requestFromWorker(String instruction) {
         redoCount = 0;
+        lastHits = null;
+        lastQuery = null;
+        searchCount = 0;
+        hitsShortfall = null;
+        readSourcesText = null;
         redoNote = null;
         String workerChatId = resolveWorker();
         if (workerChatId == null) {

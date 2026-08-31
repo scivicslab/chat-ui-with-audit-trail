@@ -63,6 +63,28 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     public String getAgentLoopWorkflowFile() { return agentLoopWorkflowFile; }
 
     /**
+     * Replaces this conversation's agent loop with another workflow, the same way the
+     * {@code set_workflow} tool does — reset first, then read
+     * ({@code WorkflowReloadReset_260828_oo01}). Used to select a variant from outside the
+     * conversation ({@code DocRetrievalAgentLoop_260830_oo01}).
+     *
+     * @param file classpath file name under {@code /workflows/}
+     * @return {@code null} on success, or an {@code error: ...} string
+     */
+    public String setAgentLoopWorkflowFile(String file) {
+        String previous = agentLoopWorkflowFile;
+        agentLoopWorkflowFile = file;
+        try {
+            chatSession().reset();
+            loadAgentLoopWorkflow();
+            return null;
+        } catch (RuntimeException e) {
+            agentLoopWorkflowFile = previous;
+            return "error: " + e.getMessage();
+        }
+    }
+
+    /**
      * Reads this tab's busy flag directly, bypassing the actor's mailbox — safe even while a long
      * turn (e.g. {@code ask_chat}) is in progress, since {@code ChatSession.busy} is {@code volatile}
      * and only ever written from this actor's own thread ({@code BusyStateReadableSnapshot_260828_oo01}).
@@ -270,6 +292,80 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     @Action("requestRedo")
     public ActionResult requestRedoAction(String arg) {
         return chatSession().requestRedo();
+    }
+
+    // ── 型3: 文書検索の状態機械 (DocRetrievalAgentLoop_260830_oo01) ──
+
+    /**
+     * @param arg unused
+     * @return success when the search returned candidates
+     */
+    @Action("searchDocs")
+    public ActionResult searchDocsAction(String arg) {
+        return chatSession().searchDocs(arg);
+    }
+
+    /**
+     * @param arg unused
+     * @return success when the candidate list looks able to answer the question
+     */
+    @Action("judgeHitsSufficient")
+    public ActionResult judgeHitsSufficientAction(String arg) {
+        return chatSession().judgeHitsSufficient(arg);
+    }
+
+    /**
+     * @param arg how many searches this turn may run
+     * @return success once that many have been run
+     */
+    @Action("searchLimitReached")
+    public ActionResult searchLimitReachedAction(String arg) {
+        return chatSession().searchLimitReached(firstArgument(arg));
+    }
+
+    /**
+     * @param arg unused
+     * @return always successful
+     */
+    @Action("judgeHitsNeedRefinement")
+    public ActionResult judgeHitsNeedRefinementAction(String arg) {
+        return chatSession().judgeHitsNeedRefinement(arg);
+    }
+
+    /**
+     * @param arg unused
+     * @return success when the new search returned candidates
+     */
+    @Action("refineQueryAndSearch")
+    public ActionResult refineQueryAndSearchAction(String arg) {
+        return chatSession().refineQueryAndSearch(arg);
+    }
+
+    /**
+     * @param arg how many documents to open at most
+     * @return success when at least one was opened
+     */
+    @Action("readSources")
+    public ActionResult readSourcesAction(String arg) {
+        return chatSession().readSources(firstArgument(arg));
+    }
+
+    /**
+     * @param arg unused
+     * @return always successful
+     */
+    @Action("reportRetrievalFailure")
+    public ActionResult reportRetrievalFailureAction(String arg) {
+        return chatSession().reportRetrievalFailure(arg);
+    }
+
+    /**
+     * @param arg unused
+     * @return always successful
+     */
+    @Action("answerFromSources")
+    public ActionResult answerFromSourcesAction(String arg) {
+        return chatSession().answerFromSources(arg);
     }
 
     /**
