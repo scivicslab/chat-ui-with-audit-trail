@@ -1,5 +1,6 @@
 package com.scivicslab.chatui.openaicompat;
 
+import com.scivicslab.chatui.agent.ContextBudget;
 import com.scivicslab.chatui.openaicompat.client.ChatMessage;
 import com.scivicslab.chatui.openaicompat.client.ContextLengthExceededException;
 import com.scivicslab.chatui.openaicompat.client.OpenAiCompatClient;
@@ -34,7 +35,17 @@ public class OpenAiCompatProvider implements LlmProvider {
 
     // Conversation history for context (not managed by actor — provider owns it)
     private final LinkedList<ChatMessage> history = new LinkedList<>();
-    private static final int MAX_HISTORY_MESSAGES = 20;
+    /**
+     * Context length assumed when the server does not report {@code max_model_len} for the model in
+     * use. 128K tokens is the agreed floor for the models this system talks to
+     * ({@code TurnResourceLimits_260830_oo01}).
+     */
+    private static final int DEFAULT_CONTEXT_TOKENS = 128_000;
+    /**
+     * Share of the model's context length the conversation history may occupy. The rest is left for
+     * the reply and for the estimate being wrong: the estimate is char-based, not a real tokenizer.
+     */
+    private static final double HISTORY_SHARE = 0.5;
     /** How many leading messages are collapsed turns rather than the running turn's steps
      *  ({@code TurnResourceLimits_260830_oo01}). */
     private int collapsedCount = 0;
@@ -156,7 +167,7 @@ public class OpenAiCompatProvider implements LlmProvider {
 
         List<String> imageDataUrls = ctx.imageDataUrls() != null ? ctx.imageDataUrls() : List.of();
         history.addLast(new ChatMessage.User(prompt, imageDataUrls));
-        if (history.size() > MAX_HISTORY_MESSAGES) evictOldest();
+        fitHistoryToBudget();
 
         // Delegate to agent loop if the plugin is present and enabled
         if (agentLoopExtension != null && agentLoopExtension.isEnabled()) {
@@ -184,10 +195,16 @@ public class OpenAiCompatProvider implements LlmProvider {
                             assistantBuf.append(content);
                             emitter.accept(ChatEvent.delta(content));
                         }
+                        @Override public void onReasoning(String reasoning) {
+                            // Reasoning is shown but never kept: it is not part of the answer, so
+                            // it stays out of assistantBuf and therefore out of the history entry
+                            // added in onComplete and out of the text parsed for tool calls.
+                            emitter.accept(ChatEvent.thinking(reasoning));
+                        }
                         @Override public void onComplete(long durationMs) {
                             String response = assistantBuf.toString();
                             history.addLast(new ChatMessage.Assistant(response));
-                            if (history.size() > MAX_HISTORY_MESSAGES) evictOldest();
+                            fitHistoryToBudget();
                             if (currentRetry > 0) {
                                 logger.info("Context overflow recovered after " + currentRetry
                                         + " trim(s). Session preserved with "
@@ -231,13 +248,86 @@ public class OpenAiCompatProvider implements LlmProvider {
             history.addLast(new ChatMessage.Assistant(answer));
         }
         collapsedCount = history.size();
-        while (history.size() > MAX_HISTORY_MESSAGES) evictOldest();
+        fitHistoryToBudget();
     }
 
     /** Drops the oldest message, keeping {@link #collapsedCount} pointing at the same boundary. */
     private void evictOldest() {
         history.removeFirst();
         if (collapsedCount > 0) collapsedCount--;
+    }
+
+    /**
+     * Drops the oldest messages until the history's estimated tokens fit the budget the model's
+     * context length allows.
+     *
+     * <p>This used to be a cap on the number of messages (20), which ignored how large a message
+     * was: one message of ten characters and one of twenty thousand counted the same. It also had
+     * nothing to do with the model — a 128K-token model was held to the same twenty messages as a
+     * small one. During an agent-loop turn each step adds two messages, so the count alone decided
+     * how far back a step could see, and a long turn silently lost its early observations while
+     * most of the context window stayed empty
+     * ({@code TurnResourceLimits_260830_oo01} "会話履歴の上限が件数なのはなぜ駄目か").</p>
+     *
+     * <p>Messages are dropped one at a time rather than in pairs, because during a turn the
+     * history is not a strict user/assistant alternation: an agent-loop step contributes a prompt
+     * and a reply, and a collapsed turn contributes a question and an answer. The last message is
+     * never dropped — it is the prompt about to be sent.</p>
+     */
+    private void fitHistoryToBudget() {
+        int budget = historyBudgetTokens();
+        int used = estimateHistoryTokens();
+        while (used > budget && history.size() > 1) {
+            used -= ContextBudget.estimateMessageTokens(contentOf(history.getFirst()));
+            evictOldest();
+        }
+    }
+
+    /** @return how many tokens the history may occupy, from the model's own reported context length */
+    private int historyBudgetTokens() {
+        int contextTokens = -1;
+        // Guard the model name: selectClient asks each client whether it serves this model, and
+        // servesModel does contains() on an immutable list, which rejects null before any model
+        // list has been fetched. collapseTurn can reach here before a model has been resolved.
+        if (currentModel != null && !currentModel.isBlank()) {
+            OpenAiCompatClient client = selectClient(currentModel);
+            if (client != null) contextTokens = client.getMaxModelLen(currentModel);
+        }
+        if (contextTokens <= 0) contextTokens = DEFAULT_CONTEXT_TOKENS;
+        return (int) (contextTokens * HISTORY_SHARE);
+    }
+
+    /** @return the estimated token count of the whole history */
+    private int estimateHistoryTokens() {
+        int sum = 0;
+        for (ChatMessage m : history) sum += ContextBudget.estimateMessageTokens(contentOf(m));
+        return sum;
+    }
+
+    /**
+     * The text a message contributes to the request. A tool-call request carries no prose, so its
+     * size is the serialized calls; an image is sent as a data URL, which is part of the message's
+     * size even though it is not text the model reads as words.
+     *
+     * @param m one history message
+     * @return the text whose length stands for that message's size
+     */
+    private static String contentOf(ChatMessage m) {
+        return switch (m) {
+            case ChatMessage.User u -> u.hasImages()
+                    ? u.content() + String.join("", u.imageDataUrls())
+                    : u.content();
+            case ChatMessage.Assistant a -> a.content();
+            case ChatMessage.System s -> s.content();
+            case ChatMessage.ToolResult r -> r.content();
+            case ChatMessage.ToolCallRequest t -> {
+                StringBuilder b = new StringBuilder();
+                for (ChatMessage.ToolCallRequest.ToolCall c : t.toolCalls()) {
+                    b.append(c.name()).append(c.arguments());
+                }
+                yield b.toString();
+            }
+        };
     }
 
     @Override

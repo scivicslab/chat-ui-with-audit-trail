@@ -42,6 +42,7 @@ import java.util.Set;
 import java.util.HashSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -144,7 +145,7 @@ public class ChatSession extends Interpreter {
      * forgot its step-limit transition still stops, instead of running to
      * {@code Interpreter.runUntilEnd}'s 10000-iteration backstop.
      */
-    private static final int DEFAULT_STEP_LIMIT = 6;
+    private static final int DEFAULT_STEP_LIMIT = 30;
     /** Ceiling on the observation size a workflow may ask for; set from configuration. */
     private int maxObservationChars = ContextBudget.OBS_THRESHOLD;
     /**
@@ -1169,6 +1170,16 @@ public class ChatSession extends Interpreter {
         StringBuilder assistantBuf = new StringBuilder();
         ActorRef<LlmProvider> providerRef = providerRef();
 
+        // The tab log used to receive nothing between here and recordStepIo() below, so a step
+        // spent entirely on a thinking model's reasoning left the System Log tab blank for as long
+        // as the model took. Announce the call before making it, then report progress while the
+        // reply streams, so the log shows that the step is alive and how far it has got.
+        String stepLabel = "turn" + ioTurnNo + "/step" + stepCount + "/llm";
+        logToTab("INFO", stepLabel + " start: model=" + (turnModel == null ? "(server default)" : turnModel)
+                + ", promptChars=" + promptToSend.length());
+        AtomicLong streamedChars = new AtomicLong();
+        AtomicLong progressLoggedAt = new AtomicLong(System.currentTimeMillis());
+
         try {
             providerRef.ask(p -> {
                 // Relabel the provider's own "delta"/"result" as "thinking" / (dropped): this step
@@ -1182,11 +1193,19 @@ public class ChatSession extends Interpreter {
                 Consumer<ChatEvent> wrapped = event -> {
                     if ("delta".equals(event.type()) && event.content() != null) {
                         assistantBuf.append(event.content());
+                        noteStreamProgress(stepLabel, streamedChars, progressLoggedAt, event.content());
                         turnEmitter.accept(ChatEvent.thinking(event.content()));
                     } else if ("result".equals(event.type())) {
                         // The provider's own per-call completion signal; the agent loop's real
                         // completion signal is finish()'s result event, emitted once for the turn.
                     } else {
+                        // Reaches here as the provider's own "thinking" event, which is how a
+                        // server that separates reasoning (delta.reasoning_content) delivers a
+                        // thinking model's chain of thought. Counting it is what makes the log
+                        // move during a step that produces no answer text at all.
+                        if ("thinking".equals(event.type())) {
+                            noteStreamProgress(stepLabel, streamedChars, progressLoggedAt, event.content());
+                        }
                         turnEmitter.accept(event);
                     }
                 };
@@ -1215,6 +1234,37 @@ public class ChatSession extends Interpreter {
         return new ActionResult(false, "final");
     }
 
+    /** Shortest gap between two streaming-progress lines in one step's tab log. */
+    private static final long STREAM_PROGRESS_INTERVAL_MS = 1000L;
+
+    /**
+     * Adds one streamed chunk to this step's running total and writes a progress line to the tab
+     * log, at most once per {@link #STREAM_PROGRESS_INTERVAL_MS}. The throttle is what keeps this
+     * usable: a chunk is often a single token, and one log line per token would bury every other
+     * entry in the System Log tab and make the tab log actor the bottleneck of the turn.
+     *
+     * <p>Runs on whichever thread the provider streams on, not this actor's thread. That is safe
+     * because the counters are atomic and {@code logToTab} only enqueues into the tab log actor's
+     * mailbox.</p>
+     *
+     * @param stepLabel    the step this progress belongs to, e.g. {@code turn3/step2/llm}
+     * @param charsSoFar   running character count for this step, across answer and reasoning text
+     * @param loggedAt     when a progress line was last written for this step
+     * @param chunk        the chunk just received; blank chunks are counted as nothing
+     */
+    private void noteStreamProgress(String stepLabel, AtomicLong charsSoFar, AtomicLong loggedAt,
+                                    String chunk) {
+        if (chunk == null || chunk.isEmpty()) return;
+        long total = charsSoFar.addAndGet(chunk.length());
+        long now = System.currentTimeMillis();
+        long previous = loggedAt.get();
+        if (now - previous < STREAM_PROGRESS_INTERVAL_MS) return;
+        // Only the thread that wins the swap writes the line, so two chunks arriving at once do
+        // not produce two lines for the same instant.
+        if (!loggedAt.compareAndSet(previous, now)) return;
+        logToTab("INFO", stepLabel + " streaming: " + total + " chars");
+    }
+
     /**
      * Records one LLM call of the agent loop to the I/O log ({@code turn{N}/step{M}/llm}), in the
      * same marker format {@link IoLogView}'s {@code trace()} already parses (ported from
@@ -1241,7 +1291,9 @@ public class ChatSession extends Interpreter {
             }
             m.append("\n\nUSAGE: promptTokens=0 completionTokens=0");
             ioLog.record(ioSession, "agent", "turn" + ioTurnNo + "/step" + stepCount + "/llm", m.toString());
-            logToTab("INFO", "turn" + ioTurnNo + "/step" + stepCount + "/llm");
+            logToTab("INFO", "turn" + ioTurnNo + "/step" + stepCount + "/llm done: "
+                    + (responseText == null ? 0 : responseText.length()) + " chars, "
+                    + calls.size() + " tool call(s)");
         } catch (Exception e) {
             logger.log(Level.WARNING, "I/O log step record failed", e);
         }

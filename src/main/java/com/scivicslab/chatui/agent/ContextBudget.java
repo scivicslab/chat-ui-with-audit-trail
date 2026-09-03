@@ -1,9 +1,5 @@
 package com.scivicslab.chatui.agent;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-
 /**
  * Pure helpers for keeping the LLM request within a token budget (s_budget).
  *
@@ -49,29 +45,18 @@ public final class ContextBudget {
         return (int) Math.ceil(s.length() / CHARS_PER_TOKEN);
     }
 
-    /** Estimated tokens for a list of OpenAI-format messages (content + per-message overhead). */
-    public static int estimateTokens(List<Map<String, Object>> messages) {
-        int sum = 0;
-        for (Map<String, Object> m : messages) {
-            Object content = m.get("content");
-            sum += estimateTokens(content == null ? "" : content.toString());
-            sum += PER_MESSAGE_OVERHEAD;
-        }
-        return sum;
-    }
-
     /**
-     * Drops the OLDEST (user, assistant) pairs from {@code history} until its estimated tokens fit
-     * {@code budgetTokens}. Newest turns are kept; pairs are dropped together so the alternating
-     * structure stays intact. The input list is not mutated; a new list is returned.
+     * Estimated tokens for one message: its content plus the per-message overhead the request
+     * format adds around it.
+     *
+     * <p>The caller passes the content as a string rather than a message object, so that this
+     * class stays independent of any one provider's message type.</p>
+     *
+     * @param content the message's text content; {@code null} counts as empty
+     * @return the estimated token count for that message
      */
-    public static List<Map<String, Object>> fitHistory(List<Map<String, Object>> history, int budgetTokens) {
-        List<Map<String, Object>> out = new ArrayList<>(history);
-        while (estimateTokens(out) > budgetTokens && out.size() >= 2) {
-            out.remove(0);   // oldest user
-            out.remove(0);   // its assistant
-        }
-        return out;
+    public static int estimateMessageTokens(String content) {
+        return estimateTokens(content) + PER_MESSAGE_OVERHEAD;
     }
 
     /**

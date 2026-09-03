@@ -32,12 +32,13 @@ steps:
       (TurnResourceLimits_260830_oo01) — so it is a transition here rather than a hidden check
       inside stepExpectingAction. Placed first among "think"'s transitions so it is evaluated
       before the LLM is called; stepLimitReached fails while steps remain, and the scan falls
-      through to think-action. Raise the number for a workflow that has to search, read and only
-      then answer: four steps is the minimum for one search and one read.
+      through to think-action. Four steps is the minimum for one search and one read, so a turn
+      that searches, reads and only then answers needs many more than that; 6 was reached in
+      ordinary use and cut turns off before they could answer.
     actions:
       - actor: this
         method: stepLimitReached
-        arguments: "6"
+        arguments: "30"
         execution: direct
       - actor: this
         method: finish
