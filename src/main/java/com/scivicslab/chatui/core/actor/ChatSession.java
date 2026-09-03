@@ -146,6 +146,8 @@ public class ChatSession extends Interpreter {
      * {@code Interpreter.runUntilEnd}'s 10000-iteration backstop.
      */
     private static final int DEFAULT_STEP_LIMIT = 30;
+    /** When the running turn began, for the duration reported with its answer. */
+    private long turnStartedAt;
     /** Ceiling on the observation size a workflow may ask for; set from configuration. */
     private int maxObservationChars = ContextBudget.OBS_THRESHOLD;
     /**
@@ -1038,6 +1040,7 @@ public class ChatSession extends Interpreter {
         this.turnNoThink = noThink;
         this.ioSession = (ioLog != null) ? ioLog.ensureSession(myChatName()) : -1;
         this.ioTurnNo = ++ioTurn;
+        this.turnStartedAt = System.currentTimeMillis();
         this.pendingCalls = null;
         this.finalAnswer = null;
         this.stepCount = 0;
@@ -1234,6 +1237,20 @@ public class ChatSession extends Interpreter {
         return new ActionResult(false, "final");
     }
 
+    /**
+     * The session this turn belongs to, for the line the browser shows under the answer.
+     *
+     * <p>An OpenAI-compatible provider has no session of its own ({@code getSessionId()} returns
+     * null), but this product does: the I/O log session is what the Sessions tab keys on, so the
+     * identifier under an answer is the one that finds that answer's recorded input and output.
+     * Falls back to the provider's own identifier for providers that have one.</p>
+     *
+     * @return the identifier to report, or {@code null} when there is none
+     */
+    private String auditSessionId() {
+        return ioSession >= 0 ? String.valueOf(ioSession) : provider.getSessionId();
+    }
+
     /** Shortest gap between two streaming-progress lines in one step's tab log. */
     private static final long STREAM_PROGRESS_INTERVAL_MS = 1000L;
 
@@ -1408,7 +1425,11 @@ public class ChatSession extends Interpreter {
                 storeCompletedResult(activeResultKey, answer);
             }
             turnEmitter.accept(ChatEvent.delta(answer));
-            turnEmitter.accept(ChatEvent.result(provider.getSessionId(), 0.0, 0));
+            // The browser puts what this event carries under the answer, as quarkus-chat-ui does.
+            // Cost stays 0: a local model bills nothing, and the browser hides the field unless it
+            // is above zero, rather than showing a made-up figure.
+            turnEmitter.accept(ChatEvent.result(auditSessionId(), 0.0,
+                    System.currentTimeMillis() - turnStartedAt, provider.getCurrentModel(), false));
         }
         // The turn's step-by-step messages — each carrying that step's whole observation — are of
         // no further use once the answer exists, and they crowd out earlier turns in the provider's

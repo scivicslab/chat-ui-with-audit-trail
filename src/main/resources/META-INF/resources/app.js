@@ -44,6 +44,7 @@
     var themeSelect, queueBtn, queueArea, stopPlanBtn;
     var eventSource = null;
     var streamingEl = null;   // the live assistant bubble currently receiving deltas
+    var streamingMarkdown = "";  // its markdown source, kept for the footer's copy button
     var thinkingEl = null;    // the live "thinking" trace bubble, if any
     var busy = false;
 
@@ -99,13 +100,26 @@
         });
     }
 
-    // Attaches a footer holding a clipboard button to a message bubble. The button yields the
-    // message's own markdown source, not the rendered HTML: appendMarkdownMessage() replaces the
-    // source with marked.parse()'s output in the DOM, so the source is captured in this closure
-    // while it is still available.
-    function appendCopyFooter(div, markdownText, label) {
-        var footer = document.createElement("div");
-        footer.className = "message-footer";
+    // ISO 8601 with the browser's UTC offset — the format the coding standard requires wherever a
+    // time is displayed. Same function as quarkus-chat-ui's.
+    function formatTime(date) {
+        var y = date.getFullYear();
+        var m = String(date.getMonth() + 1).padStart(2, "0");
+        var d = String(date.getDate()).padStart(2, "0");
+        var hh = String(date.getHours()).padStart(2, "0");
+        var mm = String(date.getMinutes()).padStart(2, "0");
+        var ss = String(date.getSeconds()).padStart(2, "0");
+        var tz = -date.getTimezoneOffset();
+        var tzSign = tz >= 0 ? "+" : "-";
+        var tzH = String(Math.floor(Math.abs(tz) / 60)).padStart(2, "0");
+        var tzM = String(Math.abs(tz) % 60).padStart(2, "0");
+        return y + "-" + m + "-" + d + "T" + hh + ":" + mm + ":" + ss + tzSign + tzH + ":" + tzM;
+    }
+
+    // A clipboard button yielding the message's own markdown source, not the rendered HTML:
+    // appendMarkdownMessage() replaces the source with marked.parse()'s output in the DOM, so the
+    // source is captured in this closure while it is still available.
+    function copyButton(markdownText, label) {
         var btn = document.createElement("button");
         btn.className = "copy-md-btn";
         btn.textContent = label;
@@ -120,8 +134,49 @@
                 setTimeout(function () { btn.textContent = label; }, 1500);
             });
         });
-        footer.appendChild(btn);
+        return btn;
+    }
+
+    function textSpan(text, title) {
+        var span = document.createElement("span");
+        span.textContent = text;
+        if (title) span.title = title;
+        return span;
+    }
+
+    function newFooter(div) {
+        var footer = document.createElement("div");
+        footer.className = "message-footer";
         div.appendChild(footer);
+        return footer;
+    }
+
+    // Shortens an identifier for display; the whole value stays in the tooltip.
+    function shorten(value, max) {
+        return value.length > max ? value.substring(0, max) + "..." : value;
+    }
+
+    // The line under a finished answer, in the same order and format as quarkus-chat-ui's:
+    // cost, duration, session, model, the copy button, then the time. Cost appears only when the
+    // server reported one above zero — a local model bills nothing, and a zero is not shown.
+    function appendAnswerFooter(div, markdownText, event) {
+        var footer = newFooter(div);
+        if (event.costUsd != null && event.costUsd > 0) {
+            footer.appendChild(textSpan("Cost: $" + event.costUsd.toFixed(4)));
+        }
+        if (event.durationMs != null && event.durationMs >= 0) {
+            footer.appendChild(textSpan("Duration: " + (event.durationMs / 1000).toFixed(1) + "s"));
+        }
+        if (event.sessionId) {
+            var id = String(event.sessionId);
+            footer.appendChild(textSpan("Session: " + shorten(id, 12), id));
+        }
+        // The model the server actually used. The dropdown is the fallback for a server that does
+        // not report it with the result.
+        var modelName = event.model || (modelSelect && modelSelect.value) || "";
+        if (modelName) footer.appendChild(textSpan(shorten(modelName, 30), modelName));
+        footer.appendChild(copyButton(markdownText, "Copy MD"));
+        footer.appendChild(textSpan(formatTime(new Date())));
     }
 
     function appendMessage(role, text) {
@@ -129,17 +184,22 @@
         div.className = "message " + role;
         div.textContent = text;
         // The prompt a human typed is worth copying back out; transient error/info bubbles are not.
-        if (role === "user") appendCopyFooter(div, text, "Copy");
+        if (role === "user") {
+            var footer = newFooter(div);
+            footer.appendChild(textSpan(formatTime(new Date())));
+            footer.appendChild(copyButton(text, "Copy"));
+        }
         chatArea.appendChild(div);
         chatArea.scrollTop = chatArea.scrollHeight;
         return div;
     }
 
+    // Renders the bubble only. An answer's footer is added when the result event arrives, because
+    // that event carries the duration, the session and the model.
     function appendMarkdownMessage(role, text) {
         var div = document.createElement("div");
         div.className = "message " + role;
         div.innerHTML = renderMarkdown(text);
-        appendCopyFooter(div, text, "Copy MD");
         chatArea.appendChild(div);
         chatArea.scrollTop = chatArea.scrollHeight;
         return div;
@@ -343,13 +403,19 @@
                 // whole confirmed-final answer text (never incremental tokens on this channel — those
                 // stream as "thinking" instead, since an intermediate step might still be a tool call).
                 if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
-                streamingEl = appendMarkdownMessage("assistant", event.content || "");
+                streamingMarkdown = event.content || "";
+                streamingEl = appendMarkdownMessage("assistant", streamingMarkdown);
                 chatArea.scrollTop = chatArea.scrollHeight;
                 break;
             case "result":
+                // The answer's bubble was added by the delta event above; this event is what
+                // carries the duration, session and model that go under it.
+                if (streamingEl) appendAnswerFooter(streamingEl, streamingMarkdown, event);
                 streamingEl = null;
+                streamingMarkdown = "";
                 thinkingEl = null;
                 setBusy(false);
+                chatArea.scrollTop = chatArea.scrollHeight;
                 break;
             case "error":
                 appendMessage("error", "Error: " + (event.content || "unknown error"));
@@ -465,6 +531,7 @@
         localStorage.setItem(CHAT_ID_KEY, chatId);
         chatArea.textContent = "";
         streamingEl = null;
+        streamingMarkdown = "";
         thinkingEl = null;
         setBusy(false);
         if (queueArea) { queueArea.style.display = "none"; queueArea.dataset.forcedOpen = "0"; }
@@ -497,8 +564,15 @@
             .then(function (r) { return r.json(); })
             .then(function (turns) {
                 (turns || []).forEach(function (t) {
-                    if (t.role === "assistant") appendMarkdownMessage(t.role, t.content);
-                    else appendMessage(t.role, t.content);
+                    if (t.role === "assistant") {
+                        // A restored turn gets the copy button but no cost/duration/session/time:
+                        // GET /conversation returns the role and the text and nothing else, and a
+                        // footer filled with the time of the reload would state something false.
+                        var div = appendMarkdownMessage(t.role, t.content);
+                        newFooter(div).appendChild(copyButton(t.content, "Copy MD"));
+                    } else {
+                        appendMessage(t.role, t.content);
+                    }
                 });
             })
             .catch(function () { /* start with an empty pane on failure */ });
