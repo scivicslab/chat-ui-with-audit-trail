@@ -77,10 +77,59 @@
 
     function el(id) { return document.getElementById(id); }
 
+    // Writes text to the clipboard. navigator.clipboard exists only in a secure context
+    // (https, or http on localhost); when this console is opened over http on a LAN address
+    // the property is undefined, so fall back to a hidden textarea plus execCommand("copy").
+    function copyTextToClipboard(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+            return navigator.clipboard.writeText(text);
+        }
+        return new Promise(function (resolve, reject) {
+            var ta = document.createElement("textarea");
+            ta.value = text;
+            ta.setAttribute("readonly", "");
+            ta.style.position = "fixed";
+            ta.style.top = "-1000px";
+            document.body.appendChild(ta);
+            ta.select();
+            var ok = false;
+            try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+            document.body.removeChild(ta);
+            if (ok) resolve(); else reject(new Error("copy command was rejected"));
+        });
+    }
+
+    // Attaches a footer holding a clipboard button to a message bubble. The button yields the
+    // message's own markdown source, not the rendered HTML: appendMarkdownMessage() replaces the
+    // source with marked.parse()'s output in the DOM, so the source is captured in this closure
+    // while it is still available.
+    function appendCopyFooter(div, markdownText, label) {
+        var footer = document.createElement("div");
+        footer.className = "message-footer";
+        var btn = document.createElement("button");
+        btn.className = "copy-md-btn";
+        btn.textContent = label;
+        btn.title = "Copy as Markdown";
+        btn.addEventListener("click", function () {
+            copyTextToClipboard(markdownText).then(function () {
+                btn.textContent = "Copied!";
+                setTimeout(function () { btn.textContent = label; }, 1500);
+            }).catch(function (e) {
+                btn.textContent = "Copy failed";
+                notify("copy failed: " + e.message, true);
+                setTimeout(function () { btn.textContent = label; }, 1500);
+            });
+        });
+        footer.appendChild(btn);
+        div.appendChild(footer);
+    }
+
     function appendMessage(role, text) {
         var div = document.createElement("div");
         div.className = "message " + role;
         div.textContent = text;
+        // The prompt a human typed is worth copying back out; transient error/info bubbles are not.
+        if (role === "user") appendCopyFooter(div, text, "Copy");
         chatArea.appendChild(div);
         chatArea.scrollTop = chatArea.scrollHeight;
         return div;
@@ -90,6 +139,7 @@
         var div = document.createElement("div");
         div.className = "message " + role;
         div.innerHTML = renderMarkdown(text);
+        appendCopyFooter(div, text, "Copy MD");
         chatArea.appendChild(div);
         chatArea.scrollTop = chatArea.scrollHeight;
         return div;
