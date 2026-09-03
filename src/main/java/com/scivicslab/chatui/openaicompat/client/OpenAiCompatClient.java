@@ -35,6 +35,17 @@ public class OpenAiCompatClient {
         void onDelta(String content);
         void onComplete(long durationMs);
         void onError(String message);
+
+        /**
+         * Receives reasoning text, which a server that separates a thinking model's chain of
+         * thought sends in {@code delta.reasoning_content} rather than {@code delta.content}.
+         * Reasoning is deliberately a channel of its own: it is not part of the answer, so it must
+         * never reach the text that the agent loop parses for tool calls and keeps as the final
+         * answer. Default no-op, so a caller that does not care about reasoning is unaffected.
+         *
+         * @param reasoning one streamed chunk of the model's reasoning
+         */
+        default void onReasoning(String reasoning) {}
     }
 
     /**
@@ -199,8 +210,15 @@ public class OpenAiCompatClient {
             var iterator = response.body().iterator();
             while (iterator.hasNext()) {
                 if (Thread.currentThread().isInterrupted()) { interrupted = true; break; }
-                String content = parseSseLine(iterator.next());
-                if (content != null) { fullResponse.append(content); callback.onDelta(content); }
+                SseDelta delta = parseSseDelta(iterator.next());
+                if (delta == null) continue;
+                // Reasoning first: while a thinking model reasons, this is the only field that
+                // moves, and the caller needs to see that the call is alive.
+                if (delta.reasoning() != null) callback.onReasoning(delta.reasoning());
+                if (delta.content() != null) {
+                    fullResponse.append(delta.content());
+                    callback.onDelta(delta.content());
+                }
             }
             if (interrupted) { callback.onError("Request cancelled"); return null; }
             callback.onComplete(System.currentTimeMillis() - startTime);
@@ -416,20 +434,46 @@ public class OpenAiCompatClient {
         return unescapeJsonString(json, idx + marker.length());
     }
 
-    static String parseSseLine(String line) {
+    /**
+     * One streamed chunk's two text fields.
+     *
+     * @param content   answer text from {@code delta.content}, or {@code null} when this chunk
+     *                  carried none
+     * @param reasoning reasoning text from {@code delta.reasoning_content}, or {@code null} when
+     *                  the server does not separate reasoning or this chunk carried none
+     */
+    record SseDelta(String content, String reasoning) {}
+
+    static SseDelta parseSseDelta(String line) {
         if (line == null || !line.startsWith("data: ")) return null;
         String data = line.substring(6).trim();
         if (data.equals("[DONE]")) return null;
-        return extractDeltaContent(data);
+        return new SseDelta(extractDeltaContent(data), extractDeltaReasoning(data));
     }
 
     static String extractDeltaContent(String json) {
+        return extractDeltaField(json, "\"content\":\"");
+    }
+
+    /**
+     * Reads {@code delta.reasoning_content}, the field vLLM fills for a thinking model when it is
+     * started with a reasoning parser. Such a server sends {@code "content":null} for the whole
+     * thinking phase, so a client that reads only {@code content} sees nothing at all while the
+     * model reasons.
+     *
+     * @param json one SSE data payload
+     * @return the reasoning text of this chunk, or {@code null} when the field is absent
+     */
+    static String extractDeltaReasoning(String json) {
+        return extractDeltaField(json, "\"reasoning_content\":\"");
+    }
+
+    private static String extractDeltaField(String json, String marker) {
         int deltaIdx = json.indexOf("\"delta\"");
         if (deltaIdx < 0) return null;
-        String marker = "\"content\":\"";
-        int contentIdx = json.indexOf(marker, deltaIdx);
-        if (contentIdx < 0) return null;
-        return unescapeJsonString(json, contentIdx + marker.length());
+        int fieldIdx = json.indexOf(marker, deltaIdx);
+        if (fieldIdx < 0) return null;
+        return unescapeJsonString(json, fieldIdx + marker.length());
     }
 
     static boolean isContextLengthError(String body) {
