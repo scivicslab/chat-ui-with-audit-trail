@@ -36,8 +36,8 @@ class ReferenceLinkToolTest {
 
     @Test
     void aBlankIdIsRejectedBeforeAnyRequest() {
-        assertEquals("error: id required", ReferenceLinkTool.list(null, "prerequisites"));
-        assertEquals("error: id required", ReferenceLinkTool.list("  ", "prerequisites"));
+        assertEquals("error: id required", ReferenceLinkTool.list(null, "forward", ""));
+        assertEquals("error: id required", ReferenceLinkTool.list("  ", "forward", ""));
     }
 
     /**
@@ -47,11 +47,11 @@ class ReferenceLinkToolTest {
      */
     @Test
     void anUnknownDirectionIsRejectedAndNamesTheTwoThatWork() {
-        String result = ReferenceLinkTool.list("Overview_260712_oo01", "backwards");
+        String result = ReferenceLinkTool.list("Overview_260712_oo01", "sideways", "");
 
         assertTrue(result.startsWith("error: direction must be"), "got: " + result);
-        assertTrue(result.contains("prerequisites"), "got: " + result);
-        assertTrue(result.contains("prerequisite-of"), "got: " + result);
+        assertTrue(result.contains("forward"), "got: " + result);
+        assertTrue(result.contains("backward"), "got: " + result);
     }
 
     /** The rendering both tools share: number, title, id, source path, summary. */

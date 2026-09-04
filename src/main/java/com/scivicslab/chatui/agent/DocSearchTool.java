@@ -264,8 +264,20 @@ public final class DocSearchTool {
      * @return the numbered block, or {@code ""} when no hit had anything to show
      */
     static String renderHits(List<JsonNode> hits) {
+        return renderHits(hits, 1);
+    }
+
+    /**
+     * Same, numbering the entries from {@code firstNumber} instead of 1, so a caller that splits
+     * its hits into several blocks can keep one continuous numbering across them.
+     *
+     * @param hits        the hit objects, in the order they should appear
+     * @param firstNumber the number to give the first entry
+     * @return the numbered block, or {@code ""} when no hit had anything to show
+     */
+    static String renderHits(List<JsonNode> hits, int firstNumber) {
         StringBuilder sb = new StringBuilder();
-        int count = 0;
+        int count = firstNumber - 1;
         for (JsonNode hit : hits) {
             String id = hit.path("id").asText("");
             String title = hit.path("title").asText("");

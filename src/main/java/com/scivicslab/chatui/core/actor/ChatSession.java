@@ -193,14 +193,17 @@ public class ChatSession extends Interpreter {
               candidate says which of them found it, and one found by more than one is the strongest
               signal in the list. Search in the language the documents are written in: these are
               mostly Japanese.
-            - list_references(id, direction): follow the reference links an author declared between
-              documents. Pass the "id" a search_docs candidate printed. With direction
-              "prerequisites" (the default) it returns the documents that one says to read first;
-              with "prerequisite-of" it returns the documents that say to read that one first.
+            - list_references(id, direction, relation): follow the reference links an author
+              declared between documents. Pass the "id" a search_docs candidate printed. Direction
+              "forward" (the default) returns the documents that one refers to; "backward" returns
+              the documents that refer to it. Each edge has a kind, written by the author — the
+              kinds are not a fixed list, so read the kind that comes back rather than expecting a
+              particular word; pass "relation" to keep only one kind, or omit it for every kind.
               This is not a search: the relation is written in the document's own source, so it is
               the way to reach a document whose wording never matches the question — the value you
-              need may be stated only in a prerequisite. It returns the same kind of candidate list
-              search_docs does, so call read on a path to see what a document actually says.
+              need may be stated only in a document its author told you to read first. It returns
+              the same kind of candidate list search_docs does, so call read on a path to see what
+              a document actually says.
             - write(path, content): save text to a file under the working directory. Requires TWO
               <parameter> tags in the same invoke block: one named "path", one named "content".
             - ask_chat(chatId, prompt, timeoutSeconds): send an instruction to another conversation
@@ -1660,7 +1663,7 @@ public class ChatSession extends Interpreter {
             case "fetch" -> FetchTool.fetch(extractInput(args, "url"));
             case "search_docs" -> DocSearchTool.search(extractInput(args, "query"), 0);
             case "list_references" -> ReferenceLinkTool.list(extractInput(args, "id"),
-                    extractInput(args, "direction"));
+                    extractInput(args, "direction"), extractInput(args, "relation"));
             case "ask_chat" -> AskChatTool.ask(system, watchdogRef, projectId, chatId,
                     extractInput(args, "chatId"), extractInput(args, "prompt"),
                     parseIntOrNull(extractInput(args, "timeoutSeconds")));
