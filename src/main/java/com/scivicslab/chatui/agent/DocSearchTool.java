@@ -229,7 +229,17 @@ public final class DocSearchTool {
         return hits;
     }
 
-    private static String get(String url) throws Exception {
+    /** The html-saurus base URL both this tool and {@link ReferenceLinkTool} call. */
+    static String baseUrl() {
+        return BASE_URL;
+    }
+
+    /** Fetches a html-saurus JSON-array endpoint; empty list on no-hits or any failure. */
+    static List<JsonNode> hitsFrom(String url, String mode, String subject) {
+        return fetchHits(url, mode, subject);
+    }
+
+    static String get(String url) throws Exception {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 // Short per-attempt timeout: this backs an interactive gate, and there are up to three
@@ -245,8 +255,15 @@ public final class DocSearchTool {
         return response.body();
     }
 
-    /** Renders a list of hit objects as the Observation text the agent reads. */
-    private static String formatHits(List<JsonNode> hits) {
+    /**
+     * Renders hit objects as the numbered block both this tool and {@link ReferenceLinkTool} show.
+     * The caller puts its own sentence in front, because what the list means differs: search returns
+     * documents ranked by similarity, following a reference returns documents an author declared.
+     *
+     * @param hits the hit objects, in the order they should appear
+     * @return the numbered block, or {@code ""} when no hit had anything to show
+     */
+    static String renderHits(List<JsonNode> hits) {
         StringBuilder sb = new StringBuilder();
         int count = 0;
         for (JsonNode hit : hits) {
@@ -274,14 +291,20 @@ public final class DocSearchTool {
             sb.append("\n");
             count++;
         }
-        if (count == 0) return "No documents found.";
+        return count == 0 ? "" : sb.toString().stripTrailing();
+    }
+
+    /** Renders a list of hit objects as the Observation text the agent reads. */
+    private static String formatHits(List<JsonNode> hits) {
+        String block = renderHits(hits);
+        if (block.isEmpty()) return "No documents found.";
+        int count = block.split("\n\n").length;
         // Restated next to the list itself, not only in the system prompt: by the time these hits
         // are read the tool description is many messages back, and a bare ranked list reads as an
         // answer (SkillAndAgentsFile/DocRetrievalAgentLoop 実測 — the agent answered from summaries
         // without opening anything in 7 of 10 questions).
         return count + " candidate documents, best match first. These are candidates, not an answer"
-                + " — call read on a candidate's path to see what it actually says.\n\n"
-                + sb.toString().stripTrailing();
+                + " — call read on a candidate's path to see what it actually says.\n\n" + block;
     }
 
     /** De-duplication key for a hit: source path, else served path, else id, else title. */

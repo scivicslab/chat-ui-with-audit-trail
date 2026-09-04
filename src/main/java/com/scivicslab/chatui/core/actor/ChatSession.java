@@ -8,6 +8,7 @@ import com.scivicslab.chatui.agent.FileAccessScope;
 import com.scivicslab.chatui.agent.FileReadTool;
 import com.scivicslab.chatui.agent.FileWriteTool;
 import com.scivicslab.chatui.agent.LoadSkillTool;
+import com.scivicslab.chatui.agent.ReferenceLinkTool;
 import com.scivicslab.chatui.agent.RunPlanTool;
 import com.scivicslab.chatui.agent.SetCollaboratorTool;
 import com.scivicslab.chatui.agent.SetWorkflowTool;
@@ -192,6 +193,14 @@ public class ChatSession extends Interpreter {
               candidate says which of them found it, and one found by more than one is the strongest
               signal in the list. Search in the language the documents are written in: these are
               mostly Japanese.
+            - list_references(id, direction): follow the reference links an author declared between
+              documents. Pass the "id" a search_docs candidate printed. With direction
+              "prerequisites" (the default) it returns the documents that one says to read first;
+              with "prerequisite-of" it returns the documents that say to read that one first.
+              This is not a search: the relation is written in the document's own source, so it is
+              the way to reach a document whose wording never matches the question — the value you
+              need may be stated only in a prerequisite. It returns the same kind of candidate list
+              search_docs does, so call read on a path to see what a document actually says.
             - write(path, content): save text to a file under the working directory. Requires TWO
               <parameter> tags in the same invoke block: one named "path", one named "content".
             - ask_chat(chatId, prompt, timeoutSeconds): send an instruction to another conversation
@@ -1650,6 +1659,8 @@ public class ChatSession extends Interpreter {
             case "web_search" -> WebSearchTool.searchAndFetch(extractInput(args, "query"));
             case "fetch" -> FetchTool.fetch(extractInput(args, "url"));
             case "search_docs" -> DocSearchTool.search(extractInput(args, "query"), 0);
+            case "list_references" -> ReferenceLinkTool.list(extractInput(args, "id"),
+                    extractInput(args, "direction"));
             case "ask_chat" -> AskChatTool.ask(system, watchdogRef, projectId, chatId,
                     extractInput(args, "chatId"), extractInput(args, "prompt"),
                     parseIntOrNull(extractInput(args, "timeoutSeconds")));
