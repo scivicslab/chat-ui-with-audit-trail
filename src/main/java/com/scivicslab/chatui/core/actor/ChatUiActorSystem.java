@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.scivicslab.chatui.agent.FileAccessScope;
 import com.scivicslab.chatui.agent.RunPlanTool;
 import com.scivicslab.chatui.core.iolog.IoLogStore;
+import com.scivicslab.chatui.core.iolog.IoLogView;
 import com.scivicslab.chatui.core.provider.LlmProvider;
 import com.scivicslab.chatui.logging.ForwardingAccumulator;
 import com.scivicslab.chatui.logging.RecentEntriesAccumulator;
@@ -87,6 +88,16 @@ public class ChatUiActorSystem {
 
     @Inject
     IoLogStore ioLogStore;
+
+    @Inject
+    IoLogView ioLogView;
+
+    /**
+     * How many recorded turns a restarted conversation gets back. The pane's own limit
+     * ({@code ChatSession.MAX_HISTORY}) and the provider's token budget both still apply on top,
+     * so this only bounds how much is read from the DB.
+     */
+    private static final int RESTORED_TURNS = 50;
 
     // Field initializer for the no-CDI unit-test path (see the servers/defaultModel comment above).
     ObjectMapper objectMapper = new ObjectMapper();
@@ -428,7 +439,57 @@ public class ChatUiActorSystem {
         // SseConnection — plain createChild, same as PromptQueue (ChatResourceDesign_260823_oo01).
         tabRef.createChild(tabRef.getName() + ".sse", new SseConnection(objectMapper));
 
+        restoreConversation(qualifiedName, chatSessionIIAR, providerRef);
+
         return tabRef;
+    }
+
+    /**
+     * Refills a just-created conversation from what the I/O log recorded for it, so that restarting
+     * the process does not empty the pane or lose what the model was told
+     * ({@code ConversationRestoreOnRestart_260904_oo01}).
+     *
+     * <p>Two lists are rebuilt, because they are different things. The {@code ChatSession}'s own
+     * conversation is what {@code GET /conversation} returns and the browser draws. The provider's
+     * history is what accompanies the next LLM call. Filling only the first would show the
+     * conversation without the model remembering it; filling only the second would do the
+     * reverse.</p>
+     *
+     * <p>Nothing happens when the tab has no resumable session, which is the case for a genuinely
+     * new conversation and for one the user cleared before the restart.</p>
+     *
+     * @param tabName         the conversation's qualified actor name, which is also its log tab id
+     * @param chatSessionIIAR the conversation's ChatSession bridge
+     * @param providerRef     the conversation's own provider
+     */
+    private void restoreConversation(String tabName, ChatSessionIIAR chatSessionIIAR,
+                                     ActorRef<LlmProvider> providerRef) {
+        if (ioLogStore == null || ioLogView == null) return;
+        long sessionId = ioLogStore.findResumableSession(tabName);
+        if (sessionId < 0) return;
+
+        List<IoLogView.Turn> turns;
+        try {
+            turns = ioLogView.conversation(sessionId, RESTORED_TURNS);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not read the recorded conversation for " + tabName, e);
+            return;
+        }
+        if (turns.isEmpty()) return;
+
+        for (IoLogView.Turn t : turns) {
+            chatSessionIIAR.tell(a -> {
+                ChatSession c = (ChatSession) a;
+                c.recordHistory("user", t.question());
+                c.recordHistory("assistant", t.answer());
+            });
+            // collapseTurn appends the pair and moves the collapsed/running boundary past it, which
+            // is the same state a turn ending normally leaves behind — so seeding is just replaying
+            // it once per restored turn, and needs no separate provider API.
+            providerRef.tell(p -> p.collapseTurn(t.question(), t.answer()));
+        }
+        LOG.info("Restored " + turns.size() + " turn(s) into " + tabName
+                + " from I/O log session " + sessionId);
     }
 
     /**

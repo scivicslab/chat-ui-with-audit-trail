@@ -3,6 +3,7 @@ package com.scivicslab.chatui.core.iolog;
 import com.scivicslab.turingworkflow.plugins.logdb.DistributedLogStore;
 import com.scivicslab.turingworkflow.plugins.logdb.H2LogStore;
 import com.scivicslab.turingworkflow.plugins.logdb.SessionStatus;
+import com.scivicslab.turingworkflow.plugins.logdb.SessionSummary;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -58,6 +59,9 @@ public class IoLogStore {
         return dbPath + "-" + httpPort;
     }
 
+    /** How far back to look for a tab's resumable session; the Sessions view uses the same depth. */
+    private static final int SESSION_SCAN_LIMIT = 200;
+
     private DistributedLogStore store;
     private final Map<String, Long> sessionIds = new HashMap<>();
     private boolean failed = false;
@@ -90,6 +94,16 @@ public class IoLogStore {
         if (existing != null) {
             return existing;
         }
+        // After a restart this map is empty although the tab's session is still in the DB. Continue
+        // that session instead of opening another one, so the conversation can be restored from it
+        // and so a restart does not leave one more orphan session behind
+        // (ConversationRestoreOnRestart_260904_oo01).
+        long resumable = findResumableSession(tabId);
+        if (resumable >= 0) {
+            sessionIds.put(tabId, resumable);
+            LOG.info("I/O log session resumed for tab " + tabId + ": " + resumable);
+            return resumable;
+        }
         try {
             long sid = store.startSession("chat-ui-conversation-" + tabId, 1);
             sessionIds.put(tabId, sid);
@@ -99,6 +113,35 @@ public class IoLogStore {
             LOG.log(Level.WARNING, "startSession failed", e);
             return -1;
         }
+    }
+
+    /**
+     * The tab's most recent session that was never ended, or {@code -1} when it has none.
+     *
+     * <p>Only a {@code RUNNING} session qualifies. {@link #resetSession(String)} ends a session when
+     * the user starts a new conversation, and an ended session must stay ended across a restart —
+     * otherwise "new conversation" would be undone by restarting.</p>
+     *
+     * @param tabId the conversation tab's name
+     * @return the session id to continue, or {@code -1} when none can be
+     */
+    public synchronized long findResumableSession(String tabId) {
+        ensureStore();
+        if (store == null) {
+            return -1;
+        }
+        String workflowName = "chat-ui-conversation-" + tabId;
+        try {
+            // listSessions returns most recent first, so the first match is the one to continue.
+            for (SessionSummary s : store.listSessions(SESSION_SCAN_LIMIT)) {
+                if (workflowName.equals(s.getWorkflowName()) && s.getStatus() == SessionStatus.RUNNING) {
+                    return s.getSessionId();
+                }
+            }
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not look for a resumable session for tab " + tabId, e);
+        }
+        return -1;
     }
 
     /** The given tab's current log session id, or -1 if none. */

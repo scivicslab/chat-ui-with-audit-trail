@@ -55,6 +55,9 @@ public class IoLogView {
     /** One conversation turn: the user's prompt and the ordered trace steps for that turn. */
     public record TraceTurn(int turn, String userPrompt, List<TraceStep> steps) {}
 
+    /** What one turn was asked and what it answered, as recorded in its {@code /conversation} entry. */
+    public record Turn(String question, String answer) {}
+
     // ── Public API (DB-backed) ──────────────────────────────────────────────
 
     /** Lists the agents in a session with their line counts (agent-axis index). */
@@ -84,6 +87,18 @@ public class IoLogView {
         return traceOf(allLogs(sessionId));
     }
 
+    /**
+     * Reconstructs a session's conversation — what was asked and what was answered, per turn, in
+     * the order the turns happened ({@code ConversationRestoreOnRestart_260904_oo01}).
+     *
+     * @param sessionId the session to read
+     * @param maxTurns  how many of the most recent turns to return; at or below zero returns none
+     * @return the turns, oldest first
+     */
+    public List<Turn> conversation(long sessionId, int maxTurns) {
+        return conversationOf(allLogs(sessionId), maxTurns);
+    }
+
     private List<LogEntry> allLogs(long sessionId) {
         DistributedLogStore s = store();
         // DEBUG is the lowest level, so "at least DEBUG" returns every row of the session.
@@ -100,6 +115,49 @@ public class IoLogView {
     static final int OBS_DIGEST = 240;
     private static final java.util.regex.Pattern TURN_LABEL =
             java.util.regex.Pattern.compile("turn(\\d+)/step(\\d+)/(llm|tool)");
+    private static final java.util.regex.Pattern CONVERSATION_LABEL =
+            java.util.regex.Pattern.compile("turn(\\d+)/conversation");
+
+    /**
+     * Picks the {@code turnN/conversation} entries out of a session's rows and splits each into its
+     * question and its answer.
+     *
+     * <p>Entries are ordered by turn number rather than by row id, so a turn is placed where it
+     * belongs even if rows were written out of order. A malformed entry — one missing either marker
+     * — is skipped rather than restored as a half turn.</p>
+     *
+     * @param raw      every row of one session
+     * @param maxTurns how many of the most recent turns to keep; at or below zero keeps none
+     * @return the kept turns, oldest first
+     */
+    static List<Turn> conversationOf(List<LogEntry> raw, int maxTurns) {
+        if (maxTurns <= 0) return List.of();
+        List<Turn> turns = raw.stream()
+                .filter(e -> e.getLabel() != null && CONVERSATION_LABEL.matcher(e.getLabel()).matches())
+                .sorted(Comparator.comparingInt(e -> turnNumberOf(e.getLabel())))
+                .map(e -> parseConversationEntry(e.getMessage()))
+                .filter(t -> t != null)
+                .collect(Collectors.toList());
+        return turns.size() <= maxTurns ? turns : turns.subList(turns.size() - maxTurns, turns.size());
+    }
+
+    private static int turnNumberOf(String label) {
+        java.util.regex.Matcher m = CONVERSATION_LABEL.matcher(label);
+        return m.matches() ? Integer.parseInt(m.group(1)) : 0;
+    }
+
+    /** @return the turn, or {@code null} when either marker is missing */
+    private static Turn parseConversationEntry(String message) {
+        if (message == null) return null;
+        String qMarker = "QUESTION:";
+        String aMarker = "\n\nANSWER:\n";
+        if (!message.startsWith(qMarker + "\n")) return null;
+        int answerAt = message.indexOf(aMarker);
+        if (answerAt < 0) return null;
+        String question = message.substring(qMarker.length() + 1, answerAt);
+        String answer = message.substring(answerAt + aMarker.length());
+        return new Turn(question, answer);
+    }
 
     static List<TraceTurn> traceOf(List<LogEntry> raw) {
         List<LogEntry> ordered = raw.stream()

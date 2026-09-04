@@ -1251,6 +1251,38 @@ public class ChatSession extends Interpreter {
         return ioSession >= 0 ? String.valueOf(ioSession) : provider.getSessionId();
     }
 
+    /**
+     * Records what this turn was asked and what it answered, as one entry of its own
+     * ({@code turnN/conversation}).
+     *
+     * <p>The step entries this session already writes cannot serve this purpose. Their
+     * {@code REQUEST:} holds the constructed prompt — system prompt, skill catalog, project
+     * instructions and the question, concatenated by whichever prompt-construction sub-workflow is
+     * installed ({@code PromptConstructionSubworkflow_260826_oo01}). Recovering the bare question
+     * from it would mean parsing a shape that a replaced sub-workflow silently changes. The two
+     * strings kept here are the same ones handed to {@code collapseTurn}, which is exactly what a
+     * later restore needs ({@code ConversationRestoreOnRestart_260904_oo01}).</p>
+     *
+     * @param askedQuestion the prompt the human sent for this turn
+     * @param givenAnswer   the confirmed final answer
+     */
+    private void recordConversationIo(String askedQuestion, String givenAnswer) {
+        if (ioLog == null || ioSession < 0) return;
+        if (askedQuestion == null || givenAnswer == null) return;
+        try {
+            ioLog.record(ioSession, "agent", "turn" + ioTurnNo + "/conversation",
+                    CONVERSATION_QUESTION_MARKER + "\n" + askedQuestion
+                            + "\n\n" + CONVERSATION_ANSWER_MARKER + "\n" + givenAnswer);
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "I/O log conversation record failed", e);
+        }
+    }
+
+    /** Marks the question in a {@code turnN/conversation} entry. */
+    public static final String CONVERSATION_QUESTION_MARKER = "QUESTION:";
+    /** Marks the answer in a {@code turnN/conversation} entry. */
+    public static final String CONVERSATION_ANSWER_MARKER = "ANSWER:";
+
     /** Shortest gap between two streaming-progress lines in one step's tab log. */
     private static final long STREAM_PROGRESS_INTERVAL_MS = 1000L;
 
@@ -1421,6 +1453,7 @@ public class ChatSession extends Interpreter {
         if (!cancelled && finalAnswer != null) {
             String answer = finalAnswer;
             recordHistory("assistant", answer);
+            recordConversationIo(question, answer);
             if (activeResultKey != null) {
                 storeCompletedResult(activeResultKey, answer);
             }
