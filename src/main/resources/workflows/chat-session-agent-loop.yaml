@@ -79,6 +79,29 @@ steps:
         execution: direct
 
   - states: ["act", "think"]
+    label: run-tool-summarizing-pages
+    note: |
+      web_search fetches a whole page per result, and keeping each page's opening characters left
+      the model answering from an article's first paragraphs believing it had the article. This
+      transition summarises each page instead — one completion per page, in parallel, outside the
+      conversation's own history — and the whole page still reaches the I/O log, since the log
+      records what the tool returned rather than what the model was shown.
+
+      Placed before run-tool so it is tried first. runToolSummarizingPages fails when this turn
+      called no web_search, or when the provider cannot complete outside the conversation, and the
+      scan falls through to run-tool unchanged. Every other tool therefore behaves exactly as
+      before.
+
+      Which policy fits an observation belongs to this workflow, the same way the number of
+      characters already does; think-action → think-continue → think-final chooses among
+      transitions the same way.
+    actions:
+      - actor: this
+        method: runToolSummarizingPages
+        arguments: "20000"
+        execution: direct
+
+  - states: ["act", "think"]
     label: run-tool
     note: |
       A tool was called: execute it (read/calc/web_search/fetch/search_docs/write/load_skill),

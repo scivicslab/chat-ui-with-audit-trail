@@ -1453,6 +1453,33 @@ public class ChatSession extends Interpreter {
      * @return {@link ActionResult} with {@code success=true} (this transition never fails)
      */
     public ActionResult runTool(String observationChars) {
+        return runTool(observationChars, false);
+    }
+
+    /**
+     * The same as {@link #runTool(String)} but summarising each fetched web page rather than
+     * keeping its opening characters. Fails — so the workflow falls through to {@code run-tool} —
+     * when this turn called no {@code web_search}, or when the provider cannot make a completion
+     * outside the conversation.
+     *
+     * <p>A transition of its own rather than a flag, because which policy fits an observation is
+     * the workflow's decision, and the workflow already chooses among transitions this way
+     * ({@code think-action} → {@code think-continue} → {@code think-final}).
+     *
+     * @param observationChars as in {@link #runTool(String)}
+     * @return {@code success=false} when this policy does not apply to what was called
+     */
+    public ActionResult runToolSummarizingPages(String observationChars) {
+        if (pendingCalls == null || pendingCalls.stream().noneMatch(tc -> "web_search".equals(tc.name()))) {
+            return new ActionResult(false, "no web_search to summarise");
+        }
+        if (!(provider instanceof com.scivicslab.chatui.openaicompat.OpenAiCompatProvider)) {
+            return new ActionResult(false, "provider cannot complete outside the conversation");
+        }
+        return runTool(observationChars, true);
+    }
+
+    private ActionResult runTool(String observationChars, boolean summarizePages) {
         if (pendingCalls == null || pendingCalls.isEmpty()) {
             return new ActionResult(true, "observed");
         }
@@ -1460,11 +1487,14 @@ public class ChatSession extends Interpreter {
         for (ToolCall tc : pendingCalls) {
             String fullObservation;
             try {
-                fullObservation = executeTool(tc);
+                fullObservation = executeTool(tc, summarizePages);
             } catch (Exception e) {
                 fullObservation = "error: " + e.getMessage();
             }
-            String forModel = ContextBudget.truncateObservation(fullObservation,
+            String fitted = (summarizePages && "web_search".equals(tc.name()))
+                    ? pageSummarizer().summarize(fullObservation)
+                    : fullObservation;
+            String forModel = ContextBudget.truncateObservation(fitted,
                     Math.min(parsePositiveOr(observationChars, ContextBudget.OBS_THRESHOLD),
                              maxObservationChars));
             recordToolIo(tc, fullObservation);
@@ -1693,13 +1723,23 @@ public class ChatSession extends Interpreter {
 
     /** Dispatches one tool call to its implementation and returns the raw (untruncated) observation. */
     private String executeTool(ToolCall tc) {
+        return executeTool(tc, false);
+    }
+
+    private String executeTool(ToolCall tc, boolean summarizingPages) {
         String args = tc.argumentsJson();
         return switch (tc.name()) {
             case "read" -> FileReadTool.read(fileScope, extractInput(args, "path"));
             case "write" -> FileWriteTool.write(fileScope,
                     extractInput(args, "path"), extractInput(args, "content"));
             case "calc" -> calculator().evaluate(extractInput(args, "expression"));
-            case "web_search" -> WebSearchTool.searchAndFetch(extractInput(args, "query"));
+            // The whole page, not its opening characters: what reaches the model is decided
+            // afterwards by the workflow's transition (run-tool-summarizing-pages), and the
+            // untouched page reaches the I/O log either way.
+            case "web_search" -> summarizingPages
+                    ? WebSearchTool.searchAndFetch(extractInput(args, "query"),
+                            WebSearchTool.FETCH_TOP_N, page -> page)
+                    : WebSearchTool.searchAndFetch(extractInput(args, "query"));
             case "fetch" -> FetchTool.fetch(extractInput(args, "url"));
             case "search_docs" -> DocSearchTool.search(extractInput(args, "query"), 0);
             case "list_references" -> ReferenceLinkTool.list(extractInput(args, "id"),
@@ -1742,6 +1782,17 @@ public class ChatSession extends Interpreter {
     private JShellCalculator calculator() {
         if (calculator == null) calculator = new JShellCalculator();
         return calculator;
+    }
+
+    /**
+     * Summarises web pages through the same server and model the conversation uses, one
+     * completion per page, outside the conversation's own history.
+     */
+    private com.scivicslab.chatui.agent.WebPageSummarizer pageSummarizer() {
+        var openAi = (com.scivicslab.chatui.openaicompat.OpenAiCompatProvider) provider;
+        return new com.scivicslab.chatui.agent.WebPageSummarizer(
+                page -> openAi.completeOutsideConversation(
+                        com.scivicslab.chatui.agent.WebPageSummarizer.promptFor(page)));
     }
 
     // ---- Autonomous turns (idle monitor) ----

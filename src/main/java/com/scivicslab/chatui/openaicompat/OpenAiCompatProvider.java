@@ -344,6 +344,33 @@ public class OpenAiCompatProvider implements LlmProvider {
         if (history.size() > 2) evictOldest();
     }
 
+    /**
+     * One completion, outside the conversation: same server and model, but nothing is added to
+     * {@link #history} and no {@code ChatEvent} is emitted.
+     *
+     * <p>{@link #sendPrompt} cannot serve this. It carries the conversation's history, streams
+     * into the browser and holds the provider's session, so calling it ten times in parallel to
+     * summarise ten web pages would interleave ten answers into one conversation. Summarising a
+     * page is not part of the conversation; it is how one observation is made small enough to put
+     * into it ({@code WebPageSummarizer}).
+     *
+     * @param prompt the whole instruction, standing on its own
+     * @return the reply text, or {@code null} when the call failed
+     */
+    public String completeOutsideConversation(String prompt) {
+        OpenAiCompatClient client = selectClient(currentModel);
+        if (client == null) {
+            return null;
+        }
+        OpenAiCompatClient.NonStreamingResponse response = client.sendNonStreaming(
+                currentModel, List.of(new ChatMessage.User(prompt)), true, 0, List.of());
+        String reason = response.finishReason();
+        if (reason != null && reason.startsWith("error")) {
+            return null;
+        }
+        return response.content();
+    }
+
     private OpenAiCompatClient selectClient(String model) {
         // Try to find a client that serves this model (using cached model list)
         for (OpenAiCompatClient client : clients) {
