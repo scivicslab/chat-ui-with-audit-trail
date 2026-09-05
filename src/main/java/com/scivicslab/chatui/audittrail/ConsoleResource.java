@@ -22,6 +22,22 @@ public class ConsoleResource {
     Template console;
 
     /**
+     * The value appended to this application's own stylesheet and script URLs, fixed for the life
+     * of the process.
+     *
+     * <p>Quarkus serves everything under {@code META-INF/resources} with
+     * {@code cache-control: public, immutable, max-age=86400}, and a browser holding an
+     * {@code immutable} response does not ask the server again — it runs yesterday's script for a
+     * day, whatever the server now has. Every fix to the pane needed a hard reload, and looked to
+     * whoever had not done one like a fix that had never been deployed.</p>
+     *
+     * <p>These files can only change when the process is replaced, so the moment this process
+     * started is exactly the right value: a restart gives every asset a new URL, and nothing
+     * changes underneath a running one.</p>
+     */
+    private final String assetVersion = String.valueOf(System.currentTimeMillis());
+
+    /**
      * Renders the console shell.
      *
      * @return the rendered {@code console.html} template
@@ -29,6 +45,6 @@ public class ConsoleResource {
     @GET
     @Produces(MediaType.TEXT_HTML)
     public TemplateInstance get() {
-        return console.instance();
+        return console.data("assetVersion", assetVersion);
     }
 }

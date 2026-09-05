@@ -10,8 +10,8 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
     <!-- chat-ui stylesheet first, then the shell overrides/additions. -->
-    <link rel="stylesheet" href="styles.css">
-    <link rel="stylesheet" href="console.css">
+    <link rel="stylesheet" href="styles.css?v={assetVersion}">
+    <link rel="stylesheet" href="console.css?v={assetVersion}">
     <!-- Markdown rendering for assistant messages (headings/tables/bold/lists) — app.js -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <!-- KaTeX: render LaTeX math ($...$, $$...$$) in assistant answers — app.js -->
@@ -233,7 +233,7 @@
             <div id="ext-dialog-body"></div>
         </div>
     </div>
-    <script src="app.js"></script>
-    <script src="console.js"></script>
+    <script src="app.js?v={assetVersion}"></script>
+    <script src="console.js?v={assetVersion}"></script>
 </body>
 </html>
