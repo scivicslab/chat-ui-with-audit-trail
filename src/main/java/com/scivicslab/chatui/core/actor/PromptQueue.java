@@ -342,6 +342,18 @@ public class PromptQueue {
         if (queue.isEmpty()) return null;
         if (respectAuto && !queue.get(0).auto()) return null;
         QueueItem item = queue.remove(0);
+        // Show the prompt in the pane now that it is actually being sent. The browser used to draw
+        // only what it had typed itself, so a prompt from the REST API, from an MCP agent or from
+        // another conversation's ask_chat reached the model and was answered while the pane showed
+        // the answer to a question nobody could see. Emitted at dispatch, not at enqueue, so a held
+        // item appears when it is sent rather than while it is still waiting in the queue.
+        try {
+            item.emitter().accept("human".equals(item.source())
+                    ? ChatEvent.user(item.prompt())
+                    : ChatEvent.mcpUser(item.prompt()));
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not echo the dispatched prompt to the pane", e);
+        }
         LOG.info("Dequeuing prompt (remaining=" + queue.size() + "): " + truncate(item.prompt(), 80));
         logToTab("Dequeuing prompt (remaining=" + queue.size() + "): " + truncate(item.prompt(), 80));
         return item;

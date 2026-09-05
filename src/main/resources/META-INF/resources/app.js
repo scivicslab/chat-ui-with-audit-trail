@@ -530,6 +530,14 @@
                 clearThinking();
                 setBusy(false);
                 break;
+            case "user":
+                appendMessage("user", event.content || "");
+                scrollToBottom();
+                break;
+            case "mcp_user":
+                appendMessage("user", "[agent] " + (event.content || ""));
+                scrollToBottom();
+                break;
             case "info":
                 notify(event.content || "");
                 break;
@@ -551,8 +559,11 @@
             fetch(apiUrl(chatUrl("/queue/advance")), { method: "POST" }).then(refreshQueue);
             return;
         }
-        appendMessage("user", text);
+        // The prompt is NOT drawn here. The server echoes it when it dispatches it, so a prompt
+        // typed in this pane, one posted to the REST API, one from an MCP agent and one from
+        // another conversation's ask_chat all appear the same way and exactly once.
         promptInput.value = "";
+        forceScrollToBottom();
         setBusy(true);
 
         var payload = { text: text };
