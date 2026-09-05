@@ -215,7 +215,7 @@
             footer.appendChild(copyButton(text, "Copy"));
         }
         chatArea.appendChild(div);
-        chatArea.scrollTop = chatArea.scrollHeight;
+        scrollToBottom();
         return div;
     }
 
@@ -226,7 +226,7 @@
         div.className = "message " + role;
         div.innerHTML = renderMarkdown(text);
         chatArea.appendChild(div);
-        chatArea.scrollTop = chatArea.scrollHeight;
+        scrollToBottom();
         return div;
     }
 
@@ -482,7 +482,7 @@
             thinkingFrame = null;
             if (!thinkingEl) return;
             thinkingEl.textContent = thinkingText;
-            chatArea.scrollTop = chatArea.scrollHeight;
+            scrollToBottom();
         });
     }
 
@@ -512,7 +512,7 @@
                 clearThinking();
                 streamingMarkdown = event.content || "";
                 streamingEl = appendMarkdownMessage("assistant", streamingMarkdown);
-                chatArea.scrollTop = chatArea.scrollHeight;
+                scrollToBottom();
                 break;
             case "result":
                 // The answer's bubble was added by the delta event above; this event is what
@@ -522,7 +522,7 @@
                 streamingMarkdown = "";
                 clearThinking();
                 setBusy(false);
-                chatArea.scrollTop = chatArea.scrollHeight;
+                scrollToBottom();
                 break;
             case "error":
                 appendMessage("error", "Error: " + (event.content || "unknown error"));
@@ -699,10 +699,35 @@
             .catch(function () { /* start with an empty pane on failure */ });
     }
 
+    // Whether the human has scrolled away from the end of the conversation. While a thinking model
+    // streams, the pane was pinned to the bottom on every frame, so dragging the scrollbar up was
+    // undone before the drag finished and the earlier part of the conversation could not be read at
+    // all. Following the end is what someone at the end wants; someone who has scrolled up has
+    // said otherwise.
+    var userScrolledUp = false;
+
+    /** Follows the end of the conversation, unless the human has scrolled away from it. */
+    function scrollToBottom() {
+        if (!chatArea || userScrolledUp) return;
+        chatArea.scrollTop = chatArea.scrollHeight;
+    }
+
+    /** Goes back to the end and follows it again — for when the human sends a prompt. */
+    function forceScrollToBottom() {
+        if (!chatArea) return;
+        userScrolledUp = false;
+        chatArea.scrollTop = chatArea.scrollHeight;
+    }
+
     // ── Init ─────────────────────────────────────────────────────────────────
 
     document.addEventListener("DOMContentLoaded", function () {
         chatArea = el("chat-area");
+        chatArea.addEventListener("scroll", function () {
+            // 80px of slack: a pane sitting a line or two from the end still counts as at the end,
+            // so following does not stop because of a rounding difference.
+            userScrolledUp = chatArea.scrollHeight - chatArea.scrollTop - chatArea.clientHeight >= 80;
+        });
         promptInput = el("prompt-input");
         sendBtn = el("send-btn");
         connStatus = el("connection-status");
