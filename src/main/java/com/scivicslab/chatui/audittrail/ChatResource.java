@@ -229,7 +229,9 @@ public class ChatResource {
      * 応答を返せないか" (the same reasoning applies here: the agent loop can run many LLM calls).
      *
      * @param chatId conversation tab identifier
-     * @param body  {@code {"text": "...", "model": "..." (optional)}}
+     * @param body  {@code {"text": "...", "model": "..." (optional), "hold": true (optional)}}.
+     *              With {@code hold}, the prompt is put in the queue and left there until a human
+     *              turns its Auto on or advances the queue — what the pane's Queue button sends.
      * @return {@code {"type":"accepted"}}, or a 400 if {@code text} is missing/blank
      */
     @POST
@@ -240,9 +242,11 @@ public class ChatResource {
         Object textVal = body != null ? body.get("text") : null;
         Object modelVal = body != null ? body.get("model") : null;
         Object noThinkVal = body != null ? body.get("noThink") : null;
+        Object holdVal = body != null ? body.get("hold") : null;
         String text = textVal != null ? String.valueOf(textVal) : null;
         String model = modelVal != null && !String.valueOf(modelVal).isBlank() ? String.valueOf(modelVal) : null;
         boolean noThink = Boolean.TRUE.equals(noThinkVal);
+        boolean hold = Boolean.TRUE.equals(holdVal);
         if (text == null || text.isBlank()) {
             return Response.status(400).entity(Map.of("type", "error", "message", "text is required")).build();
         }
@@ -254,7 +258,8 @@ public class ChatResource {
 
         java.util.function.Consumer<ChatEvent> emitter = event -> sseRef.tell(a -> a.emit(event));
         promptQueueRef.tell(q -> q.enqueue(text, model, "queue", emitter,
-                chatSessionIIAR.asChatSessionRef(), "human", null, new CompletableFuture<Void>(), noThink));
+                chatSessionIIAR.asChatSessionRef(), "human", null, new CompletableFuture<Void>(),
+                noThink, !hold));
 
         return Response.ok(Map.of("type", "accepted")).build();
     }

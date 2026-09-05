@@ -431,6 +431,25 @@
         URL.revokeObjectURL(url);
     }
 
+    // Puts the text in the queue without sending it. The item sits there with its Auto off until
+    // a human turns it on or advances the queue.
+    function queuePrompt(text) {
+        var payload = { text: text, hold: true };
+        if (modelSelect && modelSelect.value) payload.model = modelSelect.value;
+        fetch(apiUrl(chatUrl("/chat")), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        }).then(function (r) { return r.json(); })
+          .then(function (result) {
+              if (result && result.type === "error") { notify(result.message || "queue failed"); return; }
+              promptInput.value = "";
+              if (queueArea) queueArea.dataset.forcedOpen = "1";
+              refreshQueue();
+          })
+          .catch(function (e) { notify("queue failed: " + e.message); });
+    }
+
     function moveQueueItem(index, direction) {
         fetch(apiUrl(chatUrl("/queue/" + index + "/move")), {
             method: "POST",
@@ -758,8 +777,14 @@
             });
         }
         if (queueBtn) {
+            // With text in the box the button queues it; with the box empty it just shows or hides
+            // the queue. Queueing holds the item — the point of writing a prompt now is to send it
+            // later, and an item that dispatched the moment the conversation went idle would not be
+            // a queue at all.
             queueBtn.addEventListener("click", function () {
                 if (!queueArea) return;
+                var text = promptInput ? promptInput.value.trim() : "";
+                if (text) { queuePrompt(text); return; }
                 var opening = queueArea.style.display !== "block";
                 queueArea.dataset.forcedOpen = opening ? "1" : "0";
                 if (opening) refreshQueue(); else queueArea.style.display = "none";

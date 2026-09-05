@@ -137,13 +137,27 @@ public class PromptQueue {
                         ActorRef<ChatSession> chatSessionRef,
                         String source, String resultKey,
                         CompletableFuture<Void> done, boolean noThink) {
+        enqueue(prompt, model, mode, emitter, chatSessionRef, source, resultKey, done, noThink, true);
+    }
 
-        // New items always start auto=true (queued for immediate dispatch once ChatSession is
-        // idle) — the browser can pause one afterward via setAuto(index, false), same as
-        // quarkus-chat-ui3's own queue never lets the caller create a paused item directly.
+    /**
+     * Enqueues a prompt, held or ready.
+     *
+     * @param auto {@code true} to dispatch as soon as ChatSession is idle; {@code false} to leave
+     *             the item sitting in the queue until a human turns its Auto on or advances the
+     *             queue. A held item is what the pane's Queue button makes: a prompt written now
+     *             and sent later, which is the whole of what that button does in quarkus-chat-ui.
+     *             Every other caller passes {@code true}, so nothing else changes behaviour.
+     */
+    public void enqueue(String prompt, String model, String mode,
+                        Consumer<ChatEvent> emitter,
+                        ActorRef<ChatSession> chatSessionRef,
+                        String source, String resultKey,
+                        CompletableFuture<Void> done, boolean noThink, boolean auto) {
+
         switch (mode) {
             case "cancel_and_send" -> {
-                QueueItem item = new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, true);
+                QueueItem item = new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, auto);
                 queue.add(0, item);
                 // tellNow, not tell: the running turn blocks the ChatSession's own thread, so a
                 // queued cancel would be delivered only after that turn ended (ChatSession.cancel).
@@ -154,9 +168,11 @@ public class PromptQueue {
             }
             default -> {
                 // "queue" mode (default)
-                QueueItem item = new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, true);
+                QueueItem item = new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, auto);
                 queue.add(item);
-                emitter.accept(ChatEvent.info("Queued. Your message will be sent when the current prompt finishes."));
+                emitter.accept(ChatEvent.info(auto
+                        ? "Queued. Your message will be sent when the current prompt finishes."
+                        : "Held in the queue. Turn its Auto on, or advance the queue, to send it."));
                 LOG.info("queue: queued prompt (queue size=" + queue.size() + ")");
                 logToTab("queue: queued prompt (queue size=" + queue.size() + ")");
             }
