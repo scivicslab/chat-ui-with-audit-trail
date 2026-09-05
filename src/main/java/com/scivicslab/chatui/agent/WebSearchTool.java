@@ -53,6 +53,23 @@ public final class WebSearchTool {
      * when a page cannot be fetched.
      */
     public static String searchAndFetch(String query, int maxResults, int perResultChars) {
+        return searchAndFetch(query, maxResults, page -> trim(page, perResultChars));
+    }
+
+    /**
+     * As {@link #searchAndFetch(String, int, int)} but with the caller deciding what to keep of
+     * each page.
+     *
+     * <p>How much of a page reaches the model is a decision about the turn's context, and the
+     * caller is the one that knows how much room is left; this tool only knows how many pages it
+     * fetched. Keeping the first 600 characters was this tool's own guess at that budget, and it
+     * discarded up to 88% of a page it had already downloaded — before the I/O log ever saw it,
+     * since the log records what the tool returns.
+     *
+     * @param pageFitter applied to each page's extracted text; receives the whole text
+     */
+    public static String searchAndFetch(String query, int maxResults,
+                                        java.util.function.UnaryOperator<String> pageFitter) {
         if (query == null || query.isBlank()) return "error: query required";
         int limit = maxResults > 0 ? maxResults : FETCH_TOP_N;
         List<Result> results;
@@ -67,7 +84,7 @@ public final class WebSearchTool {
         // Fetch every result's page content in parallel; preserve result order.
         LOG.info("web_search: fetching " + results.size() + " page(s) for: " + query);
         List<String> bodies = results.parallelStream()
-                .map(r -> contentFor(r, perResultChars))
+                .map(r -> contentFor(r, pageFitter))
                 .collect(Collectors.toList());
 
         StringBuilder sb = new StringBuilder();
@@ -85,8 +102,8 @@ public final class WebSearchTool {
         return searchAndFetch(query, FETCH_TOP_N, PER_RESULT_CHARS);
     }
 
-    /** Fetches one result's page content (trimmed); falls back to the snippet if the fetch fails. */
-    private static String contentFor(Result r, int perResultChars) {
+    /** Fetches one result's page content and hands it to {@code pageFitter}; falls back to the snippet. */
+    private static String contentFor(Result r, java.util.function.UnaryOperator<String> pageFitter) {
         if (r.url().isBlank()) {
             return r.snippet().isBlank() ? "(no URL)" : r.snippet();
         }
@@ -94,12 +111,21 @@ public final class WebSearchTool {
         if (body == null || body.isBlank() || body.startsWith("error")) {
             return r.snippet().isBlank() ? "(could not fetch page)" : r.snippet() + " [page fetch failed]";
         }
-        return trim(body, perResultChars);
+        return pageFitter.apply(body.strip());
     }
 
-    private static String trim(String s, int max) {
+    /**
+     * Keeps the first {@code max} characters and says how many there were.
+     *
+     * <p>The old form ended a cut page with " …" and nothing else, which a page may genuinely end
+     * with — so a reader could not tell a whole page from a cut one, and the model answered from
+     * the opening of an article believing it had the article.
+     */
+    static String trim(String s, int max) {
         String t = s.strip();
-        return t.length() > max ? t.substring(0, max) + " …" : t;
+        return t.length() > max
+                ? t.substring(0, max) + "\n[kept " + max + " of " + t.length() + " chars]"
+                : t;
     }
 
     /** Snippet-only search (titles/URLs/snippets), retained for callers that do not want page content. */
