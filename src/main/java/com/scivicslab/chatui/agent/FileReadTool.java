@@ -17,6 +17,12 @@ import java.util.stream.Stream;
  * <p>Directory recursion is capped (total bytes and file count) so a huge tree cannot exhaust memory;
  * the {@code s_budget} truncation only shrinks the copy sent to the model, not the Java string built
  * here, so this independent cap is required.</p>
+ *
+ * <p>Several paths may be given, one per line, and the same cap then covers the call as a whole.
+ * The cap is what keeps a read from flooding the context, not the number of paths a call accepts:
+ * one path already reaches a whole directory tree, so refusing a second path never bounded anything
+ * — it only made comparing two files cost two turns, or one read of a parent directory that pulls in
+ * everything else under it as well.</p>
  */
 public final class FileReadTool {
 
@@ -56,10 +62,64 @@ public final class FileReadTool {
 
     /** As {@link #read(FileAccessScope, String)} but with explicit caps (used by tests). */
     static String read(FileAccessScope scope, String input, long maxChars, int maxFiles) {
-        Path root = scope.writeRoot();
         if (input == null || input.isBlank()) {
             return "error: path required";
         }
+        List<String> paths = splitPaths(input);
+        return paths.size() == 1
+                ? readOne(scope, paths.get(0), maxChars, maxFiles)
+                : readSeveral(scope, paths, maxChars, maxFiles);
+    }
+
+    /**
+     * Splits the argument into the paths it names, one per line.
+     *
+     * <p>Reading three files that live in three different directories otherwise costs three turns,
+     * or one read of a common parent that also drags in everything else under it — which puts more
+     * into the context, not less. Newline is the separator because a path may contain a comma or a
+     * space but not a newline.
+     */
+    static List<String> splitPaths(String input) {
+        return input.lines().map(String::trim).filter(line -> !line.isEmpty()).toList();
+    }
+
+    /**
+     * Reads each path in turn, sharing one budget across all of them, and says where it stopped.
+     *
+     * <p>The same shape a directory read uses: every requested path is listed first, so a reply cut
+     * short still tells the model what it has not seen and can go back for.
+     */
+    private static String readSeveral(FileAccessScope scope, List<String> paths, long maxChars, int maxFiles) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(paths.size()).append(" paths requested. Every one is listed here, and the contents")
+          .append(" follow in the same order. This reply may be cut short before the last of them —")
+          .append(" when it is, call read on the individual paths below that you still need.\n\nPATHS:\n");
+        for (String path : paths) {
+            sb.append("  ").append(path).append("\n");
+        }
+        sb.append("\nCONTENTS:\n\n");
+
+        long remainingChars = maxChars;
+        int remainingFiles = maxFiles;
+        int done = 0;
+        for (String path : paths) {
+            if (remainingChars <= 0 || remainingFiles <= 0) {
+                sb.append("\n…(stopped after ").append(done).append(" of ").append(paths.size())
+                  .append(" paths: the read cap was reached. Read the rest individually.)…\n");
+                break;
+            }
+            String text = readOne(scope, path, remainingChars, remainingFiles);
+            sb.append("===== ").append(path).append(" =====\n").append(text).append("\n\n");
+            remainingChars -= text.length();
+            remainingFiles--;
+            done++;
+        }
+        return sb.toString();
+    }
+
+    /** One path: a file's text, a directory read recursively, or {@code error: ...}. */
+    private static String readOne(FileAccessScope scope, String input, long maxChars, int maxFiles) {
+        Path root = scope.writeRoot();
         try {
             Path base = root.toAbsolutePath().normalize();
             // Accept how users actually write paths: expand ~ and $HOME, and allow absolute paths.

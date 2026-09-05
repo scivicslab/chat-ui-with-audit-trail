@@ -179,6 +179,11 @@ public class ChatSession extends Interpreter {
 
             Available tools:
             - read(path): read a file, or a whole directory recursively, under the working directory.
+              To read several files at once, put one path per line in the same "path" parameter —
+              use that instead of reading a parent directory when you want three specific files,
+              since the parent brings everything else under it along too. A read that would return
+              more than 4,000,000 characters or 1,000 files stops early and says where it stopped,
+              listing the paths it did not reach so you can ask for them separately.
             - calc(expression): evaluate a Java arithmetic expression, e.g. 23*47 or Math.sqrt(16).
             - web_search(query): search the web and fetch the top results' page content.
             - fetch(url): fetch one specific URL you already have and return its readable text.
