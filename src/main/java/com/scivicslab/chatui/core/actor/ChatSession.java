@@ -1183,6 +1183,10 @@ public class ChatSession extends Interpreter {
         String promptToSend = constructedPrompts.pollFirst();
         ProviderContext ctx = new ProviderContext(apiKey, List.of(), turnNoThink, () -> {});
         StringBuilder assistantBuf = new StringBuilder();
+        // The reasoning is kept for the record, not for the answer: it goes to the I/O log's
+        // REASONING: section and never into assistantBuf, which is what the next step parses for
+        // tool calls and what becomes the turn's answer.
+        StringBuilder thinkingBuf = new StringBuilder();
         ActorRef<LlmProvider> providerRef = providerRef();
 
         // The tab log used to receive nothing between here and recordStepIo() below, so a step
@@ -1219,6 +1223,7 @@ public class ChatSession extends Interpreter {
                         // thinking model's chain of thought. Counting it is what makes the log
                         // move during a step that produces no answer text at all.
                         if ("thinking".equals(event.type())) {
+                            if (event.content() != null) thinkingBuf.append(event.content());
                             noteStreamProgress(stepLabel, streamedChars, progressLoggedAt, event.content());
                         }
                         turnEmitter.accept(event);
@@ -1236,7 +1241,7 @@ public class ChatSession extends Interpreter {
 
         String text = assistantBuf.toString();
         List<ToolCall> calls = TextToolCallParser.parse(text);
-        recordStepIo(promptToSend, text, calls);
+        recordStepIo(promptToSend, text, thinkingBuf.toString(), calls);
         if (!calls.isEmpty()) {
             pendingCalls = calls;
             for (ToolCall tc : calls) {
@@ -1349,9 +1354,19 @@ public class ChatSession extends Interpreter {
      * quarkus-chat-ui3): {@code REQUEST:} is the exact text sent to {@code provider.sendPrompt}
      * (which, on step 1, is the system prompt followed by the user's prompt — see
      * {@code ChatSessionAgentLoop_260823_oo01} "システムプロンプト"), {@code RESPONSE:} is the
-     * accumulated reply, {@code TOOL_CALLS:} lists any tool-call requests found in it.
+     * accumulated reply, {@code REASONING:} is what a thinking model streamed while producing it,
+     * {@code TOOL_CALLS:} lists any tool-call requests found in it.
+     *
+     * <p>The reasoning is recorded here and nowhere else. It is deliberately not part of the
+     * answer — it never enters {@code assistantBuf}, is not sent back to the model, and is not
+     * kept in the conversation — so without this section the only copy would be the one the
+     * browser happened to be drawing, and closing the tab would destroy it. Recording every input
+     * and output of the model is what this product is for ({@code Overview_260712_oo01}), and the
+     * section name matches the one {@link #recordTurnIo} already writes, so {@code IoLogView}'s
+     * existing parse covers both.</p>
      */
-    private void recordStepIo(String promptSent, String responseText, List<ToolCall> calls) {
+    private void recordStepIo(String promptSent, String responseText, String thinking,
+                              List<ToolCall> calls) {
         if (ioLog == null || ioSession < 0) return;
         try {
             String requestJson = new org.json.JSONObject()
@@ -1361,6 +1376,9 @@ public class ChatSession extends Interpreter {
             StringBuilder m = new StringBuilder();
             m.append("REQUEST:\n").append(requestJson);
             m.append("\n\nRESPONSE:\n").append(responseText == null ? "" : responseText);
+            if (thinking != null && !thinking.isBlank()) {
+                m.append("\n\nREASONING:\n").append(thinking);
+            }
             if (!calls.isEmpty()) {
                 m.append("\n\nTOOL_CALLS:\n");
                 for (ToolCall tc : calls) {
