@@ -187,6 +187,9 @@ public class ChatSession extends Interpreter {
             - calc(expression): evaluate a Java arithmetic expression, e.g. 23*47 or Math.sqrt(16).
             - web_search(query): search the web and fetch the top results' page content.
             - fetch(url): fetch one specific URL you already have and return its readable text.
+              Stops at 5,000 characters and says "[truncated N chars total]" with the page's real
+              length, so you can tell a whole page from a cut one. This is how you read a page
+              web_search only summarised for you.
             - search_docs(query): search this team's internal documentation. It returns a ranked
               list of CANDIDATE documents — title, id, source path and a short summary each — not
               the answer to your question. A summary says what a document is about, not what it
@@ -208,9 +211,14 @@ public class ChatSession extends Interpreter {
               the way to reach a document whose wording never matches the question — the value you
               need may be stated only in a document its author told you to read first. It returns
               the same kind of candidate list search_docs does, so call read on a path to see what
-              a document actually says.
+              a document actually says. "backward" stops at 30 documents and says so when it did;
+              a standard that many documents declare as their prerequisite has that many edges.
             - write(path, content): save text to a file under the working directory. Requires TWO
               <parameter> tags in the same invoke block: one named "path", one named "content".
+              Missing parent directories are created, so you can write straight to a new
+              subdirectory without making it first. An existing file is OVERWRITTEN, not appended
+              to — read it first if you meant to add to it. The reply gives the absolute path
+              written and how many characters went into it.
             - ask_chat(chatId, prompt, timeoutSeconds): send an instruction to another conversation
               (e.g. "02" for one in your own project, or "project2/02" to reach one in another
               project) and wait for its reply. Requires "chatId" and "prompt" <parameter>
