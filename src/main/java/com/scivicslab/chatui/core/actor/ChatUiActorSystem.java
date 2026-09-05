@@ -15,15 +15,20 @@ import com.scivicslab.turingworkflow.plugins.logoutput.MultiplexerAccumulatorAct
 import com.scivicslab.turingworkflow.plugins.logoutput.MultiplexerLogHandler;
 import com.scivicslab.turingworkflow.plugins.promptbuilder.PromptBuilderActor;
 import com.scivicslab.turingworkflow.workflow.IIActorRef;
+import com.scivicslab.pojoactor.core.distributed.DistributedActorSystem;
+import com.scivicslab.pojoactor.core.distributed.NodeInfo;
+import com.scivicslab.pojoactor.core.distributed.discovery.NodeDiscovery;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 import com.scivicslab.turingworkflow.workflow.RootIIAR;
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -85,6 +90,32 @@ public class ChatUiActorSystem {
     // question and answer.
     @ConfigProperty(name = "chat-ui.max-observation-chars", defaultValue = "20000")
     int maxObservationChars = 20000;
+
+    /**
+     * Port for the distributed-actor server, or empty to run without one (the default).
+     *
+     * <p>Setting it makes every actor in this system callable from another process on this
+     * machine, which is what lets a parent interpreter drive the conversations
+     * ({@code WorkflowTab_260906_oo01}). A conversation can read and write under {@code ~/works}
+     * and drive other conversations, so opening this is a real widening of what can reach those
+     * capabilities — hence off unless a port is named, and bound to 127.0.0.1 either way.
+     *
+     * <p>There is no separate on/off flag. A flag plus a port would have four combinations, two
+     * of which mean nothing.
+     */
+    // Initialised here as well as injected, like maxObservationChars above: the actor-tree unit
+    // tests construct this class directly rather than through CDI, and an uninjected field would
+    // be null there.
+    @ConfigProperty(name = "chat-ui.distributed.port")
+    Optional<Integer> distributedPort = Optional.empty();
+
+    /**
+     * The address the distributed-actor server binds to. Not configurable: a setting could be
+     * written as {@code 0.0.0.0}, and anything writable eventually gets written.
+     */
+    private static final String DISTRIBUTED_BIND_ADDRESS = "127.0.0.1";
+
+    private DistributedActorSystem distributedActorSystem;
 
     @Inject
     IoLogStore ioLogStore;
@@ -245,6 +276,77 @@ public class ChatUiActorSystem {
         reopenRecordedTabs();
         LOG.info("Actor system initialised with " + projects.size() + " project(s), "
                 + chats.size() + " conversation(s)");
+
+        startDistributedActorServer();
+    }
+
+    /**
+     * Publishes this actor system on 127.0.0.1 when {@code chat-ui.distributed.port} names a port,
+     * so a parent interpreter in another process can call the conversations
+     * ({@code WorkflowTab_260906_oo01}). Does nothing when the port is unset.
+     *
+     * <p>A failure to bind is logged and left there rather than thrown: the conversations
+     * themselves work without the port, and taking the whole application down because a workflow
+     * runner cannot attach would trade a working chat UI for one that does not start.
+     */
+    private void startDistributedActorServer() {
+        if (distributedPort.isEmpty()) {
+            return;
+        }
+        int port = distributedPort.get();
+        try {
+            distributedActorSystem = DistributedActorSystem.builder()
+                    .localActorSystem(actorSystem)
+                    .discovery(new LocalOnlyDiscovery(port))
+                    .build();
+            distributedActorSystem.startHttpServer(DISTRIBUTED_BIND_ADDRESS, port);
+            LOG.info("Actors published for other processes on this machine at "
+                    + DISTRIBUTED_BIND_ADDRESS + ":" + port);
+        } catch (IOException | RuntimeException e) {
+            distributedActorSystem = null;
+            LOG.log(Level.SEVERE, "Could not publish actors on " + DISTRIBUTED_BIND_ADDRESS + ":" + port
+                    + "; conversations still work, but no other process can drive them", e);
+        }
+    }
+
+    /**
+     * Closes the distributed-actor server so its listening socket and its threads do not outlive
+     * the application. Nothing else here needs stopping — the actor system's own threads are
+     * virtual and end with the JVM — but a bound port is visible from outside the process, and a
+     * non-daemon server thread can keep a JVM alive after it was asked to stop.
+     */
+    @PreDestroy
+    void stopDistributedActorServer() {
+        if (distributedActorSystem == null) {
+            return;
+        }
+        try {
+            distributedActorSystem.close();
+            LOG.info("Actors are no longer published");
+        } catch (RuntimeException e) {
+            LOG.log(Level.WARNING, "Failed to close the distributed actor server", e);
+        } finally {
+            distributedActorSystem = null;
+        }
+    }
+
+    /**
+     * This machine, alone. The discovery strategies POJO-actor ships with describe clusters
+     * (Slurm, Grid Engine, Kubernetes); here there is one node and nothing to discover, and
+     * naming that explicitly keeps {@code NodeDiscoveryFactory.autoDetect()} from reading the
+     * environment and deciding this process belongs to a cluster it does not.
+     */
+    private record LocalOnlyDiscovery(int port) implements NodeDiscovery {
+
+        @Override public String getMyNodeId() { return "chat-ui"; }
+
+        @Override public String getMyHost() { return DISTRIBUTED_BIND_ADDRESS; }
+
+        @Override public int getMyPort() { return port; }
+
+        @Override public List<NodeInfo> getAllNodes() { return List.of(); }
+
+        @Override public boolean isApplicable() { return true; }
     }
 
     /**
