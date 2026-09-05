@@ -107,6 +107,19 @@ public final class FileReadTool {
         return p;
     }
 
+    /**
+     * Reads a directory as a manifest followed by the files' contents.
+     *
+     * <p>The manifest comes first, and it is what makes the reply usable when the reply is cut
+     * short. A directory read is one observation, and the agent loop shows the model only the
+     * first and last part of an observation that exceeds its budget
+     * ({@code ContextBudget.truncateObservation}). Reading a 105 KB directory into a 20 000
+     * character budget therefore left the model with the first document, the tail of the last one,
+     * and no way to know which documents it had not seen — it read a directory "completely" and
+     * was missing most of it. Listing every path at the top costs about one line per file, survives
+     * the head of that cut, and turns the rest into something the model can go and read one at a
+     * time.</p>
+     */
     private static String readDirectory(Path base, Path dir, long maxChars, int maxFiles) throws IOException {
         List<Path> files;
         try (Stream<Path> walk = Files.walk(dir)) {
@@ -114,12 +127,25 @@ public final class FileReadTool {
                     .filter(f -> !isSkipped(dir, f))   // drop build/VCS/binary noise (target/, .git/, *.class …)
                     .sorted().toList();
         }
+        if (files.isEmpty()) {
+            return "(no readable files under " + base.relativize(dir) + ")";
+        }
         StringBuilder sb = new StringBuilder();
+        sb.append(base.relativize(dir)).append(" contains ").append(files.size())
+          .append(files.size() == 1 ? " readable file." : " readable files.")
+          .append(" Every path is listed here, and the contents follow in the same order.")
+          .append(" This reply may be cut short before the last of them — when it is, call read on")
+          .append(" the individual paths below that you still need.\n\nFILES:\n");
+        for (Path f : files) {
+            sb.append("  ").append(base.relativize(f)).append("\n");
+        }
+        sb.append("\nCONTENTS:\n\n");
         int count = 0;
         long chars = 0;
         for (Path f : files) {
             if (count >= maxFiles || chars >= maxChars) {
-                sb.append("\n…(truncated: cap reached after ").append(count).append(" files)…\n");
+                sb.append("\n…(stopped after ").append(count).append(" of ").append(files.size())
+                  .append(" files: the read cap was reached. Read the rest individually.)…\n");
                 break;
             }
             String content;
@@ -133,8 +159,9 @@ public final class FileReadTool {
             count++;
             chars += content.length();
         }
-        if (sb.length() == 0) {
-            return "(no readable files under " + base.relativize(dir) + ")";
+        if (count < files.size()) {
+            sb.append("\n(contents included for ").append(count).append(" of ")
+              .append(files.size()).append(" files.)\n");
         }
         return sb.toString();
     }

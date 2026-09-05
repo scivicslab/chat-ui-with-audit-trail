@@ -46,7 +46,10 @@ public final class FileWriteTool {
             }
             String body = content == null ? "" : content;
             Files.writeString(target, body);
-            return "wrote " + base.relativize(target) + " (" + body.length() + " chars)";
+            // The absolute path, not one relative to a root the model was never told about. A
+            // relative confirmation read as success while the file had landed somewhere else
+            // entirely, and nothing in the reply said where.
+            return "wrote " + target + " (" + body.length() + " chars)";
         } catch (IOException e) {
             return "error: " + e.getMessage();
         }
