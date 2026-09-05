@@ -23,6 +23,7 @@ import com.scivicslab.turingworkflow.workflow.RootIIAR;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
+import io.quarkus.runtime.Startup;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
@@ -50,7 +51,12 @@ import java.util.logging.Logger;
  * {@link ChatSession}) and one {@link PromptQueue}, wired per
  * {@code ChatSessionIIAR_260810_oo01} "ConversationTab への接続" — stage 1: no agent loop,
  * no StallMonitor, {@code openai-compat} only (see {@code ChatSessionPorting_260823_oo01}).</p>
+ *
+ * <p>Built eagerly rather than on first use: when {@code chat-ui.distributed.port} is set, the
+ * listening socket that a parent interpreter attaches to only exists once this bean does, and a
+ * parent that starts before anyone opens the Web UI would find nothing to connect to.</p>
  */
+@Startup
 @ApplicationScoped
 public class ChatUiActorSystem {
 
