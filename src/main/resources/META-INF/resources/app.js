@@ -408,6 +408,44 @@
         };
     }
 
+    // How much of a step's reasoning the pane keeps on screen. The whole of it is written to the
+    // I/O log's REASONING: section and read in the Sessions tab, so this bounds a live view, not
+    // the record. Without a bound the pane held the only copy, and a thinking model that reasons
+    // for ten thousand tokens grew one text node to that size while rewriting it once per token.
+    var THINKING_TAIL_CHARS = 2000;
+    var thinkingText = "";
+    var thinkingFrame = null;
+
+    // Writes the tail at most once per animation frame. The reasoning arrives one token per SSE
+    // event; writing textContent and reading scrollHeight on each one forced a synchronous layout
+    // per token, which is what froze the tab.
+    function appendThinking(chunk) {
+        if (!thinkingEl) {
+            thinkingEl = document.createElement("div");
+            thinkingEl.className = "message thinking";
+            chatArea.appendChild(thinkingEl);
+            thinkingText = "";
+        }
+        thinkingText += chunk;
+        if (thinkingText.length > THINKING_TAIL_CHARS) {
+            thinkingText = thinkingText.slice(-THINKING_TAIL_CHARS);
+        }
+        if (thinkingFrame !== null) return;
+        thinkingFrame = requestAnimationFrame(function () {
+            thinkingFrame = null;
+            if (!thinkingEl) return;
+            thinkingEl.textContent = thinkingText;
+            chatArea.scrollTop = chatArea.scrollHeight;
+        });
+    }
+
+    function clearThinking() {
+        if (thinkingFrame !== null) { cancelAnimationFrame(thinkingFrame); thinkingFrame = null; }
+        if (thinkingEl) thinkingEl.remove();
+        thinkingEl = null;
+        thinkingText = "";
+    }
+
     function handleEvent(event) {
         switch (event.type) {
             case "status":
@@ -418,19 +456,13 @@
                 }
                 break;
             case "thinking":
-                if (!thinkingEl) {
-                    thinkingEl = document.createElement("div");
-                    thinkingEl.className = "message thinking";
-                    chatArea.appendChild(thinkingEl);
-                }
-                thinkingEl.textContent += event.content || "";
-                chatArea.scrollTop = chatArea.scrollHeight;
+                appendThinking(event.content || "");
                 break;
             case "delta":
                 // ChatSession's agent loop sends this exactly once per turn, from finish(), with the
                 // whole confirmed-final answer text (never incremental tokens on this channel — those
                 // stream as "thinking" instead, since an intermediate step might still be a tool call).
-                if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
+                clearThinking();
                 streamingMarkdown = event.content || "";
                 streamingEl = appendMarkdownMessage("assistant", streamingMarkdown);
                 chatArea.scrollTop = chatArea.scrollHeight;
@@ -441,14 +473,14 @@
                 if (streamingEl) appendAnswerFooter(streamingEl, streamingMarkdown, event);
                 streamingEl = null;
                 streamingMarkdown = "";
-                thinkingEl = null;
+                clearThinking();
                 setBusy(false);
                 chatArea.scrollTop = chatArea.scrollHeight;
                 break;
             case "error":
                 appendMessage("error", "Error: " + (event.content || "unknown error"));
                 streamingEl = null;
-                thinkingEl = null;
+                clearThinking();
                 setBusy(false);
                 break;
             case "info":
