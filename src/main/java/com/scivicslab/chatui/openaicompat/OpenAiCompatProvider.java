@@ -28,7 +28,10 @@ public class OpenAiCompatProvider implements LlmProvider {
     private static final int MAX_TRIM_RETRIES = 5;
 
     private final List<OpenAiCompatClient> clients;
-    private String currentModel;
+    // volatile because GET .../status reads it from the request thread while this provider's own
+    // thread writes it (ModelBelongsToTheConversation_260906_oo01) — the same reason
+    // ChatSession.busy is volatile (BusyStateReadableSnapshot_260828_oo01).
+    private volatile String currentModel;
     private volatile boolean cancelled;
     private volatile Thread sendingThread;
     private final AgentLoopExtension agentLoopExtension;

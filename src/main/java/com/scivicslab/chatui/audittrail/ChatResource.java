@@ -286,8 +286,13 @@ public class ChatResource {
      * Reports whether one tab is currently busy processing a turn — read directly, so it works even
      * while the tab is busy ({@code BusyStateReadableSnapshot_260828_oo01}).
      *
+     * <p>Also reports which model this tab is on. The screen asks for both whenever it switches
+     * tabs, and one request answering both is why this is not an endpoint of its own
+     * ({@code ModelBelongsToTheConversation_260906_oo01}).</p>
+     *
      * @param chatId conversation tab identifier
-     * @return {@code {"busy": true|false}}
+     * @return {@code {"busy": true|false, "model": "..."}}; {@code model} is the empty string when
+     *         this tab has not settled on one yet
      */
     @GET
     @Path("/{projectId}/chats/{chatId}/status")
@@ -295,7 +300,47 @@ public class ChatResource {
     public Map<String, Object> status(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
         actorSystem.createChat(projectId, chatId);
         ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
-        return Map.of("busy", chatSessionIIAR.isBusyDirect());
+        String model = chatSessionIIAR.getModelDirect();
+        return Map.of("busy", chatSessionIIAR.isBusyDirect(),
+                      "model", model == null ? "" : model);
+    }
+
+    /**
+     * Sets which model this tab runs on.
+     *
+     * <p>The model belongs to the conversation, not to the browser: two tabs open at once are two
+     * conversations that may be on different models, and switching between them must not carry one
+     * tab's model into the other ({@code ModelBelongsToTheConversation_260906_oo01}).</p>
+     *
+     * <p>Delivered to the provider's own actor, so a change made while a turn is running lands
+     * after that turn rather than in the middle of it.</p>
+     *
+     * @param projectId owning project's id
+     * @param chatId    conversation tab identifier
+     * @param body      {@code {"model": "..."}}
+     * @return {@code {"type": "accepted"}}, or 400 when no model was named
+     */
+    @POST
+    @Path("/{projectId}/chats/{chatId}/model")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response model(@PathParam("projectId") String projectId,
+                          @PathParam("chatId") String chatId,
+                          Map<String, Object> body) {
+        Object modelVal = body != null ? body.get("model") : null;
+        String model = modelVal == null ? null : String.valueOf(modelVal).strip();
+        if (model == null || model.isEmpty()) {
+            return Response.status(400)
+                    .entity(Map.of("type", "error", "message", "model is required")).build();
+        }
+        actorSystem.createChat(projectId, chatId);
+        ActorRef<LlmProvider> providerRef = actorSystem.getProviderRef(projectId, chatId);
+        if (providerRef == null) {
+            return Response.status(404)
+                    .entity(Map.of("type", "error", "message", "no such conversation")).build();
+        }
+        providerRef.tell(p -> p.setModel(model));
+        return Response.ok(Map.of("type", "accepted")).build();
     }
 
     /**

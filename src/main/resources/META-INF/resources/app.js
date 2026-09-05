@@ -283,12 +283,6 @@
         });
     }
 
-    // ── Model selection (persisted the same way as Theme — otherwise loadModels()
-    // rebuilding the <select> on every load/tab-switch silently resets it to the first
-    // option, and that reset value gets sent as payload.model on the next prompt) ──
-
-    var MODEL_KEY = "chat-ui-model";
-
     // ── Queue status (server-side: chat-ui-with-audit-trail queues on the server whenever
     // ChatSession is busy, unlike chat-ui3's client-side-only draft queue) ─────
 
@@ -435,7 +429,6 @@
     // a human turns it on or advances the queue.
     function queuePrompt(text) {
         var payload = { text: text, hold: true };
-        if (modelSelect && modelSelect.value) payload.model = modelSelect.value;
         fetch(apiUrl(chatUrl("/chat")), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -517,8 +510,14 @@
             case "status":
                 setBusy(!!event.busy);
                 refreshQueue();
-                if (event.model && modelSelect && !modelSelect.value) {
-                    // Model list may not be loaded yet on the very first status event; ignore.
+                // The turn reports which model is running it. Following it keeps the dropdown
+                // honest when the model was settled on elsewhere — a REST caller or an MCP agent
+                // naming one, or the provider picking the first it was offered.
+                if (event.model && modelSelect) {
+                    var offered = Array.prototype.some.call(modelSelect.options, function (o) {
+                        return o.value === event.model;
+                    });
+                    if (offered) modelSelect.value = event.model;
                 }
                 break;
             case "thinking":
@@ -586,7 +585,6 @@
         setBusy(true);
 
         var payload = { text: text };
-        if (modelSelect && modelSelect.value) payload.model = modelSelect.value;
 
         fetch(apiUrl(chatUrl("/chat")), {
             method: "POST",
@@ -610,18 +608,44 @@
 
     // ── Models ───────────────────────────────────────────────────────────────
 
+    // The model belongs to the conversation, not to the browser
+    // (ModelBelongsToTheConversation_260906_oo01). Choosing one here tells this conversation to run
+    // on it; nothing is remembered on this side, because one remembered value is exactly what
+    // cannot describe two conversations on two different models.
     function initModelPersistence() {
         if (!modelSelect) return;
         modelSelect.addEventListener("change", function () {
-            localStorage.setItem(MODEL_KEY, modelSelect.value);
+            var chosen = modelSelect.value;
+            if (!chosen) return;
+            var forChat = PROJECT_ID + "/" + CHAT_ID;
+            fetch(apiUrl(chatUrl("/model")), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ model: chosen })
+            }).then(function (r) { return r.json(); })
+              .then(function (result) {
+                  if (result && result.type === "error") {
+                      notify(result.message || "could not change the model", true);
+                      // Say what this conversation is actually on, rather than leave the name of a
+                      // model it is not running.
+                      if (forChat === PROJECT_ID + "/" + CHAT_ID) showCurrentModel();
+                  }
+              })
+              .catch(function (err) {
+                  notify("could not change the model: " + err.message, true);
+                  if (forChat === PROJECT_ID + "/" + CHAT_ID) showCurrentModel();
+              });
         });
     }
 
+    // Fills the dropdown with what this conversation's provider offers, then shows the one it is on.
     function loadModels() {
         if (!modelSelect) return;
+        var forChat = PROJECT_ID + "/" + CHAT_ID;
         fetch(apiUrl(chatUrl("/models")))
             .then(function (r) { return r.json(); })
             .then(function (models) {
+                if (forChat !== PROJECT_ID + "/" + CHAT_ID) return;
                 modelSelect.textContent = "";
                 (models || []).forEach(function (m) {
                     var opt = document.createElement("option");
@@ -629,12 +653,28 @@
                     opt.textContent = m.name;
                     modelSelect.appendChild(opt);
                 });
-                var saved = localStorage.getItem(MODEL_KEY);
-                if (saved && (models || []).some(function (m) { return m.name === saved; })) {
-                    modelSelect.value = saved;
-                }
+                showCurrentModel();
             })
             .catch(function () { /* leave the dropdown empty on failure */ });
+    }
+
+    // Points the dropdown at the model this conversation is on. A model the list does not offer is
+    // not selected: the dropdown would then name one thing while the conversation runs another.
+    function showCurrentModel() {
+        if (!modelSelect) return;
+        var forChat = PROJECT_ID + "/" + CHAT_ID;
+        fetch(apiUrl(chatUrl("/status")))
+            .then(function (r) { return r.json(); })
+            .then(function (s) {
+                if (forChat !== PROJECT_ID + "/" + CHAT_ID) return;
+                var model = s && s.model;
+                if (!model) return;
+                var offered = Array.prototype.some.call(modelSelect.options, function (o) {
+                    return o.value === model;
+                });
+                if (offered) modelSelect.value = model;
+            })
+            .catch(function () { /* leave whatever the list opened on */ });
     }
 
     // Abandons the LLM call this conversation is running. The request is delivered with tellNow

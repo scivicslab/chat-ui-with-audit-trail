@@ -103,6 +103,15 @@ public class ChatSessionIIAR extends InterpreterIIAR {
         return chatSession().historySnapshot();
     }
 
+    /**
+     * Reads which model this tab is on, bypassing the actor's mailbox — same rationale as
+     * {@link #isBusyDirect()}, and needed for the same reason: the screen asks for it while the tab
+     * may be in the middle of a turn ({@code ModelBelongsToTheConversation_260906_oo01}).
+     *
+     * @return the model name, or {@code null} when none has been settled on yet
+     */
+    public String getModelDirect() { return chatSession().getModel(); }
+
     private ChatSession chatSession() { return (ChatSession) object; }
 
     /**
