@@ -469,13 +469,26 @@ public class ChatUiActorSystem {
         if (sessionId < 0) return;
 
         List<IoLogView.Turn> turns;
+        int lastTurn;
         try {
             turns = ioLogView.conversation(sessionId, RESTORED_TURNS);
+            lastTurn = ioLogView.lastTurnNumber(sessionId);
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Could not read the recorded conversation for " + tabName, e);
             return;
         }
-        if (turns.isEmpty()) return;
+
+        // Done whether or not anything is restored: a session recorded before this feature existed
+        // holds turns but no conversation entry, and its numbering must still be continued.
+        if (lastTurn > 0) {
+            chatSessionIIAR.tell(a -> ((ChatSession) a).resumeTurnNumbering(lastTurn));
+        }
+
+        if (turns.isEmpty()) {
+            LOG.info("I/O log session " + sessionId + " holds no restorable turn for " + tabName
+                    + "; continuing it from turn " + (lastTurn + 1));
+            return;
+        }
 
         for (IoLogView.Turn t : turns) {
             chatSessionIIAR.tell(a -> {

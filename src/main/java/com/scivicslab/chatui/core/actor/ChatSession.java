@@ -1290,6 +1290,23 @@ public class ChatSession extends Interpreter {
         }
     }
 
+    /**
+     * Continues the turn numbering of an I/O-log session this conversation is resuming.
+     *
+     * <p>{@code ioTurn} counts from zero on every start, while a resumed session already holds
+     * turns under {@code turn1}, {@code turn2} and so on. Left alone, the first turn after a
+     * restart would write its labels on top of the first turn before it, and the Sessions tab would
+     * show the two as one ({@code ConversationRestoreOnRestart_260904_oo01}).</p>
+     *
+     * @param lastRecordedTurn the highest turn number the session already holds; ignored when it is
+     *                         not ahead of the counter
+     */
+    public void resumeTurnNumbering(int lastRecordedTurn) {
+        if (lastRecordedTurn > ioTurn) {
+            ioTurn = lastRecordedTurn;
+        }
+    }
+
     /** Marks the question in a {@code turnN/conversation} entry. */
     public static final String CONVERSATION_QUESTION_MARKER = "QUESTION:";
     /** Marks the answer in a {@code turnN/conversation} entry. */

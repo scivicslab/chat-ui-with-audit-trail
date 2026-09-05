@@ -120,4 +120,31 @@ class ConversationRestoreTest {
         assertTrue(IoLogView.conversationOf(List.of(conversationRow(1, "q", "a")), 0).isEmpty());
         assertTrue(IoLogView.conversationOf(List.of(), 50).isEmpty());
     }
+
+    /**
+     * The turn a resumed session must go on from. Every label counts, not only the conversation
+     * ones, so that the numbering continues past a turn that was interrupted before it finished.
+     */
+    @Test
+    void theTurnToContinueFromIsTheHighestAnyLabelCarries() {
+        assertEquals(3, IoLogView.lastTurnNumberOf(List.of(
+                conversationRow(1, "q1", "a1"),
+                conversationRow(2, "q2", "a2"),
+                row("turn3/step1/llm", "REQUEST:\n...\n\nRESPONSE:\ninterrupted here"))));
+    }
+
+    /** A session recorded before conversation entries existed still says where its turns stopped. */
+    @Test
+    void aSessionWithOnlyStepRowsStillSaysWhereItsTurnsStopped() {
+        assertEquals(2, IoLogView.lastTurnNumberOf(List.of(
+                row("turn1/step1/llm", "REQUEST:\n...\n\nRESPONSE:\n..."),
+                row("turn1/step1/tool", "TOOL: read\nOBSERVATION:\n..."),
+                row("turn2/step1/llm", "REQUEST:\n...\n\nRESPONSE:\n..."))));
+    }
+
+    @Test
+    void aSessionWithNoTurnAtAllStartsFromTheBeginning() {
+        assertEquals(0, IoLogView.lastTurnNumberOf(List.of()));
+        assertEquals(0, IoLogView.lastTurnNumberOf(List.of(row("startup", "no turn in this label"))));
+    }
 }

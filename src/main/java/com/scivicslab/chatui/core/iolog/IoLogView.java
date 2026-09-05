@@ -99,6 +99,22 @@ public class IoLogView {
         return conversationOf(allLogs(sessionId), maxTurns);
     }
 
+    /**
+     * The highest turn number already recorded in a session, or {@code 0} when it holds no turn at
+     * all.
+     *
+     * <p>A conversation that resumes an existing session must go on numbering its turns where that
+     * session stopped. Its own counter starts at zero on every restart, so without this the next
+     * turn would be written as {@code turn1} again, on top of labels the session already holds
+     * ({@code ConversationRestoreOnRestart_260904_oo01}).</p>
+     *
+     * @param sessionId the session to read
+     * @return the highest {@code turnN} seen in any of its labels, or 0
+     */
+    public int lastTurnNumber(long sessionId) {
+        return lastTurnNumberOf(allLogs(sessionId));
+    }
+
     private List<LogEntry> allLogs(long sessionId) {
         DistributedLogStore s = store();
         // DEBUG is the lowest level, so "at least DEBUG" returns every row of the session.
@@ -117,6 +133,9 @@ public class IoLogView {
             java.util.regex.Pattern.compile("turn(\\d+)/step(\\d+)/(llm|tool)");
     private static final java.util.regex.Pattern CONVERSATION_LABEL =
             java.util.regex.Pattern.compile("turn(\\d+)/conversation");
+    /** Any label a turn writes, whatever comes after the turn number. */
+    private static final java.util.regex.Pattern ANY_TURN_LABEL =
+            java.util.regex.Pattern.compile("turn(\\d+)/.+");
 
     /**
      * Picks the {@code turnN/conversation} entries out of a session's rows and splits each into its
@@ -144,6 +163,27 @@ public class IoLogView {
     private static int turnNumberOf(String label) {
         java.util.regex.Matcher m = CONVERSATION_LABEL.matcher(label);
         return m.matches() ? Integer.parseInt(m.group(1)) : 0;
+    }
+
+    /**
+     * The highest turn number in a session's labels. Every kind of label is counted, not only
+     * {@code /conversation}: a turn that was interrupted before it finished wrote step labels and
+     * no conversation entry, and its number is taken just the same.
+     *
+     * @param raw every row of one session
+     * @return the highest {@code turnN} seen, or 0 when no label carries one
+     */
+    static int lastTurnNumberOf(List<LogEntry> raw) {
+        int highest = 0;
+        for (LogEntry e : raw) {
+            String label = e.getLabel();
+            if (label == null) continue;
+            java.util.regex.Matcher m = ANY_TURN_LABEL.matcher(label);
+            if (m.matches()) {
+                highest = Math.max(highest, Integer.parseInt(m.group(1)));
+            }
+        }
+        return highest;
     }
 
     /** @return the turn, or {@code null} when either marker is missing */
