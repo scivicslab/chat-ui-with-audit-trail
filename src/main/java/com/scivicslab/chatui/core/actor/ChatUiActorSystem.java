@@ -147,6 +147,27 @@ public class ChatUiActorSystem {
     }
 
     /**
+     * The name of one conversation's ChatSession bridge.
+     *
+     * <p>The ChatSession is a child of the ConversationTab, not the tab itself, so its name is the
+     * conversation's with {@code .chat} on the end. Anything registered under the ChatSession — the
+     * provider, the prompt builder — is named from this, not from the conversation.</p>
+     *
+     * @param projectId owning project's id
+     * @param chatId    conversation id within that project
+     * @return the ChatSession actor's name
+     */
+    public static String chatSessionActorName(String projectId, String chatId) {
+        return chatActorName(projectId, chatId) + CHAT_SESSION_SUFFIX;
+    }
+
+    /** What a ChatSession's name adds to its conversation's. */
+    static final String CHAT_SESSION_SUFFIX = ".chat";
+
+    /** What a provider's name adds to its ChatSession's. */
+    static final String PROVIDER_SUFFIX = ".provider";
+
+    /**
      * Initializes the actor system and seeds a small tree so the Actors tab has something to show.
      */
     @PostConstruct
@@ -494,7 +515,8 @@ public class ChatUiActorSystem {
         // cannot call addChildActor itself (ChatSessionIIAR_260810_oo01 "ConversationTab への接続").
         OpenAiCompatProvider provider = new OpenAiCompatProvider(servers, defaultModel);
         ChatSessionIIAR chatSessionIIAR = new ChatSessionIIAR(
-                tabRef.getName() + ".chat", provider, Optional.empty(), ioLogStore, actorSystem);
+                tabRef.getName() + CHAT_SESSION_SUFFIX, provider, Optional.empty(), ioLogStore,
+                actorSystem);
         chatSessionIIAR.setParentName(tabRef.getName());
         tabRef.getNamesOfChildren().add(chatSessionIIAR.getName());
         actorSystem.addIIActor(chatSessionIIAR);
@@ -515,7 +537,7 @@ public class ChatUiActorSystem {
         // (ChatSessionPorting_260823_oo01 "なぜ init を無くしたか").
         LlmProvider providerAsLlmProvider = provider;
         ActorRef<LlmProvider> providerRef = chatSessionIIAR.<LlmProvider>createChild(
-                chatSessionIIAR.getName() + ".provider", providerAsLlmProvider);
+                chatSessionIIAR.getName() + PROVIDER_SUFFIX, providerAsLlmProvider);
         chatSessionIIAR.tell(a -> ((ChatSession) a).setProviderName(providerRef.getName()));
 
         // Prompt builder — a child of the ChatSession, so a prompt-construction sub-workflow (also
@@ -715,6 +737,24 @@ public class ChatUiActorSystem {
      * @param chatId    conversation id within that project
      * @return the conversation's {@link PromptQueue}, or {@code null} if it does not exist
      */
+    /**
+     * A conversation's own LLM provider, by name.
+     *
+     * <p>Looked up rather than held: the provider is a child of the ChatSession, created when the
+     * conversation is ({@code ChatSessionPorting_260823_oo01}). A child of the ChatSession, which
+     * is itself a child of the conversation — so the name carries both steps, and asking for
+     * {@code <conversation>.provider} finds nothing.</p>
+     *
+     * @param projectId owning project's id
+     * @param chatId    conversation id within that project
+     * @return that conversation's provider, or {@code null} if it has none
+     */
+    @SuppressWarnings("unchecked")
+    public ActorRef<LlmProvider> getProviderRef(String projectId, String chatId) {
+        return (ActorRef<LlmProvider>) (ActorRef<?>)
+                actorSystem.getActor(chatSessionActorName(projectId, chatId) + PROVIDER_SUFFIX);
+    }
+
     public ActorRef<PromptQueue> getPromptQueue(String projectId, String chatId) {
         return actorSystem.getActor(chatActorName(projectId, chatId) + ".queue");
     }

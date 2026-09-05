@@ -52,6 +52,25 @@ class ChatUiActorSystemActorTreeTest {
                 "chat-02 should not be pre-seeded, got " + project1ChildNames);
     }
 
+    /**
+     * The provider must be findable by project and conversation id.
+     *
+     * <p>It was not: the lookup asked for {@code project1/chat-01.provider} while the provider is
+     * registered under {@code project1/chat-01.chat.provider}, one step further down, because it is
+     * a child of the ChatSession rather than of the conversation. Nothing failed loudly — the
+     * caller got {@code null} and the activity summary reported that it had no conversations.</p>
+     */
+    @Test
+    void getProviderRef_findsTheProviderOfASeededConversation() {
+        ChatUiActorSystem system = new ChatUiActorSystem();
+        system.init();
+
+        assertTrue(system.getProviderRef("project1", "01") != null,
+                "project1/chat-01 has a provider and it must be reachable by ids");
+        assertEquals("project1/chat-01.chat.provider",
+                system.getProviderRef("project1", "01").getName());
+    }
+
     @Test
     void createChat_under_anotherConversation_placesItInsideThatConversation() {
         ChatUiActorSystem system = new ChatUiActorSystem();

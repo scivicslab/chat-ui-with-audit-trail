@@ -358,6 +358,17 @@ public class OpenAiCompatProvider implements LlmProvider {
      * @return the reply text, or {@code null} when the call failed
      */
     public String completeOutsideConversation(String prompt) {
+        // Resolve the model first, the way sendPrompt does. A caller that runs before any prompt
+        // has been sent finds currentModel still unset, and selectClient then hands back whichever
+        // client is first, which is asked for a model named "" and answers an error. Observed on
+        // the activity summary, which is asked for as soon as the process is up
+        // (ActivitySummary_260905_oo01).
+        if (currentModel == null || currentModel.isBlank() || currentModel.equals("default")) {
+            getAvailableModels();
+        }
+        if (currentModel == null || currentModel.isBlank() || currentModel.equals("default")) {
+            return null;
+        }
         OpenAiCompatClient client = selectClient(currentModel);
         if (client == null) {
             return null;
