@@ -57,6 +57,17 @@ public class ActivityResource {
      */
     private static final Duration MAX_AGE = Duration.ofMinutes(30);
 
+    /**
+     * How long an answer that no model produced stands.
+     *
+     * <p>Much shorter, because these are the two answers that are about to stop being true. An
+     * instance is asked as soon as it is READY, before anyone has said anything to it, and the
+     * answer worked out then — "no conversation recorded yet" — would otherwise be repeated for
+     * half an hour after the work began. The same goes for a failure: the model being unreachable
+     * now says nothing about the next half hour. Neither costs a model call to work out again.</p>
+     */
+    private static final Duration RETRY_AGE = Duration.ofMinutes(1);
+
     /** How many of a conversation's most recent turns are read to work out its subject. */
     private static final int TURNS_READ = 12;
 
@@ -65,8 +76,13 @@ public class ActivityResource {
 
     private volatile Answer cached;
 
-    /** One worked-out answer and the moment it was worked out. */
-    private record Answer(String summary, Instant asOf, List<Map<String, String>> parts) {}
+    /**
+     * One worked-out answer and the moment it was worked out.
+     *
+     * @param fromModel whether a model produced it, which decides how long it stands
+     */
+    private record Answer(String summary, Instant asOf, List<Map<String, String>> parts,
+                          boolean fromModel) {}
 
     /**
      * Returns what this instance is working on.
@@ -76,7 +92,8 @@ public class ActivityResource {
     @GET
     public Map<String, Object> activity() {
         Answer answer = cached;
-        if (answer == null || Duration.between(answer.asOf(), Instant.now()).compareTo(MAX_AGE) > 0) {
+        Duration age = answer == null ? null : Duration.between(answer.asOf(), Instant.now());
+        if (answer == null || age.compareTo(answer.fromModel() ? MAX_AGE : RETRY_AGE) > 0) {
             answer = work();
             cached = answer;
         }
@@ -124,7 +141,7 @@ public class ActivityResource {
         } else {
             summary = first + "ほかに" + (parts.size() - 1) + "プロジェクト。";
         }
-        return new Answer(summary, Instant.now(), List.copyOf(parts));
+        return new Answer(summary, Instant.now(), List.copyOf(parts), !parts.isEmpty());
     }
 
     /**
