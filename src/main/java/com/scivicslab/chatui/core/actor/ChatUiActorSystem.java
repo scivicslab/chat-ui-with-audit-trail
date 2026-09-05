@@ -292,6 +292,31 @@ public class ChatUiActorSystem {
     }
 
     /**
+     * Asks a conversation to abandon the LLM call it is running, if any.
+     *
+     * <p>Sent with {@code tellNow} so it reaches {@link ChatSession#cancel()} without queueing
+     * behind the very turn it is meant to stop. An agent-loop step blocks its thread on
+     * {@code providerRef.ask(...).get()} until the model's reply ends, so a queued cancel would
+     * arrive only after the call it was supposed to interrupt had already finished.</p>
+     *
+     * <p>What the model is producing when the cancel arrives does not matter. A thinking model
+     * streams its reasoning as {@code delta.reasoning_content}, so bytes keep arriving during a
+     * long deliberation, and the client's read loop tests its own interrupt flag once per streamed
+     * line ({@code OpenAiCompatClient.sendPrompt}). The stop therefore lands mid-thought, which is
+     * the case it exists for.</p>
+     *
+     * @param projectId owning project's id
+     * @param chatId    conversation id within that project
+     * @return {@code true} if the conversation exists and was asked to cancel
+     */
+    public boolean cancelPrompt(String projectId, String chatId) {
+        ChatSessionIIAR chat = chatSessions.get(chatActorName(projectId, chatId));
+        if (chat == null) return false;
+        chat.tellNow(a -> ((ChatSession) a).cancel());
+        return true;
+    }
+
+    /**
      * Asks a conversation's plan runner to stop, if it has one. Sent with {@code tellNow} so it
      * reaches the runner's {@code stopRequested} flag without queueing behind the run it is meant
      * to stop; the runner then notices between transitions, so a plan waiting on another

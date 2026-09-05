@@ -145,7 +145,9 @@ public class PromptQueue {
             case "cancel_and_send" -> {
                 QueueItem item = new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, true);
                 queue.add(0, item);
-                chatSessionRef.tell(ChatSession::cancel);
+                // tellNow, not tell: the running turn blocks the ChatSession's own thread, so a
+                // queued cancel would be delivered only after that turn ended (ChatSession.cancel).
+                chatSessionRef.tellNow(ChatSession::cancel);
                 emitter.accept(ChatEvent.info("Current prompt cancelled. Your message is queued."));
                 LOG.info("cancel_and_send: cancelled current prompt, queued at front (queue size=" + queue.size() + ")");
                 logToTab("cancel_and_send: queued at front (queue size=" + queue.size() + ")");

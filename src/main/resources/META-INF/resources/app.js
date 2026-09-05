@@ -41,7 +41,7 @@
     }
 
     var chatArea, promptInput, sendBtn, connStatus, activityLabel, modelSelect, notificationBar;
-    var themeSelect, queueBtn, queueArea, stopPlanBtn;
+    var themeSelect, queueBtn, queueArea, stopPlanBtn, cancelBtn;
     var eventSource = null;
     var streamingEl = null;   // the live assistant bubble currently receiving deltas
     var streamingMarkdown = "";  // its markdown source, kept for the footer's copy button
@@ -238,6 +238,9 @@
         // sent while ChatSession is busy (PromptQueue, server-side) rather than rejecting it, so a
         // human should be able to type a follow-up and have it wait its turn. Disabling the button
         // here would silently block that — sendPrompt()'s own guard only checks for empty text.
+        // Cancel is the one control that follows busy: there is nothing to cancel when idle, and
+        // the markup ships it disabled.
+        if (cancelBtn) cancelBtn.disabled = !v;
         if (activityLabel) activityLabel.textContent = v ? "thinking…" : "";
         // Poll while busy: a single check right after sending can land in the brief window before
         // a second prompt has actually been queued server-side, showing "empty" even though the
@@ -525,6 +528,20 @@
             .catch(function () { /* leave the dropdown empty on failure */ });
     }
 
+    // Abandons the LLM call this conversation is running. The request is delivered with tellNow
+    // server-side, so it lands during the call rather than after it — including while a thinking
+    // model is still reasoning, which is when a wrong line of thought is worth stopping.
+    function cancelPrompt() {
+        fetch(apiUrl(chatUrl("/chat/cancel")), { method: "POST" })
+            .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+            .then(function (res) {
+                notify(res.ok && res.body && res.body.type === "cancelled"
+                        ? "Cancelled."
+                        : "Cancel failed: " + ((res.body && res.body.message) || "unknown"));
+            })
+            .catch(function (e) { notify("cancel failed: " + e.message); });
+    }
+
     // Asks this conversation's plan runner to stop. The runner notices between transitions, so a
     // plan waiting on another conversation stops once that wait returns, not instantly
     // (PlanRunnerLifecycleManagement_260829_oo01).
@@ -617,6 +634,7 @@
         queueBtn = el("queue-btn");
         queueArea = el("queue-area");
         stopPlanBtn = el("stop-plan-btn");
+        cancelBtn = el("cancel-btn");
 
         if (sendBtn) sendBtn.addEventListener("click", sendPrompt);
         if (promptInput) {
@@ -633,6 +651,7 @@
             });
         }
         if (stopPlanBtn) stopPlanBtn.addEventListener("click", stopPlan);
+        if (cancelBtn) cancelBtn.addEventListener("click", cancelPrompt);
         initTheme();
         initModelPersistence();
         loadModels();

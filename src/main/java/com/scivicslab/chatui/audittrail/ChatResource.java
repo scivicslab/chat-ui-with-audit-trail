@@ -180,6 +180,23 @@ public class ChatResource {
         return Response.ok(Map.of("type", "stopping")).build();
     }
 
+    /**
+     * Cancels the LLM call this conversation is running, if any.
+     *
+     * @param projectId owning project's id
+     * @param chatId    conversation id within that project
+     * @return {@code {"type": "cancelled"}}, or 404 when the conversation does not exist
+     */
+    @POST
+    @Path("/{projectId}/chats/{chatId}/chat/cancel")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response cancel(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
+        if (!actorSystem.cancelPrompt(projectId, chatId)) {
+            return Response.status(404).entity(Map.of("type", "error", "message", "no such conversation")).build();
+        }
+        return Response.ok(Map.of("type", "cancelled")).build();
+    }
+
     // ── SSE stream ────────────────────────────────────────────────────────────
 
     /**
