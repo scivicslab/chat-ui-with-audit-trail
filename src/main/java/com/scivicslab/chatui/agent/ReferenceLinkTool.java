@@ -12,7 +12,7 @@ import java.util.logging.Logger;
 
 /**
  * Follows the reference links an author declared between documents
- * ({@code DocRetrievalAgentLoop_260830_oo01}).
+ * ({@code ReferenceLinkTool_260904_oo01}).
  *
  * <p>This is not a search. {@link DocSearchTool} returns documents that resemble a query, ranked by
  * similarity, and the ranking moves when the corpus or the query changes. This tool returns the
@@ -105,6 +105,11 @@ public final class ReferenceLinkTool {
      * rendered flat, with a line saying the kind is missing rather than a group named after an
      * empty string.</p>
      */
+    /** The grouped rendering, reachable from the unit test without an html-saurus to call. */
+    static String renderForTest(List<JsonNode> hits) {
+        return body(hits);
+    }
+
     private static String body(List<JsonNode> hits) {
         if (!anyKindPresent(hits)) {
             return DocSearchTool.renderHits(hits)

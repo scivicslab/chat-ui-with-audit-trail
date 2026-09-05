@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Pure unit test for the reference-following tool's arguments and for the list shape it shares with
- * {@code search_docs} ({@code DocRetrievalAgentLoop_260830_oo01}). No html-saurus is contacted: the
+ * {@code search_docs} ({@code ReferenceLinkTool_260904_oo01}). No html-saurus is contacted: the
  * hit objects are built here in the shape {@code /api/prerequisites} returns.
  *
  * <p>The shape matters as much as the values. The tool returns the same kind of candidate list the
@@ -32,6 +32,13 @@ class ReferenceLinkToolTest {
                 .put("srcPath", srcPath)
                 .put("summary", summary)
                 .put("category", "");
+    }
+
+    /** The same hit with the kind its author wrote, which is what groups the rendered list. */
+    private static JsonNode hit(String id, String title, String srcPath, String summary,
+                                String relation) {
+        return ((com.fasterxml.jackson.databind.node.ObjectNode)
+                hit(id, title, srcPath, summary)).put("relation", relation);
     }
 
     @Test
@@ -79,5 +86,35 @@ class ReferenceLinkToolTest {
     void noHitsRenderAsEmptySoTheCallerSuppliesItsOwnWording() {
         assertEquals("", DocSearchTool.renderHits(List.of()));
         assertEquals("", DocSearchTool.renderHits(List.of(MAPPER.createObjectNode())));
+    }
+
+    /**
+     * The rendering the conversation actually sees for the two references
+     * {@code NamingByTypeAndInstance_260628_oo01} declares. The kinds head their groups, and the
+     * numbering runs on across them, so an entry can be named by its number alone. This is the
+     * output {@code ReferenceLinkTool_260904_oo01} quotes.
+     */
+    @Test
+    void edgesAreGroupedUnderTheKindTheirAuthorWrote() {
+        String out = ReferenceLinkTool.renderForTest(List.of(
+                hit("HelloWorld_260808_oo01",
+                        "Quarkusの最小形（Hello World）— Quarkus_260808_oo01との比較用",
+                        "/home/devteam/works/doc_SCIVICS003/docs/quarkus-gpu-broker/"
+                                + "030_development/010_skeleton/000_HelloWorld_260808_oo01/"
+                                + "000_HelloWorld_260808_oo01.md",
+                        "〈前提条件〉QuarkusのCDIとPOJO-actorのActorSystemがどう同居すべきかを論じる前に、",
+                        "best-practice"),
+                hit("NamingByTypeAndInstanceExamples_260811_oo01",
+                        "実体の命名 — 種別とインスタンスの一意命名（実例）",
+                        "/home/devteam/works/doc_SCIVICS000/docs/ProjectStandard/"
+                                + "010_ProjectStandards/024_NamingByTypeAndInstanceExamples_260811_oo01/"
+                                + "024_NamingByTypeAndInstanceExamples_260811_oo01.md",
+                        "`NamingByTypeAndInstance_260628_oo01` が定める命名規則を、実際に起きた事故に対応づける文書です。",
+                        "anti-pattern")));
+
+        assertTrue(out.startsWith("[best-practice] 1 document\n1. Quarkusの最小形"), out);
+        assertTrue(out.contains("[anti-pattern] 1 document\n2. 実体の命名"), out);
+        // The "kind is missing" note belongs only to the ungrouped rendering.
+        assertTrue(!out.contains("does not report the kind"), out);
     }
 }
