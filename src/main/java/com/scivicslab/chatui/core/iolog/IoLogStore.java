@@ -13,6 +13,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -113,6 +114,42 @@ public class IoLogStore {
             LOG.log(Level.WARNING, "startSession failed", e);
             return -1;
         }
+    }
+
+    /**
+     * Every conversation tab the log still holds an unfinished session for, most recent first.
+     *
+     * <p>This is what the tab-to-actor structure is rebuilt from after a restart. The actor tree
+     * lives only in memory, so a process that starts with one project and one conversation shows
+     * exactly that, however many were open when it stopped. The tabs are not lost — their sessions
+     * are in the database, and {@link #ensureSession} resumes one by name as soon as a tab of that
+     * name exists again — but nothing was creating the tabs, so a conversation stayed invisible
+     * until someone happened to recreate a project with the same generated name.</p>
+     *
+     * <p>Only {@code RUNNING} sessions count, for the reason {@link #findResumableSession} gives:
+     * a conversation the user cleared has had its session ended, and must stay cleared.</p>
+     *
+     * @return the tab ids, e.g. {@code "project2/chat-01"}, without duplicates
+     */
+    public synchronized List<String> resumableTabs() {
+        ensureStore();
+        if (store == null) {
+            return List.of();
+        }
+        String prefix = "chat-ui-conversation-";
+        java.util.LinkedHashSet<String> tabs = new java.util.LinkedHashSet<>();
+        try {
+            for (SessionSummary s : store.listSessions(SESSION_SCAN_LIMIT)) {
+                String name = s.getWorkflowName();
+                if (name == null || !name.startsWith(prefix)) continue;
+                if (s.getStatus() != SessionStatus.RUNNING) continue;
+                String tabId = name.substring(prefix.length());
+                if (!tabId.isBlank()) tabs.add(tabId);
+            }
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not list the resumable conversation tabs", e);
+        }
+        return List.copyOf(tabs);
     }
 
     /**
