@@ -76,6 +76,10 @@ public class ActivityResource {
 
     private volatile Answer cached;
 
+    /** Whether an answer is being worked out, so that ten requests do not start ten of them. */
+    private final java.util.concurrent.atomic.AtomicBoolean working =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
     /**
      * One worked-out answer and the moment it was worked out.
      *
@@ -92,11 +96,39 @@ public class ActivityResource {
     @GET
     public Map<String, Object> activity() {
         Answer answer = cached;
-        Duration age = answer == null ? null : Duration.between(answer.asOf(), Instant.now());
-        if (answer == null || age.compareTo(answer.fromModel() ? MAX_AGE : RETRY_AGE) > 0) {
-            answer = work();
-            cached = answer;
+        // The answer that is held is returned as it stands, and a stale one is renewed behind this
+        // request rather than in front of it. Whoever asks is drawing a dashboard and gives up after
+        // a second; working out an answer takes three calls to a model. Blocking here made the
+        // column go blank for one poll every half hour, exactly when the answer was being renewed.
+        if (isStale(answer)) renew();
+        if (answer == null) {
+            return answerOf(new Answer("", Instant.now(), List.of(), false));
         }
+        return answerOf(answer);
+    }
+
+    /** @return whether {@code answer} is missing or has stood longer than it may */
+    private boolean isStale(Answer answer) {
+        return answer == null || Duration.between(answer.asOf(), Instant.now())
+                .compareTo(answer.fromModel() ? MAX_AGE : RETRY_AGE) > 0;
+    }
+
+    /** Works out a new answer on its own thread, unless one is already being worked out. */
+    private void renew() {
+        if (!working.compareAndSet(false, true)) return;
+        Thread.ofVirtual().start(() -> {
+            try {
+                cached = work();
+            } catch (RuntimeException e) {
+                LOG.log(Level.FINE, "Could not work out what this instance is doing", e);
+            } finally {
+                working.set(false);
+            }
+        });
+    }
+
+    /** @param answer the answer to send @return it, as the three fields of the reply */
+    private static Map<String, Object> answerOf(Answer answer) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("summary", answer.summary());
         out.put("asOf", answer.asOf().toString());
