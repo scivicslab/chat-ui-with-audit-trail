@@ -306,14 +306,31 @@
                 queueArea.textContent = "";
                 var header = document.createElement("div");
                 header.className = "queue-header";
-                header.textContent = size > 0
-                    ? size + " prompt(s) queued (waiting for the current turn to finish)"
-                    : "Queue is empty";
+                var headerText = document.createElement("span");
+                // Every item in this queue is still pending: PromptQueue removes an item when it
+                // dispatches it, so there is no already-sent item to count separately the way
+                // quarkus-chat-ui's client-side queue has (it keeps sent items and a position).
+                headerText.textContent = size > 0 ? "Queue (" + size + ") - " + size + " pending:"
+                                                  : "Queue is empty";
+                header.appendChild(headerText);
+                if (size > 0) {
+                    var saveBtn = document.createElement("button");
+                    saveBtn.className = "queue-save-btn";
+                    saveBtn.title = "Save as Markdown";
+                    saveBtn.textContent = "Save";
+                    saveBtn.addEventListener("click", function () { saveQueueAsMarkdown(items); });
+                    header.appendChild(saveBtn);
+                }
                 queueArea.appendChild(header);
 
                 items.forEach(function (item, i) {
                     var row = document.createElement("div");
-                    row.className = "queue-item" + (i === 0 ? " current" : "");
+                    // "current" is the item that goes next; "waiting" is that item held back
+                    // because its Auto is off and nothing is running to hand it over.
+                    var cls = "queue-item";
+                    if (i === 0) cls += " current";
+                    if (i === 0 && !busy && !item.auto) cls += " waiting";
+                    row.className = cls;
 
                     var index = document.createElement("span");
                     index.className = "queue-index";
@@ -323,7 +340,10 @@
                     var text = document.createElement("span");
                     text.className = "queue-text";
                     text.textContent = item.prompt;
-                    if (item.source && item.source !== "human") text.title = "source: " + item.source;
+                    // The row shows one line; the hover text is the whole prompt.
+                    text.title = (item.source && item.source !== "human")
+                            ? "source: " + item.source + "\n\n" + item.prompt
+                            : item.prompt;
                     row.appendChild(text);
 
                     var autoLabel = document.createElement("label");
@@ -380,8 +400,35 @@
                     queueArea.appendChild(row);
                 });
                 queueArea.style.display = (size > 0 || queueArea.dataset.forcedOpen === "1") ? "block" : "none";
+                queueArea.scrollTop = queueArea.scrollHeight;
             })
             .catch(function () { /* leave the last known state on failure */ });
+    }
+
+    // Downloads the queue as a Markdown checklist, the same shape quarkus-chat-ui writes. Every
+    // box is unchecked: an item leaves this queue when it is dispatched, so what is listed is
+    // exactly what has not been sent.
+    function saveQueueAsMarkdown(items) {
+        if (!items || items.length === 0) return;
+        var lines = ["# Prompt Queue", ""];
+        items.forEach(function (item, i) {
+            lines.push((i + 1) + ". [ ] " + item.prompt);
+        });
+        lines.push("");
+        var url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/markdown" }));
+        var a = document.createElement("a");
+        a.href = url;
+        var now = new Date();
+        var stamp = now.getFullYear()
+                + String(now.getMonth() + 1).padStart(2, "0")
+                + String(now.getDate()).padStart(2, "0")
+                + "-" + String(now.getHours()).padStart(2, "0")
+                + String(now.getMinutes()).padStart(2, "0");
+        a.download = "prompt-queue-" + stamp + ".md";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
     }
 
     function moveQueueItem(index, direction) {
