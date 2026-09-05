@@ -67,7 +67,32 @@
     // incremental tokens on that channel, so there is no unclosed-fence mid-stream case to patch.
     function renderMarkdown(text) {
         if (typeof marked === "undefined") return escapeHtml(text);
-        try { return marked.parse(text); } catch (e) { return escapeHtml(text); }
+        try { return withLocalImages(marked.parse(text)); } catch (e) { return escapeHtml(text); }
+    }
+
+    // Points every <img> whose source is a path on this machine at /api/local-image, which reads
+    // the file server-side (LocalImageInAnswer_260904_oo01). Markdown turns
+    // ![](/home/devteam/works/shot.png) into <img src="/home/devteam/works/shot.png">, and the
+    // browser asks THIS server for that path — a request no static resource answers, so the picture
+    // comes out broken. The browser has no way to open a local file itself; only the server does.
+    // Sources under /api/ are left alone: those are this application's own endpoints, not files.
+    function withLocalImages(html) {
+        var holder = document.createElement("div");
+        holder.innerHTML = html;
+        var imgs = holder.getElementsByTagName("img");
+        for (var i = 0; i < imgs.length; i++) {
+            var raw = imgs[i].getAttribute("src") || "";
+            var filePath = null;
+            if (raw.indexOf("file://") === 0) {
+                filePath = decodeURIComponent(raw.substring("file://".length));
+            } else if (raw.charAt(0) === "/" && raw.indexOf("/api/") !== 0) {
+                filePath = raw;
+            }
+            if (filePath) {
+                imgs[i].setAttribute("src", "api/local-image?path=" + encodeURIComponent(filePath));
+            }
+        }
+        return holder.innerHTML;
     }
 
     function escapeHtml(s) {
