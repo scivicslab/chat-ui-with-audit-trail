@@ -15,9 +15,9 @@ import com.scivicslab.turingworkflow.plugins.logoutput.MultiplexerAccumulatorAct
 import com.scivicslab.turingworkflow.plugins.logoutput.MultiplexerLogHandler;
 import com.scivicslab.turingworkflow.plugins.promptbuilder.PromptBuilderActor;
 import com.scivicslab.turingworkflow.workflow.IIActorRef;
-import com.scivicslab.pojoactor.core.distributed.DistributedActorSystem;
-import com.scivicslab.pojoactor.core.distributed.NodeInfo;
-import com.scivicslab.pojoactor.core.distributed.discovery.NodeDiscovery;
+import com.scivicslab.pojoactor.distributed.DistributedActorSystem;
+import com.scivicslab.pojoactor.distributed.NodeInfo;
+import com.scivicslab.pojoactor.distributed.discovery.NodeDiscovery;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 import com.scivicslab.pojoactor.core.schema.ActionCatalog;
 import com.scivicslab.pojoactor.core.schema.ActionSchemaRegistry;

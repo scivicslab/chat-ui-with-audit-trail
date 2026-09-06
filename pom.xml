@@ -64,6 +64,13 @@
       <artifactId>turing-workflow</artifactId>
       <version>${turing-workflow.version}</version>
     </dependency>
+
+    <dependency>
+      <groupId>com.scivicslab</groupId>
+      <artifactId>pojo-actor-distributed</artifactId>
+      <version>1.0.0-SNAPSHOT</version>
+    </dependency>
+
     <!-- turing-workflow:3.7.0's own published pom omits this, even though Interpreter (which
          ChatSession extends) uses org.apache.commons.jexl3 directly — declared explicitly here
          so it resolves at runtime, not just compile time. -->
