@@ -131,6 +131,41 @@
 
   <build>
     <plugins>
+      <!-- Turns every @Action(argsType = ...) into a JSON Schema under
+           target/classes/action-schemas, so ActionSchemaRegistry can load it at runtime and
+           ActionCatalog can hand it to a caller in another process
+           (ActionArgumentSchema_260807_oo01). Runs at process-classes so the files are in the
+           jar. pojo-actor and the generator are declared as the plugin's own dependencies
+           because exec:java does not put this project's dependencies on the plugin's classpath. -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.1.0</version>
+        <dependencies>
+          <dependency>
+            <groupId>com.scivicslab</groupId>
+            <artifactId>pojo-actor</artifactId>
+            <version>${pojo-actor.version}</version>
+          </dependency>
+          <dependency>
+            <groupId>com.github.victools</groupId>
+            <artifactId>jsonschema-generator</artifactId>
+            <version>4.38.0</version>
+          </dependency>
+        </dependencies>
+        <executions>
+          <execution>
+            <id>generate-action-schemas</id>
+            <phase>process-classes</phase>
+            <goals><goal>java</goal></goals>
+            <configuration>
+              <includePluginDependencies>true</includePluginDependencies>
+              <mainClass>com.scivicslab.pojoactor.core.schema.ActionSchemaGenerator</mainClass>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
       <plugin>
         <groupId>${quarkus.platform.group-id}</groupId>
         <artifactId>quarkus-maven-plugin</artifactId>

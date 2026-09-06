@@ -144,21 +144,41 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     // setCurrentState ...) down to it.
 
     /**
-     * @param arg the prompt, as the workflow wrote it
-     * @return the result key to poll {@link #getResult} with
+     * What {@code sendPrompt} takes.
+     *
+     * <p>Declared as a type rather than parsed by hand so that a caller in another process can be
+     * told the shape instead of having to know it ({@code ActionArgumentSchema_260807_oo01}).
+     *
+     * @param prompt  what to say to the conversation. Required
+     * @param model   which model to answer with, or null for the conversation's own
+     * @param noThink whether to suppress the model's reasoning output; absent means false
      */
-    @Action("sendPrompt")
-    public ActionResult sendPromptAction(String arg) {
-        return sendPrompt(arg);
+    public record SendPromptArgs(String prompt, String model, Boolean noThink) {}
+
+    /**
+     * What {@code getResult} takes.
+     *
+     * @param resultKey the key {@code sendPrompt} returned
+     */
+    public record GetResultArgs(String resultKey) {}
+
+    /**
+     * @param args the prompt, and optionally the model to answer it with
+     * @return the result key to poll {@code getResult} with
+     */
+    @Action(value = "sendPrompt", argsType = SendPromptArgs.class)
+    public ActionResult sendPromptAction(SendPromptArgs args) {
+        return sendPrompt(args);
     }
 
     /**
-     * @param arg the result key returned by {@code sendPrompt}
-     * @return the answer once the turn has finished
+     * @param args the result key returned by {@code sendPrompt}
+     * @return the answer once the turn has finished, or a failure carrying the turn's status
+     *         while it is still running
      */
-    @Action("getResult")
-    public ActionResult getResultAction(String arg) {
-        return getResult(arg);
+    @Action(value = "getResult", argsType = GetResultArgs.class)
+    public ActionResult getResultAction(GetResultArgs args) {
+        return getResult(args);
     }
 
     /**
@@ -448,11 +468,13 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      * see {@code ChatSessionIIAR_260810_oo01} "なぜ PromptQueue を経由する必要があるか"), and
      * returns the key immediately. Poll {@link #getResult} for the outcome.
      */
-    private ActionResult sendPrompt(String arg) {
-        org.json.JSONObject args = new org.json.JSONObject(arg == null ? "{}" : arg);
-        String prompt = args.getString("prompt");
-        String model = args.optString("model", null);
-        boolean noThink = args.optBoolean("noThink", false);
+    private ActionResult sendPrompt(SendPromptArgs args) {
+        if (args == null || args.prompt() == null || args.prompt().isBlank()) {
+            return new ActionResult(false, "sendPrompt needs a prompt");
+        }
+        String prompt = args.prompt();
+        String model = args.model();
+        boolean noThink = Boolean.TRUE.equals(args.noThink());
         ActorRef<PromptQueue> promptQueue = chatSession().getPromptQueue();
         if (promptQueue == null) {
             return new ActionResult(false, "PromptQueue not wired yet");
@@ -466,9 +488,11 @@ public class ChatSessionIIAR extends InterpreterIIAR {
         return new ActionResult(true, resultKey);
     }
 
-    private ActionResult getResult(String arg) {
-        org.json.JSONObject args = new org.json.JSONObject(arg == null ? "{}" : arg);
-        String resultKey = args.getString("resultKey");
+    private ActionResult getResult(GetResultArgs args) {
+        if (args == null || args.resultKey() == null || args.resultKey().isBlank()) {
+            return new ActionResult(false, "getResult needs a resultKey");
+        }
+        String resultKey = args.resultKey();
         String status = chatSession().getResultStatus(resultKey);
         if ("completed".equals(status)) {
             return new ActionResult(true, chatSession().getCompletedResult(resultKey));

@@ -19,6 +19,8 @@ import com.scivicslab.pojoactor.core.distributed.DistributedActorSystem;
 import com.scivicslab.pojoactor.core.distributed.NodeInfo;
 import com.scivicslab.pojoactor.core.distributed.discovery.NodeDiscovery;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
+import com.scivicslab.pojoactor.core.schema.ActionCatalog;
+import com.scivicslab.pojoactor.core.schema.ActionSchemaRegistry;
 import com.scivicslab.turingworkflow.workflow.RootIIAR;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -114,6 +116,9 @@ public class ChatUiActorSystem {
     // Initialised here as well as injected, like maxObservationChars above: the actor-tree unit
     // tests construct this class directly rather than through CDI, and an uninjected field would
     // be null there.
+    /** Registry name of the actor that answers what may be called here. */
+    static final String ACTION_CATALOG = "actionCatalog";
+
     @ConfigProperty(name = "chat-ui.distributed.enabled", defaultValue = "false")
     boolean distributedEnabled = false;
 
@@ -286,6 +291,13 @@ public class ChatUiActorSystem {
         // が違う"), not pre-seeded.
         projects.put(DEFAULT_PROJECT_ID,
                 actorSystem.getRoot().createChild(DEFAULT_PROJECT_ID, new Project()));
+        // What a caller in another process asks before it can call anything: which actions an
+        // actor has, and what one of them takes (ActionArgumentSchema_260807_oo01). Under the
+        // housekeeper because it exists regardless of what work is being done.
+        ActorRef<ActionCatalog> catalogRef = housekeeperRef.createChild(ACTION_CATALOG,
+                new ActionCatalog(actorSystem, new ActionSchemaRegistry()));
+        LOG.info("Action catalog available as actor '" + catalogRef.getName() + "'");
+
         createChat(DEFAULT_PROJECT_ID, "01");
         reopenRecordedTabs();
         LOG.info("Actor system initialised with " + projects.size() + " project(s), "
