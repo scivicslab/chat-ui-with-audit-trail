@@ -18,8 +18,8 @@
     <quarkus.platform.version>3.28.3</quarkus.platform.version>
     <surefire-plugin.version>3.5.4</surefire-plugin.version>
     <!-- Actor model + Turing Workflow engine (IIActorSystem / RootIIAR) for the Actors tab -->
-    <pojo-actor.version>4.0.0-SNAPSHOT</pojo-actor.version>
-    <turing-workflow.version>4.0.0-SNAPSHOT</turing-workflow.version>
+    <pojo-actor.version>4.0.0</pojo-actor.version>
+    <turing-workflow.version>4.0.0</turing-workflow.version>
     <!-- uber-jar without the -runner suffix, per the project naming rule -->
     <quarkus.package.jar.type>uber-jar</quarkus.package.jar.type>
     <quarkus.package.jar.add-runner-suffix>false</quarkus.package.jar.add-runner-suffix>
@@ -68,7 +68,7 @@
     <dependency>
       <groupId>com.scivicslab</groupId>
       <artifactId>pojo-actor-distributed</artifactId>
-      <version>1.0.0-SNAPSHOT</version>
+      <version>1.0.0</version>
     </dependency>
 
     <!-- turing-workflow:3.7.0's own published pom omits this, even though Interpreter (which
@@ -86,7 +86,7 @@
     <dependency>
       <groupId>com.scivicslab.turingworkflow.plugins</groupId>
       <artifactId>plugin-log-db</artifactId>
-      <version>1.7.0-SNAPSHOT</version>
+      <version>4.0.0</version>
       <exclusions>
         <exclusion>
           <groupId>com.scivicslab</groupId>
@@ -106,7 +106,7 @@
     <dependency>
       <groupId>com.scivicslab.turingworkflow.plugins</groupId>
       <artifactId>plugin-log-output</artifactId>
-      <version>1.7.0-SNAPSHOT</version>
+      <version>4.0.0</version>
     </dependency>
     <!-- Prompt construction (TurnResourceLimits/DocRetrievalAgentLoop): PromptBuilderActor keeps
          the constraints sent with every step in the workflow YAML rather than in Java, which is
@@ -114,7 +114,7 @@
     <dependency>
       <groupId>com.scivicslab.turingworkflow.plugins</groupId>
       <artifactId>plugin-prompt-builder</artifactId>
-      <version>1.7.0-SNAPSHOT</version>
+      <version>4.0.0</version>
     </dependency>
     <!-- Agent-loop tools (read/write/web_search/fetch/search_docs): jsoup for HTML parsing
          (DuckDuckGo results, fetched pages). Same version as quarkus-chat-ui3, which these
