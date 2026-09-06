@@ -98,22 +98,30 @@ public class ChatUiActorSystem {
     int maxObservationChars = 20000;
 
     /**
-     * Port for the distributed-actor server, or empty to run without one (the default).
+     * Whether to publish this system's actors for other processes on this machine (off by default).
      *
-     * <p>Setting it makes every actor in this system callable from another process on this
-     * machine, which is what lets a parent interpreter drive the conversations
-     * ({@code WorkflowTab_260906_oo01}). A conversation can read and write under {@code ~/works}
-     * and drive other conversations, so opening this is a real widening of what can reach those
-     * capabilities — hence off unless a port is named, and bound to 127.0.0.1 either way.
+     * <p>Publishing makes every actor here callable from another process, which is what lets a
+     * parent interpreter drive the conversations ({@code WorkflowTab_260906_oo01}). A conversation
+     * can read and write under {@code ~/works} and drive other conversations, so opening this is a
+     * real widening of what can reach those capabilities — hence off by default, and bound to
+     * 127.0.0.1 when on.
      *
-     * <p>There is no separate on/off flag. A flag plus a port would have four combinations, two
-     * of which mean nothing.
+     * <p>The port is not configured: it is derived from this application's own HTTP port by
+     * {@link DistributedActorSystem#publicationPortFor(int)}, so a parent needs only the port it
+     * can already see. Configuring the number as well would give four combinations of flag and
+     * port, two of which mean nothing.
      */
     // Initialised here as well as injected, like maxObservationChars above: the actor-tree unit
     // tests construct this class directly rather than through CDI, and an uninjected field would
     // be null there.
-    @ConfigProperty(name = "chat-ui.distributed.port")
-    Optional<Integer> distributedPort = Optional.empty();
+    @ConfigProperty(name = "chat-ui.distributed.enabled", defaultValue = "false")
+    boolean distributedEnabled = false;
+
+    /**
+     * This application's own HTTP port, which the publication port is derived from.
+     */
+    @ConfigProperty(name = "quarkus.http.port", defaultValue = "8080")
+    int httpPort = 8080;
 
     /**
      * The address the distributed-actor server binds to. Not configurable: a setting could be
@@ -289,17 +297,24 @@ public class ChatUiActorSystem {
     /**
      * Publishes this actor system on 127.0.0.1 when {@code chat-ui.distributed.port} names a port,
      * so a parent interpreter in another process can call the conversations
-     * ({@code WorkflowTab_260906_oo01}). Does nothing when the port is unset.
+     * ({@code WorkflowTab_260906_oo01}). Does nothing unless
+     * {@code chat-ui.distributed.enabled} is on.
      *
      * <p>A failure to bind is logged and left there rather than thrown: the conversations
      * themselves work without the port, and taking the whole application down because a workflow
      * runner cannot attach would trade a working chat UI for one that does not start.
      */
     private void startDistributedActorServer() {
-        if (distributedPort.isEmpty()) {
+        if (!distributedEnabled) {
             return;
         }
-        int port = distributedPort.get();
+        int port;
+        try {
+            port = DistributedActorSystem.publicationPortFor(httpPort);
+        } catch (IllegalArgumentException e) {
+            LOG.log(Level.SEVERE, "Cannot publish actors: " + e.getMessage());
+            return;
+        }
         try {
             distributedActorSystem = DistributedActorSystem.builder()
                     .localActorSystem(actorSystem)
