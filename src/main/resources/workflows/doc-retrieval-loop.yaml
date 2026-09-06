@@ -50,7 +50,8 @@ steps:
     actions:
       - actor: this
         method: searchLimitReached
-        arguments: "3"
+        arguments:
+          maxSearches: 3
         execution: direct
 
   - states: ["judge-hits", "refine"]
@@ -90,7 +91,8 @@ steps:
     actions:
       - actor: this
         method: readSources
-        arguments: "3"
+        arguments:
+          maxDocuments: 3
         execution: direct
 
   - states: ["read-sources", "end"]
@@ -132,7 +134,8 @@ steps:
     actions:
       - actor: this
         method: answerLimitReached
-        arguments: "2"
+        arguments:
+          maxRewrites: 2
         execution: direct
       - actor: this
         method: finish

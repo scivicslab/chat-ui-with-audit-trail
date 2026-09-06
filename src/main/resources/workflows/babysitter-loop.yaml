@@ -26,7 +26,8 @@ steps:
     actions:
       - actor: this
         method: requestFromWorker
-        arguments: ""
+        arguments:
+          request: ""
         execution: direct
 
   - states: ["think", "end"]
@@ -45,9 +46,10 @@ steps:
     actions:
       - actor: this
         method: judgeResult
-        arguments: >-
-          The text must be written in full sentences, must not wander off the subject, must not
-          hedge its conclusions, must not repeat itself, and must not make excuses.
+        arguments:
+          criteria: >-
+            The text must be written in full sentences, must not wander off the subject, must not
+            hedge its conclusions, must not repeat itself, and must not make excuses.
         execution: direct
 
   - states: ["judge", "give-up"]
@@ -57,7 +59,8 @@ steps:
     actions:
       - actor: this
         method: retryLimitReached
-        arguments: "3"
+        arguments:
+          maxRetries: 3
         execution: direct
 
   - states: ["judge", "redo"]

@@ -163,6 +163,33 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      */
     public record GetResultArgs(@NotNull String resultKey) {}
 
+    /** @param maxObservationChars how much of each observation the model may see */
+    public record RunToolArgs(@NotNull Integer maxObservationChars) {}
+
+    /** @param maxSteps how many LLM calls one turn may make */
+    public record StepLimitArgs(@NotNull Integer maxSteps) {}
+
+    /** @param prompt the text to queue as this turn's next prompt */
+    public record AppendPromptArgs(@NotNull String prompt) {}
+
+    /** @param request what to ask the worker to do */
+    public record RequestFromWorkerArgs(@NotNull String request) {}
+
+    /** @param criteria what to judge the worker's reply against */
+    public record JudgeResultArgs(@NotNull String criteria) {}
+
+    /** @param maxRetries how many redos this phase may ask for */
+    public record RetryLimitArgs(@NotNull Integer maxRetries) {}
+
+    /** @param maxSearches how many searches this turn may run */
+    public record SearchLimitArgs(@NotNull Integer maxSearches) {}
+
+    /** @param maxDocuments how many documents to open at most */
+    public record ReadSourcesArgs(@NotNull Integer maxDocuments) {}
+
+    /** @param maxRewrites how many rewrites this turn may make */
+    public record AnswerLimitArgs(@NotNull Integer maxRewrites) {}
+
     /**
      * @param args the prompt, and optionally the model to answer it with
      * @return the result key to poll {@code getResult} with
@@ -200,9 +227,9 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      *            applies ({@code TurnResourceLimits_260830_oo01})
      * @return always successful
      */
-    @Action("runTool")
-    public ActionResult runToolAction(String arg) {
-        return chatSession().runTool(firstArgument(arg));
+    @Action(value = "runTool", argsType = RunToolArgs.class)
+    public ActionResult runToolAction(RunToolArgs args) {
+        return chatSession().runTool(String.valueOf(args.maxObservationChars()));
     }
 
     /**
@@ -211,9 +238,9 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      * @param arg the step limit
      * @return success once the turn has used its steps
      */
-    @Action("stepLimitReached")
-    public ActionResult stepLimitReachedAction(String arg) {
-        return chatSession().stepLimitReached(firstArgument(arg));
+    @Action(value = "stepLimitReached", argsType = StepLimitArgs.class)
+    public ActionResult stepLimitReachedAction(StepLimitArgs args) {
+        return chatSession().stepLimitReached(String.valueOf(args.maxSteps()));
     }
 
     /**
@@ -268,9 +295,9 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      * @param arg the constructed prompt
      * @return always successful
      */
-    @Action("appendConstructedPrompt")
-    public ActionResult appendConstructedPromptAction(String arg) {
-        chatSession().appendConstructedPrompt(new org.json.JSONArray(arg).getString(0));
+    @Action(value = "appendConstructedPrompt", argsType = AppendPromptArgs.class)
+    public ActionResult appendConstructedPromptAction(AppendPromptArgs args) {
+        chatSession().appendConstructedPrompt(args.prompt());
         return new ActionResult(true, "");
     }
 
@@ -281,27 +308,27 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      * @param arg what to ask the worker to do
      * @return success when the worker replied
      */
-    @Action("requestFromWorker")
-    public ActionResult requestFromWorkerAction(String arg) {
-        return chatSession().requestFromWorker(firstArgument(arg));
+    @Action(value = "requestFromWorker", argsType = RequestFromWorkerArgs.class)
+    public ActionResult requestFromWorkerAction(RequestFromWorkerArgs args) {
+        return chatSession().requestFromWorker(args.request());
     }
 
     /**
      * @param arg the criteria to judge the worker's reply against
      * @return success when the reply meets them
      */
-    @Action("judgeResult")
-    public ActionResult judgeResultAction(String arg) {
-        return chatSession().judgeResult(firstArgument(arg));
+    @Action(value = "judgeResult", argsType = JudgeResultArgs.class)
+    public ActionResult judgeResultAction(JudgeResultArgs args) {
+        return chatSession().judgeResult(args.criteria());
     }
 
     /**
      * @param arg this phase's redo budget
      * @return success once the budget is spent
      */
-    @Action("retryLimitReached")
-    public ActionResult retryLimitReachedAction(String arg) {
-        return chatSession().retryLimitReached(firstArgument(arg));
+    @Action(value = "retryLimitReached", argsType = RetryLimitArgs.class)
+    public ActionResult retryLimitReachedAction(RetryLimitArgs args) {
+        return chatSession().retryLimitReached(String.valueOf(args.maxRetries()));
     }
 
     /**
@@ -348,9 +375,9 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      * @param arg how many searches this turn may run
      * @return success once that many have been run
      */
-    @Action("searchLimitReached")
-    public ActionResult searchLimitReachedAction(String arg) {
-        return chatSession().searchLimitReached(firstArgument(arg));
+    @Action(value = "searchLimitReached", argsType = SearchLimitArgs.class)
+    public ActionResult searchLimitReachedAction(SearchLimitArgs args) {
+        return chatSession().searchLimitReached(String.valueOf(args.maxSearches()));
     }
 
     /**
@@ -375,9 +402,9 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      * @param arg how many documents to open at most
      * @return success when at least one was opened
      */
-    @Action("readSources")
-    public ActionResult readSourcesAction(String arg) {
-        return chatSession().readSources(firstArgument(arg));
+    @Action(value = "readSources", argsType = ReadSourcesArgs.class)
+    public ActionResult readSourcesAction(ReadSourcesArgs args) {
+        return chatSession().readSources(String.valueOf(args.maxDocuments()));
     }
 
     /**
@@ -411,9 +438,9 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      * @param arg how many rewrites this turn may make
      * @return success once that many have been made
      */
-    @Action("answerLimitReached")
-    public ActionResult answerLimitReachedAction(String arg) {
-        return chatSession().answerLimitReached(firstArgument(arg));
+    @Action(value = "answerLimitReached", argsType = AnswerLimitArgs.class)
+    public ActionResult answerLimitReachedAction(AnswerLimitArgs args) {
+        return chatSession().answerLimitReached(String.valueOf(args.maxRewrites()));
     }
 
     /**

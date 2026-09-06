@@ -77,5 +77,6 @@ steps:
     actions:
       - actor: ..
         method: appendConstructedPrompt
-        arguments: "${result}"
+        arguments:
+          prompt: "${result}"
         execution: direct

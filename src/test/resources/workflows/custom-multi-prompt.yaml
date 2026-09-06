@@ -8,9 +8,11 @@ steps:
     actions:
       - actor: ..
         method: appendConstructedPrompt
-        arguments: ["first constructed prompt"]
+        arguments:
+          prompt: "first constructed prompt"
   - states: ["1", "end"]
     actions:
       - actor: ..
         method: appendConstructedPrompt
-        arguments: ["second constructed prompt"]
+        arguments:
+          prompt: "second constructed prompt"

@@ -38,7 +38,8 @@ steps:
     actions:
       - actor: this
         method: stepLimitReached
-        arguments: "30"
+        arguments:
+          maxSteps: 30
         execution: direct
       - actor: this
         method: finish
@@ -113,5 +114,6 @@ steps:
     actions:
       - actor: this
         method: runTool
-        arguments: "20000"
+        arguments:
+          maxObservationChars: 20000
         execution: direct

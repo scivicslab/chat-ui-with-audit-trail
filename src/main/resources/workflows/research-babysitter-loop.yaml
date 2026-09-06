@@ -19,9 +19,10 @@ steps:
     actions:
       - actor: this
         method: requestFromWorker
-        arguments: >-
-          Search for sources on the current state of AI-based security defence. Do not write the
-          report yet — just gather and list what you find, with a one-line note on each source.
+        arguments:
+          request: >-
+            Search for sources on the current state of AI-based security defence. Do not write the
+            report yet — just gather and list what you find, with a one-line note on each source.
         execution: direct
 
   - states: ["think", "end"]
@@ -37,10 +38,11 @@ steps:
     actions:
       - actor: this
         method: judgeResult
-        arguments: >-
-          The search results must cover several distinct angles, not just one: detection
-          technology, what attackers are doing, and organisational or process-level measures. A
-          list of vendor product pages alone is not enough.
+        arguments:
+          criteria: >-
+            The search results must cover several distinct angles, not just one: detection
+            technology, what attackers are doing, and organisational or process-level measures. A
+            list of vendor product pages alone is not enough.
         execution: direct
 
   - states: ["judge-search", "give-up"]
@@ -48,7 +50,8 @@ steps:
     actions:
       - actor: this
         method: retryLimitReached
-        arguments: "3"
+        arguments:
+          maxRetries: 3
         execution: direct
 
   - states: ["judge-search", "redo-search"]
@@ -79,10 +82,11 @@ steps:
     actions:
       - actor: this
         method: requestFromWorker
-        arguments: >-
-          Now write the report on the current state of AI-based security defence, using what you
-          found. Summarise and group the sources, and give the text a structure the reader can
-          follow.
+        arguments:
+          request: >-
+            Now write the report on the current state of AI-based security defence, using what you
+            found. Summarise and group the sources, and give the text a structure the reader can
+            follow.
         execution: direct
 
   - states: ["write", "end"]
@@ -102,11 +106,12 @@ steps:
     actions:
       - actor: this
         method: judgeResult
-        arguments: >-
-          Nothing unrelated may be added without connection to the argument; the line of argument
-          must not break; conclusions must not be blurred by hedging; nothing may be said twice in
-          different words; there must be no excuses. Where any of these appear, the fix is to cut
-          that part, not to add more.
+        arguments:
+          criteria: >-
+            Nothing unrelated may be added without connection to the argument; the line of argument
+            must not break; conclusions must not be blurred by hedging; nothing may be said twice in
+            different words; there must be no excuses. Where any of these appear, the fix is to cut
+            that part, not to add more.
         execution: direct
 
   - states: ["judge-write", "give-up"]
@@ -114,7 +119,8 @@ steps:
     actions:
       - actor: this
         method: retryLimitReached
-        arguments: "3"
+        arguments:
+          maxRetries: 3
         execution: direct
 
   - states: ["judge-write", "redo-write"]
