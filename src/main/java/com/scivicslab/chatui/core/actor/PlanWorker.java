@@ -1,7 +1,7 @@
 package com.scivicslab.chatui.core.actor;
 
 import com.scivicslab.chatui.agent.AskChatTool;
-import com.scivicslab.pojoactor.core.ActionResult;
+import com.scivicslab.pojoactor.action.ActionResult;
 import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 

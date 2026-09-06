@@ -342,7 +342,7 @@ public class PromptQueue {
 
         chat.start(item.prompt(), item.model(), item.emitter(), chatSessionRef, item.done(), item.resultKey(),
                 item.noThink());
-        com.scivicslab.pojoactor.core.ActionResult result = chat.runUntilEnd();
+        com.scivicslab.pojoactor.action.ActionResult result = chat.runUntilEnd();
         if (!result.isSuccess()) {
             LOG.warning("Agent loop did not reach 'end': " + result.getResult());
         }

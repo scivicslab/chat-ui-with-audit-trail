@@ -151,8 +151,8 @@
         <dependencies>
           <dependency>
             <groupId>com.scivicslab</groupId>
-            <artifactId>pojo-actor</artifactId>
-            <version>${pojo-actor.version}</version>
+            <artifactId>turing-workflow</artifactId>
+            <version>${turing-workflow.version}</version>
           </dependency>
           <dependency>
             <groupId>com.github.victools</groupId>
@@ -167,7 +167,7 @@
             <goals><goal>java</goal></goals>
             <configuration>
               <includePluginDependencies>true</includePluginDependencies>
-              <mainClass>com.scivicslab.pojoactor.core.schema.ActionSchemaGenerator</mainClass>
+              <mainClass>com.scivicslab.pojoactor.action.schema.ActionSchemaGenerator</mainClass>
             </configuration>
           </execution>
         </executions>

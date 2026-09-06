@@ -20,7 +20,7 @@ import com.scivicslab.chatui.core.provider.LlmProvider;
 import com.scivicslab.chatui.core.provider.ProviderContext;
 import com.scivicslab.chatui.core.rest.ChatEvent;
 import com.scivicslab.chatui.core.service.AuthMode;
-import com.scivicslab.pojoactor.core.ActionResult;
+import com.scivicslab.pojoactor.action.ActionResult;
 import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.turingworkflow.examples.jshell.JShellCalculator;
 import com.scivicslab.turingworkflow.workflow.IIActorRef;
