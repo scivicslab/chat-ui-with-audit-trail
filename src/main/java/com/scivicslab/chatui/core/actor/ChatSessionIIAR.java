@@ -5,6 +5,7 @@ import com.scivicslab.chatui.core.provider.LlmProvider;
 import com.scivicslab.chatui.core.rest.ChatEvent;
 import com.scivicslab.pojoactor.action.Action;
 import com.scivicslab.pojoactor.action.ActionResult;
+import jakarta.validation.constraints.NotNull;
 import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 import com.scivicslab.turingworkflow.workflow.InterpreterIIAR;
@@ -153,14 +154,14 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      * @param model   which model to answer with, or null for the conversation's own
      * @param noThink whether to suppress the model's reasoning output; absent means false
      */
-    public record SendPromptArgs(String prompt, String model, Boolean noThink) {}
+    public record SendPromptArgs(@NotNull String prompt, String model, Boolean noThink) {}
 
     /**
      * What {@code getResult} takes.
      *
      * @param resultKey the key {@code sendPrompt} returned
      */
-    public record GetResultArgs(String resultKey) {}
+    public record GetResultArgs(@NotNull String resultKey) {}
 
     /**
      * @param args the prompt, and optionally the model to answer it with
@@ -469,9 +470,6 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      * returns the key immediately. Poll {@link #getResult} for the outcome.
      */
     private ActionResult sendPrompt(SendPromptArgs args) {
-        if (args == null || args.prompt() == null || args.prompt().isBlank()) {
-            return new ActionResult(false, "sendPrompt needs a prompt");
-        }
         String prompt = args.prompt();
         String model = args.model();
         boolean noThink = Boolean.TRUE.equals(args.noThink());
@@ -489,9 +487,6 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     }
 
     private ActionResult getResult(GetResultArgs args) {
-        if (args == null || args.resultKey() == null || args.resultKey().isBlank()) {
-            return new ActionResult(false, "getResult needs a resultKey");
-        }
         String resultKey = args.resultKey();
         String status = chatSession().getResultStatus(resultKey);
         if ("completed".equals(status)) {
