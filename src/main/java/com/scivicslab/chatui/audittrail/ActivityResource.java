@@ -68,8 +68,13 @@ public class ActivityResource {
      */
     private static final Duration RETRY_AGE = Duration.ofMinutes(1);
 
-    /** How many of a conversation's most recent turns are read to work out its subject. */
-    private static final int TURNS_READ = 12;
+    /** How many of a conversation's most recent turns are read to work out its subject.
+     *
+     * <p>Wide enough that the turns actually naming the program/domain being worked on are still in
+     * view even once the conversation has moved on to fine-grained sub-tasks, without reaching back
+     * so far that a topic the conversation has since dropped gets pulled in.</p>
+     */
+    private static final int TURNS_READ = 30;
 
     /** How much of one turn is passed on. A subject does not need whole answers. */
     private static final int CHARS_PER_TURN = 400;
@@ -258,6 +263,8 @@ public class ActivityResource {
                 Constraints:
                 - Describe the program/project and its domain, not the specific sub-task currently in
                   progress within it.
+                - Look for the actual program name, repository name, or project keyword mentioned in
+                  the conversation, and name it rather than describing the work only in generic terms.
                 - One sentence, at most 20 words. No preamble, no quotation marks.
                 - Do not write hostnames, IP addresses, file paths, credentials, or commands.
                 - Do not copy the conversation text verbatim.
