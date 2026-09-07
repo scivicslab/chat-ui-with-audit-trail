@@ -899,6 +899,51 @@ footer {
     background: #e87a99;
 }
 
+/* Pending image attachments, shown above the prompt textarea */
+#image-attachments {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.image-attachment {
+    position: relative;
+    display: inline-block;
+}
+
+.image-attachment img {
+    width: 56px;
+    height: 56px;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+}
+
+.image-attachment .remove-attachment {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 18px;
+    height: 18px;
+    line-height: 16px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: var(--accent-red);
+    color: var(--bg-primary);
+    cursor: pointer;
+    font-size: 12px;
+}
+
+/* An image attached to a message, in the chat log */
+.message-image {
+    display: block;
+    max-width: 260px;
+    max-height: 260px;
+    border-radius: 8px;
+    margin-bottom: 6px;
+}
+
 /* Prompt messages (interactive prompts from Claude) */
 .message.prompt {
     background: rgba(249, 226, 175, 0.1);

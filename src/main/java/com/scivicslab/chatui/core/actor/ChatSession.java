@@ -257,6 +257,10 @@ public class ChatSession extends Interpreter {
     // closure, so the whole turn runs on this actor's own single thread.
     private String question;
     private String pendingPrompt;
+    // Data URLs attached to this turn's prompt, sent to the provider on step 1 only
+    // (stepExpectingAction) — a later step's provider call carries a tool observation, not the
+    // original attachment, so re-sending them would just repeat the same image every step.
+    private List<String> pendingImages = List.of();
     private String turnModel;
     private Consumer<ChatEvent> turnEmitter;
     private ActorRef<ChatSession> turnSelf;
@@ -1038,6 +1042,18 @@ public class ChatSession extends Interpreter {
     public void start(String prompt, String model, Consumer<ChatEvent> emitter,
                        ActorRef<ChatSession> self, CompletableFuture<Void> done, String resultKey,
                        boolean noThink) {
+        start(prompt, model, emitter, self, done, resultKey, noThink, List.of());
+    }
+
+    /**
+     * Starts a turn with images attached to its prompt ({@code AttachedImages_260908_oo01}).
+     *
+     * @param images data URLs pasted/dropped/attached alongside {@code prompt}, sent to the
+     *               provider only on this turn's first LLM call — see {@link #pendingImages}
+     */
+    public void start(String prompt, String model, Consumer<ChatEvent> emitter,
+                       ActorRef<ChatSession> self, CompletableFuture<Void> done, String resultKey,
+                       boolean noThink, List<String> images) {
         if (busy) {
             emitter.accept(ChatEvent.error("Already processing a prompt. Please wait or cancel."));
             done.complete(null);
@@ -1058,6 +1074,7 @@ public class ChatSession extends Interpreter {
 
         this.question = prompt;
         this.pendingPrompt = prompt;
+        this.pendingImages = (images == null) ? List.of() : images;
         this.turnModel = model;
         this.turnEmitter = emitter;
         this.turnSelf = self;
@@ -1194,7 +1211,11 @@ public class ChatSession extends Interpreter {
             }
         }
         String promptToSend = constructedPrompts.pollFirst();
-        ProviderContext ctx = new ProviderContext(apiKey, List.of(), turnNoThink, () -> {});
+        // Attached images belong to the human's original message, sent once on this turn's first
+        // LLM call. A later step's promptToSend is a tool observation, not that message, so it
+        // carries no images of its own.
+        List<String> stepImages = (stepCount == 1) ? pendingImages : List.of();
+        ProviderContext ctx = new ProviderContext(apiKey, stepImages, turnNoThink, () -> {});
         StringBuilder assistantBuf = new StringBuilder();
         // The reasoning is kept for the record, not for the answer: it goes to the I/O log's
         // REASONING: section and never into assistantBuf, which is what the next step parses for

@@ -35,7 +35,8 @@ public record ChatEvent(
     List<String> options,
     String logLevel,
     String loggerName,
-    Long timestamp
+    Long timestamp,
+    List<String> images
 ) {
 
     /**
@@ -45,7 +46,7 @@ public record ChatEvent(
      * @return a new delta event
      */
     public static ChatEvent delta(String content) {
-        return new ChatEvent("delta", content, null, null, null, null, null, null, null, null, null, null, null);
+        return new ChatEvent("delta", content, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -57,7 +58,7 @@ public record ChatEvent(
      * @return a new result event
      */
     public static ChatEvent result(String sessionId, double costUsd, long durationMs) {
-        return new ChatEvent("result", null, sessionId, costUsd, durationMs, null, null, null, null, null, null, null, null);
+        return new ChatEvent("result", null, sessionId, costUsd, durationMs, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -71,7 +72,7 @@ public record ChatEvent(
      * @return a new result event
      */
     public static ChatEvent result(String sessionId, double costUsd, long durationMs, String model, boolean busy) {
-        return new ChatEvent("result", null, sessionId, costUsd, durationMs, model, busy, null, null, null, null, null, null);
+        return new ChatEvent("result", null, sessionId, costUsd, durationMs, model, busy, null, null, null, null, null, null, null);
     }
 
     /**
@@ -81,7 +82,7 @@ public record ChatEvent(
      * @return a new error event
      */
     public static ChatEvent error(String content) {
-        return new ChatEvent("error", content, null, null, null, null, null, null, null, null, null, null, null);
+        return new ChatEvent("error", content, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -91,7 +92,7 @@ public record ChatEvent(
      * @return a new info event
      */
     public static ChatEvent info(String content) {
-        return new ChatEvent("info", content, null, null, null, null, null, null, null, null, null, null, null);
+        return new ChatEvent("info", content, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -101,7 +102,19 @@ public record ChatEvent(
      * @return a new user event
      */
     public static ChatEvent user(String content) {
-        return new ChatEvent("user", content, null, null, null, null, null, null, null, null, null, null, null);
+        return user(content, null);
+    }
+
+    /**
+     * Creates a user message event carrying attached images alongside the prompt text.
+     *
+     * @param content the user's prompt text
+     * @param images  data URLs of images attached to this prompt, or {@code null}/empty if none
+     * @return a new user event
+     */
+    public static ChatEvent user(String content, List<String> images) {
+        return new ChatEvent("user", content, null, null, null, null, null, null, null, null, null, null, null,
+                (images == null || images.isEmpty()) ? null : images);
     }
 
     /**
@@ -112,7 +125,7 @@ public record ChatEvent(
      * @return a new mcp_user event
      */
     public static ChatEvent mcpUser(String content) {
-        return new ChatEvent("mcp_user", content, null, null, null, null, null, null, null, null, null, null, null);
+        return new ChatEvent("mcp_user", content, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -124,7 +137,7 @@ public record ChatEvent(
      * @return a new status event
      */
     public static ChatEvent status(String model, String sessionId, boolean busy) {
-        return new ChatEvent("status", null, sessionId, null, null, model, busy, null, null, null, null, null, null);
+        return new ChatEvent("status", null, sessionId, null, null, model, busy, null, null, null, null, null, null, null);
     }
 
     /**
@@ -134,7 +147,7 @@ public record ChatEvent(
      * @return a new thinking event
      */
     public static ChatEvent thinking(String content) {
-        return new ChatEvent("thinking", content, null, null, null, null, null, null, null, null, null, null, null);
+        return new ChatEvent("thinking", content, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -143,7 +156,7 @@ public record ChatEvent(
      * @return a new heartbeat event
      */
     public static ChatEvent heartbeat() {
-        return new ChatEvent("heartbeat", null, null, null, null, null, null, null, null, null, null, null, null);
+        return new ChatEvent("heartbeat", null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -157,7 +170,7 @@ public record ChatEvent(
      */
     public static ChatEvent prompt(String promptId, String content, String promptType, List<String> options) {
         return new ChatEvent("prompt", content, null, null, null, null, null,
-                             promptId, promptType, options, null, null, null);
+                             promptId, promptType, options, null, null, null, null);
     }
 
     /**
@@ -171,7 +184,7 @@ public record ChatEvent(
      */
     public static ChatEvent log(String level, String logger, String message, long ts) {
         return new ChatEvent("log", message, null, null, null, null, null,
-                             null, null, null, level, logger, ts);
+                             null, null, null, level, logger, ts, null);
     }
 
     /**
@@ -183,7 +196,7 @@ public record ChatEvent(
      */
     public static ChatEvent translation(String content) {
         return new ChatEvent("translation", content, null, null, null, null, null,
-                             null, null, null, null, null, null);
+                             null, null, null, null, null, null, null);
     }
 
     /**
@@ -194,7 +207,7 @@ public record ChatEvent(
      */
     public static ChatEvent btwDelta(String content) {
         return new ChatEvent("btw_delta", content, null, null, null, null, null,
-                             null, null, null, null, null, null);
+                             null, null, null, null, null, null, null);
     }
 
     /**
@@ -204,6 +217,6 @@ public record ChatEvent(
      */
     public static ChatEvent btwResult() {
         return new ChatEvent("btw_result", null, null, null, null, null, null,
-                             null, null, null, null, null, null);
+                             null, null, null, null, null, null, null);
     }
 }

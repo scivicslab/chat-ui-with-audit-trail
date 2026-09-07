@@ -42,6 +42,8 @@
 
     var chatArea, promptInput, sendBtn, connStatus, activityLabel, modelSelect, notificationBar;
     var themeSelect, queueBtn, queueArea, stopPlanBtn, cancelBtn;
+    var attachBtn, imageFileInput, imageAttachments;
+    var pendingImages = []; // [{name, dataUrl}] attached via paste, drop, or the file picker
     var eventSource = null;
     var streamingEl = null;   // the live assistant bubble currently receiving deltas
     var streamingMarkdown = "";  // its markdown source, kept for the footer's copy button
@@ -204,10 +206,20 @@
         footer.appendChild(textSpan(formatTime(new Date())));
     }
 
-    function appendMessage(role, text) {
+    function appendMessage(role, text, images) {
         var div = document.createElement("div");
         div.className = "message " + role;
-        div.textContent = text;
+        if (images && images.length) {
+            images.forEach(function (src) {
+                var img = document.createElement("img");
+                img.src = src;
+                img.className = "message-image";
+                div.appendChild(img);
+            });
+            div.appendChild(document.createTextNode(text));
+        } else {
+            div.textContent = text;
+        }
         // The prompt a human typed is worth copying back out; transient error/info bubbles are not.
         if (role === "user") {
             var footer = newFooter(div);
@@ -428,7 +440,7 @@
     // Puts the text in the queue without sending it. The item sits there with its Auto off until
     // a human turns it on or advances the queue.
     function queuePrompt(text) {
-        var payload = { text: text, hold: true };
+        var payload = { text: text, hold: true, images: takePendingImages() };
         fetch(apiUrl(chatUrl("/chat")), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -549,7 +561,7 @@
                 setBusy(false);
                 break;
             case "user":
-                appendMessage("user", event.content || "");
+                appendMessage("user", event.content || "", event.images);
                 scrollToBottom();
                 break;
             case "mcp_user":
@@ -584,7 +596,7 @@
         forceScrollToBottom();
         setBusy(true);
 
-        var payload = { text: text };
+        var payload = { text: text, images: takePendingImages() };
 
         fetch(apiUrl(chatUrl("/chat")), {
             method: "POST",
@@ -789,6 +801,45 @@
         chatArea.scrollTop = chatArea.scrollHeight;
     }
 
+    // ── Image attachments: paste, drop, or pick a file ──────────────────────────
+
+    function addImageFile(file) {
+        if (!file || file.type.indexOf("image/") !== 0) return;
+        var reader = new FileReader();
+        reader.onload = function () {
+            pendingImages.push({ name: file.name || "pasted-image", dataUrl: reader.result });
+            renderPendingImages();
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function renderPendingImages() {
+        if (!imageAttachments) return;
+        if (!pendingImages.length) {
+            imageAttachments.style.display = "none";
+            imageAttachments.innerHTML = "";
+            return;
+        }
+        imageAttachments.style.display = "flex";
+        imageAttachments.innerHTML = pendingImages.map(function (img, i) {
+            return '<span class="image-attachment"><img src="' + img.dataUrl + '" alt="">' +
+                   '<button type="button" class="remove-attachment" data-idx="' + i + '" title="Remove">&times;</button></span>';
+        }).join("");
+        Array.prototype.forEach.call(imageAttachments.querySelectorAll(".remove-attachment"), function (btn) {
+            btn.addEventListener("click", function () {
+                pendingImages.splice(parseInt(btn.dataset.idx, 10), 1);
+                renderPendingImages();
+            });
+        });
+    }
+
+    function takePendingImages() {
+        var urls = pendingImages.map(function (img) { return img.dataUrl; });
+        pendingImages = [];
+        renderPendingImages();
+        return urls;
+    }
+
     // ── Init ─────────────────────────────────────────────────────────────────
 
     document.addEventListener("DOMContentLoaded", function () {
@@ -809,11 +860,33 @@
         queueArea = el("queue-area");
         stopPlanBtn = el("stop-plan-btn");
         cancelBtn = el("cancel-btn");
+        attachBtn = el("attach-btn");
+        imageFileInput = el("image-file-input");
+        imageAttachments = el("image-attachments");
 
         if (sendBtn) sendBtn.addEventListener("click", sendPrompt);
         if (promptInput) {
             promptInput.addEventListener("keydown", function (e) {
                 if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); sendPrompt(); }
+            });
+            promptInput.addEventListener("paste", function (e) {
+                var items = (e.clipboardData || {}).items || [];
+                for (var i = 0; i < items.length; i++) {
+                    if (items[i].type.indexOf("image/") === 0) addImageFile(items[i].getAsFile());
+                }
+            });
+            promptInput.addEventListener("dragover", function (e) { e.preventDefault(); });
+            promptInput.addEventListener("drop", function (e) {
+                e.preventDefault();
+                var files = (e.dataTransfer || {}).files || [];
+                for (var i = 0; i < files.length; i++) addImageFile(files[i]);
+            });
+        }
+        if (attachBtn && imageFileInput) {
+            attachBtn.addEventListener("click", function () { imageFileInput.click(); });
+            imageFileInput.addEventListener("change", function () {
+                Array.prototype.forEach.call(imageFileInput.files, addImageFile);
+                imageFileInput.value = "";
             });
         }
         if (queueBtn) {

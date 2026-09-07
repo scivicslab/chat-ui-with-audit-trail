@@ -154,10 +154,27 @@ public class PromptQueue {
                         ActorRef<ChatSession> chatSessionRef,
                         String source, String resultKey,
                         CompletableFuture<Void> done, boolean noThink, boolean auto) {
+        enqueue(prompt, model, mode, emitter, chatSessionRef, source, resultKey, done, noThink, auto, List.of());
+    }
+
+    /**
+     * Enqueues a prompt with images attached, held or ready.
+     *
+     * @param images data URLs of images pasted/dropped/attached alongside {@code prompt}
+     *               ({@code AttachedImages_260908_oo01}), or empty if none. Rendered by the
+     *               provider only on the turn's first step ({@code ChatSession.stepExpectingAction});
+     *               see {@link #popFront} for where they are also echoed to the pane.
+     */
+    public void enqueue(String prompt, String model, String mode,
+                        Consumer<ChatEvent> emitter,
+                        ActorRef<ChatSession> chatSessionRef,
+                        String source, String resultKey,
+                        CompletableFuture<Void> done, boolean noThink, boolean auto,
+                        List<String> images) {
 
         switch (mode) {
             case "cancel_and_send" -> {
-                QueueItem item = new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, auto);
+                QueueItem item = new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, auto, images);
                 queue.add(0, item);
                 // tellNow, not tell: the running turn blocks the ChatSession's own thread, so a
                 // queued cancel would be delivered only after that turn ended (ChatSession.cancel).
@@ -168,7 +185,7 @@ public class PromptQueue {
             }
             default -> {
                 // "queue" mode (default)
-                QueueItem item = new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, auto);
+                QueueItem item = new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, auto, images);
                 queue.add(item);
                 emitter.accept(ChatEvent.info(auto
                         ? "Queued. Your message will be sent when the current prompt finishes."
@@ -341,7 +358,7 @@ public class PromptQueue {
         if (item == null) return;
 
         chat.start(item.prompt(), item.model(), item.emitter(), chatSessionRef, item.done(), item.resultKey(),
-                item.noThink());
+                item.noThink(), item.images());
         com.scivicslab.pojoactor.action.ActionResult result = chat.runUntilEnd();
         if (!result.isSuccess()) {
             LOG.warning("Agent loop did not reach 'end': " + result.getResult());
@@ -365,7 +382,7 @@ public class PromptQueue {
         // item appears when it is sent rather than while it is still waiting in the queue.
         try {
             item.emitter().accept("human".equals(item.source())
-                    ? ChatEvent.user(item.prompt())
+                    ? ChatEvent.user(item.prompt(), item.images())
                     : ChatEvent.mcpUser(item.prompt()));
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Could not echo the dispatched prompt to the pane", e);
@@ -391,10 +408,11 @@ public class PromptQueue {
             String source,     // "human" | "agent:xxx" (e.g. "agent:localhost:28900")
             String resultKey,  // UUID for MCP result tracking, null for human prompts
             boolean noThink,
-            boolean auto       // false = paused: waits for advanceNow instead of auto-dispatch
+            boolean auto,      // false = paused: waits for advanceNow instead of auto-dispatch
+            List<String> images // data URLs attached to this prompt, or empty
     ) {
         QueueItem withAuto(boolean newAuto) {
-            return new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, newAuto);
+            return new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, newAuto, images);
         }
     }
 }

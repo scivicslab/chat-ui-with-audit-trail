@@ -33,6 +33,7 @@ class PromptQueueDispatchTest {
 
     private static final class RecordingProvider implements LlmProvider {
         final List<String> receivedPrompts = Collections.synchronizedList(new ArrayList<>());
+        final List<List<String>> receivedImages = Collections.synchronizedList(new ArrayList<>());
         final CountDownLatch holdLatch = new CountDownLatch(1);
         volatile boolean holdNext = false;
 
@@ -46,6 +47,7 @@ class PromptQueueDispatchTest {
         @Override
         public void sendPrompt(String prompt, String model, Consumer<ChatEvent> emitter, ProviderContext ctx) {
             receivedPrompts.add(prompt);
+            receivedImages.add(ctx.imageDataUrls());
             if (holdNext) {
                 holdNext = false;
                 try { holdLatch.await(2, TimeUnit.SECONDS); } catch (InterruptedException ignored) { }
@@ -88,6 +90,22 @@ class PromptQueueDispatchTest {
         assertEquals(1, r.provider().receivedPrompts.size());
         // step 1 prefixes the system prompt (ChatSessionAgentLoop_260823_oo01) — check the tail.
         assertTrue(r.provider().receivedPrompts.get(0).endsWith("\n\nhello"));
+    }
+
+    @Test
+    void enqueue_withImages_reachesProviderAndIsEchoedToThePane() {
+        Rig r = setUp();
+        List<String> images = List.of("data:image/png;base64,QUJD");
+        List<ChatEvent> emitted = Collections.synchronizedList(new ArrayList<>());
+        r.queueRef().tellNow(q -> q.enqueue("what is this?", null, "queue", emitted::add, r.chatRef(),
+                "human", null, new java.util.concurrent.CompletableFuture<Void>(), false, true, images)).join();
+
+        waitUntil(() -> !r.provider().receivedImages.isEmpty(), 2000);
+        assertEquals(images, r.provider().receivedImages.get(0));
+
+        waitUntil(() -> emitted.stream().anyMatch(e -> "user".equals(e.type())), 2000);
+        ChatEvent userEvent = emitted.stream().filter(e -> "user".equals(e.type())).findFirst().orElseThrow();
+        assertEquals(images, userEvent.images());
     }
 
     @Test

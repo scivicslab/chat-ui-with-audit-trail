@@ -129,9 +129,12 @@
                     <div id="input-area" style="position:relative">
                         <div id="predict-popup" style="display:none"></div>
                         <div id="skill-suggest" style="display:none"></div>
-                        <textarea id="prompt-input" placeholder="Type a message… (Shift+Enter to send, Tab to predict, /btw question for side questions)" rows="5"></textarea>
+                        <div id="image-attachments" style="display:none"></div>
+                        <textarea id="prompt-input" placeholder="Type a message… (Shift+Enter to send, Tab to predict, /btw question for side questions, paste or drop an image to attach it)" rows="5"></textarea>
+                        <input type="file" id="image-file-input" accept="image/*" multiple style="display:none">
                         <div id="input-toolbar">
                             <div id="input-toolbar-left">
+                                <button id="attach-btn" class="icon-btn" title="Attach image">📎</button>
                                 <button id="queue-btn" class="icon-btn" title="Add to queue">⏱</button>
                                 <button id="stop-plan-btn" class="icon-btn" title="Stop this conversation's running plan">■</button>
                             </div>
