@@ -130,11 +130,15 @@
                         <div id="predict-popup" style="display:none"></div>
                         <div id="skill-suggest" style="display:none"></div>
                         <textarea id="prompt-input" placeholder="Type a message… (Shift+Enter to send, Tab to predict, /btw question for side questions)" rows="5"></textarea>
-                        <div id="buttons">
-                            <button id="send-btn" title="Send (Shift+Enter)">Send</button>
-                            <button id="cancel-btn" title="Cancel" disabled>Cancel</button>
-                            <button id="queue-btn" title="Add to queue">Queue</button>
-                            <button id="stop-plan-btn" title="Stop this conversation's running plan">Stop plan</button>
+                        <div id="input-toolbar">
+                            <div id="input-toolbar-left">
+                                <button id="queue-btn" class="icon-btn" title="Add to queue">⏱</button>
+                                <button id="stop-plan-btn" class="icon-btn" title="Stop this conversation's running plan">■</button>
+                            </div>
+                            <div id="send-cancel-slot">
+                                <button id="cancel-btn" title="Cancel" disabled>Cancel</button>
+                                <button id="send-btn" title="Send (Shift+Enter)">Send</button>
+                            </div>
                         </div>
                     </div>
                 </footer>
