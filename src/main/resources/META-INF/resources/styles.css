@@ -944,6 +944,15 @@ footer {
     margin-bottom: 6px;
 }
 
+/* An SVG the model drew, rendered inline (ImageOutputViaSvg_260908_oo01) — bounded the same way
+   as an attached/rendered raster image, so a large canvas does not blow up the message bubble. */
+.message svg {
+    display: block;
+    max-width: 100%;
+    max-height: 400px;
+    margin-bottom: 6px;
+}
+
 /* Prompt messages (interactive prompts from Claude) */
 .message.prompt {
     background: rgba(249, 226, 175, 0.1);

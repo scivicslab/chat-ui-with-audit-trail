@@ -94,7 +94,48 @@
                 imgs[i].setAttribute("src", "api/local-image?path=" + encodeURIComponent(filePath));
             }
         }
+        renderInlineSvg(holder);
         return holder.innerHTML;
+    }
+
+    // --- LLM-drawn images: a ```svg fenced code block or a bare <svg> tag in the model's own
+    // reply, rendered as an actual picture (ImageOutputViaSvg_260908_oo01). No image-generation
+    // model exists in this environment; a text model asked to "draw" something can still produce
+    // valid SVG markup directly, which is itself a picture once parsed — no data-URI encoding
+    // (fragile: a model-authored data: URI with raw spaces was observed to break the markdown
+    // image link entirely, leaving literal source text on screen) is needed or attempted.
+
+    /** Strips the executable surface from a model-authored SVG subtree before it reaches the DOM:
+     *  <script> elements, "on*" event handler attributes, and javascript: URLs. Applied to both a
+     *  freshly-parsed fenced code block and any <svg> the model wrote inline as raw HTML — marked
+     *  passes inline HTML through unescaped, so an unfenced <svg> reaches here exactly as unsafe
+     *  as a fenced one. */
+    function sanitizeSvgElement(svg) {
+        Array.prototype.forEach.call(svg.querySelectorAll("script"), function (el) { el.remove(); });
+        var walker = document.createTreeWalker(svg, NodeFilter.SHOW_ELEMENT);
+        var el = svg;
+        do {
+            Array.prototype.slice.call(el.attributes || []).forEach(function (attr) {
+                var name = attr.name.toLowerCase();
+                if (name.indexOf("on") === 0 || /javascript:/i.test(attr.value)) {
+                    el.removeAttribute(attr.name);
+                }
+            });
+        } while ((el = walker.nextNode()));
+    }
+
+    /** Converts every ```svg fenced code block into a live, sanitized <svg> element, and sanitizes
+     *  any <svg> already present as raw inline HTML. */
+    function renderInlineSvg(holder) {
+        Array.prototype.forEach.call(holder.querySelectorAll("code.language-svg"), function (code) {
+            var pre = code.closest("pre") || code;
+            var parsed = new DOMParser().parseFromString(code.textContent, "image/svg+xml");
+            var svg = parsed.querySelector("svg");
+            if (!svg || parsed.querySelector("parsererror")) return;
+            sanitizeSvgElement(svg);
+            pre.replaceWith(document.importNode(svg, true));
+        });
+        Array.prototype.forEach.call(holder.querySelectorAll("svg"), sanitizeSvgElement);
     }
 
     function escapeHtml(s) {

@@ -249,7 +249,13 @@ public class ChatSession extends Interpreter {
 
             Call at most one tool per reply. After a tool result comes back, either call another tool \
             or give your final answer. When you have enough information, answer in plain text with NO \
-            <invoke> block — that plain text is taken as your final answer to the user.""";
+            <invoke> block — that plain text is taken as your final answer to the user.
+
+            To show an image (a diagram, an icon, a drawing you were asked for), write a fenced code \
+            block whose language is "svg", containing valid, self-contained SVG markup — it renders as \
+            an actual picture in the chat pane. This is the only way to produce an image here: there is \
+            no image-generation tool or model, so do not call one or invent one. Do not wrap the SVG in \
+            a data: URI or a markdown image link; write the <svg>...</svg> markup itself.""";
 
     // Per-turn working memory, reset in start(). Not thread-confined by field type (see
     // ChatSessionAgentLoop_260823_oo01's own note in chat-session-agent-loop.yaml) — safe only
