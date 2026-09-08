@@ -99,7 +99,8 @@ steps:
     actions:
       - actor: this
         method: runToolSummarizingPages
-        arguments: "20000"
+        arguments:
+          maxObservationChars: 20000
         execution: direct
 
   - states: ["act", "think"]

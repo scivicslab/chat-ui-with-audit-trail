@@ -233,6 +233,20 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     }
 
     /**
+     * The same as {@code runTool}, except that a fetched web page is summarised rather than cut
+     * at its opening characters. Fails when this turn called no {@code web_search}, or when the
+     * provider cannot complete outside the conversation, so the workflow falls through to
+     * {@code run-tool}.
+     *
+     * @param args how much of each observation the model may see, as for {@code runTool}
+     * @return success once every pending tool call has been run and observed
+     */
+    @Action(value = "runToolSummarizingPages", argsType = RunToolArgs.class)
+    public ActionResult runToolSummarizingPagesAction(RunToolArgs args) {
+        return chatSession().runToolSummarizingPages(String.valueOf(args.maxObservationChars()));
+    }
+
+    /**
      * The step-limit transition's guard. The number is the workflow's, not Java's.
      *
      * @param arg the step limit
