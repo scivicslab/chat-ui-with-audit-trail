@@ -359,7 +359,7 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      */
     @Action("searchDocs")
     public ActionResult searchDocsAction(String arg) {
-        return chatSession().searchDocs(arg);
+        return chatSession().searchDocs();
     }
 
     /**
@@ -368,7 +368,7 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      */
     @Action("judgeHitsSufficient")
     public ActionResult judgeHitsSufficientAction(String arg) {
-        return chatSession().judgeHitsSufficient(arg);
+        return chatSession().judgeHitsSufficient();
     }
 
     /**
@@ -386,7 +386,7 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      */
     @Action("judgeHitsNeedRefinement")
     public ActionResult judgeHitsNeedRefinementAction(String arg) {
-        return chatSession().judgeHitsNeedRefinement(arg);
+        return chatSession().judgeHitsNeedRefinement();
     }
 
     /**
@@ -395,7 +395,7 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      */
     @Action("refineQueryAndSearch")
     public ActionResult refineQueryAndSearchAction(String arg) {
-        return chatSession().refineQueryAndSearch(arg);
+        return chatSession().refineQueryAndSearch();
     }
 
     /**
@@ -413,7 +413,7 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      */
     @Action("reportRetrievalFailure")
     public ActionResult reportRetrievalFailureAction(String arg) {
-        return chatSession().reportRetrievalFailure(arg);
+        return chatSession().reportRetrievalFailure();
     }
 
     /**
@@ -422,7 +422,7 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      */
     @Action("answerFromSources")
     public ActionResult answerFromSourcesAction(String arg) {
-        return chatSession().answerFromSources(arg);
+        return chatSession().answerFromSources();
     }
 
     /**
@@ -431,7 +431,7 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      */
     @Action("answerComplete")
     public ActionResult answerCompleteAction(String arg) {
-        return chatSession().answerComplete(arg);
+        return chatSession().answerComplete();
     }
 
     /**
@@ -449,7 +449,7 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      */
     @Action("answerNeedsMore")
     public ActionResult answerNeedsMoreAction(String arg) {
-        return chatSession().answerNeedsMore(arg);
+        return chatSession().answerNeedsMore();
     }
 
     /**
@@ -458,7 +458,7 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      */
     @Action("rewriteAnswer")
     public ActionResult rewriteAnswerAction(String arg) {
-        return chatSession().rewriteAnswer(arg);
+        return chatSession().rewriteAnswer();
     }
 
     /**

@@ -18,8 +18,8 @@
     <quarkus.platform.version>3.28.3</quarkus.platform.version>
     <surefire-plugin.version>3.5.4</surefire-plugin.version>
     <!-- Actor model + Turing Workflow engine (IIActorSystem / RootIIAR) for the Actors tab -->
-    <pojo-actor.version>4.1.0-SNAPSHOT</pojo-actor.version>
-    <turing-workflow.version>4.1.0-SNAPSHOT</turing-workflow.version>
+    <pojo-actor.version>4.1.0</pojo-actor.version>
+    <turing-workflow.version>4.1.0</turing-workflow.version>
     <!-- uber-jar without the -runner suffix, per the project naming rule -->
     <quarkus.package.jar.type>uber-jar</quarkus.package.jar.type>
     <quarkus.package.jar.add-runner-suffix>false</quarkus.package.jar.add-runner-suffix>

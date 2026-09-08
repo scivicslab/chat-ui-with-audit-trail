@@ -290,10 +290,9 @@ public class ChatSession extends Interpreter {
      * Turns the turn's question into search terms and runs one search. Entry state of
      * {@code doc-retrieval-loop.yaml}.
      *
-     * @param args unused
      * @return {@link ActionResult} with {@code success=true} iff the search returned candidates
      */
-    public ActionResult searchDocs(String args) {
+    public ActionResult searchDocs() {
         String query = askLlm("Write the search terms for finding, in this team's internal "
                 + "documentation, what answers the question below. Reply with the terms only — no "
                 + "explanation, no quotes. Write them in the language the documents are written in "
@@ -322,10 +321,9 @@ public class ChatSession extends Interpreter {
      * Judges whether the candidate list holds something that can answer the question. Makes one LLM
      * call and keeps its reasoning for {@link #refineQueryAndSearch()}.
      *
-     * @param args unused
      * @return {@link ActionResult} with {@code success=true} iff the list looks sufficient
      */
-    public ActionResult judgeHitsSufficient(String args) {
+    public ActionResult judgeHitsSufficient() {
         if (lastHits == null) return new ActionResult(false, "no candidates yet");
         String verdict = askLlm("Below is a question and a list of candidate documents returned by "
                 + "a search. Decide whether any of them is likely to contain the answer. Judge from "
@@ -355,10 +353,9 @@ public class ChatSession extends Interpreter {
      * The searching state's catch-all, reached once judging and the limit guard have both failed.
      * Keeps what is missing; makes no LLM call.
      *
-     * @param args unused
      * @return {@link ActionResult} with {@code success=true} always
      */
-    public ActionResult judgeHitsNeedRefinement(String args) {
+    public ActionResult judgeHitsNeedRefinement() {
         if (hitsShortfall == null) hitsShortfall = "the candidates do not answer the question";
         return new ActionResult(true, "refinement requested");
     }
@@ -367,10 +364,9 @@ public class ChatSession extends Interpreter {
      * Writes different search terms and searches again, told what the previous attempt missed and
      * what it already tried.
      *
-     * @param args unused
      * @return {@link ActionResult} with {@code success=true} iff the new search returned candidates
      */
-    public ActionResult refineQueryAndSearch(String args) {
+    public ActionResult refineQueryAndSearch() {
         String query = askLlm("A search of this team's internal documentation did not find what was "
                 + "needed. Write different search terms. Do not repeat the previous ones. Reply with "
                 + "the terms only. Write them in the language the documents are written in (these "
@@ -419,10 +415,9 @@ public class ChatSession extends Interpreter {
      * The reading state's catch-all: nothing could be opened, so say that instead of leaving the
      * turn stuck.
      *
-     * @param args unused
      * @return {@link ActionResult} with {@code success=true} always
      */
-    public ActionResult reportRetrievalFailure(String args) {
+    public ActionResult reportRetrievalFailure() {
         finalAnswer = "I could not open any document that answers this. The search terms I tried "
                 + "were: " + lastQuery + ".";
         return new ActionResult(true, "retrieval failure reported");
@@ -432,10 +427,9 @@ public class ChatSession extends Interpreter {
      * Answers from what was opened, and from nothing else. When nothing was opened (the give-up
      * path), answers from the candidate list and says so.
      *
-     * @param args unused
      * @return {@link ActionResult} with {@code success=true} always
      */
-    public ActionResult answerFromSources(String args) {
+    public ActionResult answerFromSources() {
         boolean haveSources = readSourcesText != null && !readSourcesText.isBlank();
         String prompt = haveSources
                 ? "Answer the question using only the documents below. State the name of the "
@@ -455,10 +449,9 @@ public class ChatSession extends Interpreter {
      * questions, three of the five the state machine got wrong had opened the right document and
      * left part of the answer out ({@code DocRetrievalBenchmark_260830_oo01}).
      *
-     * @param args unused
      * @return {@link ActionResult} with {@code success=true} iff nothing asked for is missing
      */
-    public ActionResult answerComplete(String args) {
+    public ActionResult answerComplete() {
         if (finalAnswer == null || finalAnswer.isBlank()) {
             return new ActionResult(false, "no draft answer");
         }
@@ -490,10 +483,9 @@ public class ChatSession extends Interpreter {
      * The verifying state's catch-all, reached once the check has failed and rewrites remain.
      * Keeps what is missing; makes no LLM call.
      *
-     * @param args unused
      * @return {@link ActionResult} with {@code success=true} always
      */
-    public ActionResult answerNeedsMore(String args) {
+    public ActionResult answerNeedsMore() {
         if (answerShortfall == null) answerShortfall = "part of what was asked is not stated";
         return new ActionResult(true, "rewrite requested");
     }
@@ -501,10 +493,9 @@ public class ChatSession extends Interpreter {
     /**
      * Writes the answer again from the same documents, told what the previous draft left out.
      *
-     * @param args unused
      * @return {@link ActionResult} with {@code success=true} always
      */
-    public ActionResult rewriteAnswer(String args) {
+    public ActionResult rewriteAnswer() {
         rewriteCount++;
         String rewritten = askLlm("Your previous answer left something out. Write it again, from the "
                 + "documents below and nothing else, stating everything the question asks for. Keep "
