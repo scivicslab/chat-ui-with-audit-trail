@@ -840,16 +840,18 @@ footer {
     background: var(--border-color);
 }
 
-/* Send and Cancel occupy the same cell and swap by visibility, driven by
-   #cancel-btn's existing disabled state (idle = disabled = Send shows;
-   busy = enabled = Cancel shows) — the busy-state bookkeeping that already
-   toggles that attribute elsewhere needed no changes for this. */
+/* Send and Cancel sit side by side, both always on screen. They used to share one
+   cell and swap by visibility, and the swap read as a trap: mid-turn, a click aimed
+   at Send landed on the Cancel occupying its place and stopped the running turn.
+   Send stays pressable while busy — a prompt sent then is queued, and the server
+   already says so. Cancel keeps its disabled state for idle, greyed rather than
+   hidden, so the pair never changes shape under the pointer. */
 #send-cancel-slot {
-    display: grid;
+    display: flex;
+    gap: 4px;
 }
 
 #send-cancel-slot > button {
-    grid-area: 1 / 1;
     width: 100px;
 }
 
@@ -873,21 +875,9 @@ footer {
 }
 
 #cancel-btn:disabled {
-    visibility: hidden;
-    pointer-events: none;
-}
-
-#cancel-btn:not(:disabled) {
-    visibility: visible;
-}
-
-#cancel-btn:not(:disabled) ~ #send-btn {
-    visibility: hidden;
-    pointer-events: none;
-}
-
-#cancel-btn:disabled ~ #send-btn {
-    visibility: visible;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    cursor: not-allowed;
 }
 
 #cancel-btn {

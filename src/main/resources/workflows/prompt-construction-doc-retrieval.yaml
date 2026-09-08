@@ -50,7 +50,7 @@ steps:
 
   - states: ["1", "2"]
     label: take-turn-text
-    note: The turn's own text (system prompt on the first step, tool observations after) into ${result}.
+    note: The turn's own text (system prompt on the first step, tool observations after) into result.
     actions:
       - actor: ..
         method: currentPromptText
@@ -61,12 +61,12 @@ steps:
     actions:
       - actor: ../*promptBuilder
         method: addMessage
-        arguments: "${result}"
+        arguments: "jexl: result"
         execution: direct
 
   - states: ["3", "4"]
     label: build
-    note: Produces "[Constraints] ... [Message] ..." into ${result}.
+    note: Produces "[Constraints] ... [Message] ..." into result.
     actions:
       - actor: ../*promptBuilder
         method: build
@@ -78,5 +78,5 @@ steps:
       - actor: ..
         method: appendConstructedPrompt
         arguments:
-          prompt: "${result}"
+          prompt: "jexl: result"
         execution: direct
