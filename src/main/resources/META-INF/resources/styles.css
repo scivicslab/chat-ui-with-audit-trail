@@ -791,7 +791,12 @@ footer {
 }
 
 #prompt-input {
-    flex: 1;
+    /* Not flex:1: #input-area is a column flex container (its main axis is height), and a
+       flex-basis of 0% wins over any explicit height for main-axis sizing — with flex:1 here,
+       #input-resize-handle's drag (below) would set a height only to have it silently overridden
+       back to whatever the flex algorithm computed. flex:1 dates from when #input-area was a row
+       container, where flex:1 distributed width and height was the (unaffected) cross axis. */
+    flex: none;
     background: var(--bg-tertiary);
     color: var(--text-primary);
     border: 1px solid var(--border-color);

@@ -44,6 +44,8 @@
     var themeSelect, queueBtn, queueArea, stopPlanBtn, cancelBtn;
     var attachBtn, imageFileInput, imageAttachments;
     var pendingImages = []; // [{name, dataUrl}] attached via paste, drop, or the file picker
+    var inputResizeHandle;
+    var manualInputHeight = null; // set once the human drags the handle; autoResize() then floors to it
     var eventSource = null;
     var streamingEl = null;   // the live assistant bubble currently receiving deltas
     var streamingMarkdown = "";  // its markdown source, kept for the footer's copy button
@@ -881,6 +883,59 @@
         return urls;
     }
 
+    // --- Input textarea resize: drag the handle, or let it grow as you type ---
+
+    var INPUT_HEIGHT_KEY = "chat-ui-input-height";
+
+    // Grows #prompt-input to fit what was typed, up to the drag handle's own max (500px) — and
+    // once the human has dragged the handle, treats that height as a floor instead of recomputing
+    // from scratch and shrinking straight back past it on the next keystroke.
+    function autoResize() {
+        promptInput.style.height = "auto";
+        var contentHeight = Math.min(promptInput.scrollHeight, 500);
+        promptInput.style.height = Math.max(contentHeight, manualInputHeight || 0) + "px";
+    }
+
+    function initInputResize() {
+        if (!inputResizeHandle || !promptInput) return;
+        var saved = localStorage.getItem(INPUT_HEIGHT_KEY);
+        if (saved) {
+            manualInputHeight = parseInt(saved, 10);
+            promptInput.style.height = manualInputHeight + "px";
+        }
+
+        var dragging = false;
+        var startY = 0;
+        var startHeight = 0;
+
+        inputResizeHandle.addEventListener("mousedown", function (e) {
+            e.preventDefault();
+            dragging = true;
+            startY = e.clientY;
+            startHeight = promptInput.offsetHeight;
+            inputResizeHandle.classList.add("dragging");
+            document.body.style.cursor = "ns-resize";
+            document.body.style.userSelect = "none";
+        });
+
+        document.addEventListener("mousemove", function (e) {
+            if (!dragging) return;
+            var delta = startY - e.clientY;
+            var newHeight = Math.max(42, Math.min(startHeight + delta, 500));
+            promptInput.style.height = newHeight + "px";
+        });
+
+        document.addEventListener("mouseup", function () {
+            if (!dragging) return;
+            dragging = false;
+            inputResizeHandle.classList.remove("dragging");
+            document.body.style.cursor = "";
+            document.body.style.userSelect = "";
+            manualInputHeight = promptInput.offsetHeight;
+            localStorage.setItem(INPUT_HEIGHT_KEY, manualInputHeight);
+        });
+    }
+
     // ── Init ─────────────────────────────────────────────────────────────────
 
     document.addEventListener("DOMContentLoaded", function () {
@@ -904,6 +959,7 @@
         attachBtn = el("attach-btn");
         imageFileInput = el("image-file-input");
         imageAttachments = el("image-attachments");
+        inputResizeHandle = el("input-resize-handle");
 
         if (sendBtn) sendBtn.addEventListener("click", sendPrompt);
         if (promptInput) {
@@ -922,7 +978,9 @@
                 var files = (e.dataTransfer || {}).files || [];
                 for (var i = 0; i < files.length; i++) addImageFile(files[i]);
             });
+            promptInput.addEventListener("input", autoResize);
         }
+        initInputResize();
         if (attachBtn && imageFileInput) {
             attachBtn.addEventListener("click", function () { imageFileInput.click(); });
             imageFileInput.addEventListener("change", function () {
