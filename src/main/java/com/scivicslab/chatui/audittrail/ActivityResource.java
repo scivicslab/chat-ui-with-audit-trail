@@ -68,11 +68,12 @@ public class ActivityResource {
      */
     private static final Duration RETRY_AGE = Duration.ofMinutes(1);
 
-    /** How many of a conversation's most recent turns are read to work out its subject.
+    /** How many of a conversation's most recent turns are read to work out what it is doing.
      *
-     * <p>Wide enough that the turns actually naming the program/domain being worked on are still in
-     * view even once the conversation has moved on to fine-grained sub-tasks, without reaching back
-     * so far that a topic the conversation has since dropped gets pulled in.</p>
+     * <p>The answer names both the thing being worked on and what is being done to it, and those
+     * two are rarely in the same turn: the name is usually settled early and the work is in the
+     * last few exchanges. Wide enough to hold both, and not so wide that a subject the
+     * conversation has since dropped gets pulled in.</p>
      */
     private static final int TURNS_READ = 30;
 
@@ -257,15 +258,23 @@ public class ActivityResource {
         ActorRef<LlmProvider> ref = actorSystem.getProviderRef(projectId, "01");
         if (ref == null) return null;
         String prompt = """
-                State in one English sentence what program or project this conversation is building,
-                and what domain of work it belongs to.
+                Say in one English sentence what is being done in this conversation right now.
+
+                Write it as a piece of work being done to a named thing, for example
+                "Reworking the UI design of quarkus-AI-workspace" or
+                "Refactoring the parallel execution in Turing-workflow".
 
                 Constraints:
-                - Describe the program/project and its domain, not the specific sub-task currently in
-                  progress within it.
-                - Look for the actual program name, repository name, or project keyword mentioned in
-                  the conversation, and name it rather than describing the work only in generic terms.
-                - One sentence, at most 20 words. No preamble, no quotation marks.
+                - Start with the work itself: fixing, refactoring, designing, measuring, writing,
+                  deploying, investigating, and so on.
+                - Name the program, project or document the work is being done to, using the name
+                  the conversation calls it by, for example quarkus-AI-workspace or doc_SCIVICS002.
+                - Do not name a field of work or an industry. "software development", "the AI
+                  workspace domain", "knowledge management" and the like tell a reader nothing that
+                  separates this conversation from any other, and must not appear.
+                - Take the work from the most recent exchanges. A subject the conversation has
+                  already finished with is not what is being done now.
+                - One sentence, at most 15 words. No preamble, no quotation marks.
                 - Do not write hostnames, IP addresses, file paths, credentials, or commands.
                 - Do not copy the conversation text verbatim.
 
