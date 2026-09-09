@@ -60,6 +60,31 @@ class TurnWindowTest {
     }
 
     @Test
+    void turnHeadsOf_showsTheEndOfAFoldedPrompt_whichIsWhereTheQuestionIs() {
+        // This program sends the system prompt, the tool descriptions and the question as one user
+        // message. Read from its start, every turn's line said "You are a helpful assistant…".
+        String folded = "You are a helpful assistant with access to tools. "
+                + "tool descriptions here. ".repeat(40)
+                + "では新しいディレクトリを作ってください";
+        List<LogEntry> raw = List.of(entry(1, 1, "llm", llmEntry(folded)));
+
+        String question = IoLogView.turnHeadsOf(raw, 0, 1).get(0).question();
+
+        assertTrue(question.endsWith("では新しいディレクトリを作ってください"),
+                "the line must end with the question, got: " + question);
+        assertTrue(question.startsWith("…"), "and say it was cut from the front");
+        assertFalse(question.contains("You are a helpful"),
+                "the one part every prompt shares must not be the part shown");
+    }
+
+    @Test
+    void questionTail_ofAShortPrompt_isTheWholeOfIt() {
+        assertEquals("what does this do?", IoLogView.questionTail("what does this do?"));
+        assertEquals("", IoLogView.questionTail(null));
+        assertEquals("a b", IoLogView.questionTail("a\n\n  b"));
+    }
+
+    @Test
     void turnHeadsOf_readsFurtherBackFromAGivenTurn() {
         List<IoLogView.TurnHead> older = IoLogView.turnHeadsOf(session(50), 31, 20);
 

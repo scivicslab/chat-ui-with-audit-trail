@@ -189,6 +189,11 @@ public class SessionsReadingPaneE2E {
                 check(page.locator("details.tr-turn[open]").count() == 1,
                         "only one turn is open at a time ("
                                 + page.locator("details.tr-turn[open]").count() + ")");
+                // The closed turn gives its messages back. Kept hidden, they piled up — a tool
+                // row's line carries its input, and reading fifty turns held fifty of those.
+                check(page.locator("details.tr-turn:not([open]) .trm").count() == 0,
+                        "a closed turn holds no message rows ("
+                                + page.locator("details.tr-turn:not([open]) .trm").count() + ")");
             }
 
             Locator older = page.locator(".tr-more");

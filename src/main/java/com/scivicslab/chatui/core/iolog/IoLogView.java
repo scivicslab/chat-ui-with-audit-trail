@@ -261,8 +261,8 @@ public class IoLogView {
             questions.putIfAbsent(turn, "");
             if (!"tool".equals(m.group(3)) && questions.get(turn).isEmpty()) {
                 String msg = nz(e.getMessage());
-                questions.put(turn, extractUserPrompt(between(msg,
-                        "REQUEST:", "RESPONSE:", "REASONING:", "TOOL_CALLS:", "USAGE:")));
+                questions.put(turn, questionTail(extractUserPrompt(between(msg,
+                        "REQUEST:", "RESPONSE:", "REASONING:", "TOOL_CALLS:", "USAGE:"))));
             }
         }
         List<TurnHead> newestFirst = new java.util.ArrayList<>();
@@ -272,6 +272,24 @@ public class IoLogView {
             newestFirst.add(new TurnHead(turn, questions.get(turn)));
         }
         return List.copyOf(newestFirst);
+    }
+
+    /** How much of the question a turn's line carries. */
+    private static final int QUESTION_TAIL_CHARS = 200;
+
+    /**
+     * The end of what the person sent, on one line, rather than its beginning.
+     *
+     * <p>This program folds the system prompt, the tool descriptions and the question into one
+     * message with the user's role, and the question is its last hundred characters or so. Read
+     * from the start, every turn in the list said "You are a helpful assistant…" — the one part of
+     * the prompt that is the same in all of them.</p>
+     */
+    static String questionTail(String prompt) {
+        if (prompt == null) return "";
+        String flat = prompt.replaceAll("\\s+", " ").strip();
+        return flat.length() > QUESTION_TAIL_CHARS
+                ? "\u2026" + flat.substring(flat.length() - QUESTION_TAIL_CHARS) : flat;
     }
 
     /** @return the turn a step label names, e.g. 7 for {@code turn7/step1/llm}, or {@code -1}.

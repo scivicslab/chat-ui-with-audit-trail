@@ -656,7 +656,13 @@
         var body = document.createElement("div"); box.appendChild(body);
         var loaded = false;
         box.addEventListener("toggle", function () {
-            if (!box.open) return;
+            if (!box.open) {
+                // Closed turns give their messages back. Kept, they pile up hidden — a tool row's
+                // line carries its whole input, and fifty read turns held fifty of those.
+                body.textContent = "";
+                loaded = false;
+                return;
+            }
             // One turn open at a time: two turns of messages is already more than the pane holds,
             // and the point of the window is that the page does not grow with the session.
             box.parentNode.querySelectorAll("details.tr-turn[open]").forEach(function (other) {
@@ -680,16 +686,23 @@
 
     // Flattens a turn into an ordered list of one-direction messages: an llm step -> (loop→LLM
     // request) + (LLM→loop reply); a tool step -> (loop→tool input) + (tool→loop observation).
+    // One line of a summary: the whole text is read by picking the message, so its row carries a
+    // bounded slice. tail() rather than a head for what the person sent — this program folds the
+    // system prompt in front of the question, so the head is the same in every turn.
+    function ioTrim(s, n) { s = s || ""; return s.length > n ? s.slice(0, n) + "…" : s; }
+    function ioTail(s, n) { s = s || ""; return s.length > n ? "…" + s.slice(-n) : s; }
+
     function ioTurnMessages(t) {
         var out = [];
         var firstLlm = (t.steps || []).filter(function (s) { return s.kind === "llm"; })[0];
         out.push({ dir: "user → loop", cls: "user",
-                   summary: "🗣 " + (t.userPrompt || "(user prompt not found)"),
+                   summary: "🗣 " + (ioTail(t.userPrompt, 200) || "(user prompt not found)"),
                    id: firstLlm ? firstLlm.id : -1, part: "USER" });
         (t.steps || []).forEach(function (s) {
             if (s.kind === "tool") {
                 out.push({ dir: "loop → tool", cls: "to-tool",
-                           summary: "↳ " + s.toolName + "(" + s.toolInput + ")", id: s.id, part: "INPUT" });
+                           summary: "↳ " + s.toolName + "(" + ioTrim(s.toolInput, 200) + ")",
+                           id: s.id, part: "INPUT" });
                 out.push({ dir: "tool → loop", cls: "from-tool",
                            summary: "→ " + s.observation + " …  [" + s.obsChars + " chars]", id: s.id, part: "OBSERVATION" });
                 return;
