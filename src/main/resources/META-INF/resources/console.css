@@ -336,7 +336,13 @@ details.sess:not([open]) > .sess-head { border-top: none; }
 #io-mode { background: var(--bg-tertiary, #2a2a2a); color: var(--text-primary, #e6e6e6); border: 1px solid var(--border-color, #444); border-radius: 4px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
 #io-mode.active { background: var(--accent-blue, #4f46e5); color: #fff; border-color: var(--accent-blue, #4f46e5); }
 .tr-turn { border: 1px solid var(--border-color, #2f2f2f); border-radius: 6px; margin-bottom: 10px; background: var(--bg-secondary, #1b1b1b); overflow: hidden; }
-.tr-turn-head { padding: 5px 10px; font-weight: 600; color: var(--accent-blue, #a5b4fc); background: var(--bg-tertiary, #232323); border-bottom: 1px solid var(--border-color, #2f2f2f); cursor: pointer; user-select: none; list-style-position: inside; }
+.tr-turn-head { display: flex; gap: 8px; align-items: baseline; padding: 5px 10px; font-weight: 600; color: var(--accent-blue, #a5b4fc); background: var(--bg-tertiary, #232323); border-bottom: 1px solid var(--border-color, #2f2f2f); cursor: pointer; user-select: none; list-style-position: inside; }
+.tr-turn-num { flex-shrink: 0; }
+/* What was asked, so a turn can be found among hundreds by something other than its number. */
+.tr-turn-q { font-weight: 400; font-size: 11px; color: var(--text-secondary, #9a9a9a); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tr-more { display: block; width: 100%; margin: 4px 0 8px; padding: 5px 10px; font-size: 11px; cursor: pointer; background: var(--bg-secondary, #1b1b1b); color: var(--text-secondary, #9a9a9a); border: 1px dashed var(--border-color, #444); border-radius: 6px; }
+.tr-more:hover { color: var(--text-primary, #d4d4d4); border-color: var(--accent-blue, #6366f1); }
+.tr-more[disabled] { cursor: default; opacity: .5; }
 .tr-turn-head:hover { background: var(--bg-secondary, #2a2a2a); }
 .tr-turn:not([open]) > .tr-turn-head { border-bottom: none; }
 .tr-step { padding: 7px 10px 7px 14px; border-bottom: 1px solid var(--border-color, #232323); }

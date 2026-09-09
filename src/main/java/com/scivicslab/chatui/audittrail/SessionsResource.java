@@ -54,16 +54,40 @@ public class SessionsResource {
     }
 
     /**
-     * Reconstructs one session's per-turn trace — the Sessions tab's primary view.
+     * A window of a session's turns, newest first — what the Sessions tab lists.
      *
-     * @param id the session id
-     * @return the ordered {@link IoLogView.TraceTurn} list
+     * <p>A window rather than all of them: the archive holds a session of 1,417 turns, and
+     * answering with every step of every turn came to 3.3 MB for a list of questions.</p>
+     *
+     * @param id     the session id
+     * @param before return only turns numbered below this; {@code 0} starts at the newest
+     * @param limit  how many to return, capped at 200
+     * @return {@code {turns: [{turn, question}], lastTurn}}
      */
     @GET
-    @Path("/{id}/trace")
+    @Path("/{id}/turns")
     @Produces(MediaType.APPLICATION_JSON)
-    public List<IoLogView.TraceTurn> trace(@PathParam("id") long id) {
-        return ioLogView.trace(id);
+    public Map<String, Object> turns(@PathParam("id") long id,
+                                     @QueryParam("before") @DefaultValue("0") int before,
+                                     @QueryParam("limit") @DefaultValue("20") int limit) {
+        return Map.of("turns", ioLogView.turnHeads(id, before, Math.min(Math.max(limit, 1), 200)),
+                      "lastTurn", ioLogView.lastTurnNumber(id));
+    }
+
+    /**
+     * One turn's steps.
+     *
+     * @param id   the session
+     * @param turn the turn number, as {@link #turns} listed it
+     * @return that turn, or 404 when the session holds no such turn
+     */
+    @GET
+    @Path("/{id}/trace/{turn}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response traceTurn(@PathParam("id") long id, @PathParam("turn") int turn) {
+        IoLogView.TraceTurn one = ioLogView.traceTurn(id, turn);
+        return one == null ? Response.status(404).entity(Map.of("error", "no such turn")).build()
+                           : Response.ok(one).build();
     }
 
     /**

@@ -593,28 +593,89 @@
         det.addEventListener("toggle", function () {
             if (!det.open || loaded) return;
             loaded = true;
-            fetch("api/sessions/" + s.sessionId + "/trace")
-                .then(function (r) { return r.json(); })
-                .then(function (turns) { ioRenderTraceInto(body, turns || [], s.sessionId); })
+            ioLoadTurnWindow(body, s.sessionId, 0, false)
                 .catch(function (err) { body.textContent = "error: " + err.message; loaded = false; });
         });
         return det;
     }
 
-    function ioRenderTraceInto(el, turns, sessionId) {
-        el.textContent = "";
-        if (!turns.length) {
-            var none = document.createElement("div"); none.className = "io-empty";
-            none.textContent = "No agent-loop trace in this session."; el.appendChild(none); return;
-        }
-        turns.forEach(function (t) {
-            var box = document.createElement("details"); box.className = "tr-turn"; box.open = true;
-            var head = document.createElement("summary"); head.className = "tr-turn-head";
-            head.textContent = "Turn " + t.turn;
-            box.appendChild(head);
-            ioTurnMessages(t).forEach(function (m) { box.appendChild(ioMsgEl(m, sessionId)); });
-            el.appendChild(box);
+    // How many turns a session shows at a time. A session in this archive runs to 1,417 of them;
+    // drawing every turn with its messages open put all of that in the page at once.
+    var IO_TURN_WINDOW = 20;
+
+    /**
+     * Draws a window of a session's turns into `el`, newest first. `before` is the turn to read
+     * back from (0 = the newest); `append` keeps what is already there and adds older ones below.
+     */
+    function ioLoadTurnWindow(el, sessionId, before, append) {
+        if (!append) el.textContent = "loading…";
+        return fetch("api/sessions/" + sessionId + "/turns?before=" + before
+                     + "&limit=" + IO_TURN_WINDOW)
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                var turns = (d && d.turns) || [];
+                if (!append) el.textContent = "";
+                var more = el.querySelector(".tr-more");
+                if (more) more.remove();
+                if (!turns.length && !append) {
+                    var none = document.createElement("div"); none.className = "io-empty";
+                    none.textContent = "No agent-loop trace in this session.";
+                    el.appendChild(none);
+                    return;
+                }
+                turns.forEach(function (h) { el.appendChild(ioTurnEl(h, sessionId)); });
+                var oldest = turns.length ? turns[turns.length - 1].turn : 0;
+                if (oldest > 1) {
+                    var btn = document.createElement("button");
+                    btn.type = "button"; btn.className = "tr-more";
+                    btn.textContent = "older turns (" + (oldest - 1) + " before this)";
+                    btn.addEventListener("click", function () {
+                        btn.disabled = true;
+                        ioLoadTurnWindow(el, sessionId, oldest, true);
+                    });
+                    el.appendChild(btn);
+                }
+            });
+    }
+
+    /**
+     * One turn as a row: its number and what was asked. Its messages are fetched and shown under
+     * it when it is opened, and only one turn is open at a time, so what is in the page does not
+     * depend on how many turns the session has.
+     */
+    function ioTurnEl(head, sessionId) {
+        var box = document.createElement("details"); box.className = "tr-turn";
+        var sum = document.createElement("summary"); sum.className = "tr-turn-head";
+        var num = document.createElement("span"); num.className = "tr-turn-num";
+        num.textContent = "Turn " + head.turn;
+        var q = document.createElement("span"); q.className = "tr-turn-q";
+        q.textContent = head.question || "(no question recorded)";
+        q.title = q.textContent;
+        sum.appendChild(num); sum.appendChild(q);
+        box.appendChild(sum);
+        var body = document.createElement("div"); box.appendChild(body);
+        var loaded = false;
+        box.addEventListener("toggle", function () {
+            if (!box.open) return;
+            // One turn open at a time: two turns of messages is already more than the pane holds,
+            // and the point of the window is that the page does not grow with the session.
+            box.parentNode.querySelectorAll("details.tr-turn[open]").forEach(function (other) {
+                if (other !== box) other.open = false;
+            });
+            if (loaded) return;
+            loaded = true;
+            body.textContent = "loading…";
+            fetch("api/sessions/" + sessionId + "/trace/" + head.turn)
+                .then(function (r) { return r.json(); })
+                .then(function (t) {
+                    body.textContent = "";
+                    ioTurnMessages(t).forEach(function (m) {
+                        body.appendChild(ioMsgEl(m, sessionId));
+                    });
+                })
+                .catch(function (err) { body.textContent = "error: " + err.message; loaded = false; });
         });
+        return box;
     }
 
     // Flattens a turn into an ordered list of one-direction messages: an llm step -> (loop→LLM

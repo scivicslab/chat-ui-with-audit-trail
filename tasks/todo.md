@@ -68,16 +68,38 @@ turn の見出しも領域外に出る。見出しの中にある削除ボタン
 `#fff` 固定はほかに 2 箇所（`#io-mode.active`、`.tr-full[open] > summary`）あるが、
 どちらもアクセント色の背景の上なので残す。
 
-### turn 数が増えると破綻する件（未着手）
+### turn 数が増えると破綻する件
 
 マージ済みアーカイブで最大のセッションは 1,417 turn。300 前後も複数ある。
 `api/sessions/{id}/trace` は全 turn を返し、実測で 3,263,127 バイト（3.3 MB）。
 描画側も全 turn を `<details open>` にするので、全 turn の全メッセージが DOM に載る。
 
-案: turn 一覧を窓にする。既定で最新 20 turn を 1 行ずつ（番号＋その turn の質問文の冒頭。
-`TraceTurn.userPrompt` が既にある）、「さらに古い 20 件」で伸ばし、番号でのジャンプも置く。
-選んだ turn のメッセージだけを下に出す。サーバ側は `IoLogView.trace` に範囲を足す
-（総数は既存の `lastTurnNumber` から取れる）。
+turn 一覧を窓にした。既定で最新 20 turn を「番号＋その turn の質問文の冒頭」の 1 行ずつで並べ、
+`older turns (N before this)` で 20 件ずつ古い方へ伸ばす。turn を開くとその turn のメッセージだけを
+取りに行き、別の turn を開くと前のものは閉じる。
+
+サーバ側は `IoLogView.turnHeads(sessionId, beforeTurn, limit)` と `traceTurn(sessionId, turn)` を追加。
+前者は turn 番号と質問文だけを返し step を組み立てない。エンドポイントは
+`/{id}/turns?before=&limit=` と `/{id}/trace/{turn}` の 2 本。全件返す `/{id}/trace` は
+Sessions タブからは使わなくなった。既存の private `turnNumberOf`（`/conversation` ラベル用）と
+名前が衝突したので、追加した方は `stepTurnOf` にした。
+
+実測（最大セッション、実際は 1,524 turn）:
+
+| | 修正前 | 修正後 |
+|---|---|---|
+| セッションを開いたときの応答 | 3,263,127 バイト | 8,141 バイト |
+| 1 turn 分の step | 上に含まれる | 2,279 バイト |
+| 最初に DOM へ載るメッセージ | 全 turn の全メッセージ | 0（turn を開くまで） |
+
+`TurnWindowTest` 8 件、`SessionsReadingPaneE2E` 17 件、いずれも緑。
+
+E2E の検査対象を選ぶのに 4 回失敗した。(1) 一覧の先頭は最新セッションで turn が 1 つしかない。
+(2) 見出しの `N entries` は turn 数を代表しない（最大は 112 entries で turn は 1 つ、
+turn が 1,524 のセッションは下の方）。(3) 絞り込み無しの `api/sessions` は画面が描く順と違う。
+(4) 画面の一覧は現在のチャットで絞り込まれるので、長いセッションはそもそも描かれていない。
+最終的に、絞り込みの無い状態（画面に実在する状態）にしてから DOM の `data-session-id` を
+順に問い合わせ、20 turn を超える最初のセッションを選ぶ形にした。該当が無ければ SKIP を出す。
 
 ### 未対応
 

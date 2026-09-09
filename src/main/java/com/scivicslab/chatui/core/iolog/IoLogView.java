@@ -55,6 +55,15 @@ public class IoLogView {
     /** One conversation turn: the user's prompt and the ordered trace steps for that turn. */
     public record TraceTurn(int turn, String userPrompt, List<TraceStep> steps) {}
 
+    /**
+     * One turn as a list of them shows it: its number and what the person asked.
+     *
+     * <p>Without the steps, on purpose. A session in this archive runs to 1,417 turns, and asking
+     * for all of their steps at once answered with 3.3 MB — every step of every turn, to draw a
+     * list of questions.</p>
+     */
+    public record TurnHead(int turn, String question) {}
+
     /** What one turn was asked and what it answered, as recorded in its {@code /conversation} entry. */
     public record Turn(String question, String answer) {}
 
@@ -85,6 +94,33 @@ public class IoLogView {
     /** Reconstructs the per-turn trace for a session. */
     public List<TraceTurn> trace(long sessionId) {
         return traceOf(allLogs(sessionId));
+    }
+
+    /**
+     * A window of a session's turns, newest first, for a list to show.
+     *
+     * @param sessionId  the session to read
+     * @param beforeTurn return only turns numbered below this; {@code 0} starts at the newest
+     * @param limit      how many to return at most
+     * @return the turns, newest first
+     */
+    public List<TurnHead> turnHeads(long sessionId, int beforeTurn, int limit) {
+        return turnHeadsOf(allLogs(sessionId), beforeTurn, limit);
+    }
+
+    /**
+     * One turn's steps.
+     *
+     * @param sessionId the session to read
+     * @param turn      the turn number
+     * @return that turn, or {@code null} when the session holds no such turn
+     */
+    public TraceTurn traceTurn(long sessionId, int turn) {
+        List<LogEntry> ofTurn = allLogs(sessionId).stream()
+                .filter(e -> stepTurnOf(nz(e.getLabel())) == turn)
+                .toList();
+        List<TraceTurn> turns = traceOf(ofTurn);
+        return turns.isEmpty() ? null : turns.get(0);
     }
 
     /**
@@ -197,6 +233,52 @@ public class IoLogView {
         String question = message.substring(qMarker.length() + 1, answerAt);
         String answer = message.substring(answerAt + aMarker.length());
         return new Turn(question, answer);
+    }
+
+    /**
+     * The turns present in {@code raw}, newest first, with what the person asked in each.
+     *
+     * <p>Reads the request only far enough to find the prompt, and never builds a step: this is
+     * what a list of turns needs, and building the steps of all of them is what made listing a
+     * long session answer with megabytes.</p>
+     *
+     * @param beforeTurn return only turns numbered below this; {@code 0} starts at the newest
+     * @param limit      how many to return at most; at or below zero returns none
+     */
+    static List<TurnHead> turnHeadsOf(List<LogEntry> raw, int beforeTurn, int limit) {
+        if (limit <= 0) {
+            return List.of();
+        }
+        List<LogEntry> ordered = raw.stream()
+                .sorted(Comparator.comparing(IoLogView::ts).thenComparing(LogEntry::getId))
+                .toList();
+        Map<Integer, String> questions = new java.util.TreeMap<>();
+        for (LogEntry e : ordered) {
+            java.util.regex.Matcher m = TURN_LABEL.matcher(nz(e.getLabel()));
+            if (!m.find()) continue;
+            int turn = Integer.parseInt(m.group(1));
+            if (beforeTurn > 0 && turn >= beforeTurn) continue;
+            questions.putIfAbsent(turn, "");
+            if (!"tool".equals(m.group(3)) && questions.get(turn).isEmpty()) {
+                String msg = nz(e.getMessage());
+                questions.put(turn, extractUserPrompt(between(msg,
+                        "REQUEST:", "RESPONSE:", "REASONING:", "TOOL_CALLS:", "USAGE:")));
+            }
+        }
+        List<TurnHead> newestFirst = new java.util.ArrayList<>();
+        List<Integer> numbers = new java.util.ArrayList<>(questions.keySet());
+        for (int i = numbers.size() - 1; i >= 0 && newestFirst.size() < limit; i--) {
+            int turn = numbers.get(i);
+            newestFirst.add(new TurnHead(turn, questions.get(turn)));
+        }
+        return List.copyOf(newestFirst);
+    }
+
+    /** @return the turn a step label names, e.g. 7 for {@code turn7/step1/llm}, or {@code -1}.
+     *  Distinct from {@link #turnNumberOf}, which reads the {@code /conversation} label instead. */
+    static int stepTurnOf(String label) {
+        java.util.regex.Matcher m = TURN_LABEL.matcher(label);
+        return m.find() ? Integer.parseInt(m.group(1)) : -1;
     }
 
     static List<TraceTurn> traceOf(List<LogEntry> raw) {
