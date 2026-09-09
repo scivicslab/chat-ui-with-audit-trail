@@ -134,6 +134,14 @@
       <artifactId>quarkus-junit5</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- E2E: a main() driven browser against an already-running instance, per the project's
+         testing standard (TestingStandard_260404_oo01). Not on the Maven lifecycle. -->
+    <dependency>
+      <groupId>com.microsoft.playwright</groupId>
+      <artifactId>playwright</artifactId>
+      <version>1.52.0</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>

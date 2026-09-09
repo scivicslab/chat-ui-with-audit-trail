@@ -171,7 +171,15 @@
                         </span>
                         <span id="io-status"></span>
                     </div>
+                    <!-- Two regions, each with its own scroll: the conversations and their turns
+                         above, and the one message being read below. Together in one scroll, a
+                         message of several kilobytes pushed the session and turn it belongs to off
+                         the top, and the delete button in the session's heading with them. -->
                     <div id="io-sessions"></div>
+                    <div id="io-reading">
+                        <div id="io-reading-head">Pick a message above to read it here.</div>
+                        <div id="io-reading-body"></div>
+                    </div>
                 </section>
 
                 <section id="tab-syslog" class="rtab-content">

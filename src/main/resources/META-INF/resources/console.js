@@ -649,26 +649,42 @@
         return out;
     }
 
+    // One message is a row that is picked, not a block that opens where it sits. Opened in place,
+    // each one pushed everything below it further down and the session and turn it belongs to off
+    // the top — five of them made this list six screens tall. The one picked is shown below, in
+    // #io-reading, so only ever one is open and the structure above it never moves.
     function ioMsgEl(m, sessionId) {
-        var det = document.createElement("details"); det.className = "trm " + m.cls;
-        var sum = document.createElement("summary"); sum.className = "trm-sum";
+        var row = document.createElement("div"); row.className = "trm " + m.cls;
+        var sum = document.createElement("div"); sum.className = "trm-sum";
         var dir = document.createElement("span"); dir.className = "trm-dir"; dir.textContent = m.dir;
         var txt = document.createElement("span"); txt.className = "trm-txt"; txt.textContent = m.summary;
         sum.appendChild(dir); sum.appendChild(txt);
-        det.appendChild(sum);
-        var body = document.createElement("div"); body.className = "trm-body"; body.textContent = "loading…";
-        det.appendChild(body);
-        var loaded = false;
-        det.addEventListener("toggle", function () {
-            if (!det.open || loaded) return;
-            loaded = true;
-            if (m.id < 0) { body.textContent = "(no source entry)"; return; }
-            fetch("api/sessions/" + sessionId + "/entry/" + m.id)
-                .then(function (r) { return r.json(); })
-                .then(function (d) { ioRenderPart(body, d.message || "", m.part); })
-                .catch(function (err) { body.textContent = "error: " + err.message; loaded = false; });
+        row.appendChild(sum);
+        sum.addEventListener("click", function () { ioReadMessage(row, m, sessionId); });
+        return row;
+    }
+
+    // Shows one message in the reading pane below the list.
+    function ioReadMessage(row, m, sessionId) {
+        document.querySelectorAll("#io-sessions .trm.selected").forEach(function (el) {
+            el.classList.remove("selected");
         });
-        return det;
+        row.classList.add("selected");
+        var head = document.getElementById("io-reading-head");
+        var body = document.getElementById("io-reading-body");
+        head.textContent = m.dir + "  ·  " + m.part;
+        head.title = head.textContent;
+        body.textContent = "";
+        if (m.id < 0) {
+            body.textContent = "(no source entry)";
+            return;
+        }
+        var pending = document.createElement("div"); pending.textContent = "loading…";
+        body.appendChild(pending);
+        fetch("api/sessions/" + sessionId + "/entry/" + m.id)
+            .then(function (r) { return r.json(); })
+            .then(function (d) { ioRenderPart(body, d.message || "", m.part); body.scrollTop = 0; })
+            .catch(function (err) { body.textContent = "error: " + err.message; });
     }
 
     function ioRenderPart(holder, message, part) {
