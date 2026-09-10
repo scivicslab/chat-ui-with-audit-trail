@@ -142,6 +142,9 @@ public class ChatUiActorSystem {
     @Inject
     IoLogView ioLogView;
 
+    @Inject
+    com.scivicslab.chatui.audittrail.ActivityWork activityWork;
+
     /**
      * How many recorded turns a restarted conversation gets back. The pane's own limit
      * ({@code ChatSession.MAX_HISTORY}) and the provider's token budget both still apply on top,
@@ -175,6 +178,7 @@ public class ChatUiActorSystem {
     private ActorRef<CallWatchdog> callWatchdogRef;
     private ActorRef<CollaborationGraph> collaborationGraphRef;
     private ActorRef<SkillRegistry> skillRegistryRef;
+    private ActorRef<com.scivicslab.chatui.audittrail.ActivityWatcher> activityWatcherRef;
     private FileAccessScope fileScope;
 
     /** One {@link Project} grouping actor per project id. Purely an actor-tree grouping plus a
@@ -303,7 +307,27 @@ public class ChatUiActorSystem {
         LOG.info("Actor system initialised with " + projects.size() + " project(s), "
                 + chats.size() + " conversation(s)");
 
+        startActivityWatcher();
         startDistributedActorServer();
+    }
+
+    /**
+     * Creates the actor that holds what this instance is doing, and starts its schedule.
+     *
+     * <p>Under the housekeeper because it exists once regardless of what work is being done. After
+     * the projects and their conversations, because working an answer out reads them.</p>
+     */
+    private void startActivityWatcher() {
+        activityWatcherRef = housekeeperRef.createChild("activity",
+                new com.scivicslab.chatui.audittrail.ActivityWatcher(activityWork));
+        activityWatcherRef.tell(w -> w.bind(activityWatcherRef, actorSystem.getManagedThreadPool()));
+        activityWatcherRef.tell(com.scivicslab.chatui.audittrail.ActivityWatcher::startWatching);
+        LOG.info("ActivityWatcher available as actor '" + activityWatcherRef.getName() + "'");
+    }
+
+    /** @return the actor holding what this instance is doing, for {@code ActivityResource} */
+    public ActorRef<com.scivicslab.chatui.audittrail.ActivityWatcher> getActivityWatcher() {
+        return activityWatcherRef;
     }
 
     /**
@@ -348,6 +372,15 @@ public class ChatUiActorSystem {
      * virtual and end with the JVM — but a bound port is visible from outside the process, and a
      * non-daemon server thread can keep a JVM alive after it was asked to stop.
      */
+    /** Stops the activity schedule before the actor system goes away. */
+    @PreDestroy
+    void stopActivityWatcher() {
+        if (activityWatcherRef != null) {
+            activityWatcherRef.tell(com.scivicslab.chatui.audittrail.ActivityWatcher::stopWatching)
+                    .join();
+        }
+    }
+
     @PreDestroy
     void stopDistributedActorServer() {
         if (distributedActorSystem == null) {
