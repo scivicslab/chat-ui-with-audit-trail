@@ -5,7 +5,9 @@ import com.scivicslab.chatui.core.actor.Project;
 import com.scivicslab.pojoactor.core.ActorRef;
 
 import jakarta.inject.Inject;
+import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.GET;
+import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
@@ -68,6 +70,36 @@ public class ProjectWorkflowResource {
             return Response.status(404).entity(Map.of("error", "unknown workflow: " + name)).build();
         }
         return Response.ok(doc).build();
+    }
+
+    /**
+     * Writes one workflow as the project's own, creating or replacing it, after checking that
+     * Turing-workflow can read it ({@link ProjectWorkflowCatalog#write}).
+     *
+     * @param projectId the project
+     * @param name      the basename without {@code .yaml}
+     * @param yaml      the text, as the request body
+     * @return {@code {name, yaml, origin, editable}} of what was written; 400 with {@code error}
+     *         when the name is not a plain basename, the project has no working directory, or the
+     *         text is not a workflow; 404 when there is no such project
+     */
+    @PUT
+    @Path("/{name}")
+    @Consumes(MediaType.TEXT_PLAIN)
+    public Response write(@PathParam("projectId") String projectId, @PathParam("name") String name,
+                          String yaml) {
+        if (!ProjectWorkflowCatalog.isSafeName(name)) {
+            return Response.status(400).entity(Map.of("error", "not a workflow name: " + name)).build();
+        }
+        ProjectWorkflowCatalog catalog = catalogOf(projectId);
+        if (catalog == null) return noSuchProject(projectId);
+        try {
+            return Response.ok(catalog.write(name, yaml)).build();
+        } catch (IllegalArgumentException e) {
+            return Response.status(400).entity(Map.of("error", e.getMessage())).build();
+        } catch (java.io.IOException e) {
+            return Response.status(500).entity(Map.of("error", "could not write: " + e.getMessage())).build();
+        }
     }
 
     /**

@@ -1,5 +1,9 @@
 package com.scivicslab.chatui.audittrail;
 
+import com.scivicslab.turingworkflow.workflow.Interpreter;
+import com.scivicslab.turingworkflow.workflow.MatrixCode;
+
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -145,6 +149,60 @@ public final class ProjectWorkflowCatalog {
             LOG.log(Level.WARNING, "Could not read bundled workflow " + name, e);
             return null;
         }
+    }
+
+    /**
+     * Checks that {@code yaml} is a workflow Turing-workflow can read, by reading it the way a run
+     * would — the only judge of that is the interpreter itself.
+     *
+     * @param yaml the candidate text
+     * @return {@code null} when it can be read and has at least one step, else why not
+     */
+    public static String validate(String yaml) {
+        if (yaml == null || yaml.isBlank()) return "the workflow is empty";
+        try {
+            Interpreter probe = new Interpreter();
+            probe.readYaml(new ByteArrayInputStream(yaml.getBytes(StandardCharsets.UTF_8)));
+            MatrixCode code = probe.getCode();
+            if (code == null || code.getTransitions() == null || code.getTransitions().isEmpty()) {
+                return "the workflow has no steps";
+            }
+            return null;
+        } catch (Exception e) {
+            String m = e.getMessage();
+            return "not a workflow Turing-workflow can read: "
+                    + (m == null || m.isBlank() ? e.getClass().getSimpleName() : m);
+        }
+    }
+
+    /**
+     * Writes {@code yaml} as the project's own workflow {@code name}, creating or replacing the
+     * file under {@code workflows/} in the working directory.
+     *
+     * <p>Writing over a bundled name is how a bundled default is customised: the project file
+     * hides the bundled one from then on. Nothing is written unless {@link #validate} passes, so
+     * a file on disk is always one the interpreter can run.</p>
+     *
+     * @param name the basename without {@code .yaml}
+     * @param yaml the text to write
+     * @return the written workflow
+     * @throws IllegalArgumentException when the name is unsafe, the project has no working
+     *                                  directory, or the text is not a workflow — the message
+     *                                  says which
+     * @throws IOException              when the file cannot be written
+     */
+    public Document write(String name, String yaml) throws IOException {
+        if (!isSafeName(name)) throw new IllegalArgumentException("not a workflow name: " + name);
+        if (projectDir == null) {
+            throw new IllegalArgumentException(
+                    "this project has no working directory; set one before writing workflows");
+        }
+        String why = validate(yaml);
+        if (why != null) throw new IllegalArgumentException(why);
+        Files.createDirectories(projectDir);
+        Path file = projectDir.resolve(name + ".yaml");
+        Files.writeString(file, yaml, StandardCharsets.UTF_8);
+        return new Document(name, yaml, ORIGIN_PROJECT, true);
     }
 
     /** @return the project's own workflows, basename to text; empty when it has no directory */

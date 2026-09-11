@@ -432,12 +432,17 @@
             .catch(function (e) { projectWfStatus("error: " + e.message); });
     }
 
+    // The workflow last opened, as the server sent it: {name, yaml, origin, editable}. What Edit
+    // starts from.
+    var projectWfDoc = null;
+
     function projectWfOpen(name) {
         var url = projectWfUrl("/" + encodeURIComponent(name));
         var head = document.getElementById("project-wf-head");
         var view = document.getElementById("project-wf-view");
         if (!url || !view) return;
         projectWfOpenName = name;
+        projectWfEditorHide();
         document.querySelectorAll("#project-wf-list .pwf-row").forEach(function (r) {
             r.classList.toggle("selected", r.querySelector(".pwf-name") && r.querySelector(".pwf-name").textContent.indexOf(name) >= 0);
         });
@@ -445,12 +450,103 @@
         fetch(url)
             .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
             .then(function (d) {
+                projectWfDoc = d;
                 var n = wfRenderInto(view, d.yaml || "");
                 if (head) head.textContent = d.name + "  —  " + n + " step(s), "
                     + (d.editable ? "this project's own file" : "bundled, read-only");
                 view.scrollTop = 0;
+                var edit = document.getElementById("project-wf-edit");
+                if (edit) {
+                    edit.disabled = false;
+                    edit.textContent = d.editable ? "Edit" : "Edit a copy";
+                    edit.title = d.editable
+                        ? "Edit this file"
+                        : "Bundled workflows are read-only; saving creates this project's own copy, which then replaces it";
+                }
             })
-            .catch(function (e) { if (head) head.textContent = "error: " + e.message; });
+            .catch(function (e) { if (head) head.textContent = "error: " + e.message; projectWfDoc = null; });
+    }
+
+    // ── Editing (ProjectPerspective_260911_oo01, step 3) ──
+    // The editor takes the reader's place. Save PUTs the text as-is; the server refuses anything
+    // Turing-workflow cannot read, and its reason is shown next to the buttons.
+    var WF_TEMPLATE = "name: my-workflow\ndescription: |\n  What this workflow does.\nsteps:\n"
+        + "  - states: [\"0\", \"1\"]\n    label: first-step\n    actions:\n"
+        + "      - actor: this\n        method: noop\n        arguments: []\n        execution: direct\n";
+
+    function projectWfEditStatus(msg, isError) {
+        var s = document.getElementById("project-wf-edit-status");
+        if (!s) return;
+        s.textContent = msg || "";
+        s.classList.toggle("pwf-error", !!isError);
+    }
+
+    function projectWfEditorShow(name, yaml, hint) {
+        var editor = document.getElementById("project-wf-editor");
+        var view = document.getElementById("project-wf-view");
+        var nameEl = document.getElementById("project-wf-edit-name");
+        var yamlEl = document.getElementById("project-wf-edit-yaml");
+        if (!editor || !view || !nameEl || !yamlEl) return;
+        nameEl.value = name || "";
+        yamlEl.value = yaml || "";
+        view.style.display = "none";
+        editor.style.display = "";
+        projectWfEditStatus(hint || "");
+        (name ? yamlEl : nameEl).focus();
+    }
+
+    function projectWfEditorHide() {
+        var editor = document.getElementById("project-wf-editor");
+        var view = document.getElementById("project-wf-view");
+        if (editor) editor.style.display = "none";
+        if (view) view.style.display = "";
+    }
+
+    function projectWfEdit() {
+        if (!projectWfDoc) return;
+        projectWfEditorShow(projectWfDoc.name, projectWfDoc.yaml,
+            projectWfDoc.editable ? "" : "Saving creates this project's own copy of this bundled workflow.");
+    }
+
+    function projectWfNew() {
+        projectWfEditorShow("", WF_TEMPLATE, "Give it a name, then Save.");
+    }
+
+    function projectWfSave() {
+        var nameEl = document.getElementById("project-wf-edit-name");
+        var yamlEl = document.getElementById("project-wf-edit-yaml");
+        if (!nameEl || !yamlEl) return;
+        var name = nameEl.value.trim();
+        if (!name) { projectWfEditStatus("a name is required", true); nameEl.focus(); return; }
+        if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) {
+            projectWfEditStatus("a name is letters, digits, '.', '_' and '-' only", true); nameEl.focus(); return;
+        }
+        var url = projectWfUrl("/" + encodeURIComponent(name));
+        if (!url) { projectWfEditStatus("no project selected", true); return; }
+        projectWfEditStatus("saving…");
+        fetch(url, { method: "PUT", headers: { "Content-Type": "text/plain; charset=utf-8" }, body: yamlEl.value })
+            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; }); })
+            .then(function (res) {
+                if (!res.ok) {
+                    projectWfEditStatus((res.body && res.body.error) || ("HTTP " + res.status), true);
+                    return;
+                }
+                projectWfEditStatus("saved");
+                projectWfLoadList();
+                projectWfOpen(name);
+            })
+            .catch(function (e) { projectWfEditStatus("error: " + e.message, true); });
+    }
+
+    function initProjectWorkflowEditor() {
+        var edit = document.getElementById("project-wf-edit");
+        var neu = document.getElementById("project-wf-new");
+        var save = document.getElementById("project-wf-save");
+        var cancel = document.getElementById("project-wf-cancel");
+        if (edit) edit.addEventListener("click", projectWfEdit);
+        if (neu) neu.addEventListener("click", projectWfNew);
+        if (save) save.addEventListener("click", projectWfSave);
+        if (cancel) cancel.addEventListener("click", projectWfEditorHide);
     }
 
     function projectWfOnShow() {
@@ -1193,6 +1289,7 @@
         initWorkflow();
         initExtensions();
         initProjectWorkflows();
+        initProjectWorkflowEditor();
         restorePerspective(); // before the tree renders, so its highlight matches
         refreshActors();   // the actor dock is visible by default
         ioOnShow();         // Sessions is the default-active right-pane tab

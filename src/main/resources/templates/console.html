@@ -174,7 +174,26 @@
                 <div id="project-wf-list"></div>
                 <div id="project-wf-reading">
                     <div id="project-wf-head">Pick a workflow above to read it here.</div>
+                    <!-- Reading and editing share the region: the boxes, or the editor, one at a
+                         time (ProjectPerspective_260911_oo01, step 3). Saving writes the project's
+                         own file under workflows/; a bundled workflow saved becomes the project's
+                         copy and hides the bundled one. -->
+                    <div class="tab-toolbar" id="project-wf-actions">
+                        <button id="project-wf-edit" type="button" disabled>Edit</button>
+                        <button id="project-wf-new" type="button">New</button>
+                    </div>
                     <div id="project-wf-view"></div>
+                    <div id="project-wf-editor" style="display:none">
+                        <div class="tab-toolbar">
+                            <label class="tab-auto">Name:
+                                <input id="project-wf-edit-name" type="text" placeholder="my-workflow" autocomplete="off" spellcheck="false">
+                            </label>
+                            <button id="project-wf-save" type="button">Save</button>
+                            <button id="project-wf-cancel" type="button">Cancel</button>
+                            <span id="project-wf-edit-status"></span>
+                        </div>
+                        <textarea id="project-wf-edit-yaml" spellcheck="false" wrap="off"></textarea>
+                    </div>
                 </div>
             </main>
         </div>

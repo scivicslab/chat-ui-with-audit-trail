@@ -105,6 +105,55 @@ class ProjectWorkflowCatalogTest {
     }
 
     @Test
+    void validate_acceptsABundledWorkflow_andRejectsWhatTheInterpreterCannotRead() {
+        String real = new ProjectWorkflowCatalog(null).read("parallel-workers-plan").yaml();
+
+        assertNull(ProjectWorkflowCatalog.validate(real), "a workflow that ships with this program must pass");
+        assertNotNull(ProjectWorkflowCatalog.validate(""), "empty is refused");
+        assertNotNull(ProjectWorkflowCatalog.validate("name: x\nsteps: []\n"), "no steps is refused");
+        assertNotNull(ProjectWorkflowCatalog.validate("this: [is: not, valid yaml"), "unreadable text is refused");
+        assertTrue(ProjectWorkflowCatalog.validate("this: [is: not, valid yaml").startsWith("not a workflow"),
+                "the reason names the interpreter's judgement");
+    }
+
+    @Test
+    void write_createsTheProjectsOwnFile_whichThenHidesTheBundledOne(@TempDir Path work) throws Exception {
+        ProjectWorkflowCatalog catalog = new ProjectWorkflowCatalog(work);
+        String yaml = "name: my-plan\ndescription: Mine.\nsteps:\n  - states: [\"0\", \"1\"]\n    label: only\n    actions: []\n";
+
+        ProjectWorkflowCatalog.Document written = catalog.write("parallel-workers-plan", yaml);
+
+        assertEquals(ProjectWorkflowCatalog.ORIGIN_PROJECT, written.origin());
+        assertTrue(written.editable());
+        assertTrue(Files.isRegularFile(work.resolve(ProjectWorkflowCatalog.SUBDIR).resolve("parallel-workers-plan.yaml")),
+                "written under workflows/ in the working directory, creating the directory");
+        ProjectWorkflowCatalog.Document back = catalog.read("parallel-workers-plan");
+        assertEquals(yaml, back.yaml());
+        assertEquals(ProjectWorkflowCatalog.ORIGIN_PROJECT, back.origin(), "the project's copy now hides the bundled one");
+    }
+
+    @Test
+    void write_writesNothingThatCannotBeRun(@TempDir Path work) throws Exception {
+        ProjectWorkflowCatalog catalog = new ProjectWorkflowCatalog(work);
+
+        IllegalArgumentException e = org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalArgumentException.class, () -> catalog.write("broken", "steps: [\n"));
+        assertTrue(e.getMessage().startsWith("not a workflow"), e.getMessage());
+        assertFalse(Files.exists(work.resolve(ProjectWorkflowCatalog.SUBDIR).resolve("broken.yaml")), "nothing on disk");
+
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> catalog.write("../escape", "name: x\nsteps:\n  - states: [\"0\",\"1\"]\n    actions: []\n"));
+    }
+
+    @Test
+    void write_refusesWhenTheProjectHasNoWorkingDirectory() {
+        IllegalArgumentException e = org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalArgumentException.class,
+                () -> new ProjectWorkflowCatalog(null).write("x", "name: x\nsteps:\n  - states: [\"0\",\"1\"]\n    actions: []\n"));
+        assertTrue(e.getMessage().contains("working directory"), e.getMessage());
+    }
+
+    @Test
     void read_refusesAnythingThatIsNotAPlainBasename(@TempDir Path work) throws Exception {
         workflowsDir(work);
         Files.writeString(work.resolve("secret.yaml"), "not a workflow\n");
