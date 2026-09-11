@@ -157,7 +157,7 @@ public class ChatUiActorSystem {
 
     /** Name of the system-wide log multiplexer actor — fixed, per {@code MultiplexerLogHandler}'s
      *  hardcoded lookup name. */
-    private static final String SYSTEM_LOG_ACTOR = "outputMultiplexer";
+    static final String SYSTEM_LOG_ACTOR = "outputMultiplexer";
     private static final int SYSTEM_LOG_CAPACITY = 500;
     private static final int TAB_LOG_CAPACITY = 200;
 
@@ -295,6 +295,7 @@ public class ChatUiActorSystem {
         // が違う"), not pre-seeded.
         projects.put(DEFAULT_PROJECT_ID,
                 actorSystem.getRoot().createChild(DEFAULT_PROJECT_ID, new Project()));
+        wireProject(DEFAULT_PROJECT_ID);
         // What a caller in another process asks before it can call anything: which actions an
         // actor has, and what one of them takes (ActionArgumentSchema_260807_oo01). Under the
         // housekeeper because it exists regardless of what work is being done.
@@ -502,8 +503,31 @@ public class ChatUiActorSystem {
     public synchronized String createProject() {
         String projectId = "project" + nextProjectNumber.getAndIncrement();
         projects.put(projectId, actorSystem.getRoot().createChild(projectId, new Project()));
+        wireProject(projectId);
         createChat(projectId, "01");
         return projectId;
+    }
+
+    /**
+     * Gives a freshly created project what it needs to run jobs, and starts its watch over them
+     * ({@code ProjectPerspective_260911_oo01}). Called at both places a project is created.
+     */
+    private void wireProject(String projectId) {
+        ActorRef<Project> ref = projects.get(projectId);
+        ref.tell(p -> p.bind(projectId, actorSystem, ref, callWatchdogRef, SYSTEM_LOG_ACTOR));
+        ref.tell(Project::startWatching);
+    }
+
+    /** Stops every project's job watch before the actor system goes away. */
+    @PreDestroy
+    void stopProjectWatchers() {
+        for (ActorRef<Project> ref : projects.values()) {
+            try {
+                ref.tell(Project::stopWatching).join();
+            } catch (RuntimeException e) {
+                LOG.log(Level.FINE, "Could not stop the job watch of " + ref.getName(), e);
+            }
+        }
     }
 
     /** @return the ids of all projects created so far */

@@ -59,6 +59,43 @@ public class PlanRunner extends Interpreter {
     /** @param done completed with the plan's result once it finishes */
     public void setDone(CompletableFuture<String> done) { this.done = done; }
 
+    /** Told one line about every transition this plan leaves; {@code null} means nobody listens. */
+    private java.util.function.Consumer<String> stepListener;
+
+    /**
+     * @param listener told one line per transition left, e.g. for a job's log
+     *                 ({@code ProjectPerspective_260911_oo01}); {@code null} to tell nobody
+     */
+    public void setStepListener(java.util.function.Consumer<String> listener) {
+        this.stepListener = listener;
+    }
+
+    /**
+     * Reports the transition just left to {@link #setStepListener the listener}, then does what
+     * {@code Interpreter} does.
+     */
+    @Override
+    protected void onExitTransition(com.scivicslab.turingworkflow.workflow.Transition transition,
+                                    boolean success, ActionResult result) {
+        java.util.function.Consumer<String> listener = stepListener;
+        if (listener != null && transition != null) {
+            String label = transition.getLabel();
+            String states = transition.getStates() == null ? "" : String.join(" -> ", transition.getStates());
+            String line = "step " + currentTransitionIndex
+                    + (label == null || label.isBlank() ? "" : " " + label)
+                    + (states.isEmpty() ? "" : " [" + states + "]")
+                    + (success ? " ok" : " failed")
+                    + (result == null || result.getResult() == null || result.getResult().isBlank()
+                        ? "" : ": " + result.getResult());
+            try {
+                listener.accept(line);
+            } catch (RuntimeException e) {
+                LOG.log(java.util.logging.Level.FINE, "step listener failed", e);
+            }
+        }
+        super.onExitTransition(transition, success, result);
+    }
+
     /** @return the reply the last plan step received, or {@code null} */
     public String lastReply() { return lastReply; }
 

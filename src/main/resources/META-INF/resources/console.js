@@ -30,7 +30,204 @@
             if (tab === "logdb") ioOnShow();
             if (tab === "syslog") refreshLogs();
             if (tab === "agentloop") wfOnShow();
+            if (tab === "jobrun") jobRunOnShow();
+            if (tab === "jobs") jobsOnShow();
+            if (tab === "joblog") jobLogOnShow();
         });
+    }
+
+    // ── Project perspective, right pane: run a workflow, list the jobs, read a job's log ────
+    // (ProjectPerspective_260911_oo01, step 4). A job is one workflow run as the project's child
+    // actor; the Project actor owns the list. Lists auto-refresh every 3s while their tab shows.
+    var jobLogSelected = null;
+    var jobsTimer = null;
+    var jobLogTimer = null;
+
+    function projectJobsUrl(suffix) {
+        if (!perspectiveProjectId) return null;
+        return "api/projects/" + encodeURIComponent(perspectiveProjectId) + "/jobs" + (suffix || "");
+    }
+    function setText(id, text) { var el = document.getElementById(id); if (el) el.textContent = text || ""; }
+    function tabShowing(id) {
+        var el = document.getElementById(id);
+        return !!el && el.classList.contains("active") && perspective === "project";
+    }
+
+    // Run tab: mirrors what the centre pane has open.
+    function jobRunOnShow() {
+        setText("jobrun-workflow", projectWfOpenName || "(none open)");
+        var btn = document.getElementById("jobrun-run");
+        if (btn) btn.disabled = !projectWfOpenName;
+    }
+
+    function jobRun() {
+        var url = projectJobsUrl("");
+        if (!url || !projectWfOpenName) return;
+        setText("jobrun-status", "starting…");
+        fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+                     body: JSON.stringify({ workflow: projectWfOpenName }) })
+            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; }); })
+            .then(function (res) {
+                if (!res.ok) { setText("jobrun-status", (res.body && res.body.error) || ("HTTP " + res.status)); return; }
+                setText("jobrun-status", "started " + res.body.jobId);
+                jobLogSelected = res.body.jobId;
+                jobsOnShow();
+            })
+            .catch(function (e) { setText("jobrun-status", "error: " + e.message); });
+    }
+
+    function fmtInstant(s) {
+        if (!s) return "";
+        var d = new Date(s);
+        if (isNaN(d.getTime())) return s;
+        var p = function (n) { return String(n).padStart(2, "0"); };
+        return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+    }
+
+    function jobRowEl(j) {
+        var row = document.createElement("div");
+        row.className = "job-row job-" + (j.state || "").toLowerCase() + (j.jobId === jobLogSelected ? " selected" : "");
+        var head = document.createElement("div");
+        head.className = "job-head";
+        var id = document.createElement("span"); id.className = "job-id"; id.textContent = j.jobId;
+        var wf = document.createElement("span"); wf.className = "job-wf"; wf.textContent = j.workflow || "";
+        var st = document.createElement("span"); st.className = "job-state"; st.textContent = j.state || "";
+        var when = document.createElement("span"); when.className = "job-when";
+        when.textContent = fmtInstant(j.startedAt) + (j.finishedAt ? " → " + fmtInstant(j.finishedAt) : "");
+        head.appendChild(id); head.appendChild(wf); head.appendChild(st); head.appendChild(when);
+        var actions = document.createElement("span");
+        actions.className = "job-actions";
+        var logBtn = document.createElement("button");
+        logBtn.type = "button"; logBtn.textContent = "Log"; logBtn.title = "Show this job's log";
+        logBtn.addEventListener("click", function (e) {
+            e.stopPropagation();
+            jobLogSelected = j.jobId;
+            var tab = document.querySelector('#right-tab-bar .rtab-btn[data-tab="joblog"]');
+            if (tab) tab.click();
+        });
+        actions.appendChild(logBtn);
+        if (j.state === "RUNNING") {
+            var stop = document.createElement("button");
+            stop.type = "button"; stop.textContent = "Stop"; stop.title = "Ask this job to stop between steps";
+            stop.addEventListener("click", function (e) {
+                e.stopPropagation();
+                fetch(projectJobsUrl("/" + encodeURIComponent(j.jobId) + "/stop"), { method: "POST" })
+                    .then(function (r) { return r.json().then(function (b) { setText("jobs-status", r.ok ? "stop requested for " + j.jobId : ((b && b.error) || ("HTTP " + r.status))); }); })
+                    .catch(function (err) { setText("jobs-status", "error: " + err.message); })
+                    .finally(jobsLoad);
+            });
+            actions.appendChild(stop);
+        }
+        head.appendChild(actions);
+        row.appendChild(head);
+        if (j.result) {
+            var res = document.createElement("div");
+            res.className = "job-result";
+            res.textContent = j.result;
+            row.appendChild(res);
+        }
+        row.addEventListener("click", function () {
+            jobLogSelected = j.jobId;
+            document.querySelectorAll("#jobs-list .job-row").forEach(function (r) { r.classList.toggle("selected", r === row); });
+        });
+        return row;
+    }
+
+    var jobsLoading = false;
+    function jobsLoad() {
+        var list = document.getElementById("jobs-list");
+        var url = projectJobsUrl("");
+        if (!list || !url || jobsLoading) return;
+        jobsLoading = true;
+        fetch(url)
+            .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+            .then(function (jobs) {
+                list.textContent = "";
+                if (!jobs || !jobs.length) {
+                    var empty = document.createElement("div");
+                    empty.className = "project-placeholder";
+                    empty.textContent = "No jobs yet. Open a workflow and Run it.";
+                    list.appendChild(empty);
+                } else {
+                    jobs.forEach(function (j) { list.appendChild(jobRowEl(j)); });
+                }
+                var running = (jobs || []).filter(function (j) { return j.state === "RUNNING"; }).length;
+                setText("jobs-status", (jobs || []).length + " job(s), " + running + " running");
+            })
+            .catch(function (e) { setText("jobs-status", "error: " + e.message); })
+            .finally(function () { jobsLoading = false; });
+    }
+
+    function jobsOnShow() {
+        jobsLoad();
+        jobsApplyAuto();
+    }
+
+    function jobsApplyAuto() {
+        var auto = document.getElementById("jobs-auto");
+        if (jobsTimer) { clearInterval(jobsTimer); jobsTimer = null; }
+        if (auto && auto.checked) {
+            jobsTimer = setInterval(function () { if (tabShowing("tab-jobs")) jobsLoad(); }, 3000);
+        }
+    }
+
+    function jobLogRender(entries) {
+        var list = document.getElementById("joblog-list");
+        if (!list) return;
+        list.textContent = "";
+        (entries || []).forEach(function (e) {
+            var line = document.createElement("div");
+            line.className = "joblog-line joblog-" + String(e.type || "").toLowerCase();
+            var t = document.createElement("span"); t.className = "joblog-time"; t.textContent = fmtLogTime(e.time);
+            var ty = document.createElement("span"); ty.className = "joblog-type"; ty.textContent = e.type || "";
+            var d = document.createElement("span"); d.className = "joblog-data"; d.textContent = e.data || "";
+            line.appendChild(t); line.appendChild(ty); line.appendChild(d);
+            list.appendChild(line);
+        });
+        list.scrollTop = list.scrollHeight;
+    }
+
+    var jobLogLoading = false;
+    function jobLogLoad() {
+        setText("joblog-job", jobLogSelected || "(none selected)");
+        if (!jobLogSelected) { setText("joblog-status", "pick a job under Batch Jobs"); return; }
+        var url = projectJobsUrl("/" + encodeURIComponent(jobLogSelected) + "/log");
+        if (!url || jobLogLoading) return;
+        jobLogLoading = true;
+        fetch(url)
+            .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+            .then(function (entries) {
+                jobLogRender(entries);
+                setText("joblog-status", (entries || []).length + " line(s)");
+            })
+            .catch(function (e) { setText("joblog-status", "error: " + e.message); })
+            .finally(function () { jobLogLoading = false; });
+    }
+
+    function jobLogOnShow() {
+        jobLogLoad();
+        jobLogApplyAuto();
+    }
+
+    function jobLogApplyAuto() {
+        var auto = document.getElementById("joblog-auto");
+        if (jobLogTimer) { clearInterval(jobLogTimer); jobLogTimer = null; }
+        if (auto && auto.checked) {
+            jobLogTimer = setInterval(function () { if (tabShowing("tab-joblog")) jobLogLoad(); }, 3000);
+        }
+    }
+
+    function initJobs() {
+        var run = document.getElementById("jobrun-run");
+        if (run) run.addEventListener("click", jobRun);
+        var jr = document.getElementById("jobs-refresh");
+        if (jr) jr.addEventListener("click", jobsLoad);
+        var ja = document.getElementById("jobs-auto");
+        if (ja) ja.addEventListener("change", jobsApplyAuto);
+        var lr = document.getElementById("joblog-refresh");
+        if (lr) lr.addEventListener("click", jobLogLoad);
+        var la = document.getElementById("joblog-auto");
+        if (la) la.addEventListener("change", jobLogApplyAuto);
     }
 
     // ── System Log tab (GET /api/logs — LogTap's server-wide ring buffer) ──────
@@ -463,6 +660,7 @@
                         ? "Edit this file"
                         : "Bundled workflows are read-only; saving creates this project's own copy, which then replaces it";
                 }
+                jobRunOnShow(); // the Run tab mirrors what is open here
             })
             .catch(function (e) { if (head) head.textContent = "error: " + e.message; projectWfDoc = null; });
     }
@@ -1290,6 +1488,7 @@
         initExtensions();
         initProjectWorkflows();
         initProjectWorkflowEditor();
+        initJobs();
         restorePerspective(); // before the tree renders, so its highlight matches
         refreshActors();   // the actor dock is visible by default
         ioOnShow();         // Sessions is the default-active right-pane tab

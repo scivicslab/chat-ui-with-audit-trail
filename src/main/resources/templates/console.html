@@ -272,25 +272,40 @@
                 <!-- Project perspective tabs (ProjectPerspective_260911_oo01). Running a workflow,
                      reading a job's log and listing the project's batch jobs arrive in a later
                      step; these are the tabs they go into. -->
+                <!-- Run: the workflow open in the centre pane, started as a batch job
+                     (POST api/projects/PROJECT/jobs). No braces in this file's comments: Qute
+                     reads them as expressions and the page fails to render. -->
                 <section id="tab-jobrun" class="rtab-content" data-perspective="project">
                     <div class="tab-toolbar">
+                        <span class="tab-auto">Workflow: <b id="jobrun-workflow">(none open)</b></span>
+                        <button id="jobrun-run" type="button" disabled>Run</button>
                         <span id="jobrun-status"></span>
                     </div>
-                    <div class="project-placeholder">Run the selected workflow as a batch job here.</div>
+                    <div class="project-placeholder">
+                        Open a workflow in the centre pane, then Run. The job appears under Batch Jobs,
+                        and its log under Job Log.
+                    </div>
                 </section>
 
+                <!-- Job Log: the lines one job wrote (GET api/projects/PROJECT/jobs/JOB/log). -->
                 <section id="tab-joblog" class="rtab-content" data-perspective="project">
                     <div class="tab-toolbar">
+                        <span class="tab-auto">Job: <b id="joblog-job">(none selected)</b></span>
+                        <button id="joblog-refresh" type="button">Refresh</button>
+                        <label class="tab-auto"><input type="checkbox" id="joblog-auto" checked> Auto</label>
                         <span id="joblog-status"></span>
                     </div>
-                    <div class="project-placeholder">A running job's log is shown here.</div>
+                    <div id="joblog-list"></div>
                 </section>
 
+                <!-- Batch Jobs: this project's jobs, newest first (GET api/projects/PROJECT/jobs). -->
                 <section id="tab-jobs" class="rtab-content" data-perspective="project">
                     <div class="tab-toolbar">
+                        <button id="jobs-refresh" type="button">Refresh</button>
+                        <label class="tab-auto"><input type="checkbox" id="jobs-auto" checked> Auto</label>
                         <span id="jobs-status"></span>
                     </div>
-                    <div class="project-placeholder">This project's batch jobs are listed here.</div>
+                    <div id="jobs-list"></div>
                 </section>
             </div>
         </div>

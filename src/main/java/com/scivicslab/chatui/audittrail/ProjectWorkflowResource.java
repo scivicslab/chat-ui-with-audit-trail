@@ -107,6 +107,15 @@ public class ProjectWorkflowResource {
      *         is no such project
      */
     private ProjectWorkflowCatalog catalogOf(String projectId) {
+        return catalogFor(actorSystem, projectId);
+    }
+
+    /**
+     * @return a catalog over the project's current working directory, read from the
+     *         {@code Project} actor now, or {@code null} when there is no such project. Shared
+     *         with {@link ProjectJobResource}, which starts jobs from the same catalog.
+     */
+    static ProjectWorkflowCatalog catalogFor(ChatUiActorSystem actorSystem, String projectId) {
         ActorRef<Project> project = actorSystem.getProject(projectId);
         if (project == null) return null;
         java.nio.file.Path dir = project.ask(Project::getWorkingDir).join();

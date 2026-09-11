@@ -662,3 +662,26 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
     border: none; border-top: 1px solid var(--border-color, #2c2c2c); outline: none;
 }
 #project-wf-edit-status.pwf-error { color: var(--error-text, #f66); }
+
+/* Project pane, right: jobs and a job's log (ProjectPerspective_260911_oo01, step 4). */
+#jobs-list, #joblog-list { flex: 1; min-height: 0; overflow: auto; }
+.job-row { padding: 6px 12px; border-bottom: 1px solid var(--border-color, #232323); cursor: pointer; }
+.job-row:hover { background: var(--bg-secondary, #262626); }
+.job-row.selected { background: var(--bg-secondary, #2a2a3a); }
+.job-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.job-id { font-family: var(--font-mono, monospace); font-weight: 600; color: var(--text-primary, #e6e6e6); }
+.job-wf { color: var(--text-primary, #e6e6e6); }
+.job-state { font-size: 11px; padding: 1px 6px; border-radius: 3px; border: 1px solid var(--border-color, #444); color: var(--text-secondary, #9aa0a6); }
+.job-running .job-state { color: var(--accent-blue, #a5b4fc); border-color: var(--accent-blue, #6366f1); }
+.job-finished .job-state { color: #7ccf8a; border-color: #4d8a57; }
+.job-failed .job-state { color: var(--error-text, #f66); border-color: var(--error-text, #a44); }
+.job-stopped .job-state { color: #e0b35a; border-color: #8a6d2f; }
+.job-when { font-size: 12px; color: var(--text-secondary, #9aa0a6); font-variant-numeric: tabular-nums; }
+.job-actions { margin-left: auto; display: flex; gap: 6px; }
+.job-actions button { font-size: 12px; padding: 2px 8px; }
+.job-result { margin-top: 4px; font-size: 12px; color: var(--text-secondary, #9aa0a6); white-space: pre-wrap; word-break: break-word; }
+.joblog-line { display: flex; gap: 8px; padding: 2px 12px; font-family: var(--font-mono, monospace); font-size: 12px; border-bottom: 1px solid var(--border-color, #1f1f1f); }
+.joblog-time { color: var(--text-secondary, #9aa0a6); flex-shrink: 0; }
+.joblog-type { color: var(--text-secondary, #9aa0a6); flex-shrink: 0; width: 5.5em; }
+.joblog-warning .joblog-type, .joblog-severe .joblog-type { color: var(--error-text, #f66); }
+.joblog-data { white-space: pre-wrap; word-break: break-word; }

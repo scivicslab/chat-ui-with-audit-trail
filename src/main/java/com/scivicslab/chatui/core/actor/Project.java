@@ -1,8 +1,30 @@
 package com.scivicslab.chatui.core.actor;
 
+import com.scivicslab.chatui.agent.RunPlanTool;
+import com.scivicslab.chatui.logging.ForwardingAccumulator;
+import com.scivicslab.chatui.logging.RecentEntriesAccumulator;
+import com.scivicslab.pojoactor.core.ActorRef;
+import com.scivicslab.pojoactor.core.scheduler.Scheduler;
+import com.scivicslab.turingworkflow.plugins.logoutput.MultiplexerAccumulator;
+import com.scivicslab.turingworkflow.plugins.logoutput.MultiplexerAccumulatorActor;
+import com.scivicslab.turingworkflow.workflow.IIActorRef;
+import com.scivicslab.turingworkflow.workflow.IIActorSystem;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Top-level grouping actor for one project — a {@code createChild} parent, exactly like
@@ -19,6 +41,19 @@ import java.nio.file.Path;
  * "the nearest {@code AGENTS.md}" from the file it is editing, and a conversation has no such
  * file. The project's directory stands in for it, so every conversation in one project receives
  * that directory's instructions ({@code SkillAndAgentsFile_260830_oo01}).</p>
+ *
+ * <p>The project also runs its workflows as batch jobs ({@code ProjectPerspective_260911_oo01}).
+ * One job is one workflow run as one {@link PlanRunner} that is this project's child, named
+ * {@code <projectId>/job-NN}; the jobs that exist are the project's job list. They are the
+ * project's rather than a conversation's because a plan drives conversations — {@code addWorker}
+ * hands slots to {@code chat-02}, {@code chat-03} — and a thing that spans conversations belongs
+ * to what contains them. The conversation-scoped runner ({@code <chat>.plan}, {@link RunPlanTool})
+ * stays as the entry point a conversation's own LLM uses.</p>
+ *
+ * <p>A plain object held by one actor: the job table is an ordinary map, changed only through
+ * that actor's mailbox. A job's end arrives as a message ({@link #jobFinished}), and a
+ * {@link Scheduler} tick against the actor itself ({@link #tick}) notices a runner that died
+ * without saying so, the way {@code ActivityWatcher} renews its answer.</p>
  */
 public class Project {
 
@@ -83,5 +118,230 @@ public class Project {
     /** @return this project's instructions, or {@code null} if it has none */
     public String getInstructions() {
         return instructions;
+    }
+
+    // ── Batch jobs (ProjectPerspective_260911_oo01) ──────────────────────────────────────────
+
+    private static final Logger LOG = Logger.getLogger(Project.class.getName());
+
+    /** A job's state. */
+    public static final String RUNNING = "RUNNING";
+    /** A job's state: the workflow reached its end. */
+    public static final String FINISHED = "FINISHED";
+    /** A job's state: the workflow did not reach its end, or its runner died. */
+    public static final String FAILED = "FAILED";
+    /** A job's state: stopped by request. */
+    public static final String STOPPED = "STOPPED";
+
+    /** How often {@link #tick} looks at the running jobs. Cheap: a lookup per job, no I/O. */
+    private static final Duration TICK = Duration.ofSeconds(5);
+    /** How many of a job's log lines are kept. */
+    private static final int JOB_LOG_CAPACITY = 500;
+
+    /**
+     * One job as it stands.
+     *
+     * @param jobId      {@code job-NN}, unique within this project
+     * @param actorName  the runner's actor name, {@code <projectId>/job-NN}
+     * @param workflow   the workflow's name, as the catalog lists it
+     * @param state      one of {@link #RUNNING}, {@link #FINISHED}, {@link #FAILED}, {@link #STOPPED}
+     * @param startedAt  when it was started
+     * @param finishedAt when it ended, or {@code null} while running
+     * @param result     what the run reported, or {@code null} while running
+     */
+    public record JobView(String jobId, String actorName, String workflow, String state,
+                          Instant startedAt, Instant finishedAt, String result) {
+        JobView ended(String state, String result) {
+            return new JobView(jobId, actorName, workflow, state, startedAt, Instant.now(), result);
+        }
+    }
+
+    private String projectId;
+    private IIActorSystem system;
+    private ActorRef<Project> self;
+    private ActorRef<CallWatchdog> watchdog;
+    private String systemLogActorName;
+    private Scheduler scheduler;
+    private final Map<String, JobView> jobs = new LinkedHashMap<>();
+    private final Map<String, RecentEntriesAccumulator> jobLogs = new HashMap<>();
+    private int jobCounter;
+
+    /**
+     * Binds what starting a job needs. Must run before {@link #startJob} and {@link #startWatching}.
+     *
+     * @param projectId          this project's id, the prefix of its jobs' names
+     * @param system             the actor system the runners are registered in
+     * @param self               this actor's own reference, the runners' parent
+     * @param watchdog           the shared {@link CallWatchdog} a plan's {@code askChat} steps use
+     * @param systemLogActorName the system-wide log actor a job's log forwards to
+     */
+    public void bind(String projectId, IIActorSystem system, ActorRef<Project> self,
+                     ActorRef<CallWatchdog> watchdog, String systemLogActorName) {
+        this.projectId = projectId;
+        this.system = system;
+        this.self = self;
+        this.watchdog = watchdog;
+        this.systemLogActorName = systemLogActorName;
+    }
+
+    /** Starts the periodic look at running jobs, scheduled against this actor's own mailbox. */
+    public void startWatching() {
+        scheduler = new Scheduler(1);
+        scheduler.scheduleWithFixedDelay("jobs", self, Project::tick,
+                TICK.toSeconds(), TICK.toSeconds(), TimeUnit.SECONDS);
+    }
+
+    /** Stops the schedule. Called when the actor system is torn down. */
+    public void stopWatching() {
+        if (scheduler != null) scheduler.close();
+    }
+
+    /**
+     * Starts a workflow as a new job of this project.
+     *
+     * <p>Creates the runner as this project's child, {@code <projectId>/job-NN}, gives it a log
+     * actor of its own wired like a conversation's ({@code <job>.log}, forwarding to the
+     * system-wide log), and launches the run the way {@link RunPlanTool} does. The run's end
+     * comes back as a message to this actor ({@link #jobFinished}).</p>
+     *
+     * @param workflow the workflow's name, for the job list
+     * @param yaml     the workflow text
+     * @return the new job, in state {@link #RUNNING}
+     * @throws IllegalStateException when {@link #bind} has not run
+     */
+    public JobView startJob(String workflow, String yaml) {
+        if (self == null || system == null) {
+            throw new IllegalStateException("project " + projectId + " is not bound to an actor system");
+        }
+        String jobId = String.format("job-%02d", ++jobCounter);
+        String name = projectId + "/" + jobId;
+
+        PlanRunner runner = new PlanRunner(name, system, watchdog);
+        PlanRunnerIIAR runnerRef = new PlanRunnerIIAR(name, runner, system);
+        runnerRef.setParentName(projectId);
+        self.getNamesOfChildren().add(name);
+        system.addIIActor(runnerRef);
+
+        RecentEntriesAccumulator buffer = new RecentEntriesAccumulator(JOB_LOG_CAPACITY);
+        MultiplexerAccumulator mux = new MultiplexerAccumulator();
+        mux.addTarget(buffer);
+        if (systemLogActorName != null) {
+            mux.addTarget(new ForwardingAccumulator(system, systemLogActorName, name));
+        }
+        MultiplexerAccumulatorActor logActor = new MultiplexerAccumulatorActor(name + ".log", mux, system);
+        logActor.setParentName(name);
+        runnerRef.getNamesOfChildren().add(logActor.getName());
+        system.addIIActor(logActor);
+        jobLogs.put(jobId, buffer);
+
+        // Every transition the runner leaves is one line in the job's log.
+        runner.setStepListener(line -> log(name, "INFO", line));
+
+        JobView view = new JobView(jobId, name, workflow, RUNNING, Instant.now(), null, null);
+        jobs.put(jobId, view);
+        log(name, "INFO", "started workflow " + workflow);
+
+        ActorRef<Project> me = self;
+        CompletableFuture<String> done = RunPlanTool.start(runnerRef, name, yaml);
+        // `done` is completed from inside the last transition (finish), before that transition's
+        // own log line is written. Queue an empty message behind the run on the runner's mailbox
+        // and record the end only once that has been processed, so the job's log reads in order:
+        // start, every step, then the end.
+        done.whenComplete((result, error) ->
+                runnerRef.tell(interp -> { })
+                         .whenComplete((v, ignored) -> me.tell(p -> p.jobFinished(jobId, result, error))));
+        return view;
+    }
+
+    /**
+     * On the mailbox: records how a job ended.
+     *
+     * @param jobId  the job
+     * @param result what the run reported, or {@code null} when it threw
+     * @param error  what it threw, or {@code null}
+     */
+    void jobFinished(String jobId, String result, Throwable error) {
+        JobView job = jobs.get(jobId);
+        if (job == null || !RUNNING.equals(job.state())) return;
+        String state;
+        String outcome;
+        if (error != null) {
+            state = FAILED;
+            outcome = "(job failed: " + error + ")";
+        } else {
+            outcome = result == null ? "" : result;
+            if (outcome.startsWith("(plan stopped")) state = STOPPED;
+            else if (outcome.startsWith("(plan failed") || outcome.startsWith("(plan did not finish")) state = FAILED;
+            else state = FINISHED;
+        }
+        jobs.put(jobId, job.ended(state, outcome));
+        log(job.actorName(), FAILED.equals(state) ? "WARNING" : "INFO", state.toLowerCase() + ": " + outcome);
+    }
+
+    /**
+     * Asks a running job to stop between transitions.
+     *
+     * @param jobId the job
+     * @return whether there was such a job and it was running
+     */
+    public boolean stopJob(String jobId) {
+        JobView job = jobs.get(jobId);
+        if (job == null || !RUNNING.equals(job.state())) return false;
+        IIActorRef<?> ref = system.getIIActor(job.actorName());
+        if (!(ref instanceof PlanRunnerIIAR runnerRef)) return false;
+        // tellNow, as ChatUiActorSystem.stopPlan does: the runner's thread is inside runUntilEnd,
+        // so a queued message would arrive only after the run it was meant to stop.
+        runnerRef.tellNow(interp -> interp.requestStop());
+        log(job.actorName(), "INFO", "stop requested");
+        return true;
+    }
+
+    /**
+     * On the mailbox, on a schedule: a running job whose runner is gone is recorded as failed.
+     * A runner that ends normally says so through {@link #jobFinished}; this covers the one that
+     * died without saying so.
+     */
+    void tick() {
+        for (JobView job : new ArrayList<>(jobs.values())) {
+            if (!RUNNING.equals(job.state())) continue;
+            IIActorRef<?> ref = system.getIIActor(job.actorName());
+            if (ref == null || !ref.isAlive()) {
+                jobs.put(job.jobId(), job.ended(FAILED, "(runner is gone)"));
+                log(job.actorName(), "WARNING", "failed: runner is gone");
+            }
+        }
+    }
+
+    /** @return this project's jobs, newest first */
+    public List<JobView> jobs() {
+        List<JobView> out = new ArrayList<>(jobs.values());
+        Collections.reverse(out);
+        return List.copyOf(out);
+    }
+
+    /** @return one job, or {@code null} */
+    public JobView job(String jobId) {
+        return jobs.get(jobId);
+    }
+
+    /** @return a job's log lines, oldest first, or {@code null} when there is no such job */
+    public List<RecentEntriesAccumulator.Entry> jobLog(String jobId) {
+        RecentEntriesAccumulator buffer = jobLogs.get(jobId);
+        return buffer == null ? null : buffer.recent();
+    }
+
+    /** Writes one line to a job's log actor, through its mailbox, as ChatUiActorSystem.submitPlan does. */
+    private void log(String jobActorName, String type, String data) {
+        IIActorRef<?> logRef = system.getIIActor(jobActorName + ".log");
+        if (logRef == null) return;
+        try {
+            org.json.JSONObject args = new org.json.JSONObject();
+            args.put("source", "job");
+            args.put("type", type);
+            args.put("data", data);
+            logRef.callByActionName("add", args.toString());
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not log for " + jobActorName, e);
+        }
     }
 }
