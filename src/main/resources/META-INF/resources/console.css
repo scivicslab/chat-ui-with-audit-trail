@@ -608,3 +608,39 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
 #console-root[data-perspective="chat"] .rtab-content[data-perspective="project"] { display: none; }
 #console-root[data-perspective="project"] .rtab-btn[data-perspective="chat"],
 #console-root[data-perspective="project"] .rtab-content[data-perspective="chat"] { display: none; }
+
+/* Project pane, centre: the workflow catalog above, the one being read below
+   (ProjectPerspective_260911_oo01, step 2). Same two-region shape as the Sessions tab. */
+#project-workflows { display: flex; flex-direction: column; padding: 0; }
+#project-workflows > .tab-toolbar { flex-shrink: 0; }
+#project-wf-search {
+    flex: 1; min-width: 120px;
+    padding: 4px 8px; font-size: 13px;
+    background: var(--bg-secondary, #262626); color: var(--text-primary, #e6e6e6);
+    border: 1px solid var(--border-color, #333); border-radius: 4px;
+}
+#project-wf-list {
+    flex: 0 0 auto; max-height: 40%; overflow: auto;
+    border-bottom: 1px solid var(--border-color, #2c2c2c);
+}
+#project-wf-reading { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#project-wf-head {
+    flex-shrink: 0; padding: 8px 12px; font-size: 12px;
+    color: var(--text-secondary, #9aa0a6);
+    border-bottom: 1px solid var(--border-color, #2c2c2c);
+}
+#project-wf-view { flex: 1; min-height: 0; overflow: auto; padding: 8px 12px; }
+.pwf-row {
+    padding: 6px 12px; cursor: pointer;
+    border-bottom: 1px solid var(--border-color, #232323);
+    display: grid; grid-template-columns: 1fr auto; column-gap: 8px; align-items: baseline;
+}
+.pwf-row:hover { background: var(--bg-secondary, #262626); }
+.pwf-row.selected { background: var(--bg-secondary, #2a2a3a); }
+.pwf-name { font-weight: 600; color: var(--text-primary, #e6e6e6); }
+.pwf-origin {
+    font-size: 11px; padding: 1px 6px; border-radius: 3px;
+    color: var(--text-secondary, #9aa0a6); border: 1px solid var(--border-color, #444);
+}
+.pwf-origin-project { color: var(--accent-blue, #a5b4fc); border-color: var(--accent-blue, #6366f1); }
+.pwf-desc { grid-column: 1 / -1; font-size: 12px; color: var(--text-secondary, #9aa0a6); }

@@ -164,8 +164,17 @@
                 </div>
             </header>
             <main id="project-workflows">
-                <div class="project-placeholder">
-                    Workflows of this project are listed here.
+                <!-- Two regions, each with its own scroll, as the Sessions tab has: the catalog
+                     above, the one workflow being read below. -->
+                <div class="tab-toolbar">
+                    <input id="project-wf-search" type="search" placeholder="Search workflows…" autocomplete="off">
+                    <button id="project-wf-refresh" type="button">Refresh</button>
+                    <span id="project-wf-status"></span>
+                </div>
+                <div id="project-wf-list"></div>
+                <div id="project-wf-reading">
+                    <div id="project-wf-head">Pick a workflow above to read it here.</div>
+                    <div id="project-wf-view"></div>
                 </div>
             </main>
         </div>

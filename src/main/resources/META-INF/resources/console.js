@@ -229,16 +229,22 @@
         parent.appendChild(box);
     }
 
-    function wfRender(yaml) {
-        var list = document.getElementById("wf-list");
-        if (!list) return;
-        list.textContent = "";
+    // Draws a workflow as boxes into any container. Shared by the Agent Loop tab and the project
+    // pane (ProjectPerspective_260911_oo01). Returns the step count for the caller's status line.
+    function wfRenderInto(container, yaml) {
+        if (!container) return 0;
+        container.textContent = "";
         var parts = wfSplitSteps(yaml);
-        if (parts.preamble) wfRenderBox(list, "workflow header", parts.preamble, "head");
+        if (parts.preamble) wfRenderBox(container, "workflow header", parts.preamble, "head");
         parts.steps.forEach(function (s, i) {
-            wfRenderBox(list, wfStepTitle(s, i), s, "step");
+            wfRenderBox(container, wfStepTitle(s, i), s, "step");
         });
-        wfStatus(parts.steps.length + " step(s) — read-only");
+        return parts.steps.length;
+    }
+
+    function wfRender(yaml) {
+        var n = wfRenderInto(document.getElementById("wf-list"), yaml);
+        wfStatus(n + " step(s) — read-only");
     }
 
     function wfLoad(name) {
@@ -365,6 +371,104 @@
         var title = document.getElementById("project-panel-title");
         if (title && kind === "project") title.textContent = perspectiveProjectId || "Project";
         activateFirstTabOf(kind);
+        if (kind === "project") projectWfOnShow();
+    }
+
+    // ── Project perspective, centre pane: the project's workflows ─────────────
+    // GET api/projects/{p}/workflows lists them (the project's own under workflows/ in its working
+    // directory first, then the bundled ones); GET .../workflows/{name} reads one
+    // (ProjectPerspective_260911_oo01, step 2). Drawn with the same boxes as the Agent Loop tab.
+    var projectWfOpenName = null;
+
+    function projectWfUrl(suffix) {
+        if (!perspectiveProjectId) return null;
+        return "api/projects/" + encodeURIComponent(perspectiveProjectId) + "/workflows" + (suffix || "");
+    }
+
+    function projectWfStatus(msg) {
+        var s = document.getElementById("project-wf-status");
+        if (s) s.textContent = msg || "";
+    }
+
+    function projectWfRowEl(w) {
+        var row = document.createElement("div");
+        row.className = "pwf-row" + (w.name === projectWfOpenName ? " selected" : "");
+        var name = document.createElement("span");
+        name.className = "pwf-name";
+        name.textContent = w.title && w.title !== w.name ? w.title + "  (" + w.name + ")" : w.name;
+        var origin = document.createElement("span");
+        origin.className = "pwf-origin pwf-origin-" + (w.origin || "");
+        origin.textContent = w.origin === "project" ? "project" : "bundled";
+        origin.title = w.origin === "project"
+            ? "This project's own file, under workflows/ in its working directory. Editable."
+            : "Shipped with this program. Read-only.";
+        var desc = document.createElement("div");
+        desc.className = "pwf-desc";
+        desc.textContent = w.description || "";
+        row.appendChild(name);
+        row.appendChild(origin);
+        if (w.description) row.appendChild(desc);
+        row.addEventListener("click", function () { projectWfOpen(w.name); });
+        return row;
+    }
+
+    function projectWfLoadList() {
+        var list = document.getElementById("project-wf-list");
+        var search = document.getElementById("project-wf-search");
+        if (!list) return;
+        var q = search ? search.value.trim() : "";
+        var url = projectWfUrl(q ? "?q=" + encodeURIComponent(q) : "");
+        if (!url) { projectWfStatus("no project selected"); return; }
+        projectWfStatus("loading…");
+        fetch(url)
+            .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+            .then(function (rows) {
+                list.textContent = "";
+                (rows || []).forEach(function (w) { list.appendChild(projectWfRowEl(w)); });
+                var own = (rows || []).filter(function (w) { return w.origin === "project"; }).length;
+                projectWfStatus((rows || []).length + " workflow(s), " + own + " of this project"
+                    + (q ? " matching “" + q + "”" : ""));
+            })
+            .catch(function (e) { projectWfStatus("error: " + e.message); });
+    }
+
+    function projectWfOpen(name) {
+        var url = projectWfUrl("/" + encodeURIComponent(name));
+        var head = document.getElementById("project-wf-head");
+        var view = document.getElementById("project-wf-view");
+        if (!url || !view) return;
+        projectWfOpenName = name;
+        document.querySelectorAll("#project-wf-list .pwf-row").forEach(function (r) {
+            r.classList.toggle("selected", r.querySelector(".pwf-name") && r.querySelector(".pwf-name").textContent.indexOf(name) >= 0);
+        });
+        if (head) head.textContent = "loading " + name + "…";
+        fetch(url)
+            .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+            .then(function (d) {
+                var n = wfRenderInto(view, d.yaml || "");
+                if (head) head.textContent = d.name + "  —  " + n + " step(s), "
+                    + (d.editable ? "this project's own file" : "bundled, read-only");
+                view.scrollTop = 0;
+            })
+            .catch(function (e) { if (head) head.textContent = "error: " + e.message; });
+    }
+
+    function projectWfOnShow() {
+        projectWfLoadList();
+    }
+
+    function initProjectWorkflows() {
+        var search = document.getElementById("project-wf-search");
+        var refresh = document.getElementById("project-wf-refresh");
+        var debounce = null;
+        if (search) search.addEventListener("input", function () {
+            if (debounce) clearTimeout(debounce);
+            debounce = setTimeout(projectWfLoadList, 200);
+        });
+        if (refresh) refresh.addEventListener("click", function () {
+            projectWfLoadList();
+            if (projectWfOpenName) projectWfOpen(projectWfOpenName);
+        });
     }
 
     // The right pane keeps one active tab per perspective. After a switch, the tab that was
@@ -1088,6 +1192,7 @@
         initLogs();
         initWorkflow();
         initExtensions();
+        initProjectWorkflows();
         restorePerspective(); // before the tree renders, so its highlight matches
         refreshActors();   // the actor dock is visible by default
         ioOnShow();         // Sessions is the default-active right-pane tab
