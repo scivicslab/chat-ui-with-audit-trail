@@ -22,7 +22,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the search must find a workflow by what it says and not only by its name, and no name may
  * reach outside the workflows directory.</p>
  */
-@Tag("ProjectPerspective_260911_oo01")
+@Tag("ProjectWorkflowCatalog_260911_oo01")
+@Tag("ProjectWorkflowEditing_260911_oo01")
 class ProjectWorkflowCatalogTest {
 
     private static Path workflowsDir(Path workingDir) throws Exception {

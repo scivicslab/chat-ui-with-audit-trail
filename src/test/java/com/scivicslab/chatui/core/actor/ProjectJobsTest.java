@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * cannot read leaves a FAILED job and never a running one; jobs are listed newest first; a job
  * that is over cannot be stopped.</p>
  */
-@Tag("ProjectPerspective_260911_oo01")
+@Tag("ProjectBatchJobs_260911_oo01")
 class ProjectJobsTest {
 
     private static final String FINISHING = "name: finishing\n"
