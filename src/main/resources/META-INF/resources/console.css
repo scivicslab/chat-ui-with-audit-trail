@@ -571,3 +571,40 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
 
 /* アクターに、それを作ったワークフローの note が付いている印（ActorPurposeFromWorkflowNote_260831_oo01） */
 .actor-label.actor-has-note .actor-name { border-bottom: 1px dotted var(--text-secondary, #7a7a7a); }
+
+/* ── Perspective (ProjectPerspective_260911_oo01) ───────────────────────────
+   #console-root[data-perspective] decides which centre sub-pane and which right tabs are shown.
+   The selectors below are more specific than .rtab-content.active, so a tab of the other
+   perspective stays hidden even while it still carries "active". */
+#project-panel {
+    width: 60%;            /* same initial width as #left-panel; the splitter sets it at runtime */
+    flex-shrink: 0;
+    min-width: 320px;
+    height: 100%;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary, #1e1e1e);
+    color: var(--text-primary, #e6e6e6);
+}
+#project-panel > header {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-color, #2c2c2c);
+    flex-shrink: 0;
+}
+#project-panel > main {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 12px;
+}
+.project-panel-title { font-weight: 600; color: var(--text-primary, #e6e6e6); }
+.project-placeholder { color: var(--text-secondary, #9aa0a6); padding: 12px; }
+
+#console-root[data-perspective="chat"] #project-panel { display: none; }
+#console-root[data-perspective="project"] #left-panel { display: none; }
+#console-root[data-perspective="chat"] .rtab-btn[data-perspective="project"],
+#console-root[data-perspective="chat"] .rtab-content[data-perspective="project"] { display: none; }
+#console-root[data-perspective="project"] .rtab-btn[data-perspective="chat"],
+#console-root[data-perspective="project"] .rtab-content[data-perspective="chat"] { display: none; }

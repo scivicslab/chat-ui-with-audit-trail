@@ -101,8 +101,12 @@
         </aside>
         <div id="left-dock-resize-handle" title="Drag to resize the actor panel"></div>
 
-        <!-- (3) Main pane: (3-1) chat sub-pane | (3-2) right sub-pane (tabs). -->
-        <div id="console-root">
+        <!-- (3) Main pane: (3-1) centre sub-pane | (3-2) right sub-pane (tabs).
+             data-perspective decides what both sub-panes show (ProjectPerspective_260911_oo01):
+               "chat"    — one conversation: #left-panel, and the chat-scoped right tabs
+               "project" — one project: #project-panel, and the project-scoped right tabs
+             Clicking a chat-<id> actor picks "chat"; clicking a Project actor picks "project". -->
+        <div id="console-root" data-perspective="chat">
         <div id="left-panel">
             <!-- ===== BEGIN chat-ui markup (unchanged: Claude features kept) ===== -->
             <div id="app">
@@ -149,18 +153,40 @@
             <!-- ===== END chat-ui markup ===== -->
         </div>
 
+        <!-- Centre sub-pane for the "project" perspective: the project's Turing workflows —
+             find one, read it, edit it. Shown in place of #left-panel when a Project actor is
+             selected (ProjectPerspective_260911_oo01). The catalog and the editor arrive in later
+             steps; this is the pane they go into. -->
+        <div id="project-panel">
+            <header>
+                <div class="left-pane-actions" style="display:flex;align-items:center;gap:8px">
+                    <span id="project-panel-title" class="project-panel-title">Project</span>
+                </div>
+            </header>
+            <main id="project-workflows">
+                <div class="project-placeholder">
+                    Workflows of this project are listed here.
+                </div>
+            </main>
+        </div>
+
         <div id="splitter" title="Drag to resize"></div>
 
         <div id="right-panel">
             <div id="right-tab-bar">
-                <button class="rtab-btn active" data-tab="logdb">Sessions</button>
-                <button class="rtab-btn" data-tab="syslog">System Log</button>
-                <button class="rtab-btn" data-tab="agentloop">Agent Loop</button>
-                <!-- Add new feature tabs here. -->
+                <!-- Each tab belongs to one perspective; only the active perspective's tabs are
+                     shown (ProjectPerspective_260911_oo01). -->
+                <button class="rtab-btn active" data-tab="logdb" data-perspective="chat">Sessions</button>
+                <button class="rtab-btn" data-tab="syslog" data-perspective="chat">System Log</button>
+                <button class="rtab-btn" data-tab="agentloop" data-perspective="chat">Agent Loop</button>
+                <button class="rtab-btn" data-tab="jobrun" data-perspective="project">Run</button>
+                <button class="rtab-btn" data-tab="joblog" data-perspective="project">Job Log</button>
+                <button class="rtab-btn" data-tab="jobs" data-perspective="project">Batch Jobs</button>
+                <!-- Add new feature tabs here, with the perspective they belong to. -->
             </div>
 
             <div class="rtab-body">
-                <section id="tab-logdb" class="rtab-content active">
+                <section id="tab-logdb" class="rtab-content active" data-perspective="chat">
                     <!-- Sessions: list conversations; expand one to read its turn-by-turn trace inline;
                          clean up. (Backed by the H2 I/O log — added in a later phase.) -->
                     <div class="tab-toolbar">
@@ -182,7 +208,7 @@
                     </div>
                 </section>
 
-                <section id="tab-syslog" class="rtab-content">
+                <section id="tab-syslog" class="rtab-content" data-perspective="chat">
                     <div class="tab-toolbar">
                         <button id="logs-refresh" type="button">Refresh</button>
                         <label class="tab-auto"><input type="checkbox" id="logs-auto" checked> Auto</label>
@@ -201,7 +227,7 @@
                     <div id="logs-list"></div>
                 </section>
 
-                <section id="tab-agentloop" class="rtab-content">
+                <section id="tab-agentloop" class="rtab-content" data-perspective="chat">
                     <!-- Read-only workflow YAML viewer, ported from quarkus-chat-ui3, made tab-scoped:
                          the catalog is this tab's agent-loop workflow + prompt-construction sub-workflow
                          (AgentLoopTab_260827_oo01). -->
@@ -213,6 +239,30 @@
                         <span id="wf-status"></span>
                     </div>
                     <div id="wf-list"></div>
+                </section>
+
+                <!-- Project perspective tabs (ProjectPerspective_260911_oo01). Running a workflow,
+                     reading a job's log and listing the project's batch jobs arrive in a later
+                     step; these are the tabs they go into. -->
+                <section id="tab-jobrun" class="rtab-content" data-perspective="project">
+                    <div class="tab-toolbar">
+                        <span id="jobrun-status"></span>
+                    </div>
+                    <div class="project-placeholder">Run the selected workflow as a batch job here.</div>
+                </section>
+
+                <section id="tab-joblog" class="rtab-content" data-perspective="project">
+                    <div class="tab-toolbar">
+                        <span id="joblog-status"></span>
+                    </div>
+                    <div class="project-placeholder">A running job's log is shown here.</div>
+                </section>
+
+                <section id="tab-jobs" class="rtab-content" data-perspective="project">
+                    <div class="tab-toolbar">
+                        <span id="jobs-status"></span>
+                    </div>
+                    <div class="project-placeholder">This project's batch jobs are listed here.</div>
                 </section>
             </div>
         </div>

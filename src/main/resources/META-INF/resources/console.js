@@ -344,6 +344,51 @@
         });
     }
 
+    // ── Perspective: what the centre and right panes show (ProjectPerspective_260911_oo01) ──
+    // "chat" shows one conversation (#left-panel and the chat-scoped right tabs); "project" shows
+    // one project (#project-panel and the project-scoped right tabs). Persisted like the theme, so
+    // a reload comes back to the same view.
+    var PERSPECTIVE_KEY = "chat-ui-perspective";
+    var PERSPECTIVE_PROJECT_KEY = "chat-ui-perspective-project";
+    var perspective = "chat";
+    var perspectiveProjectId = null;
+
+    function switchPerspective(kind, projectId) {
+        if (kind !== "project") kind = "chat";
+        var root = document.getElementById("console-root");
+        if (!root) return;
+        perspective = kind;
+        if (kind === "project" && projectId) perspectiveProjectId = projectId;
+        root.setAttribute("data-perspective", kind);
+        localStorage.setItem(PERSPECTIVE_KEY, kind);
+        if (perspectiveProjectId) localStorage.setItem(PERSPECTIVE_PROJECT_KEY, perspectiveProjectId);
+        var title = document.getElementById("project-panel-title");
+        if (title && kind === "project") title.textContent = perspectiveProjectId || "Project";
+        activateFirstTabOf(kind);
+    }
+
+    // The right pane keeps one active tab per perspective. After a switch, the tab that was
+    // active may belong to the other perspective and be hidden now; if none of the new
+    // perspective's tabs is active, pick its first. Clicking goes through initTabs' handler, so
+    // the tab's own onShow runs as if the user had clicked it.
+    function activateFirstTabOf(kind) {
+        var bar = document.getElementById("right-tab-bar");
+        if (!bar) return;
+        var btns = Array.prototype.slice.call(
+            bar.querySelectorAll('.rtab-btn[data-perspective="' + kind + '"]'));
+        if (!btns.length) return;
+        var already = btns.filter(function (b) { return b.classList.contains("active"); })[0];
+        if (!already) btns[0].click();
+    }
+
+    function restorePerspective() {
+        var kind = localStorage.getItem(PERSPECTIVE_KEY) || "chat";
+        var pid = localStorage.getItem(PERSPECTIVE_PROJECT_KEY);
+        if (kind === "project" && !pid) kind = "chat";
+        perspectiveProjectId = pid;
+        switchPerspective(kind, pid);
+    }
+
     // ── Actors tab ──────────────────────────────────────────────────────────
     // Each node: {name, type, alive, children[]}. Collapsed state is keyed by actor name (unique
     // in this actor system) and kept outside the tree DOM, so it survives the full rebuild
@@ -388,13 +433,17 @@
         if (tabMatch && typeof window.chatUiSwitchChat === "function") {
             name.classList.add("tab-switchable");
             var active = (typeof window.chatUiGetActiveChat === "function") ? window.chatUiGetActiveChat() : null;
-            if (active && active.projectId === tabMatch[1] && active.chatId === tabMatch[2]) {
+            if (perspective === "chat" && active
+                    && active.projectId === tabMatch[1] && active.chatId === tabMatch[2]) {
                 name.classList.add("tab-active");
             }
             name.title = "Switch to " + tabMatch[1] + " / " + tabMatch[2];
             name.addEventListener("click", function (e) {
                 e.stopPropagation(); // don't also trigger the fold/unfold toggle on the label
                 window.chatUiSwitchChat(tabMatch[1], tabMatch[2]);
+                // A conversation is shown in the chat perspective; leave the project one if in it
+                // (ProjectPerspective_260911_oo01).
+                switchPerspective("chat");
                 refreshActors(); // re-render so the tab-active highlight moves immediately
                 // Right pane follows the newly active tab (150_TabScopedLogging_260826_oo01) —
                 // re-fetch immediately rather than waiting for the next poll/tab-open.
@@ -409,6 +458,21 @@
                 if (document.getElementById("tab-agentloop") && document.getElementById("tab-agentloop").classList.contains("active")) {
                     wfOnShow();
                 }
+            });
+        }
+        // A Project node switches the whole console to that project's perspective
+        // (ProjectPerspective_260911_oo01): the centre pane shows its workflows, the right pane
+        // its jobs. Matched by type rather than by name, so a project named anything switches.
+        if (node.type === "Project") {
+            name.classList.add("tab-switchable");
+            if (perspective === "project" && perspectiveProjectId === node.name) {
+                name.classList.add("tab-active");
+            }
+            name.title = "Show project " + node.name;
+            name.addEventListener("click", function (e) {
+                e.stopPropagation(); // don't also trigger the fold/unfold toggle on the label
+                switchPerspective("project", node.name);
+                refreshActors(); // re-render so the tab-active highlight moves immediately
             });
         }
         var type = document.createElement("span");
@@ -1024,6 +1088,7 @@
         initLogs();
         initWorkflow();
         initExtensions();
+        restorePerspective(); // before the tree renders, so its highlight matches
         refreshActors();   // the actor dock is visible by default
         ioOnShow();         // Sessions is the default-active right-pane tab
     });
