@@ -693,6 +693,51 @@
         });
     }
 
+    // The provider belongs to the conversation as the model does (CliHarnessProvider_260912_oo01).
+    // The dropdown's value is "<kind>" or "<kind>:<tools>"; choosing one tells this conversation to
+    // switch, and the model list is reloaded from the new provider.
+    function initProviderSelect() {
+        if (!providerSelect) return;
+        providerSelect.addEventListener("change", function () {
+            var chosen = providerSelect.value;
+            if (!chosen) return;
+            var parts = chosen.split(":");
+            var body = { provider: parts[0] };
+            if (parts.length > 1) body.tools = parts[1];
+            var forChat = PROJECT_ID + "/" + CHAT_ID;
+            fetch(apiUrl(chatUrl("/provider")), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body)
+            }).then(function (r) { return r.json(); })
+              .then(function (result) {
+                  if (forChat !== PROJECT_ID + "/" + CHAT_ID) return;
+                  if (result && result.type === "error") {
+                      notify(result.message || "could not change the provider", true);
+                  } else {
+                      notify("Provider: " + result.provider + " (tools: " + result.tools + ")");
+                  }
+                  loadModels();
+              })
+              .catch(function (err) {
+                  notify("could not change the provider: " + err.message, true);
+                  if (forChat === PROJECT_ID + "/" + CHAT_ID) loadModels();
+              });
+        });
+    }
+
+    // Points the provider dropdown at what /status reports: "<kind>" unless the tool set is not
+    // the kind's default, then "<kind>:<tools>" (the dropdown offers "claude:full").
+    function showProvider(s) {
+        if (!providerSelect || !s || !s.provider) return;
+        var defaultTools = s.provider === "openai-compat" ? "full" : "collaboration";
+        var value = s.tools && s.tools !== defaultTools ? s.provider + ":" + s.tools : s.provider;
+        var offered = Array.prototype.some.call(providerSelect.options, function (o) {
+            return o.value === value;
+        });
+        if (offered) providerSelect.value = value;
+    }
+
     // Fills the dropdown with what this conversation's provider offers, then shows the one it is on.
     function loadModels() {
         if (!modelSelect) return;
@@ -722,6 +767,7 @@
             .then(function (r) { return r.json(); })
             .then(function (s) {
                 if (forChat !== PROJECT_ID + "/" + CHAT_ID) return;
+                showProvider(s);
                 var model = s && s.model;
                 if (!model) return;
                 var offered = Array.prototype.some.call(modelSelect.options, function (o) {
@@ -938,6 +984,8 @@
 
     // ── Init ─────────────────────────────────────────────────────────────────
 
+    var providerSelect;
+
     document.addEventListener("DOMContentLoaded", function () {
         chatArea = el("chat-area");
         chatArea.addEventListener("scroll", function () {
@@ -950,6 +998,7 @@
         connStatus = el("connection-status");
         activityLabel = el("activity-label");
         modelSelect = el("model-select");
+        providerSelect = el("provider-select");
         notificationBar = el("notification-bar");
         themeSelect = el("theme-select");
         queueBtn = el("queue-btn");
@@ -1006,6 +1055,7 @@
         if (cancelBtn) cancelBtn.addEventListener("click", cancelPrompt);
         initTheme();
         initModelPersistence();
+        initProviderSelect();
         loadModels();
         hydrateConversation();
         refreshQueue();

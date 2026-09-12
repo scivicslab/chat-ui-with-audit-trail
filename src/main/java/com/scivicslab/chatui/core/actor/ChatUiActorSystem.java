@@ -3,7 +3,11 @@ package com.scivicslab.chatui.core.actor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.scivicslab.chatui.agent.FileAccessScope;
 import com.scivicslab.chatui.agent.RunPlanTool;
+import com.scivicslab.chatui.agent.ToolSet;
 import com.scivicslab.chatui.core.iolog.IoLogStore;
+import com.scivicslab.chatui.harness.ClaudeCodeProvider;
+import com.scivicslab.chatui.harness.CodexProvider;
+import com.scivicslab.chatui.harness.HarnessSettings;
 import com.scivicslab.chatui.core.iolog.IoLogView;
 import com.scivicslab.chatui.core.provider.LlmProvider;
 import com.scivicslab.chatui.logging.ForwardingAccumulator;
@@ -127,6 +131,23 @@ public class ChatUiActorSystem {
      */
     @ConfigProperty(name = "quarkus.http.port", defaultValue = "8080")
     int httpPort = 8080;
+
+    // ---- CLI harness providers (CliHarnessProvider_260912_oo01) ----
+
+    /** Claude Code's permission mode. The same default as quarkus-chat-ui: the workflow, not a dialog, constrains a turn. */
+    @ConfigProperty(name = "chat-ui.harness.permission-mode", defaultValue = "bypassPermissions")
+    String harnessPermissionMode = "bypassPermissions";
+
+    /** Where each conversation's harness session id is kept, so a re-created provider resumes it. */
+    @ConfigProperty(name = "chat-ui.harness.session-dir")
+    Optional<String> harnessSessionDir = Optional.empty();
+
+    @ConfigProperty(name = "chat-ui.harness.claude-model", defaultValue = "sonnet")
+    String harnessClaudeModel = "sonnet";
+
+    /** Passed as {@code -m}; the model in {@code ~/.codex/config.toml} may be one the account cannot use. */
+    @ConfigProperty(name = "chat-ui.harness.codex-model", defaultValue = "gpt-5.5")
+    String harnessCodexModel = "gpt-5.5";
 
     /**
      * The address the distributed-actor server binds to. Not configurable: a setting could be
@@ -945,6 +966,93 @@ public class ChatUiActorSystem {
     public ActorRef<LlmProvider> getProviderRef(String projectId, String chatId) {
         return (ActorRef<LlmProvider>) (ActorRef<?>)
                 actorSystem.getActor(chatSessionActorName(projectId, chatId) + PROVIDER_SUFFIX);
+    }
+
+    /**
+     * Replaces a conversation's provider with one of another kind
+     * ({@code CliHarnessProvider_260912_oo01}). The provider is a child of the ChatSession and the
+     * ChatSession finds it by name, so the new one takes the old one's name: the old actor is
+     * cancelled, closed and removed from the registry and from the ChatSession's child list, and
+     * the new provider is created under the same name. The ChatSession is then told about the new
+     * provider and tool set on its own thread, so a turn already running finishes on the old one.
+     *
+     * @param projectId owning project's id
+     * @param chatId    conversation id within that project
+     * @param kind      {@code openai-compat}, {@code claude} or {@code codex}
+     * @param toolSet   the conversation's tool set from now on
+     * @throws IllegalArgumentException for an unknown kind, or a tool set the kind cannot take
+     */
+    public synchronized void setProvider(String projectId, String chatId, String kind, ToolSet toolSet) {
+        createChat(projectId, chatId);
+        String qualifiedName = chatActorName(projectId, chatId);
+        ChatSessionIIAR chatSessionIIAR = chatSessions.get(qualifiedName);
+        String providerName = chatSessionIIAR.getName() + PROVIDER_SUFFIX;
+        LlmProvider provider = newProvider(kind, toolSet, projectId, chatId);
+
+        ActorRef<LlmProvider> old = actorSystem.getActor(providerName);
+        if (old != null) {
+            try {
+                old.ask(p -> { p.cancel(); return null; }).get(5, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                LOG.log(Level.WARNING, "Old provider of " + qualifiedName + " did not cancel cleanly", e);
+            }
+            old.close();
+            actorSystem.removeActor(providerName);
+            chatSessionIIAR.getNamesOfChildren().remove(providerName);
+        }
+        ActorRef<LlmProvider> providerRef = chatSessionIIAR.<LlmProvider>createChild(providerName, provider);
+        chatSessionIIAR.tell(a -> {
+            ChatSession c = (ChatSession) a;
+            c.setProvider(provider, Optional.empty());
+            c.setToolSet(toolSet);
+            c.setProviderName(providerRef.getName());
+        });
+        LOG.info("Provider of " + qualifiedName + " is now " + kind + " with tool set " + toolSet.id());
+    }
+
+    /** Builds a provider of the given kind for one conversation. */
+    private LlmProvider newProvider(String kind, ToolSet toolSet, String projectId, String chatId) {
+        String k = kind == null ? "" : kind.trim().toLowerCase();
+        return switch (k) {
+            case "openai-compat" -> {
+                if (toolSet != ToolSet.FULL) {
+                    throw new IllegalArgumentException("openai-compat runs no tools of its own, so its tool set is always full");
+                }
+                yield new OpenAiCompatProvider(servers, defaultModel);
+            }
+            case ClaudeCodeProvider.ID -> new ClaudeCodeProvider(harnessSettings(), projectId, chatId,
+                    harnessWorkingDir(projectId), toolSet);
+            case CodexProvider.ID -> {
+                if (toolSet != ToolSet.COLLABORATION) {
+                    throw new IllegalArgumentException("codex cannot disable its own tools, so its tool set is always collaboration");
+                }
+                yield new CodexProvider(harnessSettings(), projectId, chatId, harnessWorkingDir(projectId));
+            }
+            default -> throw new IllegalArgumentException("unknown provider kind '" + kind
+                    + "' (openai-compat | claude | codex)");
+        };
+    }
+
+    /** The directory a harness works in: the project's working directory, else the write root. */
+    private java.nio.file.Path harnessWorkingDir(String projectId) {
+        ActorRef<Project> projectRef = projects.get(projectId);
+        if (projectRef != null) {
+            try {
+                java.nio.file.Path dir = projectRef.ask(Project::getWorkingDir).get(5, TimeUnit.SECONDS);
+                if (dir != null) return dir;
+            } catch (Exception e) {
+                LOG.log(Level.WARNING, "Could not read the working directory of " + projectId, e);
+            }
+        }
+        return fileScope == null ? null : fileScope.writeRoot();
+    }
+
+    private HarnessSettings harnessSettings() {
+        java.nio.file.Path sessionDir = harnessSessionDir.filter(d -> !d.isBlank())
+                .map(java.nio.file.Path::of)
+                .orElse(java.nio.file.Path.of(System.getProperty("user.home"), ".chat-ui-with-audit-trail", "harness-sessions"));
+        return new HarnessSettings(harnessPermissionMode, sessionDir, httpPort, harnessClaudeModel,
+                harnessCodexModel == null || harnessCodexModel.isBlank() ? null : harnessCodexModel);
     }
 
     public ActorRef<PromptQueue> getPromptQueue(String projectId, String chatId) {

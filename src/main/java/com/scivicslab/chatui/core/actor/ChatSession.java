@@ -14,6 +14,7 @@ import com.scivicslab.chatui.agent.SetCollaboratorTool;
 import com.scivicslab.chatui.agent.SetWorkflowTool;
 import com.scivicslab.chatui.agent.TextToolCallParser;
 import com.scivicslab.chatui.agent.ToolCall;
+import com.scivicslab.chatui.agent.ToolSet;
 import com.scivicslab.chatui.agent.WebSearchTool;
 import com.scivicslab.chatui.core.iolog.IoLogStore;
 import com.scivicslab.chatui.core.provider.LlmProvider;
@@ -72,8 +73,10 @@ public class ChatSession extends Interpreter {
     private static final int MAX_HISTORY = 200;
     private static final int LOG_BUFFER_SIZE = 500;
 
-    private final LlmProvider provider;
-    private final AuthMode authMode;
+    /** The conversation's provider. Not final: setProvider replaces it when the conversation's
+ *  provider kind changes (CliHarnessProvider_260912_oo01). */
+    private LlmProvider provider;
+    private AuthMode authMode;
 
     /** Complete I/O log (Sessions tab). May be null (logging disabled / not yet ported). */
     private final IoLogStore ioLog;
@@ -158,7 +161,7 @@ public class ChatSession extends Interpreter {
      */
     private FileAccessScope fileScope = FileAccessScope.processDirectory();
 
-    private static final String SYSTEM_PROMPT = """
+    private static final String SYSTEM_PROMPT_HEAD = """
             You are a helpful assistant with access to tools. To call a tool, write EXACTLY this format \
             in your reply (nothing else on those lines). Every parameter, without exception, uses a \
             <parameter name="..."> tag — never a bare tag named after the parameter (e.g. write "<parameter \
@@ -178,18 +181,38 @@ public class ChatSession extends Interpreter {
             </invoke>
 
             Available tools:
+            """;
+
+    /**
+     * What the first step's prompt says about each tool, keyed by tool name, in the order they are
+     * listed. Which of them a conversation is shown — and may call — is its {@link ToolSet}
+     * ({@code CliHarnessProvider_260912_oo01}).
+     */
+    private static final Map<String, String> TOOL_DESCRIPTIONS = toolDescriptions();
+
+    private static Map<String, String> toolDescriptions() {
+        Map<String, String> m = new LinkedHashMap<>();
+        m.put("read", """
             - read(path): read a file, or a whole directory recursively, under the working directory.
               To read several files at once, put one path per line in the same "path" parameter —
               use that instead of reading a parent directory when you want three specific files,
               since the parent brings everything else under it along too. A read that would return
               more than 4,000,000 characters or 1,000 files stops early and says where it stopped,
               listing the paths it did not reach so you can ask for them separately.
+            """);
+        m.put("calc", """
             - calc(expression): evaluate a Java arithmetic expression, e.g. 23*47 or Math.sqrt(16).
+            """);
+        m.put("web_search", """
             - web_search(query): search the web and fetch the top results' page content.
+            """);
+        m.put("fetch", """
             - fetch(url): fetch one specific URL you already have and return its readable text.
               Stops at 5,000 characters and says "[truncated N chars total]" with the page's real
               length, so you can tell a whole page from a cut one. This is how you read a page
               web_search only summarised for you.
+            """);
+        m.put("search_docs", """
             - search_docs(query): search this team's internal documentation. It returns a ranked
               list of CANDIDATE documents — title, id, source path and a short summary each — not
               the answer to your question. A summary says what a document is about, not what it
@@ -201,6 +224,8 @@ public class ChatSession extends Interpreter {
               candidate says which of them found it, and one found by more than one is the strongest
               signal in the list. Search in the language the documents are written in: these are
               mostly Japanese.
+            """);
+        m.put("list_references", """
             - list_references(id, direction, relation): follow the reference links an author
               declared between documents. Pass the "id" a search_docs candidate printed. Direction
               "forward" (the default) returns the documents that one refers to; "backward" returns
@@ -213,22 +238,30 @@ public class ChatSession extends Interpreter {
               the same kind of candidate list search_docs does, so call read on a path to see what
               a document actually says. "backward" stops at 30 documents and says so when it did;
               a standard that many documents declare as their prerequisite has that many edges.
+            """);
+        m.put("write", """
             - write(path, content): save text to a file under the working directory. Requires TWO
               <parameter> tags in the same invoke block: one named "path", one named "content".
               Missing parent directories are created, so you can write straight to a new
               subdirectory without making it first. An existing file is OVERWRITTEN, not appended
               to — read it first if you meant to add to it. The reply gives the absolute path
               written and how many characters went into it.
+            """);
+        m.put("ask_chat", """
             - ask_chat(chatId, prompt, timeoutSeconds): send an instruction to another conversation
               (e.g. "02" for one in your own project, or "project2/02" to reach one in another
               project) and wait for its reply. Requires "chatId" and "prompt" <parameter>
               tags; "timeoutSeconds" is an optional third <parameter> tag (default 60) — pass a
               larger value if you expect the target to take a while, e.g. because it will itself
               call ask_chat on another tab. Use this to direct or review another tab's work.
+            """);
+        m.put("set_workflow", """
             - set_workflow(chatId, yaml): replace another conversation tab's agent-loop workflow
               with the given Turing-workflow YAML text (not a file path). Requires TWO <parameter>
               tags: "chatId" and "yaml". Use this to author a workflow for another tab to run,
               then use ask_chat to actually kick off a turn under it.
+            """);
+        m.put("run_plan", """
             - run_plan(yaml, timeoutSeconds): run a plan you wrote — a Turing-workflow YAML whose
               steps drive other conversations — and wait for its result. Requires a "yaml"
               <parameter> tag; "timeoutSeconds" is optional. Each step is an action on "this" with
@@ -237,16 +270,24 @@ public class ChatSession extends Interpreter {
               every asking state a fallback transition to "end" with method reportFailure. The first
               state must be named "0". Use this when a task needs several conversations driven in a
               fixed order, rather than you asking each one yourself.
+            """);
+        m.put("load_skill", """
             - load_skill(name): read one of the skills listed after this tool list in full — its
               step-by-step instructions, the routes it says to call, its own files. Requires a
               "name" <parameter> tag. Each skill's description says when it applies; when one
               applies to the task at hand, load it before you act rather than after.
+            """);
+        m.put("set_collaborator", """
             - set_collaborator(chatId, role, collaboratorChatId): record that, for tab "chatId",
               the tab playing role "role" (e.g. "worker") is "collaboratorChatId". Requires THREE
               <parameter> tags: "chatId", "role", "collaboratorChatId". A workflow installed via
               set_workflow can then resolve that role instead of a hardcoded chat id, and you can
               reassign it again later by calling this a second time.
+            """);
+        return Collections.unmodifiableMap(m);
+    }
 
+    private static final String SYSTEM_PROMPT_TAIL = """
             Call at most one tool per reply. After a tool result comes back, either call another tool \
             or give your final answer. When you have enough information, answer in plain text with NO \
             <invoke> block — that plain text is taken as your final answer to the user.
@@ -274,6 +315,8 @@ public class ChatSession extends Interpreter {
     private boolean turnNoThink;
     /** Open I/O-log session id for this turn, or -1 when logging is disabled. Set in start(). */
     private long ioSession = -1;
+    /** Which tools this conversation is shown and may call; every conversation starts with all of them. */
+    private ToolSet toolSet = ToolSet.FULL;
     /** This turn's number, for turn{N}/step{M}/... I/O-log labels. Set in start(). */
     private int ioTurnNo;
     private List<ToolCall> pendingCalls;
@@ -609,9 +652,25 @@ public class ChatSession extends Interpreter {
      * @param ioLog        store for the complete I/O log (Sessions tab), or {@code null} to disable logging
      */
     public ChatSession(LlmProvider provider, Optional<String> configApiKey, IoLogStore ioLog) {
-        this.provider = provider;
         this.ioLog = ioLog;
+        bindProvider(provider, configApiKey);
+    }
 
+    /**
+     * Replaces this conversation's provider with another implementation
+     * ({@code CliHarnessProvider_260912_oo01}). The generating side calls this after it has put the
+     * new provider under the same child name the old one had, so {@link #providerRef()} and this
+     * field agree again. Must run on this actor's own thread, between turns.
+     *
+     * @param provider     the new provider
+     * @param configApiKey optional API key supplied via application configuration
+     */
+    public void setProvider(LlmProvider provider, Optional<String> configApiKey) {
+        bindProvider(provider, configApiKey);
+    }
+
+    private void bindProvider(LlmProvider provider, Optional<String> configApiKey) {
+        this.provider = provider;
         if (provider.capabilities().supportsWatchdog()) {
             // CLI-based provider: no API key needed, CLI binary handles auth
             this.authMode = AuthMode.CLI;
@@ -816,6 +875,9 @@ public class ChatSession extends Interpreter {
      * @return the active model name
      */
     public String getModel() { return provider.getCurrentModel(); }
+
+    /** @return the provider's kind id, e.g. {@code openai-compat} or {@code claude} */
+    public String getProviderId() { return provider.id(); }
 
     /**
      * Returns the current provider session identifier, or {@code null} if no session is active.
@@ -1158,11 +1220,17 @@ public class ChatSession extends Interpreter {
      * @return the text prefixed to this turn's first prompt
      */
     private String firstStepPrompt() {
-        StringBuilder buf = new StringBuilder(SYSTEM_PROMPT);
-        buf.append("\n\nread may read files under: ").append(fileScope.describeReadRoots())
-           .append("\nwrite may only write under: ").append(fileScope.writeRoot())
-           .append("\nA relative path is taken from the write directory. When a skill's text points"
-                 + " at a file in its own directory, read it — that directory is readable.");
+        StringBuilder buf = new StringBuilder(SYSTEM_PROMPT_HEAD);
+        for (Map.Entry<String, String> tool : TOOL_DESCRIPTIONS.entrySet()) {
+            if (toolSet.contains(tool.getKey())) buf.append(tool.getValue());
+        }
+        buf.append("\n").append(SYSTEM_PROMPT_TAIL);
+        if (toolSet.contains("read")) {
+            buf.append("\n\nread may read files under: ").append(fileScope.describeReadRoots())
+               .append("\nwrite may only write under: ").append(fileScope.writeRoot())
+               .append("\nA relative path is taken from the write directory. When a skill's text points"
+                     + " at a file in its own directory, read it — that directory is readable.");
+        }
         String catalog = skillCatalogText();
         if (!catalog.isEmpty()) {
             buf.append("\n\n").append(catalog);
@@ -1218,6 +1286,9 @@ public class ChatSession extends Interpreter {
         // REASONING: section and never into assistantBuf, which is what the next step parses for
         // tool calls and what becomes the turn's answer.
         StringBuilder thinkingBuf = new StringBuilder();
+        // Tool calls the provider's own harness makes inside this one sendPrompt, keyed by
+        // tool_use id until their result arrives (CliHarnessProvider_260912_oo01).
+        Map<String, ChatEvent> harnessToolUses = new LinkedHashMap<>();
         ActorRef<LlmProvider> providerRef = providerRef();
 
         // The tab log used to receive nothing between here and recordStepIo() below, so a step
@@ -1248,6 +1319,23 @@ public class ChatSession extends Interpreter {
                     } else if ("result".equals(event.type())) {
                         // The provider's own per-call completion signal; the agent loop's real
                         // completion signal is finish()'s result event, emitted once for the turn.
+                    } else if ("tool_use".equals(event.type())) {
+                        // The harness called one of its own tools. Recorded when its result
+                        // arrives, so the log holds the call and its observation as one entry,
+                        // the same shape runTool writes for this conversation's own tools.
+                        harnessToolUses.put(event.toolUseId(), event);
+                        noteStreamProgress(stepLabel, streamedChars, progressLoggedAt, event.content());
+                        turnEmitter.accept(ChatEvent.thinking(
+                                "\n→ " + event.toolName() + "(" + event.content() + ")\n"));
+                    } else if ("tool_result".equals(event.type())) {
+                        ChatEvent use = harnessToolUses.remove(event.toolUseId());
+                        String observation = (event.isError() != null && event.isError())
+                                ? "error: " + (event.content() == null ? "" : event.content())
+                                : (event.content() == null ? "" : event.content());
+                        recordHarnessToolIo(use, observation);
+                        String toolName = use == null ? "tool" : use.toolName();
+                        turnEmitter.accept(ChatEvent.thinking("Observation (" + toolName + "): "
+                                + observation.substring(0, Math.min(200, observation.length())) + "\n"));
                     } else {
                         // Reaches here as the provider's own "thinking" event, which is how a
                         // server that separates reasoning (delta.reasoning_content) delivers a
@@ -1457,6 +1545,20 @@ public class ChatSession extends Interpreter {
         }
     }
 
+    /**
+     * Which tools this conversation is shown and may call ({@code CliHarnessProvider_260912_oo01}).
+     * A provider whose harness runs its own file and shell tools gets {@link ToolSet#COLLABORATION}
+     * so the same tools are not offered twice under different names.
+     *
+     * @param toolSet the tool set; {@code null} keeps the current one
+     */
+    public void setToolSet(ToolSet toolSet) {
+        if (toolSet != null) this.toolSet = toolSet;
+    }
+
+    /** @return which tools this conversation is shown and may call */
+    public ToolSet getToolSet() { return toolSet; }
+
     /** @param maxObservationChars ceiling on what a workflow may ask to keep of one observation */
     public void setMaxObservationChars(int maxObservationChars) {
         if (maxObservationChars > 0) this.maxObservationChars = maxObservationChars;
@@ -1548,6 +1650,28 @@ public class ChatSession extends Interpreter {
             logToTab("INFO", "turn" + ioTurnNo + "/step" + stepCount + "/tool: " + tc.name());
         } catch (Exception e) {
             logger.log(Level.WARNING, "I/O log tool record failed", e);
+        }
+    }
+
+    /**
+     * Records one tool call the provider's own harness made inside a sendPrompt
+     * ({@code CliHarnessProvider_260912_oo01}) to the I/O log, under the same
+     * {@code turn{N}/step{M}/tool} label and {@code TOOL:/INPUT:/OBSERVATION:} form
+     * {@link #recordToolIo} uses, so {@link IoLogView}'s trace lists it as one more tool step.
+     *
+     * @param use         the tool_use event the result answers, or {@code null} if none was seen
+     * @param observation the harness's result text, whole; prefixed {@code error: } on failure
+     */
+    private void recordHarnessToolIo(ChatEvent use, String observation) {
+        if (ioLog == null || ioSession < 0) return;
+        String toolName = use == null ? "(unknown harness tool)" : use.toolName();
+        String input = (use == null || use.content() == null) ? "{}" : use.content();
+        try {
+            String m = "TOOL: " + toolName + "\nINPUT:\n" + input + "\nOBSERVATION:\n" + observation;
+            ioLog.record(ioSession, "agent", "turn" + ioTurnNo + "/step" + stepCount + "/tool", m);
+            logToTab("INFO", "turn" + ioTurnNo + "/step" + stepCount + "/tool (harness): " + toolName);
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "I/O log harness tool record failed", e);
         }
     }
 
@@ -1754,6 +1878,9 @@ public class ChatSession extends Interpreter {
 
     private String executeTool(ToolCall tc, boolean summarizingPages) {
         String args = tc.argumentsJson();
+        if (!toolSet.contains(tc.name())) {
+            return "error: tool '" + tc.name() + "' is not available in this conversation";
+        }
         return switch (tc.name()) {
             case "read" -> FileReadTool.read(fileScope, extractInput(args, "path"));
             case "write" -> FileWriteTool.write(fileScope,
