@@ -571,3 +571,117 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
 
 /* アクターに、それを作ったワークフローの note が付いている印（ActorPurposeFromWorkflowNote_260831_oo01） */
 .actor-label.actor-has-note .actor-name { border-bottom: 1px dotted var(--text-secondary, #7a7a7a); }
+
+/* ── Perspective (ProjectPerspective_260911_oo01) ───────────────────────────
+   #console-root[data-perspective] decides which centre sub-pane and which right tabs are shown.
+   The selectors below are more specific than .rtab-content.active, so a tab of the other
+   perspective stays hidden even while it still carries "active". */
+#project-panel {
+    width: 60%;            /* same initial width as #left-panel; the splitter sets it at runtime */
+    flex-shrink: 0;
+    min-width: 320px;
+    height: 100%;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary, #1e1e1e);
+    color: var(--text-primary, #e6e6e6);
+}
+#project-panel > header {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-color, #2c2c2c);
+    flex-shrink: 0;
+}
+#project-panel > main {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 12px;
+}
+.project-panel-title { font-weight: 600; color: var(--text-primary, #e6e6e6); }
+.project-placeholder { color: var(--text-secondary, #9aa0a6); padding: 12px; }
+
+#console-root[data-perspective="chat"] #project-panel { display: none; }
+#console-root[data-perspective="project"] #left-panel { display: none; }
+#console-root[data-perspective="chat"] .rtab-btn[data-perspective="project"],
+#console-root[data-perspective="chat"] .rtab-content[data-perspective="project"] { display: none; }
+#console-root[data-perspective="project"] .rtab-btn[data-perspective="chat"],
+#console-root[data-perspective="project"] .rtab-content[data-perspective="chat"] { display: none; }
+
+/* Project pane, centre: the workflow catalog above, the one being read below
+   (ProjectPerspective_260911_oo01, step 2). Same two-region shape as the Sessions tab. */
+#project-workflows { display: flex; flex-direction: column; padding: 0; }
+#project-workflows > .tab-toolbar { flex-shrink: 0; }
+#project-wf-search {
+    flex: 1; min-width: 120px;
+    padding: 4px 8px; font-size: 13px;
+    background: var(--bg-secondary, #262626); color: var(--text-primary, #e6e6e6);
+    border: 1px solid var(--border-color, #333); border-radius: 4px;
+}
+#project-wf-list {
+    flex: 0 0 auto; max-height: 40%; overflow: auto;
+    border-bottom: 1px solid var(--border-color, #2c2c2c);
+}
+#project-wf-reading { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#project-wf-head {
+    flex-shrink: 0; padding: 8px 12px; font-size: 12px;
+    color: var(--text-secondary, #9aa0a6);
+    border-bottom: 1px solid var(--border-color, #2c2c2c);
+}
+#project-wf-view { flex: 1; min-height: 0; overflow: auto; padding: 8px 12px; }
+.pwf-row {
+    padding: 6px 12px; cursor: pointer;
+    border-bottom: 1px solid var(--border-color, #232323);
+    display: grid; grid-template-columns: 1fr auto; column-gap: 8px; align-items: baseline;
+}
+.pwf-row:hover { background: var(--bg-secondary, #262626); }
+.pwf-row.selected { background: var(--bg-secondary, #2a2a3a); }
+.pwf-name { font-weight: 600; color: var(--text-primary, #e6e6e6); }
+.pwf-origin {
+    font-size: 11px; padding: 1px 6px; border-radius: 3px;
+    color: var(--text-secondary, #9aa0a6); border: 1px solid var(--border-color, #444);
+}
+.pwf-origin-project { color: var(--accent-blue, #a5b4fc); border-color: var(--accent-blue, #6366f1); }
+.pwf-desc { grid-column: 1 / -1; font-size: 12px; color: var(--text-secondary, #9aa0a6); }
+
+/* Project pane, editing (ProjectPerspective_260911_oo01, step 3): the editor takes the reader's
+   place below the head; the name field and the buttons sit in one row above the text. */
+#project-wf-actions { flex-shrink: 0; border-bottom: 1px solid var(--border-color, #2c2c2c); }
+#project-wf-editor { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#project-wf-editor > .tab-toolbar { flex-shrink: 0; }
+#project-wf-edit-name {
+    width: 16em; padding: 3px 6px; font-size: 13px; font-family: var(--font-mono, monospace);
+    background: var(--bg-secondary, #262626); color: var(--text-primary, #e6e6e6);
+    border: 1px solid var(--border-color, #333); border-radius: 4px;
+}
+#project-wf-edit-yaml {
+    flex: 1; min-height: 0; resize: none; margin: 0; padding: 8px 12px;
+    font-family: var(--font-mono, monospace); font-size: 12px; line-height: 1.5; tab-size: 2;
+    background: var(--bg-primary, #1e1e1e); color: var(--text-primary, #e6e6e6);
+    border: none; border-top: 1px solid var(--border-color, #2c2c2c); outline: none;
+}
+#project-wf-edit-status.pwf-error { color: var(--error-text, #f66); }
+
+/* Project pane, right: jobs and a job's log (ProjectPerspective_260911_oo01, step 4). */
+#jobs-list, #joblog-list { flex: 1; min-height: 0; overflow: auto; }
+.job-row { padding: 6px 12px; border-bottom: 1px solid var(--border-color, #232323); cursor: pointer; }
+.job-row:hover { background: var(--bg-secondary, #262626); }
+.job-row.selected { background: var(--bg-secondary, #2a2a3a); }
+.job-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.job-id { font-family: var(--font-mono, monospace); font-weight: 600; color: var(--text-primary, #e6e6e6); }
+.job-wf { color: var(--text-primary, #e6e6e6); }
+.job-state { font-size: 11px; padding: 1px 6px; border-radius: 3px; border: 1px solid var(--border-color, #444); color: var(--text-secondary, #9aa0a6); }
+.job-running .job-state { color: var(--accent-blue, #a5b4fc); border-color: var(--accent-blue, #6366f1); }
+.job-finished .job-state { color: #7ccf8a; border-color: #4d8a57; }
+.job-failed .job-state { color: var(--error-text, #f66); border-color: var(--error-text, #a44); }
+.job-stopped .job-state { color: #e0b35a; border-color: #8a6d2f; }
+.job-when { font-size: 12px; color: var(--text-secondary, #9aa0a6); font-variant-numeric: tabular-nums; }
+.job-actions { margin-left: auto; display: flex; gap: 6px; }
+.job-actions button { font-size: 12px; padding: 2px 8px; }
+.job-result { margin-top: 4px; font-size: 12px; color: var(--text-secondary, #9aa0a6); white-space: pre-wrap; word-break: break-word; }
+.joblog-line { display: flex; gap: 8px; padding: 2px 12px; font-family: var(--font-mono, monospace); font-size: 12px; border-bottom: 1px solid var(--border-color, #1f1f1f); }
+.joblog-time { color: var(--text-secondary, #9aa0a6); flex-shrink: 0; }
+.joblog-type { color: var(--text-secondary, #9aa0a6); flex-shrink: 0; width: 5.5em; }
+.joblog-warning .joblog-type, .joblog-severe .joblog-type { color: var(--error-text, #f66); }
+.joblog-data { white-space: pre-wrap; word-break: break-word; }

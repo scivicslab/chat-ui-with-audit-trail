@@ -30,7 +30,204 @@
             if (tab === "logdb") ioOnShow();
             if (tab === "syslog") refreshLogs();
             if (tab === "agentloop") wfOnShow();
+            if (tab === "jobrun") jobRunOnShow();
+            if (tab === "jobs") jobsOnShow();
+            if (tab === "joblog") jobLogOnShow();
         });
+    }
+
+    // ── Project perspective, right pane: run a workflow, list the jobs, read a job's log ────
+    // (ProjectPerspective_260911_oo01, step 4). A job is one workflow run as the project's child
+    // actor; the Project actor owns the list. Lists auto-refresh every 3s while their tab shows.
+    var jobLogSelected = null;
+    var jobsTimer = null;
+    var jobLogTimer = null;
+
+    function projectJobsUrl(suffix) {
+        if (!perspectiveProjectId) return null;
+        return "api/projects/" + encodeURIComponent(perspectiveProjectId) + "/jobs" + (suffix || "");
+    }
+    function setText(id, text) { var el = document.getElementById(id); if (el) el.textContent = text || ""; }
+    function tabShowing(id) {
+        var el = document.getElementById(id);
+        return !!el && el.classList.contains("active") && perspective === "project";
+    }
+
+    // Run tab: mirrors what the centre pane has open.
+    function jobRunOnShow() {
+        setText("jobrun-workflow", projectWfOpenName || "(none open)");
+        var btn = document.getElementById("jobrun-run");
+        if (btn) btn.disabled = !projectWfOpenName;
+    }
+
+    function jobRun() {
+        var url = projectJobsUrl("");
+        if (!url || !projectWfOpenName) return;
+        setText("jobrun-status", "starting…");
+        fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+                     body: JSON.stringify({ workflow: projectWfOpenName }) })
+            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; }); })
+            .then(function (res) {
+                if (!res.ok) { setText("jobrun-status", (res.body && res.body.error) || ("HTTP " + res.status)); return; }
+                setText("jobrun-status", "started " + res.body.jobId);
+                jobLogSelected = res.body.jobId;
+                jobsOnShow();
+            })
+            .catch(function (e) { setText("jobrun-status", "error: " + e.message); });
+    }
+
+    function fmtInstant(s) {
+        if (!s) return "";
+        var d = new Date(s);
+        if (isNaN(d.getTime())) return s;
+        var p = function (n) { return String(n).padStart(2, "0"); };
+        return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+    }
+
+    function jobRowEl(j) {
+        var row = document.createElement("div");
+        row.className = "job-row job-" + (j.state || "").toLowerCase() + (j.jobId === jobLogSelected ? " selected" : "");
+        var head = document.createElement("div");
+        head.className = "job-head";
+        var id = document.createElement("span"); id.className = "job-id"; id.textContent = j.jobId;
+        var wf = document.createElement("span"); wf.className = "job-wf"; wf.textContent = j.workflow || "";
+        var st = document.createElement("span"); st.className = "job-state"; st.textContent = j.state || "";
+        var when = document.createElement("span"); when.className = "job-when";
+        when.textContent = fmtInstant(j.startedAt) + (j.finishedAt ? " → " + fmtInstant(j.finishedAt) : "");
+        head.appendChild(id); head.appendChild(wf); head.appendChild(st); head.appendChild(when);
+        var actions = document.createElement("span");
+        actions.className = "job-actions";
+        var logBtn = document.createElement("button");
+        logBtn.type = "button"; logBtn.textContent = "Log"; logBtn.title = "Show this job's log";
+        logBtn.addEventListener("click", function (e) {
+            e.stopPropagation();
+            jobLogSelected = j.jobId;
+            var tab = document.querySelector('#right-tab-bar .rtab-btn[data-tab="joblog"]');
+            if (tab) tab.click();
+        });
+        actions.appendChild(logBtn);
+        if (j.state === "RUNNING") {
+            var stop = document.createElement("button");
+            stop.type = "button"; stop.textContent = "Stop"; stop.title = "Ask this job to stop between steps";
+            stop.addEventListener("click", function (e) {
+                e.stopPropagation();
+                fetch(projectJobsUrl("/" + encodeURIComponent(j.jobId) + "/stop"), { method: "POST" })
+                    .then(function (r) { return r.json().then(function (b) { setText("jobs-status", r.ok ? "stop requested for " + j.jobId : ((b && b.error) || ("HTTP " + r.status))); }); })
+                    .catch(function (err) { setText("jobs-status", "error: " + err.message); })
+                    .finally(jobsLoad);
+            });
+            actions.appendChild(stop);
+        }
+        head.appendChild(actions);
+        row.appendChild(head);
+        if (j.result) {
+            var res = document.createElement("div");
+            res.className = "job-result";
+            res.textContent = j.result;
+            row.appendChild(res);
+        }
+        row.addEventListener("click", function () {
+            jobLogSelected = j.jobId;
+            document.querySelectorAll("#jobs-list .job-row").forEach(function (r) { r.classList.toggle("selected", r === row); });
+        });
+        return row;
+    }
+
+    var jobsLoading = false;
+    function jobsLoad() {
+        var list = document.getElementById("jobs-list");
+        var url = projectJobsUrl("");
+        if (!list || !url || jobsLoading) return;
+        jobsLoading = true;
+        fetch(url)
+            .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+            .then(function (jobs) {
+                list.textContent = "";
+                if (!jobs || !jobs.length) {
+                    var empty = document.createElement("div");
+                    empty.className = "project-placeholder";
+                    empty.textContent = "No jobs yet. Open a workflow and Run it.";
+                    list.appendChild(empty);
+                } else {
+                    jobs.forEach(function (j) { list.appendChild(jobRowEl(j)); });
+                }
+                var running = (jobs || []).filter(function (j) { return j.state === "RUNNING"; }).length;
+                setText("jobs-status", (jobs || []).length + " job(s), " + running + " running");
+            })
+            .catch(function (e) { setText("jobs-status", "error: " + e.message); })
+            .finally(function () { jobsLoading = false; });
+    }
+
+    function jobsOnShow() {
+        jobsLoad();
+        jobsApplyAuto();
+    }
+
+    function jobsApplyAuto() {
+        var auto = document.getElementById("jobs-auto");
+        if (jobsTimer) { clearInterval(jobsTimer); jobsTimer = null; }
+        if (auto && auto.checked) {
+            jobsTimer = setInterval(function () { if (tabShowing("tab-jobs")) jobsLoad(); }, 3000);
+        }
+    }
+
+    function jobLogRender(entries) {
+        var list = document.getElementById("joblog-list");
+        if (!list) return;
+        list.textContent = "";
+        (entries || []).forEach(function (e) {
+            var line = document.createElement("div");
+            line.className = "joblog-line joblog-" + String(e.type || "").toLowerCase();
+            var t = document.createElement("span"); t.className = "joblog-time"; t.textContent = fmtLogTime(e.time);
+            var ty = document.createElement("span"); ty.className = "joblog-type"; ty.textContent = e.type || "";
+            var d = document.createElement("span"); d.className = "joblog-data"; d.textContent = e.data || "";
+            line.appendChild(t); line.appendChild(ty); line.appendChild(d);
+            list.appendChild(line);
+        });
+        list.scrollTop = list.scrollHeight;
+    }
+
+    var jobLogLoading = false;
+    function jobLogLoad() {
+        setText("joblog-job", jobLogSelected || "(none selected)");
+        if (!jobLogSelected) { setText("joblog-status", "pick a job under Batch Jobs"); return; }
+        var url = projectJobsUrl("/" + encodeURIComponent(jobLogSelected) + "/log");
+        if (!url || jobLogLoading) return;
+        jobLogLoading = true;
+        fetch(url)
+            .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+            .then(function (entries) {
+                jobLogRender(entries);
+                setText("joblog-status", (entries || []).length + " line(s)");
+            })
+            .catch(function (e) { setText("joblog-status", "error: " + e.message); })
+            .finally(function () { jobLogLoading = false; });
+    }
+
+    function jobLogOnShow() {
+        jobLogLoad();
+        jobLogApplyAuto();
+    }
+
+    function jobLogApplyAuto() {
+        var auto = document.getElementById("joblog-auto");
+        if (jobLogTimer) { clearInterval(jobLogTimer); jobLogTimer = null; }
+        if (auto && auto.checked) {
+            jobLogTimer = setInterval(function () { if (tabShowing("tab-joblog")) jobLogLoad(); }, 3000);
+        }
+    }
+
+    function initJobs() {
+        var run = document.getElementById("jobrun-run");
+        if (run) run.addEventListener("click", jobRun);
+        var jr = document.getElementById("jobs-refresh");
+        if (jr) jr.addEventListener("click", jobsLoad);
+        var ja = document.getElementById("jobs-auto");
+        if (ja) ja.addEventListener("change", jobsApplyAuto);
+        var lr = document.getElementById("joblog-refresh");
+        if (lr) lr.addEventListener("click", jobLogLoad);
+        var la = document.getElementById("joblog-auto");
+        if (la) la.addEventListener("change", jobLogApplyAuto);
     }
 
     // ── System Log tab (GET /api/logs — LogTap's server-wide ring buffer) ──────
@@ -229,16 +426,22 @@
         parent.appendChild(box);
     }
 
-    function wfRender(yaml) {
-        var list = document.getElementById("wf-list");
-        if (!list) return;
-        list.textContent = "";
+    // Draws a workflow as boxes into any container. Shared by the Agent Loop tab and the project
+    // pane (ProjectPerspective_260911_oo01). Returns the step count for the caller's status line.
+    function wfRenderInto(container, yaml) {
+        if (!container) return 0;
+        container.textContent = "";
         var parts = wfSplitSteps(yaml);
-        if (parts.preamble) wfRenderBox(list, "workflow header", parts.preamble, "head");
+        if (parts.preamble) wfRenderBox(container, "workflow header", parts.preamble, "head");
         parts.steps.forEach(function (s, i) {
-            wfRenderBox(list, wfStepTitle(s, i), s, "step");
+            wfRenderBox(container, wfStepTitle(s, i), s, "step");
         });
-        wfStatus(parts.steps.length + " step(s) — read-only");
+        return parts.steps.length;
+    }
+
+    function wfRender(yaml) {
+        var n = wfRenderInto(document.getElementById("wf-list"), yaml);
+        wfStatus(n + " step(s) — read-only");
     }
 
     function wfLoad(name) {
@@ -344,6 +547,246 @@
         });
     }
 
+    // ── Perspective: what the centre and right panes show (ProjectPerspective_260911_oo01) ──
+    // "chat" shows one conversation (#left-panel and the chat-scoped right tabs); "project" shows
+    // one project (#project-panel and the project-scoped right tabs). Persisted like the theme, so
+    // a reload comes back to the same view.
+    var PERSPECTIVE_KEY = "chat-ui-perspective";
+    var PERSPECTIVE_PROJECT_KEY = "chat-ui-perspective-project";
+    var perspective = "chat";
+    var perspectiveProjectId = null;
+
+    function switchPerspective(kind, projectId) {
+        if (kind !== "project") kind = "chat";
+        var root = document.getElementById("console-root");
+        if (!root) return;
+        perspective = kind;
+        if (kind === "project" && projectId) perspectiveProjectId = projectId;
+        root.setAttribute("data-perspective", kind);
+        localStorage.setItem(PERSPECTIVE_KEY, kind);
+        if (perspectiveProjectId) localStorage.setItem(PERSPECTIVE_PROJECT_KEY, perspectiveProjectId);
+        var title = document.getElementById("project-panel-title");
+        if (title && kind === "project") title.textContent = perspectiveProjectId || "Project";
+        activateFirstTabOf(kind);
+        if (kind === "project") projectWfOnShow();
+    }
+
+    // ── Project perspective, centre pane: the project's workflows ─────────────
+    // GET api/projects/{p}/workflows lists them (the project's own under workflows/ in its working
+    // directory first, then the bundled ones); GET .../workflows/{name} reads one
+    // (ProjectPerspective_260911_oo01, step 2). Drawn with the same boxes as the Agent Loop tab.
+    var projectWfOpenName = null;
+
+    function projectWfUrl(suffix) {
+        if (!perspectiveProjectId) return null;
+        return "api/projects/" + encodeURIComponent(perspectiveProjectId) + "/workflows" + (suffix || "");
+    }
+
+    function projectWfStatus(msg) {
+        var s = document.getElementById("project-wf-status");
+        if (s) s.textContent = msg || "";
+    }
+
+    function projectWfRowEl(w) {
+        var row = document.createElement("div");
+        row.className = "pwf-row" + (w.name === projectWfOpenName ? " selected" : "");
+        var name = document.createElement("span");
+        name.className = "pwf-name";
+        name.textContent = w.title && w.title !== w.name ? w.title + "  (" + w.name + ")" : w.name;
+        var origin = document.createElement("span");
+        origin.className = "pwf-origin pwf-origin-" + (w.origin || "");
+        origin.textContent = w.origin === "project" ? "project" : "bundled";
+        origin.title = w.origin === "project"
+            ? "This project's own file, under workflows/ in its working directory. Editable."
+            : "Shipped with this program. Read-only.";
+        var desc = document.createElement("div");
+        desc.className = "pwf-desc";
+        desc.textContent = w.description || "";
+        row.appendChild(name);
+        row.appendChild(origin);
+        if (w.description) row.appendChild(desc);
+        row.addEventListener("click", function () { projectWfOpen(w.name); });
+        return row;
+    }
+
+    function projectWfLoadList() {
+        var list = document.getElementById("project-wf-list");
+        var search = document.getElementById("project-wf-search");
+        if (!list) return;
+        var q = search ? search.value.trim() : "";
+        var url = projectWfUrl(q ? "?q=" + encodeURIComponent(q) : "");
+        if (!url) { projectWfStatus("no project selected"); return; }
+        projectWfStatus("loading…");
+        fetch(url)
+            .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+            .then(function (rows) {
+                list.textContent = "";
+                (rows || []).forEach(function (w) { list.appendChild(projectWfRowEl(w)); });
+                var own = (rows || []).filter(function (w) { return w.origin === "project"; }).length;
+                projectWfStatus((rows || []).length + " workflow(s), " + own + " of this project"
+                    + (q ? " matching “" + q + "”" : ""));
+            })
+            .catch(function (e) { projectWfStatus("error: " + e.message); });
+    }
+
+    // The workflow last opened, as the server sent it: {name, yaml, origin, editable}. What Edit
+    // starts from.
+    var projectWfDoc = null;
+
+    function projectWfOpen(name) {
+        var url = projectWfUrl("/" + encodeURIComponent(name));
+        var head = document.getElementById("project-wf-head");
+        var view = document.getElementById("project-wf-view");
+        if (!url || !view) return;
+        projectWfOpenName = name;
+        projectWfEditorHide();
+        document.querySelectorAll("#project-wf-list .pwf-row").forEach(function (r) {
+            r.classList.toggle("selected", r.querySelector(".pwf-name") && r.querySelector(".pwf-name").textContent.indexOf(name) >= 0);
+        });
+        if (head) head.textContent = "loading " + name + "…";
+        fetch(url)
+            .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+            .then(function (d) {
+                projectWfDoc = d;
+                var n = wfRenderInto(view, d.yaml || "");
+                if (head) head.textContent = d.name + "  —  " + n + " step(s), "
+                    + (d.editable ? "this project's own file" : "bundled, read-only");
+                view.scrollTop = 0;
+                var edit = document.getElementById("project-wf-edit");
+                if (edit) {
+                    edit.disabled = false;
+                    edit.textContent = d.editable ? "Edit" : "Edit a copy";
+                    edit.title = d.editable
+                        ? "Edit this file"
+                        : "Bundled workflows are read-only; saving creates this project's own copy, which then replaces it";
+                }
+                jobRunOnShow(); // the Run tab mirrors what is open here
+            })
+            .catch(function (e) { if (head) head.textContent = "error: " + e.message; projectWfDoc = null; });
+    }
+
+    // ── Editing (ProjectPerspective_260911_oo01, step 3) ──
+    // The editor takes the reader's place. Save PUTs the text as-is; the server refuses anything
+    // Turing-workflow cannot read, and its reason is shown next to the buttons.
+    var WF_TEMPLATE = "name: my-workflow\ndescription: |\n  What this workflow does.\nsteps:\n"
+        + "  - states: [\"0\", \"1\"]\n    label: first-step\n    actions:\n"
+        + "      - actor: this\n        method: noop\n        arguments: []\n        execution: direct\n";
+
+    function projectWfEditStatus(msg, isError) {
+        var s = document.getElementById("project-wf-edit-status");
+        if (!s) return;
+        s.textContent = msg || "";
+        s.classList.toggle("pwf-error", !!isError);
+    }
+
+    function projectWfEditorShow(name, yaml, hint) {
+        var editor = document.getElementById("project-wf-editor");
+        var view = document.getElementById("project-wf-view");
+        var nameEl = document.getElementById("project-wf-edit-name");
+        var yamlEl = document.getElementById("project-wf-edit-yaml");
+        if (!editor || !view || !nameEl || !yamlEl) return;
+        nameEl.value = name || "";
+        yamlEl.value = yaml || "";
+        view.style.display = "none";
+        editor.style.display = "";
+        projectWfEditStatus(hint || "");
+        (name ? yamlEl : nameEl).focus();
+    }
+
+    function projectWfEditorHide() {
+        var editor = document.getElementById("project-wf-editor");
+        var view = document.getElementById("project-wf-view");
+        if (editor) editor.style.display = "none";
+        if (view) view.style.display = "";
+    }
+
+    function projectWfEdit() {
+        if (!projectWfDoc) return;
+        projectWfEditorShow(projectWfDoc.name, projectWfDoc.yaml,
+            projectWfDoc.editable ? "" : "Saving creates this project's own copy of this bundled workflow.");
+    }
+
+    function projectWfNew() {
+        projectWfEditorShow("", WF_TEMPLATE, "Give it a name, then Save.");
+    }
+
+    function projectWfSave() {
+        var nameEl = document.getElementById("project-wf-edit-name");
+        var yamlEl = document.getElementById("project-wf-edit-yaml");
+        if (!nameEl || !yamlEl) return;
+        var name = nameEl.value.trim();
+        if (!name) { projectWfEditStatus("a name is required", true); nameEl.focus(); return; }
+        if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) {
+            projectWfEditStatus("a name is letters, digits, '.', '_' and '-' only", true); nameEl.focus(); return;
+        }
+        var url = projectWfUrl("/" + encodeURIComponent(name));
+        if (!url) { projectWfEditStatus("no project selected", true); return; }
+        projectWfEditStatus("saving…");
+        fetch(url, { method: "PUT", headers: { "Content-Type": "text/plain; charset=utf-8" }, body: yamlEl.value })
+            .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; }); })
+            .then(function (res) {
+                if (!res.ok) {
+                    projectWfEditStatus((res.body && res.body.error) || ("HTTP " + res.status), true);
+                    return;
+                }
+                projectWfEditStatus("saved");
+                projectWfLoadList();
+                projectWfOpen(name);
+            })
+            .catch(function (e) { projectWfEditStatus("error: " + e.message, true); });
+    }
+
+    function initProjectWorkflowEditor() {
+        var edit = document.getElementById("project-wf-edit");
+        var neu = document.getElementById("project-wf-new");
+        var save = document.getElementById("project-wf-save");
+        var cancel = document.getElementById("project-wf-cancel");
+        if (edit) edit.addEventListener("click", projectWfEdit);
+        if (neu) neu.addEventListener("click", projectWfNew);
+        if (save) save.addEventListener("click", projectWfSave);
+        if (cancel) cancel.addEventListener("click", projectWfEditorHide);
+    }
+
+    function projectWfOnShow() {
+        projectWfLoadList();
+    }
+
+    function initProjectWorkflows() {
+        var search = document.getElementById("project-wf-search");
+        var refresh = document.getElementById("project-wf-refresh");
+        var debounce = null;
+        if (search) search.addEventListener("input", function () {
+            if (debounce) clearTimeout(debounce);
+            debounce = setTimeout(projectWfLoadList, 200);
+        });
+        if (refresh) refresh.addEventListener("click", function () {
+            projectWfLoadList();
+            if (projectWfOpenName) projectWfOpen(projectWfOpenName);
+        });
+    }
+
+    // The right pane keeps one active tab per perspective. After a switch, the tab that was
+    // active may belong to the other perspective and be hidden now; if none of the new
+    // perspective's tabs is active, pick its first. Clicking goes through initTabs' handler, so
+    // the tab's own onShow runs as if the user had clicked it.
+    function activateFirstTabOf(kind) {
+        var bar = document.getElementById("right-tab-bar");
+        if (!bar) return;
+        var btns = Array.prototype.slice.call(
+            bar.querySelectorAll('.rtab-btn[data-perspective="' + kind + '"]'));
+        if (!btns.length) return;
+        var already = btns.filter(function (b) { return b.classList.contains("active"); })[0];
+        if (!already) btns[0].click();
+    }
+
+    function restorePerspective() {
+        var kind = localStorage.getItem(PERSPECTIVE_KEY) || "chat";
+        var pid = localStorage.getItem(PERSPECTIVE_PROJECT_KEY);
+        if (kind === "project" && !pid) kind = "chat";
+        perspectiveProjectId = pid;
+        switchPerspective(kind, pid);
+    }
+
     // ── Actors tab ──────────────────────────────────────────────────────────
     // Each node: {name, type, alive, children[]}. Collapsed state is keyed by actor name (unique
     // in this actor system) and kept outside the tree DOM, so it survives the full rebuild
@@ -388,13 +831,17 @@
         if (tabMatch && typeof window.chatUiSwitchChat === "function") {
             name.classList.add("tab-switchable");
             var active = (typeof window.chatUiGetActiveChat === "function") ? window.chatUiGetActiveChat() : null;
-            if (active && active.projectId === tabMatch[1] && active.chatId === tabMatch[2]) {
+            if (perspective === "chat" && active
+                    && active.projectId === tabMatch[1] && active.chatId === tabMatch[2]) {
                 name.classList.add("tab-active");
             }
             name.title = "Switch to " + tabMatch[1] + " / " + tabMatch[2];
             name.addEventListener("click", function (e) {
                 e.stopPropagation(); // don't also trigger the fold/unfold toggle on the label
                 window.chatUiSwitchChat(tabMatch[1], tabMatch[2]);
+                // A conversation is shown in the chat perspective; leave the project one if in it
+                // (ProjectPerspective_260911_oo01).
+                switchPerspective("chat");
                 refreshActors(); // re-render so the tab-active highlight moves immediately
                 // Right pane follows the newly active tab (150_TabScopedLogging_260826_oo01) —
                 // re-fetch immediately rather than waiting for the next poll/tab-open.
@@ -409,6 +856,21 @@
                 if (document.getElementById("tab-agentloop") && document.getElementById("tab-agentloop").classList.contains("active")) {
                     wfOnShow();
                 }
+            });
+        }
+        // A Project node switches the whole console to that project's perspective
+        // (ProjectPerspective_260911_oo01): the centre pane shows its workflows, the right pane
+        // its jobs. Matched by type rather than by name, so a project named anything switches.
+        if (node.type === "Project") {
+            name.classList.add("tab-switchable");
+            if (perspective === "project" && perspectiveProjectId === node.name) {
+                name.classList.add("tab-active");
+            }
+            name.title = "Show project " + node.name;
+            name.addEventListener("click", function (e) {
+                e.stopPropagation(); // don't also trigger the fold/unfold toggle on the label
+                switchPerspective("project", node.name);
+                refreshActors(); // re-render so the tab-active highlight moves immediately
             });
         }
         var type = document.createElement("span");
@@ -1024,6 +1486,10 @@
         initLogs();
         initWorkflow();
         initExtensions();
+        initProjectWorkflows();
+        initProjectWorkflowEditor();
+        initJobs();
+        restorePerspective(); // before the tree renders, so its highlight matches
         refreshActors();   // the actor dock is visible by default
         ioOnShow();         // Sessions is the default-active right-pane tab
     });

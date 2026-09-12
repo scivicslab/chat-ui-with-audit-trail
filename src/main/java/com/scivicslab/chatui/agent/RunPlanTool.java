@@ -141,7 +141,7 @@ public final class RunPlanTool {
      *
      * @return a future completed with the plan's outcome
      */
-    private static CompletableFuture<String> start(PlanRunnerIIAR planIIAR, String planName, String yaml) {
+    public static CompletableFuture<String> start(PlanRunnerIIAR planIIAR, String planName, String yaml) {
         CompletableFuture<String> done = new CompletableFuture<>();
         planIIAR.tell(interp -> {
             PlanRunner runner = (PlanRunner) interp;
