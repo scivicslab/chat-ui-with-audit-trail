@@ -6,11 +6,12 @@
   <parent>
     <groupId>com.scivicslab</groupId>
     <artifactId>chat-ui-with-audit-trail-parent</artifactId>
-    <version>0.2.0-SNAPSHOT</version>
+    <version>2.0.0-SNAPSHOT</version>
   </parent>
   <!-- The body. Keeps the artifactId the product has always had, so the uber-jar is still
        chat-ui-with-audit-trail-<version>.jar (ProviderAndToolPlugins_260912_oo01). -->
   <artifactId>chat-ui-with-audit-trail</artifactId>
+  <version>2.0.0-SNAPSHOT</version>
   <packaging>jar</packaging>
 
   <properties>
