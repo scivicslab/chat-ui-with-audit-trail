@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd"
+    xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.scivicslab</groupId>
+    <artifactId>chat-ui-with-audit-trail-parent</artifactId>
+    <version>0.2.0-SNAPSHOT</version>
+  </parent>
+  <artifactId>chat-ui-with-audit-trail-plugin-api</artifactId>
+  <packaging>jar</packaging>
+
+  <!-- The contract between the body and its plugin jars (ProviderAndToolPlugins_260912_oo01):
+       LlmProvider and what it exchanges, ToolSet, and the plugin SPI. Pure Java on purpose — a
+       plugin must not need Quarkus or the actor libraries to implement it. -->
+  <dependencies>
+    <!-- ChatEvent's @JsonInclude, nothing else -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-annotations</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

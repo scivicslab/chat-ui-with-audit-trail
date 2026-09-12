@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd"
+    xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.scivicslab</groupId>
+    <artifactId>chat-ui-with-audit-trail-parent</artifactId>
+    <version>0.2.0-SNAPSHOT</version>
+  </parent>
+  <artifactId>chat-ui-with-audit-trail-plugin-harness</artifactId>
+  <packaging>jar</packaging>
+
+  <!-- Claude Code and Codex as provider kinds, in a plugin jar (ProviderAndToolPlugins_260912_oo01).
+       Loaded at start-up from chat-ui.plugins; an instance without it has no code that starts
+       either CLI. The api and org.json are provided by the body and must not be bundled. -->
+  <dependencies>
+    <dependency>
+      <groupId>com.scivicslab</groupId>
+      <artifactId>chat-ui-with-audit-trail-plugin-api</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.json</groupId>
+      <artifactId>json</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

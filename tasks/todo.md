@@ -1,28 +1,24 @@
-# Claude Code / Codex をハーネス provider として会話ごとに選べるようにする
+# provider とツールをプラグイン jar に分離し、3 種類の起動構成を作る
 
-設計文書: `doc_SCIVICS003/docs/chat-ui-with-audit-trail/030_development/010_skeleton/100_providers/010_CliHarnessProvider_260912_oo01`
-ブランチ: `CliHarnessProvider_260912_oo01`（BranchingBrief に従い設計文書の識別子）
+設計文書: `doc_SCIVICS003/docs/chat-ui-with-audit-trail/030_development/010_skeleton/100_providers/030_ProviderAndToolPlugins_260912_oo01`
+tutorial: `doc_SCIVICS003/docs/chat-ui-with-audit-trail/050_tutorials/010_ThreeStartupConfigurations_260912_oo01`
+ブランチ: `ProviderAndToolPlugins_260912_oo01`
 
 ## 手順
 
 - [x] 1. 設計文書を書く
 - [x] 2. ブランチを切る
-- [x] 3. `ChatEvent` に `toolUse` / `toolResult` を追加し、`ChatSession` がそれを `turnN/stepM/tool` として I/O ログに記録する（provider 非依存の受け口）。ユニットテスト
-- [x] 4. ツール分担 `ToolSet`（full / collaboration）を `ChatSession` に持たせ、システムプロンプトのツール一覧と `executeTool` の受理をそれに従わせる。ユニットテスト
-- [x] 5. `quarkus-chat-ui` の `cli/process`（CliProcess, StreamEventParser, StreamEvent, CliConfig）を `com.scivicslab.chatui.harness` へ移植し、`tool_use` / `tool_result` を全文で出すよう拡張。`ClaudeCodeProvider`。ユニットテスト（パーサ）
-- [x] 6. `ChatUiActorSystem.setProvider(project, chat, kind, toolSet)`：provider 子アクターを同名で差し替える。REST `POST /api/projects/{p}/chats/{c}/provider`、`status` に provider を載せる。ユニットテスト
-- [x] 7. 画面：`#provider-select` を `#model-select` の隣に置き、切替で POST → モデル一覧再取得
-- [x] 8. `CodexProvider`（実装・パーサのユニットテストまで。実機は `codex login` 待ち）（`codex exec --json` を 1 ターン 1 プロセス、`resume` で継続）。ユニットテスト（パーサ）
-- [x] 9. ビルド（`rm -rf target; mvn install`）→ 実機で claude 会話 1 往復、ハーネス内部ツール呼び出しが Sessions タブに出ることを確認 → 設計文書に実機確認を追記
-- [x] 10. codex 実機確認 → 設計文書に追記（`codex login` 後。モデルは ChatGPT アカウントで使える `gpt-5.5` のみ、既定を変更）
+- [x] 3. Maven を親 pom + `plugin-api` + `app` に分け、`LlmProvider`/`ProviderContext`/`ProviderCapabilities`/`ChatEvent`/`ToolSet` を `plugin-api` へ移す。ビルド green
+- [x] 4. SPI（`ChatUiPlugin`/`LlmProviderFactory`/`ProviderCreationContext`/`ConversationTool`）と `PluginRegistry`（`chat-ui.plugins` の jar を起動時に読む）。組み込み `openai-compat` factory。`newProvider` を登録簿引きに。`GET /api/plugins`。ユニットテスト
+- [x] 5. 画面の provider ドロップダウンをサーバの選択肢から作る
+- [x] 6. `plugin-web-tools`（`web_search`/`fetch`）。`ChatSession` が登録簿のツールを説明・実行・要約する。ユニットテスト
+- [x] 7. `plugin-harness`（`harness` パッケージ一式 + factory + `META-INF/services`）。ユニットテスト移動
+- [x] 8. `rm -rf */target target; mvn install` green → 28039 で 3 構成を実機確認（`/api/plugins`、システムプロンプトのツール一覧、claude 1 往復）。`ProviderSelectE2E` 更新
+- [x] 9. tutorial を書く。設計文書に実機確認を追記
+- [ ] 10. コミット
 
 ## Review
 
-- ユニットテスト 119 件 green（`rm -rf target; mvn install`）。新規: `StreamEventParserTest` 5、`CodexEventParserTest` 4、`ChatSessionHarnessToolIoTest` 1、`ChatSessionToolSetTest` 3、`ChatUiActorSystemSetProviderTest` 2。
-- 実機（使い捨てポート 28039、project1 の working dir を `chat-ui-scratch/harness-trial`）:
-  - `POST .../provider {"provider":"claude"}` → status が `claude`/`collaboration`、models が Claude の一覧に変わる。
-  - Claude Code に Write を使わせる指示 → ファイル実作成、I/O ログ `turn1/step1/tool` に `TOOL: Write` の入力と結果が全文で記録、`turn1/step1/llm` に最終回答。
-  - `{"provider":"claude","tools":"full"}`（素モデル）→ Claude が `<invoke name="read">` を書き、`ChatSession` が実行。`turn2/step1..3` に llm/tool が交互に記録。セッションファイルで `--resume` が効いた。
-  - `ProviderSelectE2E`（Playwright main）10 項目 green: ドロップダウンがサーバの値を映す、切替でモデル一覧が入れ替わる。
-- Codex 実機: `command_execution` が `turn3/step1/tool` に記録、2 ターン目は `codex exec resume <thread_id>` で継続し記憶から回答。手順書 `HarnessLiveVerification_260912_oo01` を追加。
-- 残: ブランチのマージ（分岐元 `feature/project-perspective` が main 未マージのため、順序はユーザー判断）。
+- 4 モジュール（親 / `plugin-api` / `app` / `plugin-web-tools` / `plugin-harness`）。ユニットテスト 122 件 green。plugin jar に api の複製なし、services エントリあり。本体に `harness` と `WebSearchTool` なし。
+- 28039 で 3 構成を実機確認（`/api/plugins`、claude 拒否、プロンプトのツール一覧、fetch の記録、Claude Read の記録、`ProviderSelectE2E` 10 項目）。
+- tutorial `ThreeStartupConfigurations_260912_oo01`、設計文書、手順書を更新。

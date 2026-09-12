@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd"
+    xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.scivicslab</groupId>
+    <artifactId>chat-ui-with-audit-trail-parent</artifactId>
+    <version>0.2.0-SNAPSHOT</version>
+  </parent>
+  <artifactId>chat-ui-with-audit-trail-plugin-web-tools</artifactId>
+  <packaging>jar</packaging>
+
+  <!-- web_search and fetch as a plugin jar (ProviderAndToolPlugins_260912_oo01). Loaded at
+       start-up from chat-ui.plugins; an instance without it has no tool that leaves the local
+       network. The api and jsoup are provided by the body and must not be bundled. -->
+  <dependencies>
+    <dependency>
+      <groupId>com.scivicslab</groupId>
+      <artifactId>chat-ui-with-audit-trail-plugin-api</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.jsoup</groupId>
+      <artifactId>jsoup</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.json</groupId>
+      <artifactId>json</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>
