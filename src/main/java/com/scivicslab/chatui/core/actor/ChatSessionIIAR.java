@@ -113,6 +113,12 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      */
     public String getModelDirect() { return chatSession().getModel(); }
 
+    /** The conversation's provider kind ({@code openai-compat}, {@code claude}, {@code codex}), read directly. */
+    public String getProviderIdDirect() { return chatSession().getProviderId(); }
+
+    /** The conversation's tool set, read directly ({@code CliHarnessProvider_260912_oo01}). */
+    public String getToolSetDirect() { return chatSession().getToolSet().id(); }
+
     private ChatSession chatSession() { return (ChatSession) object; }
 
     /**

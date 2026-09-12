@@ -1,5 +1,6 @@
 package com.scivicslab.chatui.audittrail;
 
+import com.scivicslab.chatui.agent.ToolSet;
 import com.scivicslab.chatui.core.actor.ChatSession;
 import com.scivicslab.chatui.core.actor.ChatSessionIIAR;
 import com.scivicslab.chatui.core.actor.ChatUiActorSystem;
@@ -306,7 +307,48 @@ public class ChatResource {
         ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
         String model = chatSessionIIAR.getModelDirect();
         return Map.of("busy", chatSessionIIAR.isBusyDirect(),
-                      "model", model == null ? "" : model);
+                      "model", model == null ? "" : model,
+                      "provider", chatSessionIIAR.getProviderIdDirect(),
+                      "tools", chatSessionIIAR.getToolSetDirect());
+    }
+
+    /**
+     * Sets which provider kind this conversation talks to, and which tools it is given
+     * ({@code CliHarnessProvider_260912_oo01}). Like the model, the provider belongs to the
+     * conversation, and the server holds the value.
+     *
+     * @param projectId owning project's id
+     * @param chatId    conversation tab identifier
+     * @param body      {@code {"provider": "openai-compat"|"claude"|"codex", "tools": "full"|"collaboration"}};
+     *                  {@code tools} defaults to {@code full} for openai-compat and {@code collaboration}
+     *                  for a harness
+     * @return {@code {"type": "accepted", "provider": ..., "tools": ...}}, or 400 when the kind or the
+     *         tool set is not one the server can give this conversation
+     */
+    @POST
+    @Path("/{projectId}/chats/{chatId}/provider")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response provider(@PathParam("projectId") String projectId,
+                             @PathParam("chatId") String chatId,
+                             Map<String, Object> body) {
+        Object kindVal = body != null ? body.get("provider") : null;
+        String kind = kindVal == null ? null : String.valueOf(kindVal).strip().toLowerCase();
+        if (kind == null || kind.isEmpty()) {
+            return Response.status(400)
+                    .entity(Map.of("type", "error", "message", "provider is required")).build();
+        }
+        Object toolsVal = body.get("tools");
+        String tools = toolsVal == null || String.valueOf(toolsVal).isBlank()
+                ? ("openai-compat".equals(kind) ? "full" : "collaboration")
+                : String.valueOf(toolsVal);
+        try {
+            ToolSet toolSet = ToolSet.parse(tools);
+            actorSystem.setProvider(projectId, chatId, kind, toolSet);
+            return Response.ok(Map.of("type", "accepted", "provider", kind, "tools", toolSet.id())).build();
+        } catch (IllegalArgumentException e) {
+            return Response.status(400).entity(Map.of("type", "error", "message", e.getMessage())).build();
+        }
     }
 
     /**

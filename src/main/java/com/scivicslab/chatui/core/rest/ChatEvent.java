@@ -19,6 +19,11 @@ import java.util.List;
  *   <li>{@code prompt} - Interactive prompt from the LLM (tool permission, yes/no, etc.)</li>
  *   <li>{@code heartbeat} - Keep-alive for SSE connection</li>
  *   <li>{@code log} - Server log entry (level, logger, message, timestamp)</li>
+ *   <li>{@code tool_use} - A tool call the provider's own harness made inside one sendPrompt
+ *       (CliHarnessProvider_260912_oo01): {@code toolName}, {@code toolUseId}, input JSON in
+ *       {@code content}</li>
+ *   <li>{@code tool_result} - The harness's result for a {@code tool_use}, paired by
+ *       {@code toolUseId}; the result text in {@code content}, {@code isError} when it failed</li>
  * </ul>
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -36,7 +41,13 @@ public record ChatEvent(
     String logLevel,
     String loggerName,
     Long timestamp,
-    List<String> images
+    List<String> images,
+    /** Tool name, on {@code tool_use} events. */
+    String toolName,
+    /** Identifier pairing a {@code tool_use} with its {@code tool_result}. */
+    String toolUseId,
+    /** Whether a {@code tool_result} reports a failure. */
+    Boolean isError
 ) {
 
     /**
@@ -46,7 +57,7 @@ public record ChatEvent(
      * @return a new delta event
      */
     public static ChatEvent delta(String content) {
-        return new ChatEvent("delta", content, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new ChatEvent("delta", content, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -58,7 +69,7 @@ public record ChatEvent(
      * @return a new result event
      */
     public static ChatEvent result(String sessionId, double costUsd, long durationMs) {
-        return new ChatEvent("result", null, sessionId, costUsd, durationMs, null, null, null, null, null, null, null, null, null);
+        return new ChatEvent("result", null, sessionId, costUsd, durationMs, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -72,7 +83,7 @@ public record ChatEvent(
      * @return a new result event
      */
     public static ChatEvent result(String sessionId, double costUsd, long durationMs, String model, boolean busy) {
-        return new ChatEvent("result", null, sessionId, costUsd, durationMs, model, busy, null, null, null, null, null, null, null);
+        return new ChatEvent("result", null, sessionId, costUsd, durationMs, model, busy, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -82,7 +93,7 @@ public record ChatEvent(
      * @return a new error event
      */
     public static ChatEvent error(String content) {
-        return new ChatEvent("error", content, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new ChatEvent("error", content, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -92,7 +103,7 @@ public record ChatEvent(
      * @return a new info event
      */
     public static ChatEvent info(String content) {
-        return new ChatEvent("info", content, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new ChatEvent("info", content, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -114,7 +125,7 @@ public record ChatEvent(
      */
     public static ChatEvent user(String content, List<String> images) {
         return new ChatEvent("user", content, null, null, null, null, null, null, null, null, null, null, null,
-                (images == null || images.isEmpty()) ? null : images);
+                (images == null || images.isEmpty()) ? null : images, null, null, null);
     }
 
     /**
@@ -125,7 +136,7 @@ public record ChatEvent(
      * @return a new mcp_user event
      */
     public static ChatEvent mcpUser(String content) {
-        return new ChatEvent("mcp_user", content, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new ChatEvent("mcp_user", content, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -137,7 +148,7 @@ public record ChatEvent(
      * @return a new status event
      */
     public static ChatEvent status(String model, String sessionId, boolean busy) {
-        return new ChatEvent("status", null, sessionId, null, null, model, busy, null, null, null, null, null, null, null);
+        return new ChatEvent("status", null, sessionId, null, null, model, busy, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -147,7 +158,7 @@ public record ChatEvent(
      * @return a new thinking event
      */
     public static ChatEvent thinking(String content) {
-        return new ChatEvent("thinking", content, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new ChatEvent("thinking", content, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -156,7 +167,7 @@ public record ChatEvent(
      * @return a new heartbeat event
      */
     public static ChatEvent heartbeat() {
-        return new ChatEvent("heartbeat", null, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new ChatEvent("heartbeat", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -170,7 +181,7 @@ public record ChatEvent(
      */
     public static ChatEvent prompt(String promptId, String content, String promptType, List<String> options) {
         return new ChatEvent("prompt", content, null, null, null, null, null,
-                             promptId, promptType, options, null, null, null, null);
+                             promptId, promptType, options, null, null, null, null, null, null, null);
     }
 
     /**
@@ -184,7 +195,7 @@ public record ChatEvent(
      */
     public static ChatEvent log(String level, String logger, String message, long ts) {
         return new ChatEvent("log", message, null, null, null, null, null,
-                             null, null, null, level, logger, ts, null);
+                             null, null, null, level, logger, ts, null, null, null, null);
     }
 
     /**
@@ -196,7 +207,7 @@ public record ChatEvent(
      */
     public static ChatEvent translation(String content) {
         return new ChatEvent("translation", content, null, null, null, null, null,
-                             null, null, null, null, null, null, null);
+                             null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -207,7 +218,7 @@ public record ChatEvent(
      */
     public static ChatEvent btwDelta(String content) {
         return new ChatEvent("btw_delta", content, null, null, null, null, null,
-                             null, null, null, null, null, null, null);
+                             null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -217,6 +228,36 @@ public record ChatEvent(
      */
     public static ChatEvent btwResult() {
         return new ChatEvent("btw_result", null, null, null, null, null, null,
-                             null, null, null, null, null, null, null);
+                             null, null, null, null, null, null, null, null, null, null);
+    }
+
+    /**
+     * Creates a tool_use event: a tool call the provider's own harness (Claude Code, Codex) made
+     * inside one {@code sendPrompt}, reported so the conversation can record it to the I/O log
+     * ({@code CliHarnessProvider_260912_oo01}). The conversation did not make this call and does
+     * not execute it; the harness does both.
+     *
+     * @param toolUseId identifier the matching {@link #toolResult} will carry
+     * @param toolName  the harness's tool name (e.g. {@code Read})
+     * @param inputJson the tool's input as a JSON object text
+     * @return a new tool_use event
+     */
+    public static ChatEvent toolUse(String toolUseId, String toolName, String inputJson) {
+        return new ChatEvent("tool_use", inputJson, null, null, null, null, null,
+                             null, null, null, null, null, null, null, toolName, toolUseId, null);
+    }
+
+    /**
+     * Creates a tool_result event: what the harness's tool returned for an earlier
+     * {@link #toolUse} with the same {@code toolUseId}.
+     *
+     * @param toolUseId identifier of the tool_use this answers
+     * @param content   the result text, whole
+     * @param isError   whether the tool reported a failure
+     * @return a new tool_result event
+     */
+    public static ChatEvent toolResult(String toolUseId, String content, boolean isError) {
+        return new ChatEvent("tool_result", content, null, null, null, null, null,
+                             null, null, null, null, null, null, null, null, toolUseId, isError);
     }
 }

@@ -58,6 +58,14 @@
                     <option value="light-red">Light Red</option>
                 </select>
             </label>
+            <label id="provider-label" title="Which provider this conversation talks to (CliHarnessProvider_260912_oo01)">Provider:
+                <select id="provider-select">
+                    <option value="openai-compat">Local LLM</option>
+                    <option value="claude">Claude Code</option>
+                    <option value="claude:full">Claude (bare model)</option>
+                    <option value="codex">Codex</option>
+                </select>
+            </label>
             <label id="model-label">Model:
                 <select id="model-select">
                     <!-- Populated dynamically from /api/models -->

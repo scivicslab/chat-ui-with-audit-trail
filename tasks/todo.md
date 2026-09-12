@@ -1,125 +1,27 @@
-# Sessions タブ: 開くと構造が流れて消える問題を直す
+# Claude Code / Codex をハーネス provider として会話ごとに選べるようにする
 
-## 症状（稼働中の 28011 で実測）
-
-右ペインの幅は 528 px、`#io-sessions` の高さは 782 px でそこがスクロールする。
-セッションを 1 つ開くと中身は 1,684 px（2.2 画面）。そこからメッセージ本文を 5 つ開くと
-4,994 px（6.4 画面）になり、スクロール位置が 3,028 px へ送られて、セッションの見出しも
-turn の見出しも領域外に出る。見出しの中にある削除ボタンも届かなくなる。
-
-原因は構造（session ▸ turn ▸ メッセージ）と本文が 1 つのスクロールに同居していること。
-本文は開くたびに積み上がり、閉じる仕組みがない。ツールバー（Refresh / Delete old）は
-`flex-shrink: 0` なので消えない。消えるのは `#io-sessions` の中の見出し。
-
-## 設計
-
-縦を 2 領域に分ける。上が構造 45%、下が選択したメッセージの全文 55%。どちらも自分の中で
-スクロールし、比は固定なので一方が他方を潰せない（AI workspace の Conversations と同じ扱い）。
-
-上の領域は入れ子をそのまま残す。`session ▸ turn ▸ メッセージ`。ただしメッセージはその場で
-展開せず、選ぶと下の領域に全文が出る。同時に開くのは常に 1 通なので積み上がらない。
-
-幅 528 px なので、方向タグは既存のピル表示（`.trm-dir`）のまま、要約はその右に 1 行・省略記号付き。
-方向タグに約 90 px、要約に約 380 px。AI workspace で使った固定幅 2 列は狭すぎるので使わない。
-下の領域は `pre-wrap` と `word-break` で長い JSON を折り返す。
+設計文書: `doc_SCIVICS003/docs/chat-ui-with-audit-trail/030_development/010_skeleton/100_providers/010_CliHarnessProvider_260912_oo01`
+ブランチ: `CliHarnessProvider_260912_oo01`（BranchingBrief に従い設計文書の識別子）
 
 ## 手順
 
-- [x] 1. `console.html` — `#tab-logdb` に本文用の領域 `#io-reading` を追加する
-- [x] 2. `console.css` — `#io-sessions` を 45% 固定、`#io-reading` を残り 55% でスクロールにする
-- [x] 3. `console.js` — `ioMsgEl` を `<details>` から選択可能な 1 行に変え、選ぶと `#io-reading` に
-      `ioRenderPart` で描く。選択中の行に印を付ける
-- [x] 4. E2E — セッションと turn を開き、メッセージを次々選んでも、`#io-sessions` の
-      `scrollHeight` が一定に保たれ、見出しが領域の矩形から出ないことを座標で測る
-- [x] 5. ビルドして実機で確認する
+- [x] 1. 設計文書を書く
+- [x] 2. ブランチを切る
+- [x] 3. `ChatEvent` に `toolUse` / `toolResult` を追加し、`ChatSession` がそれを `turnN/stepM/tool` として I/O ログに記録する（provider 非依存の受け口）。ユニットテスト
+- [x] 4. ツール分担 `ToolSet`（full / collaboration）を `ChatSession` に持たせ、システムプロンプトのツール一覧と `executeTool` の受理をそれに従わせる。ユニットテスト
+- [x] 5. `quarkus-chat-ui` の `cli/process`（CliProcess, StreamEventParser, StreamEvent, CliConfig）を `com.scivicslab.chatui.harness` へ移植し、`tool_use` / `tool_result` を全文で出すよう拡張。`ClaudeCodeProvider`。ユニットテスト（パーサ）
+- [x] 6. `ChatUiActorSystem.setProvider(project, chat, kind, toolSet)`：provider 子アクターを同名で差し替える。REST `POST /api/projects/{p}/chats/{c}/provider`、`status` に provider を載せる。ユニットテスト
+- [x] 7. 画面：`#provider-select` を `#model-select` の隣に置き、切替で POST → モデル一覧再取得
+- [x] 8. `CodexProvider`（実装・パーサのユニットテストまで。実機は `codex login` 待ち）（`codex exec --json` を 1 ターン 1 プロセス、`resume` で継続）。ユニットテスト（パーサ）
+- [x] 9. ビルド（`rm -rf target; mvn install`）→ 実機で claude 会話 1 往復、ハーネス内部ツール呼び出しが Sessions タブに出ることを確認 → 設計文書に実機確認を追記
+- [ ] 10. codex 実機確認 → 設計文書に追記（ブロック中: このマシンの codex は refresh token 失効で 401。`codex login` 後に再開）
 
 ## Review
 
-### 実測での対比（右ペイン幅 528 px、構造領域の高さ 371 px）
-
-| | 修正前 | 修正後 |
-|---|---|---|
-| セッションを開いた直後 | 1,684 px | 1,684 px |
-| メッセージ本文を 5 つ開いた後 | 4,994 px | 1,684 px（5 回とも不変） |
-| スクロール位置 | 3,028 px | 0 px |
-| セッション見出し | 領域外 | 表示 |
-| turn 見出し | 領域外 | 表示 |
-
-本文は下の独立した 383 px の領域に出る。同時に開くのは常に 1 通なので積み上がらない。
-
-### E2E
-
-テスト標準（`TestingStandard_260404_oo01`）に従い、Playwright を使う `main()` の Java プログラム。
-稼働中の環境を叩くだけで、環境の作成・破棄はしない。Playwright は test スコープで追加した。
-
-`SessionsReadingPaneE2E` は `CHAT_UI_URL` で接続先を受け取り、5 通読んでも構造領域の
-`scrollHeight` が変わらないこと、セッションと turn の見出しが領域内に残ること、両領域が
-右ペインの矩形に収まることを座標で測る。11 項目。
-
-修正前のコードに戻して赤になることを確認済み。`#io-reading` が無いので
-「読み取り領域が右ペインの内側にある」が落ち、続いてメッセージ行のクリックがタイムアウトする。
-
-### テーマによるコントラスト
-
-選択行とホバーの文字色を `#fff` 固定にしていた。`light-clean` の選択背景は `--bg-tertiary` = `#e4e6eb`
-なので、白地に白文字になっていた。テーマの `--text-primary` を使うよう変え、選択は太字でも示す。
-実測: `light-clean` で文字 `rgb(28,30,33)` / 背景 `rgb(228,230,235)`、コントラスト比およそ 13:1。
-
-`#fff` 固定はほかに 2 箇所（`#io-mode.active`、`.tr-full[open] > summary`）あるが、
-どちらもアクセント色の背景の上なので残す。
-
-### turn 数が増えると破綻する件
-
-マージ済みアーカイブで最大のセッションは 1,417 turn。300 前後も複数ある。
-`api/sessions/{id}/trace` は全 turn を返し、実測で 3,263,127 バイト（3.3 MB）。
-描画側も全 turn を `<details open>` にするので、全 turn の全メッセージが DOM に載る。
-
-turn 一覧を窓にした。既定で最新 20 turn を「番号＋その turn の質問文の冒頭」の 1 行ずつで並べ、
-`older turns (N before this)` で 20 件ずつ古い方へ伸ばす。turn を開くとその turn のメッセージだけを
-取りに行き、別の turn を開くと前のものは閉じる。
-
-サーバ側は `IoLogView.turnHeads(sessionId, beforeTurn, limit)` と `traceTurn(sessionId, turn)` を追加。
-前者は turn 番号と質問文だけを返し step を組み立てない。エンドポイントは
-`/{id}/turns?before=&limit=` と `/{id}/trace/{turn}` の 2 本。全件返す `/{id}/trace` は
-Sessions タブからは使わなくなった。既存の private `turnNumberOf`（`/conversation` ラベル用）と
-名前が衝突したので、追加した方は `stepTurnOf` にした。
-
-実測（最大セッション、実際は 1,524 turn）:
-
-| | 修正前 | 修正後 |
-|---|---|---|
-| セッションを開いたときの応答 | 3,263,127 バイト | 8,141 バイト |
-| 1 turn 分の step | 上に含まれる | 2,279 バイト |
-| 最初に DOM へ載るメッセージ | 全 turn の全メッセージ | 0（turn を開くまで） |
-
-`TurnWindowTest` 8 件、`SessionsReadingPaneE2E` 17 件、いずれも緑。
-
-E2E の検査対象を選ぶのに 4 回失敗した。(1) 一覧の先頭は最新セッションで turn が 1 つしかない。
-(2) 見出しの `N entries` は turn 数を代表しない（最大は 112 entries で turn は 1 つ、
-turn が 1,524 のセッションは下の方）。(3) 絞り込み無しの `api/sessions` は画面が描く順と違う。
-(4) 画面の一覧は現在のチャットで絞り込まれるので、長いセッションはそもそも描かれていない。
-最終的に、絞り込みの無い状態（画面に実在する状態）にしてから DOM の `data-session-id` を
-順に問い合わせ、20 turn を超える最初のセッションを選ぶ形にした。該当が無ければ SKIP を出す。
-
-### turn 行のタイトルとブラウザメモリ（追補）
-
-turn 行の質問文が全部「You are a helpful assistant…」になっていた。このプログラムはシステム
-プロンプト・ツール説明・質問を 1 つの user メッセージに畳んで送り、質問は末尾にあるため。
-`questionTail` で末尾 200 文字から取るようにした（AI workspace の `summariseEnding` と同じ判断）。
-メッセージ一覧の `user → loop` 行も同じく末尾から出す。
-
-メモリは 2 箇所の線形増加のうち大きい方を塞いだ。turn を閉じたときに中身を捨てて `loaded` を
-戻す（開き直すと取り直す）。DOM にメッセージがあるのは常に開いている 1 turn 分だけになる。
-あわせて tool 行の要約が `toolInput` 全文（`write` ならファイル丸ごと）を抱えていたのを
-200 文字で切った。全文はメッセージを選んだときに読み取り領域へ出る。
-
-残る増加は turn 行そのもの（`older turns` で 20 行ずつ、1 行は番号と質問 1 行）で、
-1,500 turn を全部たどっても 1 MB に届かない。
-
-`TurnWindowTest` 10 件、`SessionsReadingPaneE2E` 18 件（「閉じた turn がメッセージ行を持たない」を
-追加）、全体 87 件、全緑。
-
-### 未対応
-
-- 稼働中の 28011 には反映していない。jar の差し替えと再起動はユーザーの操作を待つ。
-- 同じ症状を持つ quarkus-chat-ui3 の Sessions ペインは手付かず。
+- ユニットテスト 119 件 green（`rm -rf target; mvn install`）。新規: `StreamEventParserTest` 5、`CodexEventParserTest` 4、`ChatSessionHarnessToolIoTest` 1、`ChatSessionToolSetTest` 3、`ChatUiActorSystemSetProviderTest` 2。
+- 実機（使い捨てポート 28039、project1 の working dir を `chat-ui-scratch/harness-trial`）:
+  - `POST .../provider {"provider":"claude"}` → status が `claude`/`collaboration`、models が Claude の一覧に変わる。
+  - Claude Code に Write を使わせる指示 → ファイル実作成、I/O ログ `turn1/step1/tool` に `TOOL: Write` の入力と結果が全文で記録、`turn1/step1/llm` に最終回答。
+  - `{"provider":"claude","tools":"full"}`（素モデル）→ Claude が `<invoke name="read">` を書き、`ChatSession` が実行。`turn2/step1..3` に llm/tool が交互に記録。セッションファイルで `--resume` が効いた。
+  - `ProviderSelectE2E`（Playwright main）10 項目 green: ドロップダウンがサーバの値を映す、切替でモデル一覧が入れ替わる。
+- 未了: Codex の実機確認（認証切れ）。
