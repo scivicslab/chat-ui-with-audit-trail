@@ -685,3 +685,8 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
 .joblog-type { color: var(--text-secondary, #9aa0a6); flex-shrink: 0; width: 5.5em; }
 .joblog-warning .joblog-type, .joblog-severe .joblog-type { color: var(--error-text, #f66); }
 .joblog-data { white-space: pre-wrap; word-break: break-word; }
+
+/* Sessions tab: the conversation's settings history above its turns (ConversationSettingsRecord_260913_oo01) */
+.sess-settings { margin: 4px 0 8px; padding: 4px 8px; border-left: 2px solid var(--accent, #6a8); font-size: 12px; }
+.sess-settings-head { color: var(--text-secondary, #888); margin-bottom: 2px; }
+.sess-settings-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

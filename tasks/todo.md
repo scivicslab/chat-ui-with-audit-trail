@@ -7,13 +7,14 @@
 
 ## 手順
 
-- [ ] 1. 設計文書 2 件を書く
-- [ ] 2. (A) `ChatSession`: provider の `error` を `turnError` に取り、答えが空なら turn を失敗として終える。履歴に role `error`、I/O ログの llm 段に `ERROR:`、`turnN/conversation` に `ERROR:`。空の `delta` を出さない
-- [ ] 3. (A) `IoLogView.Turn` に `error` を足し、復元時に role `error` を戻す。ユニットテスト
-- [ ] 4. (B) `PromptQueue` に送出済み一覧（上限 100）。`popFront` で積む、`sentSnapshot`/`removeSentAt`/`seedSent`。`GET .../queue` が `sent` と `pos` を返す。`DELETE .../queue/sent/{i}`。復元した会話の質問を送出済みに種まき。ユニットテスト
-- [ ] 5. (B) `app.js`: quarkus-chat-ui と同じ描画（sent/current/waiting、見出し、Save、領域の表示規則、`user` イベントで再描画、リサイズ）
-- [ ] 6. ビルド green → 28014 に配置・再起動 → 実機確認（失敗ターンが会話とログに残る／キューの見え方）→ E2E `QueueChecklistE2E`
-- [ ] 7. 設計文書に実機確認を追記、コミット・push
+- [x] 1. 設計文書 2 件を書く
+- [x] 2. (A) `ChatSession`: provider の `error` を `turnError` に取り、答えが空なら turn を失敗として終える。履歴に role `error`、I/O ログの llm 段に `ERROR:`、`turnN/conversation` に `ERROR:`。空の `delta` を出さない
+- [x] 3. (A) `IoLogView.Turn` に `error` を足し、復元時に role `error` を戻す。ユニットテスト
+- [x] 4. (B) `PromptQueue` に送出済み一覧（上限 100）。`popFront` で積む、`sentSnapshot`/`removeSentAt`/`seedSent`。`GET .../queue` が `sent` と `pos` を返す。`DELETE .../queue/sent/{i}`。復元した会話の質問を送出済みに種まき。ユニットテスト
+- [x] 5. (B) `app.js`: quarkus-chat-ui と同じ描画（sent/current/waiting、見出し、Save、領域の表示規則、`user` イベントで再描画、リサイズ）
+- [x] 6. ビルド green → 28014 に配置・再起動 → 実機確認（失敗ターンが会話とログに残る／キューの見え方）→ E2E `QueueChecklistE2E`
+- [x] 7. 設計文書に実機確認を追記、コミット・push
 
 ## Review
-（完了時に記入）
+
+- 130 件 green。28014 で実機確認、`QueueChecklistE2E` 8 項目 green。設計文書 2 件に実機確認を追記、push 済み。

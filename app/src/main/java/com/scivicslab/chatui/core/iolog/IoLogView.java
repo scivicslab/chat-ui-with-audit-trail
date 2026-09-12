@@ -157,6 +157,59 @@ public class IoLogView {
         return lastTurnNumberOf(allLogs(sessionId));
     }
 
+    /** Label of the record that holds a conversation's provider and model (ConversationSettingsRecord_260913_oo01). */
+    public static final String SETTINGS_LABEL = "settings";
+
+    /** A conversation's provider kind, tool set and model, as one settings record holds them. */
+    public record Settings(String provider, String tools, String model) {}
+
+    /**
+     * The last settings record of a session, or {@code null} when it has none
+     * ({@code ConversationSettingsRecord_260913_oo01}). Every record carries all three values,
+     * so the last one is the whole state.
+     */
+    public Settings latestSettings(long sessionId) {
+        return latestSettingsOf(allLogs(sessionId));
+    }
+
+    /** One settings record with the time it was written, for the Sessions tab's settings history. */
+    public record SettingsRecord(String time, String provider, String tools, String model) {}
+
+    /**
+     * Every settings record of a session, oldest first: when the conversation changed its provider
+     * or model, and to what ({@code ConversationSettingsRecord_260913_oo01}).
+     */
+    public List<SettingsRecord> settingsHistory(long sessionId) {
+        return allLogs(sessionId).stream()
+                .filter(e -> SETTINGS_LABEL.equals(e.getLabel()))
+                .sorted(Comparator.comparingLong(LogEntry::getId))
+                .map(e -> {
+                    Settings s = parseSettings(e.getMessage());
+                    return s == null ? null
+                            : new SettingsRecord(String.valueOf(e.getTimestamp()), s.provider(), s.tools(), s.model());
+                })
+                .filter(r -> r != null)
+                .toList();
+    }
+
+    static Settings latestSettingsOf(List<LogEntry> raw) {
+        return raw.stream()
+                .filter(e -> SETTINGS_LABEL.equals(e.getLabel()))
+                .max(Comparator.comparingLong(LogEntry::getId))
+                .map(e -> parseSettings(e.getMessage()))
+                .orElse(null);
+    }
+
+    static Settings parseSettings(String message) {
+        if (message == null || message.isBlank()) return null;
+        try {
+            org.json.JSONObject o = new org.json.JSONObject(message);
+            return new Settings(o.optString("provider", null), o.optString("tools", null), o.optString("model", null));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private List<LogEntry> allLogs(long sessionId) {
         DistributedLogStore s = store();
         // DEBUG is the lowest level, so "at least DEBUG" returns every row of the session.

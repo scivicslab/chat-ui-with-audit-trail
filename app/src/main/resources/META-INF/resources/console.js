@@ -1056,9 +1056,36 @@
             if (!det.open || loaded) return;
             loaded = true;
             ioLoadTurnWindow(body, s.sessionId, 0, false)
+                .then(function () { return ioLoadSettings(body, s.sessionId); })
                 .catch(function (err) { body.textContent = "error: " + err.message; loaded = false; });
         });
         return det;
+    }
+
+    /**
+     * Puts the conversation's settings history above its turns: each time the provider, tool set
+     * or model was set, with the values (ConversationSettingsRecord_260913_oo01). Nothing is
+     * drawn for a session that never changed them.
+     */
+    function ioLoadSettings(el, sessionId) {
+        return fetch("api/sessions/" + sessionId + "/settings")
+            .then(function (r) { return r.json(); })
+            .then(function (records) {
+                if (!records || !records.length) return;
+                var box = document.createElement("div"); box.className = "sess-settings";
+                var head = document.createElement("div"); head.className = "sess-settings-head";
+                head.textContent = "Settings (" + records.length + ")";
+                box.appendChild(head);
+                records.forEach(function (rec) {
+                    var line = document.createElement("div"); line.className = "sess-settings-line";
+                    line.textContent = (rec.time || "").replace("T", " ").slice(0, 19) + "  ·  provider "
+                            + (rec.provider || "?") + "  ·  tools " + (rec.tools || "?")
+                            + "  ·  model " + (rec.model || "?");
+                    box.appendChild(line);
+                });
+                el.insertBefore(box, el.firstChild);
+            })
+            .catch(function () { /* the turns are already there; settings are extra */ });
     }
 
     // How many turns a session shows at a time. A session in this archive runs to 1,417 of them;

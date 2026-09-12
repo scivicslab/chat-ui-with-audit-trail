@@ -380,13 +380,12 @@ public class ChatResource {
             return Response.status(400)
                     .entity(Map.of("type", "error", "message", "model is required")).build();
         }
-        actorSystem.createChat(projectId, chatId);
-        ActorRef<LlmProvider> providerRef = actorSystem.getProviderRef(projectId, chatId);
-        if (providerRef == null) {
+        // Recorded with the conversation's provider and tool set, so a restart puts the
+        // conversation back on this model (ConversationSettingsRecord_260913_oo01).
+        if (!actorSystem.setModel(projectId, chatId, model)) {
             return Response.status(404)
                     .entity(Map.of("type", "error", "message", "no such conversation")).build();
         }
-        providerRef.tell(p -> p.setModel(model));
         return Response.ok(Map.of("type", "accepted")).build();
     }
 

@@ -717,6 +717,8 @@ public class ChatUiActorSystem {
         if (turns.isEmpty()) {
             LOG.info("I/O log session " + sessionId + " holds no restorable turn for " + tabName
                     + "; continuing it from turn " + (lastTurn + 1));
+            String[] ids = splitTabId(tabName);
+            if (ids != null) applyRecordedSettings(tabName, sessionId, ids[0], ids[1]);
             return;
         }
 
@@ -746,6 +748,8 @@ public class ChatUiActorSystem {
         }
         LOG.info("Restored " + turns.size() + " turn(s) into " + tabName
                 + " from I/O log session " + sessionId);
+        String[] ids = splitTabId(tabName);
+        if (ids != null) applyRecordedSettings(tabName, sessionId, ids[0], ids[1]);
     }
 
     /**
@@ -888,6 +892,15 @@ public class ChatUiActorSystem {
      * @throws IllegalArgumentException for an unknown kind, or a tool set the kind cannot take
      */
     public synchronized void setProvider(String projectId, String chatId, String kind, ToolSet toolSet) {
+        setProvider(projectId, chatId, kind, toolSet, true);
+    }
+
+    /**
+     * @param record whether to write a settings record; a restore replays an existing record and
+     *               must not write a new one, or the provider's default model would overwrite the
+     *               recorded model (ConversationSettingsRecord_260913_oo01)
+     */
+    private synchronized void setProvider(String projectId, String chatId, String kind, ToolSet toolSet, boolean record) {
         createChat(projectId, chatId);
         String qualifiedName = chatActorName(projectId, chatId);
         ChatSessionIIAR chatSessionIIAR = chatSessions.get(qualifiedName);
@@ -913,6 +926,96 @@ public class ChatUiActorSystem {
             c.setProviderName(providerRef.getName());
         });
         LOG.info("Provider of " + qualifiedName + " is now " + kind + " with tool set " + toolSet.id());
+        if (record) recordSettings(qualifiedName, kind == null ? "" : kind.trim().toLowerCase(), toolSet.id(), provider.getCurrentModel());
+    }
+
+    /**
+     * Sets which model a conversation runs on, and records it with the conversation's provider
+     * and tool set ({@code ConversationSettingsRecord_260913_oo01}). Delivered to the provider's
+     * own actor, so a change made while a turn is running lands after that turn.
+     *
+     * @param projectId owning project's id
+     * @param chatId    conversation id within that project
+     * @param model     the model name
+     * @return {@code false} when the conversation has no provider
+     */
+    public boolean setModel(String projectId, String chatId, String model) {
+        createChat(projectId, chatId);
+        ActorRef<LlmProvider> providerRef = getProviderRef(projectId, chatId);
+        if (providerRef == null) return false;
+        providerRef.tell(p -> p.setModel(model));
+        ChatSessionIIAR session = chatSessions.get(chatActorName(projectId, chatId));
+        if (session != null) {
+            recordSettings(chatActorName(projectId, chatId), session.getProviderIdDirect(),
+                    session.getToolSetDirect(), model);
+        }
+        return true;
+    }
+
+    /**
+     * Writes the conversation's current provider kind, tool set and model to its I/O log session
+     * as one {@code settings} record ({@code ConversationSettingsRecord_260913_oo01}). All three
+     * every time, so the last record is the whole state; nothing is written without a log.
+     */
+    private void recordSettings(String tabName, String provider, String tools, String model) {
+        if (ioLogStore == null) return;
+        try {
+            long sessionId = ioLogStore.ensureSession(tabName);
+            if (sessionId < 0) return;
+            org.json.JSONObject o = new org.json.JSONObject();
+            o.put("provider", provider == null ? org.json.JSONObject.NULL : provider);
+            o.put("tools", tools == null ? org.json.JSONObject.NULL : tools);
+            o.put("model", model == null ? org.json.JSONObject.NULL : model);
+            ioLogStore.record(sessionId, "agent", IoLogView.SETTINGS_LABEL, o.toString());
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not record the settings of " + tabName, e);
+        }
+    }
+
+    /**
+     * Puts a restored conversation back on the provider and model its last settings record
+     * names ({@code ConversationSettingsRecord_260913_oo01}). A kind this instance was not started
+     * with — a harness plugin not passed on the command line — leaves the default in place and
+     * says so.
+     */
+    private void applyRecordedSettings(String tabName, long sessionId, String projectId, String chatId) {
+        IoLogView.Settings s;
+        try {
+            s = ioLogView.latestSettings(sessionId);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not read the recorded settings of " + tabName, e);
+            return;
+        }
+        if (s == null) return;
+        String kind = s.provider() == null ? OpenAiCompatProviderFactory.KIND : s.provider();
+        ToolSet toolSet = ToolSet.FULL;
+        try {
+            if (s.tools() != null) toolSet = ToolSet.parse(s.tools());
+        } catch (IllegalArgumentException e) {
+            LOG.warning(tabName + ": recorded tool set '" + s.tools() + "' is unknown; using full");
+        }
+        if (!OpenAiCompatProviderFactory.KIND.equals(kind) || toolSet != ToolSet.FULL) {
+            if (pluginRegistry.factory(kind).isEmpty()) {
+                LOG.warning(tabName + " was on provider '" + kind + "', which this instance was not started with"
+                        + " (available: " + String.join(", ", pluginRegistry.kinds()) + "); staying on the default");
+                return;
+            }
+            try {
+                setProvider(projectId, chatId, kind, toolSet, false);
+            } catch (IllegalArgumentException e) {
+                LOG.warning(tabName + ": recorded provider could not be restored: " + e.getMessage());
+                return;
+            }
+        }
+        if (s.model() != null && !s.model().isBlank()) {
+            ActorRef<LlmProvider> providerRef = getProviderRef(projectId, chatId);
+            if (providerRef != null) {
+                String model = s.model();
+                providerRef.tell(p -> p.setModel(model));
+            }
+        }
+        LOG.info("Restored settings of " + tabName + ": provider=" + kind + ", tools=" + toolSet.id()
+                + ", model=" + s.model());
     }
 
     /** Builds a provider of the given kind for one conversation, through the registry's factory. */

@@ -64,6 +64,20 @@ public class SessionsResource {
      * @param limit  how many to return, capped at 200
      * @return {@code {turns: [{turn, question}], lastTurn}}
      */
+    /**
+     * The conversation's settings history: each time its provider, tool set or model was set,
+     * with the values ({@code ConversationSettingsRecord_260913_oo01}). Oldest first.
+     *
+     * @param id the session id
+     * @return {@code [{time, provider, tools, model}]}
+     */
+    @GET
+    @Path("/{id}/settings")
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<IoLogView.SettingsRecord> settings(@PathParam("id") long id) {
+        return ioLogView.settingsHistory(id);
+    }
+
     @GET
     @Path("/{id}/turns")
     @Produces(MediaType.APPLICATION_JSON)
