@@ -26,6 +26,13 @@
       <artifactId>json</artifactId>
       <scope>provided</scope>
     </dependency>
+    <!-- Codex's JSON Lines carry an item with two "id" keys (its web_search item), which org.json
+         refuses; Jackson takes the last one. The body ships Jackson through quarkus-rest-jackson. -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <scope>provided</scope>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>

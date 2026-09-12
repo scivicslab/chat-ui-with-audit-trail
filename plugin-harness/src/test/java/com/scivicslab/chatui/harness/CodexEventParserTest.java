@@ -64,4 +64,20 @@ class CodexEventParserTest {
         assertTrue(parser.parse("{\"type\":\"turn.started\"}").isEmpty());
         assertTrue(parser.parse("2026-09-12T01:01:38Z ERROR something").isEmpty(), "log noise is not an event");
     }
+
+    /** Codex's web_search item carries two "id" keys; the line must still parse and pair up. */
+    @Test
+    void parse_webSearchWithDuplicateIdKey_yieldsToolUseAndResult() {
+        List<StreamEvent> started = parser.parse("{\"type\":\"item.started\",\"item\":{\"id\":\"item_0\","
+                + "\"type\":\"web_search\",\"id\":\"ws_abc\",\"query\":\"\",\"action\":{\"type\":\"other\"}}}");
+        assertEquals(1, started.size(), started.toString());
+        assertEquals("tool_use", started.get(0).type());
+        assertEquals("web_search", started.get(0).toolName());
+        List<StreamEvent> done = parser.parse("{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\","
+                + "\"type\":\"web_search\",\"id\":\"ws_abc\",\"query\":\"東京 満潮\",\"action\":{\"type\":\"search\"}}}");
+        assertEquals(1, done.size());
+        assertEquals("tool_result", done.get(0).type());
+        assertEquals(started.get(0).toolUseId(), done.get(0).toolUseId(), "both events of one search pair up");
+        assertTrue(done.get(0).content().contains("東京 満潮"));
+    }
 }
