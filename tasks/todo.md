@@ -18,3 +18,6 @@
 ## Review
 
 - 130 件 green。28014 で実機確認、`QueueChecklistE2E` 8 項目 green。設計文書 2 件に実機確認を追記、push 済み。
+
+## 追加: 会話の設定の記録と復元（ConversationSettingsRecord_260913_oo01）
+- [x] `settings` 記録（provider/tools/model）、復元で適用（記録は書かない）、`GET /api/sessions/{id}/settings`、Sessions タブに履歴。133 件 green、`SessionSettingsE2E` 3 項目 green。push 済み。
