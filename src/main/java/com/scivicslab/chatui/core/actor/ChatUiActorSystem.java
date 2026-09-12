@@ -145,8 +145,9 @@ public class ChatUiActorSystem {
     @ConfigProperty(name = "chat-ui.harness.claude-model", defaultValue = "sonnet")
     String harnessClaudeModel = "sonnet";
 
-    @ConfigProperty(name = "chat-ui.harness.codex-model")
-    Optional<String> harnessCodexModel = Optional.empty();
+    /** Passed as {@code -m}; the model in {@code ~/.codex/config.toml} may be one the account cannot use. */
+    @ConfigProperty(name = "chat-ui.harness.codex-model", defaultValue = "gpt-5.5")
+    String harnessCodexModel = "gpt-5.5";
 
     /**
      * The address the distributed-actor server binds to. Not configurable: a setting could be
@@ -1051,7 +1052,7 @@ public class ChatUiActorSystem {
                 .map(java.nio.file.Path::of)
                 .orElse(java.nio.file.Path.of(System.getProperty("user.home"), ".chat-ui-with-audit-trail", "harness-sessions"));
         return new HarnessSettings(harnessPermissionMode, sessionDir, httpPort, harnessClaudeModel,
-                harnessCodexModel.filter(m -> !m.isBlank()).orElse(null));
+                harnessCodexModel == null || harnessCodexModel.isBlank() ? null : harnessCodexModel);
     }
 
     public ActorRef<PromptQueue> getPromptQueue(String projectId, String chatId) {

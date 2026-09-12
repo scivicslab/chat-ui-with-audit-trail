@@ -39,10 +39,13 @@ public class CodexProvider implements LlmProvider {
 
     public static final String ID = "codex";
 
+    /**
+     * What a ChatGPT-account Codex offers (its {@code ~/.codex/models_cache.json} lists exactly
+     * this; {@code gpt-5.4} and {@code gpt-5.2-codex} are refused with "not supported when using
+     * Codex with a ChatGPT account"). A name typed into the model box is passed through as is.
+     */
     private static final List<ModelEntry> MODELS = List.of(
-        new ModelEntry("gpt-5.4", ID, null),
-        new ModelEntry("gpt-5.4-mini", ID, null),
-        new ModelEntry("o3", ID, null)
+        new ModelEntry("gpt-5.5", ID, null)
     );
 
     /** Codex's sandbox for the commands it runs; the project's working directory is what it may write. */
