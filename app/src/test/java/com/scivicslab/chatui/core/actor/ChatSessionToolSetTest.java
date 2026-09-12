@@ -88,6 +88,7 @@ class ChatSessionToolSetTest {
         }
         assertTrue(first.contains("- web_search(query): search the web (fake)."), "full prompt lists the plugin tool");
         assertTrue(first.contains("read may read files under:"), first);
+        assertFalse(first.contains("your own coding harness"), "a bare model gets no harness preface");
         assertEquals(2, p.prompts.size(), "read was executed and its observation sent back");
         assertTrue(p.prompts.get(1).startsWith("Tool result (read):"), p.prompts.get(1));
         assertFalse(p.prompts.get(1).contains("is not available in this conversation"), p.prompts.get(1));
@@ -104,6 +105,8 @@ class ChatSessionToolSetTest {
             assertFalse(first.contains("- " + name + "("), "collaboration prompt must not list " + name);
         }
         assertFalse(first.contains("read may read files under:"), first);
+        assertTrue(first.startsWith("You are running inside your own coding harness"),
+                "a harness is told its own tools stay usable and the list is additional");
         assertEquals(2, p.prompts.size());
         assertTrue(p.prompts.get(1).contains("error: tool 'read' is not available in this conversation"),
                 p.prompts.get(1));
