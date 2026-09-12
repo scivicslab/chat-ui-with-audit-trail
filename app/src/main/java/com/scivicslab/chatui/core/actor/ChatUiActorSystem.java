@@ -20,9 +20,6 @@ import com.scivicslab.turingworkflow.plugins.logoutput.MultiplexerAccumulatorAct
 import com.scivicslab.turingworkflow.plugins.logoutput.MultiplexerLogHandler;
 import com.scivicslab.turingworkflow.plugins.promptbuilder.PromptBuilderActor;
 import com.scivicslab.turingworkflow.workflow.IIActorRef;
-import com.scivicslab.pojoactor.distributed.DistributedActorSystem;
-import com.scivicslab.pojoactor.distributed.NodeInfo;
-import com.scivicslab.pojoactor.distributed.discovery.NodeDiscovery;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 import com.scivicslab.pojoactor.action.schema.ActionCatalog;
 import com.scivicslab.pojoactor.action.schema.ActionSchemaRegistry;
@@ -59,9 +56,8 @@ import java.util.logging.Logger;
  * {@code ChatSessionIIAR_260810_oo01} "ConversationTab への接続" — stage 1: no agent loop,
  * no StallMonitor, {@code openai-compat} only (see {@code ChatSessionPorting_260823_oo01}).</p>
  *
- * <p>Built eagerly rather than on first use: when {@code chat-ui.distributed.port} is set, the
- * listening socket that a parent interpreter attaches to only exists once this bean does, and a
- * parent that starts before anyone opens the Web UI would find nothing to connect to.</p>
+ * <p>Built eagerly rather than on first use, so the recorded conversations are reopened and the
+ * activity watcher runs from start-up, not from the first time someone opens the Web UI.</p>
  */
 @Startup
 @ApplicationScoped
@@ -104,32 +100,10 @@ public class ChatUiActorSystem {
     @ConfigProperty(name = "chat-ui.max-observation-chars", defaultValue = "20000")
     int maxObservationChars = 20000;
 
-    /**
-     * Whether to publish this system's actors for other processes on this machine (off by default).
-     *
-     * <p>Publishing makes every actor here callable from another process, which is what lets a
-     * parent interpreter drive the conversations ({@code WorkflowTab_260906_oo01}). A conversation
-     * can read and write under {@code ~/works} and drive other conversations, so opening this is a
-     * real widening of what can reach those capabilities — hence off by default, and bound to
-     * 127.0.0.1 when on.
-     *
-     * <p>The port is not configured: it is derived from this application's own HTTP port by
-     * {@link DistributedActorSystem#publicationPortFor(int)}, so a parent needs only the port it
-     * can already see. Configuring the number as well would give four combinations of flag and
-     * port, two of which mean nothing.
-     */
-    // Initialised here as well as injected, like maxObservationChars above: the actor-tree unit
-    // tests construct this class directly rather than through CDI, and an uninjected field would
-    // be null there.
     /** Registry name of the actor that answers what may be called here. */
     static final String ACTION_CATALOG = "actionCatalog";
 
-    @ConfigProperty(name = "chat-ui.distributed.enabled", defaultValue = "false")
-    boolean distributedEnabled = false;
-
-    /**
-     * This application's own HTTP port, which the publication port is derived from.
-     */
+    /** This application's own HTTP port, part of the per-instance files a provider keeps. */
     @ConfigProperty(name = "quarkus.http.port", defaultValue = "8080")
     int httpPort = 8080;
 
@@ -140,14 +114,6 @@ public class ChatUiActorSystem {
      */
     @ConfigProperty(name = "chat-ui.plugins")
     Optional<List<String>> pluginJars = Optional.empty();
-
-    /**
-     * The address the distributed-actor server binds to. Not configurable: a setting could be
-     * written as {@code 0.0.0.0}, and anything writable eventually gets written.
-     */
-    private static final String DISTRIBUTED_BIND_ADDRESS = "127.0.0.1";
-
-    private DistributedActorSystem distributedActorSystem;
 
     @Inject
     IoLogStore ioLogStore;
@@ -320,9 +286,8 @@ public class ChatUiActorSystem {
         projects.put(DEFAULT_PROJECT_ID,
                 actorSystem.getRoot().createChild(DEFAULT_PROJECT_ID, new Project()));
         wireProject(DEFAULT_PROJECT_ID);
-        // What a caller in another process asks before it can call anything: which actions an
-        // actor has, and what one of them takes (ActionArgumentSchema_260807_oo01). Under the
-        // housekeeper because it exists regardless of what work is being done.
+        // Which actions an actor has, and what one of them takes (ActionArgumentSchema_260807_oo01).
+        // Under the housekeeper because it exists regardless of what work is being done.
         ActorRef<ActionCatalog> catalogRef = housekeeperRef.createChild(ACTION_CATALOG,
                 new ActionCatalog(actorSystem, new ActionSchemaRegistry()));
         LOG.info("Action catalog available as actor '" + catalogRef.getName() + "'");
@@ -333,7 +298,6 @@ public class ChatUiActorSystem {
                 + chats.size() + " conversation(s)");
 
         startActivityWatcher();
-        startDistributedActorServer();
     }
 
     /**
@@ -355,48 +319,6 @@ public class ChatUiActorSystem {
         return activityWatcherRef;
     }
 
-    /**
-     * Publishes this actor system on 127.0.0.1 when {@code chat-ui.distributed.port} names a port,
-     * so a parent interpreter in another process can call the conversations
-     * ({@code WorkflowTab_260906_oo01}). Does nothing unless
-     * {@code chat-ui.distributed.enabled} is on.
-     *
-     * <p>A failure to bind is logged and left there rather than thrown: the conversations
-     * themselves work without the port, and taking the whole application down because a workflow
-     * runner cannot attach would trade a working chat UI for one that does not start.
-     */
-    private void startDistributedActorServer() {
-        if (!distributedEnabled) {
-            return;
-        }
-        int port;
-        try {
-            port = DistributedActorSystem.publicationPortFor(httpPort);
-        } catch (IllegalArgumentException e) {
-            LOG.log(Level.SEVERE, "Cannot publish actors: " + e.getMessage());
-            return;
-        }
-        try {
-            distributedActorSystem = DistributedActorSystem.builder()
-                    .localActorSystem(actorSystem)
-                    .discovery(new LocalOnlyDiscovery(port))
-                    .build();
-            distributedActorSystem.startHttpServer(DISTRIBUTED_BIND_ADDRESS, port);
-            LOG.info("Actors published for other processes on this machine at "
-                    + DISTRIBUTED_BIND_ADDRESS + ":" + port);
-        } catch (IOException | RuntimeException e) {
-            distributedActorSystem = null;
-            LOG.log(Level.SEVERE, "Could not publish actors on " + DISTRIBUTED_BIND_ADDRESS + ":" + port
-                    + "; conversations still work, but no other process can drive them", e);
-        }
-    }
-
-    /**
-     * Closes the distributed-actor server so its listening socket and its threads do not outlive
-     * the application. Nothing else here needs stopping — the actor system's own threads are
-     * virtual and end with the JVM — but a bound port is visible from outside the process, and a
-     * non-daemon server thread can keep a JVM alive after it was asked to stop.
-     */
     /** Stops the activity schedule before the actor system goes away. */
     @PreDestroy
     void stopActivityWatcher() {
@@ -404,40 +326,6 @@ public class ChatUiActorSystem {
             activityWatcherRef.tell(com.scivicslab.chatui.audittrail.ActivityWatcher::stopWatching)
                     .join();
         }
-    }
-
-    @PreDestroy
-    void stopDistributedActorServer() {
-        if (distributedActorSystem == null) {
-            return;
-        }
-        try {
-            distributedActorSystem.close();
-            LOG.info("Actors are no longer published");
-        } catch (RuntimeException e) {
-            LOG.log(Level.WARNING, "Failed to close the distributed actor server", e);
-        } finally {
-            distributedActorSystem = null;
-        }
-    }
-
-    /**
-     * This machine, alone. The discovery strategies POJO-actor ships with describe clusters
-     * (Slurm, Grid Engine, Kubernetes); here there is one node and nothing to discover, and
-     * naming that explicitly keeps {@code NodeDiscoveryFactory.autoDetect()} from reading the
-     * environment and deciding this process belongs to a cluster it does not.
-     */
-    private record LocalOnlyDiscovery(int port) implements NodeDiscovery {
-
-        @Override public String getMyNodeId() { return "chat-ui"; }
-
-        @Override public String getMyHost() { return DISTRIBUTED_BIND_ADDRESS; }
-
-        @Override public int getMyPort() { return port; }
-
-        @Override public List<NodeInfo> getAllNodes() { return List.of(); }
-
-        @Override public boolean isApplicable() { return true; }
     }
 
     /**
