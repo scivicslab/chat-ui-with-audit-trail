@@ -30,7 +30,7 @@ import java.util.logging.Logger;
  *
  * <p>Codex runs its own tools: its command executions, file changes and MCP calls are reported
  * as {@code tool_use}/{@code tool_result} events for the conversation to record. Codex has no
- * switch that disables those tools, so this provider only exists with the collaboration tool
+ * switch that disables those tools, so this provider only exists with the harness tool
  * set.</p>
  */
 public class CodexProvider implements LlmProvider {
@@ -70,6 +70,23 @@ public class CodexProvider implements LlmProvider {
         this.model = settings.codexModel();
         restoreSession();
     }
+
+    /**
+     * What Codex is told at the top of a turn's first prompt
+     * ({@code HarnessPrefaceAndToolSplit_260912_oo01}): its own shell and file tools stay usable,
+     * and the conversation's listed tools — web search among them, which Codex may lack — are
+     * called with the {@code <invoke>} format.
+     */
+    static final String PREFACE = """
+            You are running inside Codex, your own coding harness, which runs shell commands and \
+            edits files itself. Use those directly, the way you always do, whenever they fit the \
+            task. The tools listed below are this conversation's own tools, called only with the \
+            <invoke> format described next; web_search and fetch among them reach the web even when \
+            your harness cannot, and this conversation records what they return.
+
+            """;
+
+    @Override public String promptPreface() { return PREFACE; }
 
     @Override public String id() { return ID; }
     @Override public String displayName() { return "Codex"; }

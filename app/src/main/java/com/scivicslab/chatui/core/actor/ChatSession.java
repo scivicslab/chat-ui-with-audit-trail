@@ -160,26 +160,6 @@ public class ChatSession extends Interpreter {
      */
     private FileAccessScope fileScope = FileAccessScope.processDirectory();
 
-    /**
-     * Prefixed to the first prompt of a conversation whose provider is a CLI harness
-     * ({@link ToolSet#COLLABORATION}). Without it the harness read the "Available tools" list below
-     * as everything it may use and declined to search the web. Naming the web tools is not enough
-     * either: in Claude Code they are deferred tools, absent until loaded with ToolSearch, and the
-     * model reports "no web tool" instead of loading them unless told how
-     * (CliHarnessProvider_260912_oo01 "実機確認").
-     */
-    private static final String HARNESS_PREFACE = """
-            You are running inside your own coding harness, which has its own tools: reading and \
-            writing files, running shell commands, and web search and web fetch (WebSearch and \
-            WebFetch). Some of your tools are deferred: if WebSearch or WebFetch is not yet loaded, \
-            load it first with ToolSearch (query "select:WebSearch,WebFetch") and then call it. Use \
-            these tools directly, the way you always do, whenever they fit the task — including \
-            questions about the outside world such as news, prices or the weather. The tools listed \
-            below are ADDITIONAL ones this conversation provides and your harness does not have; only \
-            these are called with the <invoke> format described next.
-
-            """;
-
     private static final String SYSTEM_PROMPT_HEAD = """
             You are a helpful assistant with access to tools. To call a tool, write EXACTLY this format \
             in your reply (nothing else on those lines). Every parameter, without exception, uses a \
@@ -1232,8 +1212,9 @@ public class ChatSession extends Interpreter {
      * @return the text prefixed to this turn's first prompt
      */
     private String firstStepPrompt() {
-        StringBuilder buf = new StringBuilder();
-        if (toolSet == ToolSet.COLLABORATION) buf.append(HARNESS_PREFACE);
+        // What the provider needs said about itself comes first — a harness's own tools, how to
+        // reach them (HarnessPrefaceAndToolSplit_260912_oo01); a plain model adds nothing.
+        StringBuilder buf = new StringBuilder(provider.promptPreface());
         buf.append(SYSTEM_PROMPT_HEAD);
         for (Map.Entry<String, String> tool : TOOL_DESCRIPTIONS.entrySet()) {
             if (toolSet.contains(tool.getKey())) buf.append(tool.getValue());
@@ -1564,7 +1545,7 @@ public class ChatSession extends Interpreter {
 
     /**
      * Which tools this conversation is shown and may call ({@code CliHarnessProvider_260912_oo01}).
-     * A provider whose harness runs its own file and shell tools gets {@link ToolSet#COLLABORATION}
+     * A provider whose harness runs its own file and shell tools gets {@link ToolSet#HARNESS}
      * so the same tools are not offered twice under different names.
      *
      * @param toolSet the tool set; {@code null} keeps the current one

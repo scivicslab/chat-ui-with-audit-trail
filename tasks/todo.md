@@ -1,24 +1,18 @@
-# provider とツールをプラグイン jar に分離し、3 種類の起動構成を作る
+# ハーネスの会話のツール分担を「重なるものだけ除く」に変え、前置きの責任を provider に移す
 
-設計文書: `doc_SCIVICS003/docs/chat-ui-with-audit-trail/030_development/010_skeleton/100_providers/030_ProviderAndToolPlugins_260912_oo01`
-tutorial: `doc_SCIVICS003/docs/chat-ui-with-audit-trail/050_tutorials/010_ThreeStartupConfigurations_260912_oo01`
-ブランチ: `ProviderAndToolPlugins_260912_oo01`
+設計文書: `doc_SCIVICS003/.../100_providers/040_HarnessPrefaceAndToolSplit_260912_oo01`
+ブランチ: 不要（1 コミットでビルドが通る。main に直接）
 
 ## 手順
 
-- [x] 1. 設計文書を書く
-- [x] 2. ブランチを切る
-- [x] 3. Maven を親 pom + `plugin-api` + `app` に分け、`LlmProvider`/`ProviderContext`/`ProviderCapabilities`/`ChatEvent`/`ToolSet` を `plugin-api` へ移す。ビルド green
-- [x] 4. SPI（`ChatUiPlugin`/`LlmProviderFactory`/`ProviderCreationContext`/`ConversationTool`）と `PluginRegistry`（`chat-ui.plugins` の jar を起動時に読む）。組み込み `openai-compat` factory。`newProvider` を登録簿引きに。`GET /api/plugins`。ユニットテスト
-- [x] 5. 画面の provider ドロップダウンをサーバの選択肢から作る
-- [x] 6. `plugin-web-tools`（`web_search`/`fetch`）。`ChatSession` が登録簿のツールを説明・実行・要約する。ユニットテスト
-- [x] 7. `plugin-harness`（`harness` パッケージ一式 + factory + `META-INF/services`）。ユニットテスト移動
-- [x] 8. `rm -rf */target target; mvn install` green → 28039 で 3 構成を実機確認（`/api/plugins`、システムプロンプトのツール一覧、claude 1 往復）。`ProviderSelectE2E` 更新
-- [x] 9. tutorial を書く。設計文書に実機確認を追記
-- [ ] 10. コミット
+- [ ] 1. 設計文書を書く
+- [ ] 2. `ToolSet`: `COLLABORATION` を `HARNESS` に改名し、意味を「登録済み全部から `read`/`write`/`calc` を除く」にする
+- [ ] 3. `LlmProvider.promptPreface()`（既定は空）。`ClaudeCodeProvider` と `CodexProvider` が自分の前置きを返す。`ChatSession` は `HARNESS_PREFACE` を捨て、provider の前置きを付ける
+- [ ] 4. `ChatResource` の既定ツール分担を factory の `defaultToolSet()` から取る
+- [ ] 5. テスト更新（ToolSet、ChatSession、SetProvider、PluginRegistry、E2E）、`HarnessPluginTest` 追加。ビルド green
+- [ ] 6. 既存文書の `collaboration` を `harness` に直す。tutorial の表
+- [ ] 7. 再配置・両タイル再起動。ハーネスの会話の最初のプロンプトに `web_search` と `fetch` が載ること、天気の質問が答えられることを確認。E2E
+- [ ] 8. コミット・push
 
 ## Review
-
-- 4 モジュール（親 / `plugin-api` / `app` / `plugin-web-tools` / `plugin-harness`）。ユニットテスト 122 件 green。plugin jar に api の複製なし、services エントリあり。本体に `harness` と `WebSearchTool` なし。
-- 28039 で 3 構成を実機確認（`/api/plugins`、claude 拒否、プロンプトのツール一覧、fetch の記録、Claude Read の記録、`ProviderSelectE2E` 10 項目）。
-- tutorial `ThreeStartupConfigurations_260912_oo01`、設計文書、手順書を更新。
+（完了時に記入）

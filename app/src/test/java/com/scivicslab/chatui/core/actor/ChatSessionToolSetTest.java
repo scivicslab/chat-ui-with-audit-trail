@@ -29,6 +29,9 @@ class ChatSessionToolSetTest {
     /** Records every prompt; answers the first with a read call, then with plain text. */
     private static final class RecordingProvider implements LlmProvider {
         final List<String> prompts = new ArrayList<>();
+        final String preface;
+        RecordingProvider(String preface) { this.preface = preface; }
+        @Override public String promptPreface() { return preface; }
         @Override public String id() { return "fake"; }
         @Override public String displayName() { return "Fake"; }
         @Override public List<ModelEntry> getAvailableModels() { return List.of(); }
@@ -59,7 +62,11 @@ class ChatSessionToolSetTest {
     }
 
     private static RecordingProvider runTurn(ToolSet toolSet) {
-        RecordingProvider provider = new RecordingProvider();
+        return runTurn(toolSet, "");
+    }
+
+    private static RecordingProvider runTurn(ToolSet toolSet, String preface) {
+        RecordingProvider provider = new RecordingProvider(preface);
         IIActorSystem system = new IIActorSystem("chat-session-tool-set-test-" + toolSet.id());
         ChatSessionIIAR iiar = new ChatSessionIIAR("chat", provider, Optional.empty(), null, system);
         system.addIIActor(iiar);
@@ -88,25 +95,27 @@ class ChatSessionToolSetTest {
         }
         assertTrue(first.contains("- web_search(query): search the web (fake)."), "full prompt lists the plugin tool");
         assertTrue(first.contains("read may read files under:"), first);
-        assertFalse(first.contains("your own coding harness"), "a bare model gets no harness preface");
+        assertTrue(first.startsWith("You are a helpful assistant"), "no preface when the provider has none");
         assertEquals(2, p.prompts.size(), "read was executed and its observation sent back");
         assertTrue(p.prompts.get(1).startsWith("Tool result (read):"), p.prompts.get(1));
         assertFalse(p.prompts.get(1).contains("is not available in this conversation"), p.prompts.get(1));
     }
 
     @Test
-    void firstStepPrompt_collaborationToolSet_listsOnlyCollaborationToolsAndRefusesRead() {
-        RecordingProvider p = runTurn(ToolSet.COLLABORATION);
+    void firstStepPrompt_harnessToolSet_dropsOnlyWhatTheHarnessDuplicatesAndRefusesRead() {
+        RecordingProvider p = runTurn(ToolSet.HARNESS, "I am a harness.\n\n");
         String first = p.prompts.get(0);
-        for (String name : ToolSet.COLLABORATION.names()) {
-            assertTrue(first.contains("- " + name + "("), "collaboration prompt lists " + name);
+        for (String name : List.of("search_docs", "list_references", "ask_chat", "set_workflow", "run_plan",
+                "load_skill", "set_collaborator")) {
+            assertTrue(first.contains("- " + name + "("), "harness prompt lists " + name);
         }
-        for (String name : List.of("read", "write", "calc", "web_search")) {
-            assertFalse(first.contains("- " + name + "("), "collaboration prompt must not list " + name);
+        assertTrue(first.contains("- web_search(query): search the web (fake)."),
+                "a plugin's web tool is listed for a harness too (HarnessPrefaceAndToolSplit_260912_oo01)");
+        for (String name : List.of("read", "write", "calc")) {
+            assertFalse(first.contains("- " + name + "("), "harness prompt must not list " + name);
         }
         assertFalse(first.contains("read may read files under:"), first);
-        assertTrue(first.startsWith("You are running inside your own coding harness"),
-                "a harness is told its own tools stay usable and the list is additional");
+        assertTrue(first.startsWith("I am a harness.\n\n"), "the provider's preface comes first: " + first.substring(0, 40));
         assertEquals(2, p.prompts.size());
         assertTrue(p.prompts.get(1).contains("error: tool 'read' is not available in this conversation"),
                 p.prompts.get(1));
@@ -115,14 +124,16 @@ class ChatSessionToolSetTest {
     @Test
     void parse_knownAndUnknownNames_mapOrThrow() {
         assertEquals(ToolSet.FULL, ToolSet.parse("Full"));
-        assertEquals(ToolSet.COLLABORATION, ToolSet.parse(" collaboration "));
-        assertTrue(ToolSet.COLLABORATION.contains("ask_chat"));
-        assertFalse(ToolSet.COLLABORATION.contains("read"));
+        assertEquals(ToolSet.HARNESS, ToolSet.parse(" harness "));
+        assertTrue(ToolSet.HARNESS.contains("ask_chat"));
+        assertTrue(ToolSet.HARNESS.contains("web_search"), "anything not excluded is in, registered or not");
+        assertFalse(ToolSet.HARNESS.contains("read"));
+        assertTrue(ToolSet.FULL.contains("read"));
         try {
-            ToolSet.parse("harness");
+            ToolSet.parse("collaboration");
             assertTrue(false, "expected IllegalArgumentException");
         } catch (IllegalArgumentException expected) {
-            assertTrue(expected.getMessage().contains("harness"));
+            assertTrue(expected.getMessage().contains("collaboration"));
         }
     }
 }

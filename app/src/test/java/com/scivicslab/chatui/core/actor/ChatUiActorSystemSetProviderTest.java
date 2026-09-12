@@ -35,10 +35,10 @@ class ChatUiActorSystemSetProviderTest {
     private static final class FakeHarnessFactory implements LlmProviderFactory {
         @Override public String kind() { return "fake-harness"; }
         @Override public List<ProviderChoice> choices() {
-            return List.of(new ProviderChoice("fake-harness", ToolSet.COLLABORATION, "Fake harness"));
+            return List.of(new ProviderChoice("fake-harness", ToolSet.HARNESS, "Fake harness"));
         }
         @Override public LlmProvider create(ProviderCreationContext ctx) {
-            if (ctx.toolSet() != ToolSet.COLLABORATION) throw new IllegalArgumentException("collaboration only");
+            if (ctx.toolSet() != ToolSet.HARNESS) throw new IllegalArgumentException("harness only");
             return new LlmProvider() {
                 @Override public String id() { return "fake-harness"; }
                 @Override public String displayName() { return "Fake harness"; }
@@ -63,7 +63,7 @@ class ChatUiActorSystemSetProviderTest {
         assertEquals("openai-compat", session.getProviderIdDirect());
         assertEquals("full", session.getToolSetDirect());
 
-        system.setProvider("project1", "01", "fake-harness", ToolSet.COLLABORATION);
+        system.setProvider("project1", "01", "fake-harness", ToolSet.HARNESS);
 
         ActorRef<LlmProvider> after = system.getProviderRef("project1", "01");
         assertNotNull(after);
@@ -75,7 +75,7 @@ class ChatUiActorSystemSetProviderTest {
         // The ChatSession learns of it on its own thread; wait for that message to land.
         session.ask(a -> ((ChatSession) a).getProviderId()).get(5, TimeUnit.SECONDS);
         assertEquals("fake-harness", session.getProviderIdDirect());
-        assertEquals("collaboration", session.getToolSetDirect());
+        assertEquals("harness", session.getToolSetDirect());
         assertTrue(session.ask(a -> ((ChatSession) a).getAvailableModels()).get(5, TimeUnit.SECONDS)
                 .stream().anyMatch(m -> "fake-model".equals(m.name())), "the model list is now the new kind's");
     }
@@ -87,7 +87,7 @@ class ChatUiActorSystemSetProviderTest {
         assertEquals(List.of("openai-compat"), system.getPluginRegistry().kinds(),
                 "the body alone has one provider kind");
         assertThrows(IllegalArgumentException.class,
-                () -> system.setProvider("project1", "01", "openai-compat", ToolSet.COLLABORATION));
+                () -> system.setProvider("project1", "01", "openai-compat", ToolSet.HARNESS));
         assertThrows(IllegalArgumentException.class,
                 () -> system.setProvider("project1", "01", "no-such-kind", ToolSet.FULL));
     }

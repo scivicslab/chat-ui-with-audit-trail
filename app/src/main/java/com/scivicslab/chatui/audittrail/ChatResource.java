@@ -319,9 +319,8 @@ public class ChatResource {
      *
      * @param projectId owning project's id
      * @param chatId    conversation tab identifier
-     * @param body      {@code {"provider": "openai-compat"|"claude"|"codex", "tools": "full"|"collaboration"}};
-     *                  {@code tools} defaults to {@code full} for openai-compat and {@code collaboration}
-     *                  for a harness
+     * @param body      {@code {"provider": "openai-compat"|"claude"|"codex", "tools": "full"|"harness"}};
+     *                  {@code tools} defaults to the kind's own default tool set
      * @return {@code {"type": "accepted", "provider": ..., "tools": ...}}, or 400 when the kind or the
      *         tool set is not one the server can give this conversation
      */
@@ -339,8 +338,10 @@ public class ChatResource {
                     .entity(Map.of("type", "error", "message", "provider is required")).build();
         }
         Object toolsVal = body.get("tools");
+        // The kind's own default when none is named: the factory says which tool set its first
+        // dropdown entry carries (HarnessPrefaceAndToolSplit_260912_oo01).
         String tools = toolsVal == null || String.valueOf(toolsVal).isBlank()
-                ? ("openai-compat".equals(kind) ? "full" : "collaboration")
+                ? actorSystem.getPluginRegistry().factory(kind).map(f -> f.defaultToolSet().id()).orElse("full")
                 : String.valueOf(toolsVal);
         try {
             ToolSet toolSet = ToolSet.parse(tools);

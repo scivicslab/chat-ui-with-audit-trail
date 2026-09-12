@@ -74,6 +74,34 @@ public class ClaudeCodeProvider implements LlmProvider {
     /** @return the conversation's tool set this provider was created for */
     public ToolSet toolSet() { return toolSet; }
 
+    /**
+     * What Claude Code must be told at the top of a turn's first prompt when it runs with its own
+     * tools ({@code HarnessPrefaceAndToolSplit_260912_oo01}). Without it the harness read the
+     * conversation's "Available tools" list as everything it may use and declined to search the
+     * web; and its WebSearch and WebFetch are deferred tools, absent until loaded with ToolSearch,
+     * which it reports as "no web tool" unless told how to load them. With the built-in tools
+     * switched off ({@link ToolSet#FULL}) there is nothing to say.
+     */
+    static final String PREFACE = """
+            You are running inside Claude Code, your own coding harness, which has its own tools: \
+            reading and writing files, running shell commands, and web search and web fetch \
+            (WebSearch and WebFetch). Some of your tools are deferred: if WebSearch or WebFetch is \
+            not yet loaded, load it first with ToolSearch (query "select:WebSearch,WebFetch") and \
+            then call it. Use your own tools directly, the way you always do, whenever they fit the \
+            task — including questions about the outside world such as news, prices or the weather. \
+            The tools listed below are this conversation's own tools, NOT tools of your harness: \
+            calling one of them as a harness tool fails with "No such tool available". To use one, \
+            write the <invoke> block described next as text in your reply and end the reply there; \
+            this conversation runs it and sends the result back. Either path is fine, and this \
+            conversation records what it returns.
+
+            """;
+
+    @Override
+    public String promptPreface() {
+        return toolSet == ToolSet.FULL ? "" : PREFACE;
+    }
+
     // ---- LlmProvider ----
 
     @Override public String id() { return ID; }

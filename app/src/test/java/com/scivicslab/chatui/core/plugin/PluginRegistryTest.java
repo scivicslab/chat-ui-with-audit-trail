@@ -31,7 +31,7 @@ class PluginRegistryTest {
             return List.of(new LlmProviderFactory() {
                 @Override public String kind() { return "fake-kind"; }
                 @Override public List<ProviderChoice> choices() {
-                    return List.of(new ProviderChoice("fake-kind", ToolSet.COLLABORATION, "Fake"),
+                    return List.of(new ProviderChoice("fake-kind", ToolSet.HARNESS, "Fake"),
                                    new ProviderChoice("fake-kind", ToolSet.FULL, "Fake (bare)"));
                 }
                 @Override public LlmProvider create(ProviderCreationContext ctx) { throw new UnsupportedOperationException(); }
@@ -55,7 +55,7 @@ class PluginRegistryTest {
         assertEquals(List.of("openai-compat", "fake-kind"), registry.kinds());
         assertEquals(List.of("fake_tool"), registry.tools().stream().map(ConversationTool::name).toList());
         assertTrue(registry.factory("fake-kind").isPresent());
-        assertEquals(ToolSet.COLLABORATION, registry.factory("fake-kind").get().defaultToolSet());
+        assertEquals(ToolSet.HARNESS, registry.factory("fake-kind").get().defaultToolSet());
 
         Map<String, Object> d = registry.describe();
         @SuppressWarnings("unchecked")

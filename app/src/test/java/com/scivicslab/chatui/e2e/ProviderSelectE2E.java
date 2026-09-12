@@ -46,7 +46,7 @@ public class ProviderSelectE2E {
                 String initial = page.evaluate("() => document.getElementById('provider-select').value").toString();
                 String statusProvider = statusField(page, "provider");
                 String statusTools = statusField(page, "tools");
-                String expected = statusTools.equals(statusProvider.equals("openai-compat") ? "full" : "collaboration")
+                String expected = statusTools.equals(statusProvider.equals("openai-compat") ? "full" : "harness")
                         ? statusProvider : statusProvider + ":" + statusTools;
                 check(initial.equals(expected), "dropdown shows what the server reports: " + initial + " vs " + expected);
 
@@ -58,7 +58,7 @@ public class ProviderSelectE2E {
 
                 switchTo(page, "claude");
                 check("claude".equals(statusField(page, "provider")), "server switched to claude");
-                check("collaboration".equals(statusField(page, "tools")), "claude conversation has the collaboration tool set");
+                check("harness".equals(statusField(page, "tools")), "claude conversation has the harness tool set");
                 List<String> claudeModels = modelOptions(page);
                 check(claudeModels.contains("sonnet"), "model list reloaded from Claude Code: " + claudeModels);
                 check("claude".equals(page.evaluate("() => document.getElementById('provider-select').value")),

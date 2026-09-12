@@ -40,14 +40,14 @@ public class HarnessPlugin implements ChatUiPlugin {
                 ctx.configOr("chat-ui.harness.codex-model", "gpt-5.5"));
     }
 
-    /** {@code claude}: with its own tools (collaboration set), or with them switched off (full set). */
+    /** {@code claude}: with its own tools (harness set), or with them switched off (full set). */
     static final class ClaudeCodeFactory implements LlmProviderFactory {
         @Override public String kind() { return ClaudeCodeProvider.ID; }
 
         @Override
         public List<ProviderChoice> choices() {
             return List.of(
-                new ProviderChoice(ClaudeCodeProvider.ID, ToolSet.COLLABORATION, "Claude Code"),
+                new ProviderChoice(ClaudeCodeProvider.ID, ToolSet.HARNESS, "Claude Code"),
                 new ProviderChoice(ClaudeCodeProvider.ID, ToolSet.FULL, "Claude Code (harness tools off)"));
         }
 
@@ -57,19 +57,19 @@ public class HarnessPlugin implements ChatUiPlugin {
         }
     }
 
-    /** {@code codex}: always with its own tools, since Codex cannot disable them. */
+    /** {@code codex}: always with its own tools (harness set), since Codex cannot disable them. */
     static final class CodexFactory implements LlmProviderFactory {
         @Override public String kind() { return CodexProvider.ID; }
 
         @Override
         public List<ProviderChoice> choices() {
-            return List.of(new ProviderChoice(CodexProvider.ID, ToolSet.COLLABORATION, "Codex"));
+            return List.of(new ProviderChoice(CodexProvider.ID, ToolSet.HARNESS, "Codex"));
         }
 
         @Override
         public LlmProvider create(ProviderCreationContext ctx) {
-            if (ctx.toolSet() != ToolSet.COLLABORATION) {
-                throw new IllegalArgumentException("codex cannot disable its own tools, so its tool set is always collaboration");
+            if (ctx.toolSet() != ToolSet.HARNESS) {
+                throw new IllegalArgumentException("codex cannot disable its own tools, so its tool set is always harness");
             }
             return new CodexProvider(settings(ctx), ctx.projectId(), ctx.chatId(), ctx.workingDir());
         }

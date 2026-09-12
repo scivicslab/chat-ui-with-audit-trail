@@ -50,6 +50,17 @@ public interface LlmProvider {
 
     // ---- Optional features with default no-op implementations ----
 
+    /**
+     * Text the conversation puts before everything else in a turn's first prompt
+     * ({@code HarnessPrefaceAndToolSplit_260912_oo01}). What a provider needs the model told about
+     * itself is the provider's knowledge: a CLI harness says that its own tools stay usable and how
+     * to reach them, a plain model needs nothing. Ends with a blank line when non-empty.
+     *
+     * @return the preface, or {@code ""} for none
+     */
+    default String promptPreface() { return ""; }
+
+
     /** Returns the current session ID, or null if not applicable (e.g., HTTP-based providers). */
     default String getSessionId() { return null; }
 
