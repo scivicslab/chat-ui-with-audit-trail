@@ -4,9 +4,19 @@
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.scivicslab</groupId>
-  <artifactId>chat-ui-with-audit-trail</artifactId>
+  <artifactId>chat-ui-with-audit-trail-parent</artifactId>
   <version>2.0.0-SNAPSHOT</version>
-  <packaging>jar</packaging>
+  <packaging>pom</packaging>
+
+  <!-- One body and separately loadable plugin jars (ProviderAndToolPlugins_260912_oo01).
+       plugin-api is what the body and every plugin compile against; app is the Quarkus uber-jar;
+       each plugin-* is a plain jar the body loads at start-up from chat-ui.plugins. -->
+  <modules>
+    <module>plugin-api</module>
+    <module>app</module>
+    <module>plugin-web-tools</module>
+    <module>plugin-harness</module>
+  </modules>
 
   <properties>
     <compiler-plugin.version>3.14.0</compiler-plugin.version>
@@ -20,9 +30,7 @@
     <!-- Actor model + Turing Workflow engine (IIActorSystem / RootIIAR) for the Actors tab -->
     <pojo-actor.version>4.1.0</pojo-actor.version>
     <turing-workflow.version>4.1.0</turing-workflow.version>
-    <!-- uber-jar without the -runner suffix, per the project naming rule -->
-    <quarkus.package.jar.type>uber-jar</quarkus.package.jar.type>
-    <quarkus.package.jar.add-runner-suffix>false</quarkus.package.jar.add-runner-suffix>
+    <jsoup.version>1.18.3</jsoup.version>
   </properties>
 
   <dependencyManagement>
@@ -34,186 +42,43 @@
         <type>pom</type>
         <scope>import</scope>
       </dependency>
+      <dependency>
+        <groupId>com.scivicslab</groupId>
+        <artifactId>chat-ui-with-audit-trail-plugin-api</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.jsoup</groupId>
+        <artifactId>jsoup</artifactId>
+        <version>${jsoup.version}</version>
+      </dependency>
+      <!-- Reaches the body through plugin-log-db; pinned here so a plugin compiled against it
+           (provided) sees the same version the body runs. -->
+      <dependency>
+        <groupId>org.json</groupId>
+        <artifactId>json</artifactId>
+        <version>20240303</version>
+      </dependency>
     </dependencies>
   </dependencyManagement>
 
-  <dependencies>
-    <!-- REST + Qute templating for the server-rendered console shell -->
-    <dependency>
-      <groupId>io.quarkus</groupId>
-      <artifactId>quarkus-rest</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>io.quarkus</groupId>
-      <artifactId>quarkus-rest-qute</artifactId>
-    </dependency>
-    <!-- JSON serialization for GET /api/actors -->
-    <dependency>
-      <groupId>io.quarkus</groupId>
-      <artifactId>quarkus-rest-jackson</artifactId>
-    </dependency>
-    <!-- POJO-actor: the actor model that backs the actor tree -->
-    <dependency>
-      <groupId>com.scivicslab</groupId>
-      <artifactId>pojo-actor</artifactId>
-      <version>${pojo-actor.version}</version>
-    </dependency>
-    <!-- Turing Workflow: provides IIActorSystem and its auto-created RootIIAR root actor -->
-    <dependency>
-      <groupId>com.scivicslab</groupId>
-      <artifactId>turing-workflow</artifactId>
-      <version>${turing-workflow.version}</version>
-    </dependency>
-
-    <dependency>
-      <groupId>com.scivicslab</groupId>
-      <artifactId>pojo-actor-distributed</artifactId>
-      <version>1.0.0</version>
-    </dependency>
-
-    <!-- turing-workflow:3.7.0's own published pom omits this, even though Interpreter (which
-         ChatSession extends) uses org.apache.commons.jexl3 directly — declared explicitly here
-         so it resolves at runtime, not just compile time. -->
-    <dependency>
-      <groupId>org.apache.commons</groupId>
-      <artifactId>commons-jexl3</artifactId>
-      <version>3.3</version>
-    </dependency>
-    <!-- H2-backed complete I/O log (Sessions tab / audit trail). Only the storage primitives are
-         used (H2LogStore / DistributedLogStore / SessionStatus), which depend on H2 + org.json only.
-         pojo-actor and turing-workflow are excluded so this does NOT pull a second pojo-actor
-         version — this project stays on its own; the H2 classes never reference them. -->
-    <dependency>
-      <groupId>com.scivicslab.turingworkflow.plugins</groupId>
-      <artifactId>plugin-log-db</artifactId>
-      <version>4.0.0</version>
-      <exclusions>
-        <exclusion>
-          <groupId>com.scivicslab</groupId>
-          <artifactId>pojo-actor</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>com.scivicslab</groupId>
-          <artifactId>turing-workflow</artifactId>
-        </exclusion>
-      </exclusions>
-    </dependency>
-    <!-- System Log (tab-scoped + system-wide): MultiplexerAccumulator/MultiplexerAccumulatorActor,
-         used as-is (150_TabScopedLogging_260826_oo01). Not excluded like plugin-log-db above — this
-         plugin's classes DO need to interoperate with this project's own pojo-actor/turing-workflow
-         instances (IIActorSystem, Accumulator), and Maven's nearest-wins mediation already resolves
-         its transitive pojo-actor/turing-workflow to the versions declared above. -->
-    <dependency>
-      <groupId>com.scivicslab.turingworkflow.plugins</groupId>
-      <artifactId>plugin-log-output</artifactId>
-      <version>4.0.0</version>
-    </dependency>
-    <!-- Prompt construction (TurnResourceLimits/DocRetrievalAgentLoop): PromptBuilderActor keeps
-         the constraints sent with every step in the workflow YAML rather than in Java, which is
-         what lets one conversation run under a different set of constraints from another. -->
-    <dependency>
-      <groupId>com.scivicslab.turingworkflow.plugins</groupId>
-      <artifactId>plugin-prompt-builder</artifactId>
-      <version>4.0.0</version>
-    </dependency>
-    <!-- Agent-loop tools (read/write/web_search/fetch/search_docs): jsoup for HTML parsing
-         (DuckDuckGo results, fetched pages). Same version as quarkus-chat-ui3, which these
-         tools are ported from. -->
-    <dependency>
-      <groupId>org.jsoup</groupId>
-      <artifactId>jsoup</artifactId>
-      <version>1.18.3</version>
-    </dependency>
-    <!-- Health probe for Kubernetes, per the project standard -->
-    <dependency>
-      <groupId>io.quarkus</groupId>
-      <artifactId>quarkus-smallrye-health</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>io.quarkus</groupId>
-      <artifactId>quarkus-junit5</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <!-- E2E: a main() driven browser against an already-running instance, per the project's
-         testing standard (TestingStandard_260404_oo01). Not on the Maven lifecycle. -->
-    <dependency>
-      <groupId>com.microsoft.playwright</groupId>
-      <artifactId>playwright</artifactId>
-      <version>1.52.0</version>
-      <scope>test</scope>
-    </dependency>
-  </dependencies>
-
   <build>
-    <plugins>
-      <!-- Turns every @Action(argsType = ...) into a JSON Schema under
-           target/classes/action-schemas, so ActionSchemaRegistry can load it at runtime and
-           ActionCatalog can hand it to a caller in another process
-           (ActionArgumentSchema_260807_oo01). Runs at process-classes so the files are in the
-           jar. pojo-actor and the generator are declared as the plugin's own dependencies
-           because exec:java does not put this project's dependencies on the plugin's classpath. -->
-      <plugin>
-        <groupId>org.codehaus.mojo</groupId>
-        <artifactId>exec-maven-plugin</artifactId>
-        <version>3.1.0</version>
-        <dependencies>
-          <dependency>
-            <groupId>com.scivicslab</groupId>
-            <artifactId>turing-workflow</artifactId>
-            <version>${turing-workflow.version}</version>
-          </dependency>
-          <dependency>
-            <groupId>com.github.victools</groupId>
-            <artifactId>jsonschema-generator</artifactId>
-            <version>4.38.0</version>
-          </dependency>
-        </dependencies>
-        <executions>
-          <execution>
-            <id>generate-action-schemas</id>
-            <phase>process-classes</phase>
-            <goals><goal>java</goal></goals>
-            <configuration>
-              <includePluginDependencies>true</includePluginDependencies>
-              <mainClass>com.scivicslab.pojoactor.action.schema.ActionSchemaGenerator</mainClass>
-            </configuration>
-          </execution>
-        </executions>
-      </plugin>
-
-      <plugin>
-        <groupId>${quarkus.platform.group-id}</groupId>
-        <artifactId>quarkus-maven-plugin</artifactId>
-        <version>${quarkus.platform.version}</version>
-        <extensions>true</extensions>
-        <executions>
-          <execution>
-            <goals>
-              <goal>build</goal>
-              <goal>generate-code</goal>
-              <goal>generate-code-tests</goal>
-            </goals>
-          </execution>
-        </executions>
-      </plugin>
-      <plugin>
-        <artifactId>maven-compiler-plugin</artifactId>
-        <version>${compiler-plugin.version}</version>
-        <configuration>
-          <compilerArgs>
-            <arg>-parameters</arg>
-          </compilerArgs>
-        </configuration>
-      </plugin>
-      <plugin>
-        <artifactId>maven-surefire-plugin</artifactId>
-        <version>${surefire-plugin.version}</version>
-        <configuration>
-          <systemPropertyVariables>
-            <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
-          </systemPropertyVariables>
-        </configuration>
-      </plugin>
-    </plugins>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>${compiler-plugin.version}</version>
+          <configuration>
+            <compilerArgs>
+              <arg>-parameters</arg>
+            </compilerArgs>
+          </configuration>
+        </plugin>
+        <plugin>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>${surefire-plugin.version}</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
   </build>
 </project>
