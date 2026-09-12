@@ -40,7 +40,7 @@ public class HarnessPlugin implements ChatUiPlugin {
                 ctx.configOr("chat-ui.harness.codex-model", "gpt-5.5"));
     }
 
-    /** {@code claude}: with its own tools (collaboration set), or as a bare model (full set). */
+    /** {@code claude}: with its own tools (collaboration set), or with them switched off (full set). */
     static final class ClaudeCodeFactory implements LlmProviderFactory {
         @Override public String kind() { return ClaudeCodeProvider.ID; }
 
@@ -48,7 +48,7 @@ public class HarnessPlugin implements ChatUiPlugin {
         public List<ProviderChoice> choices() {
             return List.of(
                 new ProviderChoice(ClaudeCodeProvider.ID, ToolSet.COLLABORATION, "Claude Code"),
-                new ProviderChoice(ClaudeCodeProvider.ID, ToolSet.FULL, "Claude (bare model)"));
+                new ProviderChoice(ClaudeCodeProvider.ID, ToolSet.FULL, "Claude Code (harness tools off)"));
         }
 
         @Override

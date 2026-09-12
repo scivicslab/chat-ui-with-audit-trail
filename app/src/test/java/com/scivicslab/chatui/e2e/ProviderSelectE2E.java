@@ -65,7 +65,7 @@ public class ProviderSelectE2E {
                         "dropdown stays on claude");
 
                 switchTo(page, "claude:full");
-                check("full".equals(statusField(page, "tools")), "claude:full gives the bare model the full tool set");
+                check("full".equals(statusField(page, "tools")), "claude:full switches the harness tools off and gives the conversation the full tool set");
                 check("claude:full".equals(page.evaluate("() => document.getElementById('provider-select').value")),
                         "dropdown shows claude:full");
             } finally {
