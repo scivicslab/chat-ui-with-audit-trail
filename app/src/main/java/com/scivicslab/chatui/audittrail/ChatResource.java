@@ -406,10 +406,15 @@ public class ChatResource {
         ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(projectId, chatId);
         try {
             List<PromptQueue.QueueEntry> items = promptQueueRef.ask(PromptQueue::snapshot).get(5, TimeUnit.SECONDS);
-            return Map.of("size", items.size(), "hasPending", !items.isEmpty(), "items", items);
+            // The already-sent items and their count come with the pending ones, so the browser
+            // can draw the position-based checklist quarkus-chat-ui draws
+            // (QueueChecklistView_260913_oo01).
+            List<PromptQueue.QueueEntry> sent = promptQueueRef.ask(PromptQueue::sentSnapshot).get(5, TimeUnit.SECONDS);
+            return Map.of("size", items.size(), "hasPending", !items.isEmpty(), "items", items,
+                          "sent", sent, "pos", sent.size());
         } catch (Exception e) {
             LOG.warning("Failed to read queue state for tab " + chatId + ": " + e.getMessage());
-            return Map.of("size", 0, "hasPending", false, "items", List.of());
+            return Map.of("size", 0, "hasPending", false, "items", List.of(), "sent", List.of(), "pos", 0);
         }
     }
 
@@ -437,6 +442,27 @@ public class ChatResource {
      * @param chatId conversation tab identifier
      * @param index position in the queue (0 = next to send)
      */
+    /**
+     * Strikes one already-sent item off the conversation's checklist
+     * ({@code QueueChecklistView_260913_oo01}). Only the list changes; what was sent was sent.
+     *
+     * @param index position in the {@code sent} list {@code GET .../queue} returned
+     */
+    @DELETE
+    @Path("/{projectId}/chats/{chatId}/queue/sent/{index}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response removeSentItem(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId,
+                                   @PathParam("index") int index) {
+        actorSystem.createChat(projectId, chatId);
+        ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(projectId, chatId);
+        try {
+            boolean removed = promptQueueRef.ask(q -> q.removeSentAt(index)).get(5, TimeUnit.SECONDS);
+            return removed ? Response.ok(Map.of("type", "removed")).build() : Response.status(404).build();
+        } catch (Exception e) {
+            return Response.status(500).entity(Map.of("type", "error", "message", e.getMessage())).build();
+        }
+    }
+
     @DELETE
     @Path("/{projectId}/chats/{chatId}/queue/{index}")
     @Produces(MediaType.APPLICATION_JSON)

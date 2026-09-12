@@ -41,7 +41,7 @@
     }
 
     var chatArea, promptInput, sendBtn, connStatus, activityLabel, modelSelect, notificationBar;
-    var themeSelect, queueBtn, queueArea, stopPlanBtn, cancelBtn;
+    var themeSelect, queueBtn, queueArea, queueResizeHandle, stopPlanBtn, cancelBtn;
     var attachBtn, imageFileInput, imageAttachments;
     var pendingImages = []; // [{name, dataUrl}] attached via paste, drop, or the file picker
     var inputResizeHandle;
@@ -350,29 +350,44 @@
         fetch(apiUrl(chatUrl("/queue")))
             .then(function (r) { return r.json(); })
             .then(function (q) {
-                var items = (q && q.items) || [];
-                var size = items.length;
+                var sent = (q && q.sent) || [];
+                var pending = (q && q.items) || [];
+                var total = sent.length + pending.length;
                 queueArea.textContent = "";
                 var header = document.createElement("div");
                 header.className = "queue-header";
                 var headerText = document.createElement("span");
-                // Every item in this queue is still pending: PromptQueue removes an item when it
-                // dispatches it, so there is no already-sent item to count separately the way
-                // quarkus-chat-ui's client-side queue has (it keeps sent items and a position).
-                headerText.textContent = size > 0 ? "Queue (" + size + ") - " + size + " pending:"
-                                                  : "Queue is empty";
+                // quarkus-chat-ui's position-based checklist (QueueChecklistView_260913_oo01): the
+                // sent items stay listed before the pending ones, and the header counts both.
+                headerText.textContent = total === 0 ? "Queue is empty"
+                        : pending.length > 0 ? "Queue (" + total + ") - " + pending.length + " pending:"
+                        : "Queue (" + total + "):";
                 header.appendChild(headerText);
-                if (size > 0) {
+                if (total > 0) {
                     var saveBtn = document.createElement("button");
                     saveBtn.className = "queue-save-btn";
                     saveBtn.title = "Save as Markdown";
                     saveBtn.textContent = "Save";
-                    saveBtn.addEventListener("click", function () { saveQueueAsMarkdown(items); });
+                    saveBtn.addEventListener("click", function () { saveQueueAsMarkdown(sent, pending); });
                     header.appendChild(saveBtn);
                 }
                 queueArea.appendChild(header);
 
-                items.forEach(function (item, i) {
+                sent.forEach(function (item, i) {
+                    var row = document.createElement("div");
+                    row.className = "queue-item sent";
+                    row.appendChild(queueIndex(i + 1));
+                    row.appendChild(queueText(item));
+                    row.appendChild(queueEditButton(item));
+                    var removeBtn = queueRemoveButton();
+                    removeBtn.addEventListener("click", function () {
+                        fetch(apiUrl(chatUrl("/queue/sent/" + i)), { method: "DELETE" }).then(refreshQueue);
+                    });
+                    row.appendChild(removeBtn);
+                    queueArea.appendChild(row);
+                });
+
+                pending.forEach(function (item, i) {
                     var row = document.createElement("div");
                     // "current" is the item that goes next; "waiting" is that item held back
                     // because its Auto is off and nothing is running to hand it over.
@@ -380,20 +395,8 @@
                     if (i === 0) cls += " current";
                     if (i === 0 && !busy && !item.auto) cls += " waiting";
                     row.className = cls;
-
-                    var index = document.createElement("span");
-                    index.className = "queue-index";
-                    index.textContent = (i + 1) + ".";
-                    row.appendChild(index);
-
-                    var text = document.createElement("span");
-                    text.className = "queue-text";
-                    text.textContent = item.prompt;
-                    // The row shows one line; the hover text is the whole prompt.
-                    text.title = (item.source && item.source !== "human")
-                            ? "source: " + item.source + "\n\n" + item.prompt
-                            : item.prompt;
-                    row.appendChild(text);
+                    row.appendChild(queueIndex(sent.length + i + 1));
+                    row.appendChild(queueText(item));
 
                     var autoLabel = document.createElement("label");
                     autoLabel.className = "queue-auto";
@@ -423,24 +426,12 @@
                     downBtn.className = "queue-move";
                     downBtn.title = "Move down";
                     downBtn.innerHTML = "&darr;";
-                    downBtn.disabled = (i === items.length - 1);
+                    downBtn.disabled = (i === pending.length - 1);
                     downBtn.addEventListener("click", function () { moveQueueItem(i, "down"); });
                     row.appendChild(downBtn);
 
-                    var editBtn = document.createElement("button");
-                    editBtn.className = "queue-edit";
-                    editBtn.title = "Edit (copy to input)";
-                    editBtn.textContent = "📝";
-                    editBtn.addEventListener("click", function () {
-                        promptInput.value = item.prompt;
-                        promptInput.focus();
-                    });
-                    row.appendChild(editBtn);
-
-                    var removeBtn = document.createElement("button");
-                    removeBtn.className = "queue-remove";
-                    removeBtn.title = "Remove";
-                    removeBtn.innerHTML = "&times;";
+                    row.appendChild(queueEditButton(item));
+                    var removeBtn = queueRemoveButton();
                     removeBtn.addEventListener("click", function () {
                         fetch(apiUrl(chatUrl("/queue/" + i)), { method: "DELETE" }).then(refreshQueue);
                     });
@@ -448,21 +439,59 @@
 
                     queueArea.appendChild(row);
                 });
-                queueArea.style.display = (size > 0 || queueArea.dataset.forcedOpen === "1") ? "block" : "none";
+                var visible = (total > 0 || queueArea.dataset.forcedOpen === "1");
+                queueArea.style.display = visible ? "block" : "none";
+                if (queueResizeHandle) queueResizeHandle.style.display = visible ? "block" : "none";
                 queueArea.scrollTop = queueArea.scrollHeight;
             })
             .catch(function () { /* leave the last known state on failure */ });
     }
 
-    // Downloads the queue as a Markdown checklist, the same shape quarkus-chat-ui writes. Every
-    // box is unchecked: an item leaves this queue when it is dispatched, so what is listed is
-    // exactly what has not been sent.
-    function saveQueueAsMarkdown(items) {
-        if (!items || items.length === 0) return;
-        var lines = ["# Prompt Queue", ""];
-        items.forEach(function (item, i) {
-            lines.push((i + 1) + ". [ ] " + item.prompt);
+    function queueIndex(n) {
+        var index = document.createElement("span");
+        index.className = "queue-index";
+        index.textContent = n + ".";
+        return index;
+    }
+
+    function queueText(item) {
+        var text = document.createElement("span");
+        text.className = "queue-text";
+        text.textContent = item.prompt;
+        // The row shows one line; the hover text is the whole prompt.
+        text.title = (item.source && item.source !== "human")
+                ? "source: " + item.source + "\n\n" + item.prompt
+                : item.prompt;
+        return text;
+    }
+
+    function queueEditButton(item) {
+        var editBtn = document.createElement("button");
+        editBtn.className = "queue-edit";
+        editBtn.title = "Edit (copy to input)";
+        editBtn.textContent = "📝";
+        editBtn.addEventListener("click", function () {
+            promptInput.value = item.prompt;
+            promptInput.focus();
         });
+        return editBtn;
+    }
+
+    function queueRemoveButton() {
+        var removeBtn = document.createElement("button");
+        removeBtn.className = "queue-remove";
+        removeBtn.title = "Remove";
+        removeBtn.innerHTML = "&times;";
+        return removeBtn;
+    }
+
+    // Downloads the queue as a Markdown checklist, the same shape quarkus-chat-ui writes: sent
+    // items checked, pending ones not.
+    function saveQueueAsMarkdown(sent, pending) {
+        if ((sent.length + pending.length) === 0) return;
+        var lines = ["# Prompt Queue", ""];
+        sent.forEach(function (item, i) { lines.push((i + 1) + ". [x] " + item.prompt); });
+        pending.forEach(function (item, i) { lines.push((sent.length + i + 1) + ". [ ] " + item.prompt); });
         lines.push("");
         var url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/markdown" }));
         var a = document.createElement("a");
@@ -478,6 +507,38 @@
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+    }
+
+    // The handle above the queue area changes its height, within the same bounds quarkus-chat-ui
+    // uses; the height is kept across reloads.
+    var QUEUE_HEIGHT_KEY = "chat-ui-queue-height";
+    function initQueueResize() {
+        if (!queueArea || !queueResizeHandle) return;
+        var saved = parseInt(localStorage.getItem(QUEUE_HEIGHT_KEY), 10);
+        if (saved >= 60 && saved <= 400) queueArea.style.height = saved + "px";
+        var dragging = false, startY = 0, startHeight = 0;
+        queueResizeHandle.addEventListener("mousedown", function (e) {
+            e.preventDefault();
+            dragging = true;
+            startY = e.clientY;
+            startHeight = queueArea.offsetHeight;
+            queueResizeHandle.classList.add("dragging");
+            document.body.style.cursor = "ns-resize";
+            document.body.style.userSelect = "none";
+        });
+        document.addEventListener("mousemove", function (e) {
+            if (!dragging) return;
+            var newHeight = Math.max(60, Math.min(startHeight + (startY - e.clientY), 400));
+            queueArea.style.height = newHeight + "px";
+        });
+        document.addEventListener("mouseup", function () {
+            if (!dragging) return;
+            dragging = false;
+            queueResizeHandle.classList.remove("dragging");
+            document.body.style.cursor = "";
+            document.body.style.userSelect = "";
+            localStorage.setItem(QUEUE_HEIGHT_KEY, queueArea.offsetHeight);
+        });
     }
 
     // Puts the text in the queue without sending it. The item sits there with its Auto off until
@@ -606,10 +667,12 @@
             case "user":
                 appendMessage("user", event.content || "", event.images);
                 scrollToBottom();
+                refreshQueue(); // the item just moved from pending to sent (QueueChecklistView_260913_oo01)
                 break;
             case "mcp_user":
                 appendMessage("user", "[agent] " + (event.content || ""));
                 scrollToBottom();
+                refreshQueue();
                 break;
             case "info":
                 notify(event.content || "");
@@ -1017,6 +1080,7 @@
         themeSelect = el("theme-select");
         queueBtn = el("queue-btn");
         queueArea = el("queue-area");
+        queueResizeHandle = el("queue-resize-handle");
         stopPlanBtn = el("stop-plan-btn");
         cancelBtn = el("cancel-btn");
         attachBtn = el("attach-btn");
@@ -1062,12 +1126,14 @@
                 if (text) { queuePrompt(text); return; }
                 var opening = queueArea.style.display !== "block";
                 queueArea.dataset.forcedOpen = opening ? "1" : "0";
-                if (opening) refreshQueue(); else queueArea.style.display = "none";
+                if (opening) { refreshQueue(); }
+                else { queueArea.style.display = "none"; if (queueResizeHandle) queueResizeHandle.style.display = "none"; }
             });
         }
         if (stopPlanBtn) stopPlanBtn.addEventListener("click", stopPlan);
         if (cancelBtn) cancelBtn.addEventListener("click", cancelPrompt);
         initTheme();
+        initQueueResize();
         initModelPersistence();
         initProviderSelect();
         loadModels();

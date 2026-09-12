@@ -310,6 +310,43 @@ public class PromptQueue {
      */
     public record QueueEntry(String prompt, String source, boolean auto) {}
 
+    // ---- What this conversation has already sent (QueueChecklistView_260913_oo01) ----
+
+    /** How many sent items are kept; the oldest go first, as in quarkus-chat-ui's own queue. */
+    static final int MAX_SENT = 100;
+
+    /** The items popFront handed to the conversation, oldest first. */
+    private final List<QueueEntry> sent = new ArrayList<>();
+
+    /** @return the items this conversation has sent, oldest first */
+    public List<QueueEntry> sentSnapshot() {
+        return List.copyOf(sent);
+    }
+
+    /** Forgets one sent item; the list is the browser's checklist, and a line may be struck out. */
+    public boolean removeSentAt(int index) {
+        if (index < 0 || index >= sent.size()) return false;
+        sent.remove(index);
+        return true;
+    }
+
+    /**
+     * Puts the questions of restored turns on the sent list, so a reload shows what was sent
+     * before the restart. Called once, before anything new is sent.
+     *
+     * @param prompts the restored questions, oldest first
+     */
+    public void seedSent(List<String> prompts) {
+        for (String p : prompts) {
+            if (p != null && !p.isBlank()) sent.add(new QueueEntry(p, "human", true));
+        }
+        trimSent();
+    }
+
+    private void trimSent() {
+        while (sent.size() > MAX_SENT) sent.remove(0);
+    }
+
     // ---- Internal ----
 
     /**
@@ -375,6 +412,8 @@ public class PromptQueue {
         if (queue.isEmpty()) return null;
         if (respectAuto && !queue.get(0).auto()) return null;
         QueueItem item = queue.remove(0);
+        sent.add(new QueueEntry(item.prompt(), item.source(), item.auto()));
+        trimSent();
         // Show the prompt in the pane now that it is actually being sent. The browser used to draw
         // only what it had typed itself, so a prompt from the REST API, from an MCP agent or from
         // another conversation's ask_chat reached the model and was answered while the pane showed

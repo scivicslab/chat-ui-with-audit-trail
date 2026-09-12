@@ -159,4 +159,34 @@ class PromptQueueDispatchTest {
 
         r.provider().holdLatch.countDown(); // release the held first turn so no thread leaks past the test
     }
+
+    /** QueueChecklistView_260913_oo01: a dispatched item moves to the sent list, in order. */
+    @Test
+    void dispatch_movesTheItemToTheSentList() {
+        Rig r = setUp();
+        r.queueRef().tellNow(q -> q.enqueue("hello", null, "queue", e -> {}, r.chatRef(), "human")).join();
+        waitUntil(() -> !r.provider().receivedPrompts.isEmpty(), 2000);
+        waitUntil(() -> !r.queueRef().askNow(PromptQueue::sentSnapshot).join().isEmpty(), 2000);
+        List<PromptQueue.QueueEntry> sent = r.queueRef().askNow(PromptQueue::sentSnapshot).join();
+        assertEquals(1, sent.size());
+        assertEquals("hello", sent.get(0).prompt());
+        assertEquals("human", sent.get(0).source());
+        assertEquals(0, r.queueRef().askNow(PromptQueue::getQueueSize).join(), "the pending list no longer holds it");
+    }
+
+    /** QueueChecklistView_260913_oo01: the sent list can be seeded, struck off, and is bounded. */
+    @Test
+    void sentList_seedRemoveAndBound() {
+        PromptQueue q = new PromptQueue();
+        q.seedSent(List.of("q1", "", "q2"));
+        assertEquals(List.of("q1", "q2"), q.sentSnapshot().stream().map(PromptQueue.QueueEntry::prompt).toList());
+        assertTrue(q.removeSentAt(0));
+        assertEquals(List.of("q2"), q.sentSnapshot().stream().map(PromptQueue.QueueEntry::prompt).toList());
+        assertTrue(!q.removeSentAt(5));
+        List<String> many = new java.util.ArrayList<>();
+        for (int i = 0; i < PromptQueue.MAX_SENT + 10; i++) many.add("p" + i);
+        q.seedSent(many);
+        assertEquals(PromptQueue.MAX_SENT, q.sentSnapshot().size());
+        assertEquals("p10", q.sentSnapshot().get(0).prompt(), "the oldest fall off first");
+    }
 }

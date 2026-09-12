@@ -307,6 +307,12 @@ public class ChatSession extends Interpreter {
     private long ioSession = -1;
     /** Which tools this conversation is shown and may call; every conversation starts with all of them. */
     private ToolSet toolSet = ToolSet.FULL;
+    /**
+     * The provider's error for this turn, when a step's call failed and produced no text
+     * (TurnErrorInConversation_260913_oo01). Kept so the failure reaches the history and the I/O
+     * log instead of ending the turn as an empty answer.
+     */
+    private String turnError;
     /** Tools a plugin jar added (ProviderAndToolPlugins_260912_oo01), by name, in registration order. */
     private final Map<String, ConversationTool> pluginTools = new LinkedHashMap<>();
     /** This turn's number, for turn{N}/step{M}/... I/O-log labels. Set in start(). */
@@ -1136,6 +1142,7 @@ public class ChatSession extends Interpreter {
         this.turnStartedAt = System.currentTimeMillis();
         this.pendingCalls = null;
         this.finalAnswer = null;
+        this.turnError = null;
         this.stepCount = 0;
         this.cancelled = false;
         this.constructedPrompts.clear();
@@ -1325,6 +1332,11 @@ public class ChatSession extends Interpreter {
                         noteStreamProgress(stepLabel, streamedChars, progressLoggedAt, event.content());
                         turnEmitter.accept(ChatEvent.thinking(
                                 "\n→ " + event.toolName() + "(" + event.content() + ")\n"));
+                    } else if ("error".equals(event.type())) {
+                        // Remembered as well as relayed: a step that ends with an error and no
+                        // text is a failed turn, not an empty answer (TurnErrorInConversation_260913_oo01).
+                        turnError = event.content() == null ? "unknown error" : event.content();
+                        turnEmitter.accept(event);
                     } else if ("tool_result".equals(event.type())) {
                         ChatEvent use = harnessToolUses.remove(event.toolUseId());
                         String observation = (event.isError() != null && event.isError())
@@ -1367,6 +1379,10 @@ public class ChatSession extends Interpreter {
             return new ActionResult(true, "action");
         }
 
+        if (text.isBlank() && turnError != null) {
+            finalAnswer = null;
+            return new ActionResult(false, "error: " + turnError);
+        }
         finalAnswer = text.trim();
         return new ActionResult(false, "final");
     }
@@ -1400,6 +1416,19 @@ public class ChatSession extends Interpreter {
      * @param askedQuestion the prompt the human sent for this turn
      * @param givenAnswer   the confirmed final answer
      */
+    /** The failed-turn counterpart of {@link #recordConversationIo}: the question and the error. */
+    private void recordConversationError(String askedQuestion, String error) {
+        if (ioLog == null || ioSession < 0) return;
+        if (askedQuestion == null || error == null) return;
+        try {
+            ioLog.record(ioSession, "agent", "turn" + ioTurnNo + "/conversation",
+                    CONVERSATION_QUESTION_MARKER + "\n" + askedQuestion
+                            + "\n\n" + CONVERSATION_ERROR_MARKER + "\n" + error);
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "I/O log conversation error record failed", e);
+        }
+    }
+
     private void recordConversationIo(String askedQuestion, String givenAnswer) {
         if (ioLog == null || ioSession < 0) return;
         if (askedQuestion == null || givenAnswer == null) return;
@@ -1433,6 +1462,8 @@ public class ChatSession extends Interpreter {
     public static final String CONVERSATION_QUESTION_MARKER = "QUESTION:";
     /** Marks the answer in a {@code turnN/conversation} entry. */
     public static final String CONVERSATION_ANSWER_MARKER = "ANSWER:";
+    /** Marks the failed-turn record: the provider's error where the answer would be. */
+    public static final String CONVERSATION_ERROR_MARKER = "ERROR:";
 
     /** Shortest gap between two streaming-progress lines in one step's tab log. */
     private static final long STREAM_PROGRESS_INTERVAL_MS = 1000L;
@@ -1501,6 +1532,9 @@ public class ChatSession extends Interpreter {
                 for (ToolCall tc : calls) {
                     m.append("  ").append(tc.name()).append(" ").append(tc.argumentsJson()).append("\n");
                 }
+            }
+            if (turnError != null && (responseText == null || responseText.isBlank())) {
+                m.append("\n\nERROR:\n").append(turnError);
             }
             m.append("\n\nUSAGE: promptTokens=0 completionTokens=0");
             ioLog.record(ioSession, "agent", "turn" + ioTurnNo + "/step" + stepCount + "/llm", m.toString());
@@ -1698,6 +1732,15 @@ public class ChatSession extends Interpreter {
      * @return {@link ActionResult} with {@code success=true}
      */
     public ActionResult finish() {
+        if (!cancelled && finalAnswer == null && turnError != null) {
+            // A failed turn (TurnErrorInConversation_260913_oo01): the error was relayed live as it
+            // happened; here it becomes part of the record. Not an assistant answer — the provider
+            // never gets it back as something the model said — and no empty answer bubble.
+            recordHistory("error", "Error: " + turnError);
+            recordConversationError(question, turnError);
+            turnEmitter.accept(ChatEvent.result(auditSessionId(), 0.0,
+                    System.currentTimeMillis() - turnStartedAt, provider.getCurrentModel(), false));
+        }
         if (!cancelled && finalAnswer != null) {
             String answer = finalAnswer;
             recordHistory("assistant", answer);

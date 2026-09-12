@@ -724,12 +724,25 @@ public class ChatUiActorSystem {
             chatSessionIIAR.tell(a -> {
                 ChatSession c = (ChatSession) a;
                 c.recordHistory("user", t.question());
-                c.recordHistory("assistant", t.answer());
+                if (t.error() != null) {
+                    // A failed turn comes back as the failure it was, not as an empty answer
+                    // (TurnErrorInConversation_260913_oo01).
+                    c.recordHistory("error", "Error: " + t.error());
+                } else {
+                    c.recordHistory("assistant", t.answer());
+                }
             });
             // collapseTurn appends the pair and moves the collapsed/running boundary past it, which
             // is the same state a turn ending normally leaves behind — so seeding is just replaying
             // it once per restored turn, and needs no separate provider API.
             providerRef.tell(p -> p.collapseTurn(t.question(), t.answer()));
+        }
+        // The questions go on the queue's sent list too, so the checklist the browser draws
+        // starts where the conversation left off (QueueChecklistView_260913_oo01).
+        ActorRef<PromptQueue> queueRef = actorSystem.getActor(tabName + ".queue");
+        if (queueRef != null) {
+            List<String> questions = turns.stream().map(IoLogView.Turn::question).toList();
+            queueRef.tell(q -> q.seedSent(questions));
         }
         LOG.info("Restored " + turns.size() + " turn(s) into " + tabName
                 + " from I/O log session " + sessionId);

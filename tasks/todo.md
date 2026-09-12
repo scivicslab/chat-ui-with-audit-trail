@@ -1,22 +1,19 @@
-# ハーネスの会話のツール分担を「重なるものだけ除く」に変え、前置きの責任を provider に移す
+# LLM 要求の失敗を会話に残す／キューを位置つきチェックリストにする
 
-設計文書: `doc_SCIVICS003/.../100_providers/040_HarnessPrefaceAndToolSplit_260912_oo01`
-ブランチ: 不要（1 コミットでビルドが通る。main に直接）
+設計文書:
+- `doc_SCIVICS003/.../030_development/020_implementation/220_TurnErrorInConversation_260913_oo01`
+- `doc_SCIVICS003/.../030_development/020_implementation/230_QueueChecklistView_260913_oo01`
+ブランチ: 不要（各 1 コミットでビルドが通る。main に直接）
 
 ## 手順
 
-- [x] 1. 設計文書を書く
-- [x] 2. `ToolSet`: `COLLABORATION` を `HARNESS` に改名し、意味を「登録済み全部から `read`/`write`/`calc` を除く」にする
-- [x] 3. `LlmProvider.promptPreface()`（既定は空）。`ClaudeCodeProvider` と `CodexProvider` が自分の前置きを返す。`ChatSession` は `HARNESS_PREFACE` を捨て、provider の前置きを付ける
-- [x] 4. `ChatResource` の既定ツール分担を factory の `defaultToolSet()` から取る
-- [x] 5. テスト更新（ToolSet、ChatSession、SetProvider、PluginRegistry、E2E）、`HarnessPluginTest` 追加。ビルド green
-- [x] 6. 既存文書の `collaboration` を `harness` に直す。tutorial の表
-- [x] 7. 再配置・両タイル再起動。ハーネスの会話の最初のプロンプトに `web_search` と `fetch` が載ること、天気の質問が答えられることを確認。E2E
-- [x] 8. コミット・push
+- [ ] 1. 設計文書 2 件を書く
+- [ ] 2. (A) `ChatSession`: provider の `error` を `turnError` に取り、答えが空なら turn を失敗として終える。履歴に role `error`、I/O ログの llm 段に `ERROR:`、`turnN/conversation` に `ERROR:`。空の `delta` を出さない
+- [ ] 3. (A) `IoLogView.Turn` に `error` を足し、復元時に role `error` を戻す。ユニットテスト
+- [ ] 4. (B) `PromptQueue` に送出済み一覧（上限 100）。`popFront` で積む、`sentSnapshot`/`removeSentAt`/`seedSent`。`GET .../queue` が `sent` と `pos` を返す。`DELETE .../queue/sent/{i}`。復元した会話の質問を送出済みに種まき。ユニットテスト
+- [ ] 5. (B) `app.js`: quarkus-chat-ui と同じ描画（sent/current/waiting、見出し、Save、領域の表示規則、`user` イベントで再描画、リサイズ）
+- [ ] 6. ビルド green → 28014 に配置・再起動 → 実機確認（失敗ターンが会話とログに残る／キューの見え方）→ E2E `QueueChecklistE2E`
+- [ ] 7. 設計文書に実機確認を追記、コミット・push
 
 ## Review
-
-- ユニットテスト 126 件 green（`HarnessPluginTest` 4 件を含む）。
-- cloud-llm 版 28031 で新しい `claude` の会話: 最初のプロンプトに `web_search`/`fetch` が載り `read` は載らない。天気の質問で `ToolSearch`→`WebSearch`→`WebFetch` が記録され回答。`ProviderSelectE2E` 10 項目 green。
-- 前置きの文言を 1 回強めた（一覧のツールをハーネスのツールとして `tool_use` で呼んで失敗していた）。
-- 設計文書 `HarnessPrefaceAndToolSplit_260912_oo01` と既存 4 文書を更新、push 済み。
+（完了時に記入）

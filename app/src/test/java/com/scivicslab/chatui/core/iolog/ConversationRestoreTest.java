@@ -147,4 +147,14 @@ class ConversationRestoreTest {
         assertEquals(0, IoLogView.lastTurnNumberOf(List.of()));
         assertEquals(0, IoLogView.lastTurnNumberOf(List.of(row("startup", "no turn in this label"))));
     }
+
+    @Test
+    void conversationOf_failedTurn_hasErrorAndNoAnswer() {
+        List<IoLogView.Turn> turns = IoLogView.conversationOf(List.of(
+                row("turn1/conversation", "QUESTION:\n天気は？\n\nERROR:\nError (https://localhost:28005): Unrecognized SSL message")), 10);
+        assertEquals(1, turns.size());
+        assertEquals("天気は？", turns.get(0).question());
+        assertEquals(null, turns.get(0).answer());
+        assertEquals("Error (https://localhost:28005): Unrecognized SSL message", turns.get(0).error());
+    }
 }

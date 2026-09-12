@@ -65,7 +65,13 @@ public class IoLogView {
     public record TurnHead(int turn, String question) {}
 
     /** What one turn was asked and what it answered, as recorded in its {@code /conversation} entry. */
-    public record Turn(String question, String answer) {}
+    /**
+     * One restorable turn. A failed turn (TurnErrorInConversation_260913_oo01) has {@code answer}
+     * null and {@code error} set; an answered turn the reverse.
+     */
+    public record Turn(String question, String answer, String error) {
+        public Turn(String question, String answer) { this(question, answer, null); }
+    }
 
     // ── Public API (DB-backed) ──────────────────────────────────────────────
 
@@ -227,12 +233,19 @@ public class IoLogView {
         if (message == null) return null;
         String qMarker = "QUESTION:";
         String aMarker = "\n\nANSWER:\n";
+        String eMarker = "\n\nERROR:\n";
         if (!message.startsWith(qMarker + "\n")) return null;
         int answerAt = message.indexOf(aMarker);
-        if (answerAt < 0) return null;
-        String question = message.substring(qMarker.length() + 1, answerAt);
-        String answer = message.substring(answerAt + aMarker.length());
-        return new Turn(question, answer);
+        if (answerAt >= 0) {
+            String question = message.substring(qMarker.length() + 1, answerAt);
+            String answer = message.substring(answerAt + aMarker.length());
+            return new Turn(question, answer);
+        }
+        int errorAt = message.indexOf(eMarker);
+        if (errorAt < 0) return null;
+        String question = message.substring(qMarker.length() + 1, errorAt);
+        String error = message.substring(errorAt + eMarker.length());
+        return new Turn(question, null, error);
     }
 
     /**
