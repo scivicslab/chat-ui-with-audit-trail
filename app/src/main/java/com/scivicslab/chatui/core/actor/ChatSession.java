@@ -1802,6 +1802,7 @@ public class ChatSession extends Interpreter {
         String prompt = (instruction == null || instruction.isBlank()) ? pendingPrompt : instruction;
         String reply = AskChatTool.askQualified(system, watchdogRef, myChatName(), workerChatId, prompt,
                 WORKER_WAIT_TIMEOUT_SECONDS);
+        recordWorkerRequestIo(workerChatId, prompt, reply);
         if (reply == null || reply.startsWith("error:")) {
             lastCollaborationError = reply != null ? reply : "no reply from worker";
             return new ActionResult(false, lastCollaborationError);
@@ -1866,6 +1867,7 @@ public class ChatSession extends Interpreter {
         String prompt = "Please revise your previous answer to address this feedback:\n" + redoNote;
         String reply = AskChatTool.askQualified(system, watchdogRef, myChatName(), workerChatId, prompt,
                 WORKER_WAIT_TIMEOUT_SECONDS);
+        recordWorkerRequestIo(workerChatId, prompt, reply);
         if (reply == null || reply.startsWith("error:")) {
             lastCollaborationError = reply != null ? reply : "no reply from worker";
             return new ActionResult(false, lastCollaborationError);
@@ -1925,9 +1927,48 @@ public class ChatSession extends Interpreter {
             }, system.getManagedThreadPool()).get();
         } catch (Exception e) {
             logger.log(Level.WARNING, "Babysitter judge LLM call failed", e);
-            return "REVISE: judge call failed: " + e.getMessage();
+            String failed = "REVISE: judge call failed: " + e.getMessage();
+            recordJudgeIo(prompt, failed);
+            return failed;
         }
-        return buf.toString();
+        String verdict = buf.toString();
+        recordJudgeIo(prompt, verdict);
+        return verdict;
+    }
+
+    /**
+     * Records one request to the worker as this turn's next tool step
+     * ({@code SupervisorTurnInTheRecord_260913_oo01}). Without it, a supervising turn wrote only
+     * its {@code turnN/conversation} row, so the turn appeared in no list and its trace could not
+     * be opened — the judgement that accepted the worker's text was in nobody's record.
+     *
+     * @param workerChatName the worker's full name, as {@code CollaborationGraph} holds it
+     * @param prompt         what was sent to it
+     * @param reply          what came back, or an {@code error:} line when nothing did
+     */
+    private void recordWorkerRequestIo(String workerChatName, String prompt, String reply) {
+        if (ioLog == null || ioSession < 0) return;
+        try {
+            stepCount++;
+            String m = "TOOL: ask_worker\nINPUT:\n" + workerChatName + "\n" + prompt
+                    + "\nOBSERVATION:\n" + (reply == null ? "no reply from worker" : reply);
+            ioLog.record(ioSession, "agent", "turn" + ioTurnNo + "/step" + stepCount + "/tool", m);
+            logToTab("INFO", "turn" + ioTurnNo + "/step" + stepCount + "/tool: ask_worker "
+                    + workerChatName);
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "I/O log worker request record failed", e);
+        }
+    }
+
+    /**
+     * Records the judging call as this turn's next LLM step, in the same form the agent loop's own
+     * calls use ({@code SupervisorTurnInTheRecord_260913_oo01}), so what was judged, against which
+     * criteria, and what the verdict was are read the same way as any other step.
+     */
+    private void recordJudgeIo(String prompt, String verdict) {
+        if (ioLog == null || ioSession < 0) return;
+        stepCount++;
+        recordStepIo(prompt, verdict, null, List.of());
     }
 
     /** Dispatches one tool call to its implementation and returns the raw (untruncated) observation. */

@@ -331,6 +331,21 @@ public class IoLogView {
                         "REQUEST:", "RESPONSE:", "REASONING:", "TOOL_CALLS:", "USAGE:"))));
             }
         }
+        // The conversation row holds what the person actually asked, without the system prompt and
+        // the tool descriptions the request carries. Preferred over the request wherever it exists:
+        // a supervising turn's first LLM call is its judgement, whose prompt is the criteria rather
+        // than the question (SupervisorTurnInTheRecord_260913_oo01).
+        for (LogEntry e : ordered) {
+            java.util.regex.Matcher m = CONVERSATION_LABEL.matcher(nz(e.getLabel()));
+            if (!m.find()) continue;
+            int turn = Integer.parseInt(m.group(1));
+            if (beforeTurn > 0 && turn >= beforeTurn) continue;
+            if (!questions.containsKey(turn)) continue;
+            Turn parsed = parseConversationEntry(nz(e.getMessage()));
+            if (parsed != null && parsed.question() != null && !parsed.question().isBlank()) {
+                questions.put(turn, questionTail(parsed.question()));
+            }
+        }
         List<TurnHead> newestFirst = new java.util.ArrayList<>();
         List<Integer> numbers = new java.util.ArrayList<>(questions.keySet());
         for (int i = numbers.size() - 1; i >= 0 && newestFirst.size() < limit; i--) {
