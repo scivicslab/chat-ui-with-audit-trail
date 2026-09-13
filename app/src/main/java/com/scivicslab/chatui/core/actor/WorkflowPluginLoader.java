@@ -17,8 +17,10 @@ import java.util.Locale;
  * always written by a person — {@code run_plan} runs YAML an LLM wrote — so an unrestricted loader
  * would let a conversation reach code the instance was deliberately started without.</p>
  *
- * <p>Only {@code loadJar} is restricted. {@code createChild} and the rest work on what has already
- * been loaded, so they add nothing this class has not already allowed.</p>
+ * <p>Only {@code loadJar} is restricted. {@code createChild}, {@code removeChild} and the rest run
+ * code this program already has, or work on what was already loaded, so they add nothing this class
+ * has not already allowed. That is why this actor stands in every instance, including one started
+ * with no plugins at all: a job still needs to be able to create and remove actors.</p>
  */
 public class WorkflowPluginLoader extends DynamicActorLoaderIIAR {
 

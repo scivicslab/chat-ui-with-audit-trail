@@ -253,8 +253,13 @@ public class IoLogStore {
     // connections to the same DB), so they never touch the store's read/write connections. The active
     // conversation session is always excluded, so a delete never contends with rows being written.
 
-    /** The same JDBC URL H2LogStore uses, for a short-lived maintenance connection. */
-    private String jdbcUrl() {
+    /**
+     * The same JDBC URL H2LogStore uses, for a short-lived connection of one's own.
+     *
+     * <p>Used by the deletes below and by {@link IoLogSearch}, which reads across every session in
+     * the file rather than through the store's one-conversation-at-a-time view.</p>
+     */
+    String jdbcUrl() {
         return "jdbc:h2:" + Path.of(dbPathForPort()).toAbsolutePath() + ";AUTO_SERVER=TRUE"
                 + (compress ? ";COMPRESS=TRUE" : "");
     }

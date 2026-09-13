@@ -266,19 +266,18 @@ public class ChatUiActorSystem {
         // written to one graph and read from another, silently losing the assignment.
         collaborationGraphRef = housekeeperRef.createChild("collaborationGraph", new CollaborationGraph());
 
-        // The loader a job's workflow calls to bring in a Turing Workflow plugin
-        // (WorkflowPluginLoader_260913_oo01). Placed only when chat-ui.workflow-plugins names
-        // something: the loader is itself a capability, and this program decides capabilities at
-        // start-up (ProviderAndToolPlugins_260912_oo01).
+        // The loader a job's workflow calls to create and remove actors, and to bring in a Turing
+        // Workflow plugin (WorkflowPluginLoader_260913_oo01). Always present: creating and removing
+        // actors runs code this program already has. What is gated is loadJar, which brings in code
+        // the instance was not started with — that stays decided at start-up
+        // (ProviderAndToolPlugins_260912_oo01), by chat-ui.workflow-plugins.
         List<String> allowedPlugins = workflowPlugins.orElse(List.of());
-        if (allowedPlugins.isEmpty()) {
-            LOG.info("Workflow plugins: none (chat-ui.workflow-plugins is unset); jobs have no loader");
-        } else {
-            WorkflowPluginLoader loader = new WorkflowPluginLoader(WORKFLOW_LOADER, actorSystem, allowedPlugins);
-            adopt(HOUSEKEEPER, loader);
-            actorSystem.addIIActor(loader);
-            LOG.info("Workflow plugins: jobs may load " + loader.allowed());
-        }
+        WorkflowPluginLoader loader = new WorkflowPluginLoader(WORKFLOW_LOADER, actorSystem, allowedPlugins);
+        adopt(HOUSEKEEPER, loader);
+        actorSystem.addIIActor(loader);
+        LOG.info(allowedPlugins.isEmpty()
+                ? "Workflow plugins: none (chat-ui.workflow-plugins is unset); loadJar refuses everything"
+                : "Workflow plugins: jobs may load " + loader.allowed());
 
         // Provider kinds and plugin tools (ProviderAndToolPlugins_260912_oo01): the body's own
         // openai-compat kind, then whatever the jars named in chat-ui.plugins add. Built here, once,

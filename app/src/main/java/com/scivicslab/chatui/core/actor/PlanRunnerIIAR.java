@@ -34,6 +34,9 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
             org.json.JSONArray a = arguments(arg);
             return runner().askWorker(a.length() > 0 ? a.getString(0) : "",
                     a.length() > 1 ? a.getString(1) : "");
+        } else if (actionName.equals("clearWorker")) {
+            org.json.JSONArray a = arguments(arg);
+            return runner().clearWorker(a.length() > 0 ? a.getString(0) : "");
         } else if (actionName.equals("keepWorkerReply")) {
             org.json.JSONArray a = arguments(arg);
             return runner().keepWorkerReply(a.length() > 0 ? a.getString(0) : "",
@@ -50,7 +53,8 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
             org.json.JSONArray a = arguments(arg);
             return runner().listFiles(a.length() > 0 ? a.getString(0) : "",
                     a.length() > 1 ? a.getString(1) : "",
-                    a.length() > 2 ? a.getString(2) : "");
+                    a.length() > 2 ? a.getString(2) : "",
+                    a.length() > 3 ? a.getString(3) : null);
         } else if (actionName.equals("takeNext")) {
             org.json.JSONArray a = arguments(arg);
             return runner().takeNext(a.length() > 0 ? a.getString(0) : "",

@@ -5,6 +5,8 @@
 //     quarkus-chat-ui3)
 //   - System Log tab: GET /api/projects/{p}/chats/{c}/log (150_TabScopedLogging_260826_oo01);
 //     falls back to GET /api/logs (LogTap, server-wide) only if no conversation is active yet
+//   - Log Search tab: GET /api/iolog/search — one query against every conversation this instance
+//     has recorded, the ones whose actor was removed included (CrossConversationLogSearch_260913_oo01)
 //   - Agent Loop tab: GET /api/projects/{p}/chats/{c}/workflows[/<name>] (AgentLoopTab_260827_oo01),
 //     read-only YAML viewer ported from quarkus-chat-ui3's own "Agent Loop" tab
 (function () {
@@ -30,6 +32,7 @@
             if (tab === "logdb") ioOnShow();
             if (tab === "syslog") refreshLogs();
             if (tab === "agentloop") wfOnShow();
+            if (tab === "logsearch") lsearchOnShow();
             if (tab === "jobrun") jobRunOnShow();
             if (tab === "jobs") jobsOnShow();
             if (tab === "joblog") jobLogOnShow();
@@ -907,6 +910,9 @@
     // renderActorTree() does on every refresh (including the 3s auto-refresh timer).
     var collapsedActorNodes = new Set();
 
+    // The actor whose name the log search is reached by (ChatUiActorSystem.SYSTEM_LOG_ACTOR).
+    var LOG_SEARCH_ACTOR = "outputMultiplexer";
+
     // Actor names are absolute ("project1/chat-01.chat.promptBuilder"), so every row would repeat
     // its ancestors. The tree's indentation already shows the hierarchy: strip the parent's name
     // from the front and show only what this node adds. The full name stays in the tooltip.
@@ -985,6 +991,17 @@
                 e.stopPropagation(); // don't also trigger the fold/unfold toggle on the label
                 switchPerspective("project", node.name);
                 refreshActors(); // re-render so the tab-active highlight moves immediately
+            });
+        }
+        // outputMultiplexer is where every conversation's lines pass through, and the log database
+        // is what they are kept in: clicking it searches the whole of that database, including the
+        // conversations whose tabs have been removed (CrossConversationLogSearch_260913_oo01).
+        if (node.name === LOG_SEARCH_ACTOR) {
+            name.classList.add("tab-switchable");
+            name.title = "Search every recorded conversation";
+            name.addEventListener("click", function (e) {
+                e.stopPropagation(); // don't also trigger the fold/unfold toggle on the label
+                lsearchOpen();
             });
         }
         var type = document.createElement("span");
@@ -1330,25 +1347,33 @@
     // each one pushed everything below it further down and the session and turn it belongs to off
     // the top — five of them made this list six screens tall. The one picked is shown below, in
     // #io-reading, so only ever one is open and the structure above it never moves.
-    function ioMsgEl(m, sessionId) {
+    // Which pair of regions a message list belongs to: the list it is in, and the head and body
+    // of the pane the message picked out of it is read in. The Sessions tab and the Log Search tab
+    // each have their own pair, so a message read in one does not clear the other's selection.
+    var IO_PANE_SESSIONS = { list: "#io-sessions", head: "io-reading-head", body: "io-reading-body" };
+    var IO_PANE_SEARCH = { list: "#lsearch-hits", head: "lsearch-reading-head", body: "lsearch-reading-body" };
+
+    function ioMsgEl(m, sessionId, pane) {
+        pane = pane || IO_PANE_SESSIONS;
         var row = document.createElement("div"); row.className = "trm " + m.cls;
         var sum = document.createElement("div"); sum.className = "trm-sum";
         var dir = document.createElement("span"); dir.className = "trm-dir"; dir.textContent = m.dir;
         var txt = document.createElement("span"); txt.className = "trm-txt"; txt.textContent = m.summary;
         sum.appendChild(dir); sum.appendChild(txt);
         row.appendChild(sum);
-        sum.addEventListener("click", function () { ioReadMessage(row, m, sessionId); });
+        sum.addEventListener("click", function () { ioReadMessage(row, m, sessionId, pane); });
         return row;
     }
 
     // Shows one message in the reading pane below the list.
-    function ioReadMessage(row, m, sessionId) {
-        document.querySelectorAll("#io-sessions .trm.selected").forEach(function (el) {
+    function ioReadMessage(row, m, sessionId, pane) {
+        pane = pane || IO_PANE_SESSIONS;
+        document.querySelectorAll(pane.list + " .trm.selected").forEach(function (el) {
             el.classList.remove("selected");
         });
         row.classList.add("selected");
-        var head = document.getElementById("io-reading-head");
-        var body = document.getElementById("io-reading-body");
+        var head = document.getElementById(pane.head);
+        var body = document.getElementById(pane.body);
         head.textContent = m.dir + "  ·  " + m.part;
         head.title = head.textContent;
         body.textContent = "";
@@ -1367,7 +1392,11 @@
     function ioRenderPart(holder, message, part) {
         holder.textContent = "";
         var sections;
-        if (part === "USER") {
+        if (part === "RAW") {
+            // A row the agent loop did not write: a search can land on one, and it has none of the
+            // markers the split below looks for. Shown as it was recorded.
+            sections = [{ spec: { t: "entry", cls: "meta" }, body: message }];
+        } else if (part === "USER") {
             sections = [{ spec: { t: "user message", cls: "user" }, body: ioUserMessageOf(message) }];
         } else {
             var kind = (part === "INPUT" || part === "OBSERVATION") ? "tool" : "llm";
@@ -1459,6 +1488,133 @@
         // Tab-switch-triggered lazy load is wired once, in initTabs()'s own #right-tab-bar handler.
     }
 
+
+    // ── Log Search tab (CrossConversationLogSearch_260913_oo01) ──────────────
+    // The Sessions tab answers about the conversation that is open. This one asks the whole I/O
+    // log database at once, so a conversation whose actor was removed (loader.removeChild leaves
+    // the log where it is) is found on the same terms as one still on the screen.
+    var lsearchOverviewLoaded = false;
+
+    function lsearchSetStatus(t) {
+        var el = document.getElementById("lsearch-status");
+        if (el) el.textContent = t;
+    }
+
+    function lsearchOverview() {
+        return fetch("api/iolog/search/overview")
+            .then(function (r) { return r.json(); })
+            .then(function (o) {
+                lsearchOverviewLoaded = true;
+                if (o.error) { lsearchSetStatus("error: " + o.error); return; }
+                lsearchSetStatus(o.conversations + " conversation(s) · " + o.entries + " entries"
+                        + (o.newest ? " · newest " + o.newest : ""));
+            })
+            .catch(function (err) { lsearchSetStatus("error: " + err.message); });
+    }
+
+    function lsearchRun() {
+        var input = document.getElementById("lsearch-q");
+        var list = document.getElementById("lsearch-hits");
+        if (!input || !list) return;
+        var q = input.value.trim();
+        list.textContent = "";
+        if (!q) { lsearchOverview(); return; }
+        lsearchSetStatus("searching…");
+        fetch("api/iolog/search?q=" + encodeURIComponent(q))
+            .then(function (r) { return r.json(); })
+            .then(function (res) {
+                if (res.error) { lsearchSetStatus("error: " + res.error); return; }
+                var hits = res.hits || [];
+                if (!hits.length) {
+                    var empty = document.createElement("div");
+                    empty.className = "io-empty";
+                    empty.textContent = "Nothing in any conversation contains " + q + ".";
+                    list.appendChild(empty);
+                    lsearchSetStatus("0 hits");
+                    return;
+                }
+                hits.forEach(function (h) { list.appendChild(lsearchHitEl(h, q)); });
+                lsearchSetStatus(hits.length + " hit(s)" + (res.limited ? " (more were found)" : ""));
+            })
+            .catch(function (err) { lsearchSetStatus("error: " + err.message); });
+    }
+
+    // One hit: where it was said, and the text around the match. Opened, it shows the whole turn
+    // that entry was part of — the same rows the Sessions tab shows, fetched from the same
+    // endpoint, so a hit is read in its conversation rather than as a fragment.
+    function lsearchHitEl(hit, query) {
+        var box = document.createElement("details"); box.className = "lshit";
+        var sum = document.createElement("summary"); sum.className = "lshit-head";
+        var where = document.createElement("div"); where.className = "lshit-where";
+        var conv = document.createElement("span"); conv.className = "lshit-conv";
+        conv.textContent = hit.conversation + (hit.turn >= 0 ? "  ·  turn " + hit.turn : "  ·  " + hit.label);
+        conv.title = hit.conversation + "  ·  " + hit.label + "  ·  " + hit.agent;
+        var when = document.createElement("span"); when.className = "lshit-when";
+        when.textContent = hit.when;
+        where.appendChild(conv); where.appendChild(when);
+        var snippet = document.createElement("div"); snippet.className = "lshit-snippet";
+        snippet.textContent = hit.snippet;
+        sum.appendChild(where); sum.appendChild(snippet);
+        box.appendChild(sum);
+        var body = document.createElement("div"); body.className = "lshit-body";
+        box.appendChild(body);
+        var loaded = false;
+        box.addEventListener("toggle", function () {
+            if (!box.open) { body.textContent = ""; loaded = false; return; }
+            // One hit open at a time, for the reason the Sessions tab opens one turn at a time:
+            // a turn of messages is already more than the pane holds.
+            box.parentNode.querySelectorAll("details.lshit[open]").forEach(function (other) {
+                if (other !== box) other.open = false;
+            });
+            if (loaded) return;
+            loaded = true;
+            body.textContent = "loading…";
+            if (hit.turn < 0) {
+                // Not part of a turn, so there is no turn to show: the entry itself is the answer.
+                body.textContent = "";
+                body.appendChild(ioMsgEl({ dir: hit.agent || "entry", cls: "meta",
+                                           summary: hit.label, id: hit.logId, part: "RAW" },
+                                         hit.sessionId, IO_PANE_SEARCH));
+                return;
+            }
+            fetch("api/sessions/" + hit.sessionId + "/trace/" + hit.turn)
+                .then(function (r) { return r.json(); })
+                .then(function (t) {
+                    body.textContent = "";
+                    ioTurnMessages(t).forEach(function (m) {
+                        var row = ioMsgEl(m, hit.sessionId, IO_PANE_SEARCH);
+                        // The entry the search matched, among the turn's others.
+                        if (m.id === hit.logId) row.classList.add("selected");
+                        body.appendChild(row);
+                    });
+                })
+                .catch(function (err) { body.textContent = "error: " + err.message; loaded = false; });
+        });
+        return box;
+    }
+
+    function lsearchOnShow() {
+        if (!lsearchOverviewLoaded) lsearchOverview();
+        var input = document.getElementById("lsearch-q");
+        if (input) input.focus();
+    }
+
+    // Opens the tab from somewhere else on the page — clicking outputMultiplexer in the actor tree,
+    // which is where the conversations of every tab, present or removed, end up.
+    function lsearchOpen() {
+        switchPerspective("chat");
+        var btn = document.querySelector('#right-tab-bar .rtab-btn[data-tab="logsearch"]');
+        if (btn) btn.click();
+    }
+
+    function initLsearch() {
+        var go = document.getElementById("lsearch-go");
+        if (go) go.addEventListener("click", lsearchRun);
+        var input = document.getElementById("lsearch-q");
+        if (input) input.addEventListener("keydown", function (e) {
+            if (e.key === "Enter") { e.preventDefault(); lsearchRun(); }
+        });
+    }
 
     // ── Extensions panel (SkillAndAgentsFile_260830_oo01) ─────────────────────
     // Two tabs, each backed by an endpoint that exists: Skills lists what
@@ -1626,6 +1782,7 @@
         initIo();
         initLogs();
         initWorkflow();
+        initLsearch();
         initExtensions();
         initProjectWorkflows();
         initProjectWorkflowEditor();

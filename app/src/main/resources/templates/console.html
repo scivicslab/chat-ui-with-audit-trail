@@ -212,6 +212,7 @@
                 <button class="rtab-btn active" data-tab="logdb" data-perspective="chat">Sessions</button>
                 <button class="rtab-btn" data-tab="syslog" data-perspective="chat">System Log</button>
                 <button class="rtab-btn" data-tab="agentloop" data-perspective="chat">Agent Loop</button>
+                <button class="rtab-btn" data-tab="logsearch" data-perspective="chat">Log Search</button>
                 <button class="rtab-btn" data-tab="jobrun" data-perspective="project">Run</button>
                 <button class="rtab-btn" data-tab="joblog" data-perspective="project">Job Log</button>
                 <button class="rtab-btn" data-tab="jobs" data-perspective="project">Batch Jobs</button>
@@ -258,6 +259,24 @@
                         <span id="logs-status"></span>
                     </div>
                     <div id="logs-list"></div>
+                </section>
+
+                <!-- Log Search: one query against every conversation this instance has recorded,
+                     the ones whose tab was removed included (CrossConversationLogSearch_260913_oo01).
+                     Opened by clicking outputMultiplexer in the actor tree. -->
+                <section id="tab-logsearch" class="rtab-content" data-perspective="chat">
+                    <div class="tab-toolbar">
+                        <input id="lsearch-q" type="search" placeholder="Find in every conversation" spellcheck="false">
+                        <button id="lsearch-go" type="button">Search</button>
+                        <span id="lsearch-status"></span>
+                    </div>
+                    <!-- Same two regions as the Sessions tab: the hits above, the one message being
+                         read below, so reading a request never pushes the hit list off the top. -->
+                    <div id="lsearch-hits"></div>
+                    <div id="lsearch-reading">
+                        <div id="lsearch-reading-head">Pick a message above to read it here.</div>
+                        <div id="lsearch-reading-body"></div>
+                    </div>
                 </section>
 
                 <section id="tab-agentloop" class="rtab-content" data-perspective="chat">

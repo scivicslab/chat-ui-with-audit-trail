@@ -278,21 +278,37 @@
 /* Log DB tab = session manager: a table of conversations with cleanup + open-in-Trace. */
 /* A fixed share, not a flexible one. What is read below has no length limit — one message can
    be the whole of a request — and given room to shrink this list loses it to that text. */
-#io-sessions { flex: 0 0 45%; min-height: 0; overflow: auto; padding: 6px 8px; }
-#io-reading {
+#io-sessions, #lsearch-hits { flex: 0 0 45%; min-height: 0; overflow: auto; padding: 6px 8px; }
+#io-reading, #lsearch-reading {
     flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
     border-top: 1px solid var(--border-color, #2c2c2c);
 }
-#io-reading-head {
+#io-reading-head, #lsearch-reading-head {
     flex: 0 0 auto; padding: 5px 10px; font-size: 11px;
     color: var(--text-secondary, #9a9a9a);
     border-bottom: 1px solid var(--border-color, #2c2c2c);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-#io-reading-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 6px 8px; }
+#io-reading-body, #lsearch-reading-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 6px 8px; }
 /* The pane is about 500px wide, so anything long — a request, a JSON argument — has to wrap
    rather than run off the side out of sight. */
-#io-reading-body pre { white-space: pre-wrap; word-break: break-word; }
+#io-reading-body pre, #lsearch-reading-body pre { white-space: pre-wrap; word-break: break-word; }
+
+/* ── Log Search tab (CrossConversationLogSearch_260913_oo01) ────── */
+/* The query box takes the width the toolbar has left: what is typed here is a phrase from a
+   conversation, not a keyword, and a narrow box shows the end of it only. */
+#lsearch-q { flex: 1 1 auto; min-width: 8em; background: var(--bg-secondary, #2a2a2a); color: var(--text-primary, #e6e6e6); border: 1px solid var(--border-color, #444); border-radius: 4px; padding: 3px 6px; font-size: 12px; }
+#lsearch-status { color: var(--text-secondary, #8a8a8a); white-space: nowrap; }
+details.lshit { border: 1px solid var(--border-color, #2f2f2f); border-radius: 6px; margin: 0 0 8px; background: var(--bg-secondary, #1a1a1a); }
+summary.lshit-head { padding: 5px 10px; cursor: pointer; user-select: none; }
+summary.lshit-head:hover { background: var(--bg-tertiary, #232323); }
+.lshit-where { display: flex; gap: 8px; font-size: 11px; color: var(--text-secondary, #9a9a9a); }
+.lshit-conv { color: var(--accent-blue, #a5b4fc); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lshit-when { flex-shrink: 0; margin-left: auto; }
+/* The snippet is the reason the row is there, so it is shown whole over as many lines as it
+   takes: cut to one line, a match in the middle of a sentence is a row of ellipses. */
+.lshit-snippet { font-size: 12px; color: var(--text-primary, #d4d4d4); margin-top: 2px; word-break: break-word; }
+.lshit-body { padding: 4px 8px; border-top: 1px solid var(--border-color, #2f2f2f); }
 .io-empty { color: var(--text-secondary, #8a8a8a); padding: 8px; font-size: 12px; }
 table.io-sessions { width: 100%; border-collapse: collapse; font-size: 12px; }
 table.io-sessions th { text-align: left; color: var(--text-secondary, #8a8a8a); font-weight: 600; padding: 4px 8px; border-bottom: 1px solid var(--border-color, #2c2c2c); position: sticky; top: 0; background: var(--bg-primary, #141414); }

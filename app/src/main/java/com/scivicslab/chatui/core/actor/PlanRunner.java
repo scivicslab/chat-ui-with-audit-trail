@@ -208,6 +208,37 @@ public class PlanRunner extends Interpreter {
     }
 
     /**
+     * Plan step: empties the conversation behind one worker slot, so the next prompt starts from
+     * nothing ({@code SelfContainedPromptsPerCriterion_260913_oo01}).
+     *
+     * <p>What a checklist run needs. Each prompt carries the rule and the whole text, so the
+     * conversation's history adds nothing and costs the context it takes up. Left to accumulate, a
+     * run over six criteria pushes the model past its window and the conversation answers with
+     * nothing, which reaches the plan as {@code no result from chat}.</p>
+     *
+     * @param workerId the slot's short id, as {@link #addWorker} was given it
+     * @return {@link ActionResult} with {@code success=true} iff that slot's conversation was found
+     */
+    public ActionResult clearWorker(String workerId) {
+        if (selfActorRef == null || system == null) {
+            return new ActionResult(false, "plan runner is not wired to an actor system");
+        }
+        if (workerId == null || workerId.isBlank()) return new ActionResult(false, "workerId is required");
+        String workerName = myName + ".worker-" + workerId;
+        Object slot = system.getIIActor(workerName);
+        if (!(slot instanceof PlanWorkerIIAR workerIIAR)) {
+            return new ActionResult(false, "no worker slot named " + workerName);
+        }
+        String chatName = workerIIAR.worker().targetChatName();
+        Object session = system.getIIActor(chatName + ".chat");
+        if (!(session instanceof ChatSessionIIAR chatSessionIIAR)) {
+            return new ActionResult(false, "chat not found: " + chatName);
+        }
+        chatSessionIIAR.tell(a -> ((ChatSession) a).clearHistory()).join();
+        return new ActionResult(true, "cleared the history of " + chatName);
+    }
+
+    /**
      * Plan step: puts what one worker slot last replied into this plan's own state, under
      * {@code key}, so a later step can hand it to somebody else with
      * <code>jexl:state.getString('key')</code> ({@code ChainedRolesInAPlan_260913_oo01}).
@@ -313,6 +344,19 @@ public class PlanRunner extends Interpreter {
      * @return {@link ActionResult} with {@code success=true} iff at least one file matched
      */
     public ActionResult listFiles(String dir, String suffix, String key) {
+        return listFiles(dir, suffix, key, null);
+    }
+
+    /**
+     * The same, walking into subdirectories to the given depth.
+     *
+     * @param dir    the directory to list
+     * @param suffix what a name must end with; every file when blank
+     * @param key    where to put the list
+     * @param depth  how many levels to walk; {@code 1} (this directory alone) when absent. A corpus
+     *               that keeps one document per directory needs {@code 2}
+     */
+    public ActionResult listFiles(String dir, String suffix, String key, String depth) {
         if (selfActorRef == null) return new ActionResult(false, "plan runner is not wired to an actor system");
         if (dir == null || dir.isBlank()) return new ActionResult(false, "dir is required");
         if (key == null || key.isBlank()) return new ActionResult(false, "key is required");
@@ -321,8 +365,16 @@ public class PlanRunner extends Interpreter {
         try {
             java.nio.file.Path root = java.nio.file.Path.of(dir.strip()).toAbsolutePath().toRealPath();
             if (!fileScope.canRead(root)) return new ActionResult(false, "outside the readable range: " + root);
+            int levels = 1;
+            if (depth != null && !depth.isBlank()) {
+                try {
+                    levels = Math.max(1, Integer.parseInt(depth.strip()));
+                } catch (NumberFormatException e) {
+                    return new ActionResult(false, "depth must be a whole number, not '" + depth + "'");
+                }
+            }
             java.util.List<String> found = new java.util.ArrayList<>();
-            try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.list(root)) {
+            try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(root, levels)) {
                 files.filter(java.nio.file.Files::isRegularFile)
                      .filter(f -> ending.isEmpty() || f.getFileName().toString().endsWith(ending))
                      .sorted()
