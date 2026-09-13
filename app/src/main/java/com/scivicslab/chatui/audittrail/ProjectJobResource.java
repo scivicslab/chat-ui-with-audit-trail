@@ -15,6 +15,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -37,14 +38,18 @@ public class ProjectJobResource {
      * Starts a workflow as a new job.
      *
      * @param projectId the project
-     * @param body      {@code {"workflow": name}}, the name as the catalog lists it
+     * @param body      {@code {"workflow": name}}, the name as the catalog lists it, and
+     *                  optionally {@code "parameters"}: the values its <code>${key}</code> stand
+     *                  for, keyed by the names {@code Document.params} declares
+     *                  ({@code JobParameterForm_260913_oo01})
      * @return the new job; 404 when there is no such project or workflow; 400 when the workflow
-     *         cannot be read or the request names none
+     *         cannot be read, the request names none, or a required value is missing
      */
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
-    public Response start(@PathParam("projectId") String projectId, Map<String, String> body) {
-        String workflow = body == null ? null : body.get("workflow");
+    public Response start(@PathParam("projectId") String projectId, Map<String, Object> body) {
+        Object named = body == null ? null : body.get("workflow");
+        String workflow = named == null ? null : String.valueOf(named);
         if (workflow == null || workflow.isBlank()) {
             return Response.status(400).entity(Map.of("error", "workflow is required")).build();
         }
@@ -60,8 +65,62 @@ public class ProjectJobResource {
         }
         String why = ProjectWorkflowCatalog.validate(doc.yaml());
         if (why != null) return Response.status(400).entity(Map.of("error", why)).build();
-        Project.JobView job = project.ask(p -> p.startJob(workflow, doc.yaml())).join();
+
+        Map<String, String> given = given(body);
+        String missing = firstMissing(doc.params(), given);
+        if (missing != null) {
+            return Response.status(400).entity(Map.of("error", missing)).build();
+        }
+        Map<String, String> values = withDefaults(doc.params(), given);
+        Project.JobView job = project.ask(p -> p.startJob(workflow, doc.yaml(), values)).join();
         return Response.ok(job).build();
+    }
+
+    /** @return the {@code parameters} of the request as text, keyed by name; empty when absent */
+    private static Map<String, String> given(Map<String, Object> body) {
+        Object parameters = body == null ? null : body.get("parameters");
+        if (!(parameters instanceof Map<?, ?> m)) return Map.of();
+        Map<String, String> out = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> e : m.entrySet()) {
+            if (e.getKey() == null || e.getValue() == null) continue;
+            out.put(String.valueOf(e.getKey()), String.valueOf(e.getValue()));
+        }
+        return out;
+    }
+
+    /**
+     * @return why the run cannot start — the first declared input that must have a value and was
+     *         given none — or {@code null} when every one of them has one. An input with a default
+     *         has one even when the request left it out.
+     */
+    private static String firstMissing(List<ProjectWorkflowCatalog.ParamSpec> params,
+                                       Map<String, String> given) {
+        if (params == null) return null;
+        for (ProjectWorkflowCatalog.ParamSpec p : params) {
+            if (!p.required()) continue;
+            String value = given.get(p.key());
+            if (value != null && !value.isBlank()) continue;
+            if (p.defaultValue() != null) continue;
+            return "parameter is required: " + p.key();
+        }
+        return null;
+    }
+
+    /**
+     * @return what the run is given: the values of the request, plus the declared default of every
+     *         input the request left out — the same order {@code RunCLI} fills them in
+     */
+    private static Map<String, String> withDefaults(List<ProjectWorkflowCatalog.ParamSpec> params,
+                                                    Map<String, String> given) {
+        Map<String, String> out = new LinkedHashMap<>(given);
+        if (params == null) return out;
+        for (ProjectWorkflowCatalog.ParamSpec p : params) {
+            String value = out.get(p.key());
+            if ((value == null || value.isBlank()) && p.defaultValue() != null) {
+                out.put(p.key(), p.defaultValue());
+            }
+        }
+        return out;
     }
 
     /**

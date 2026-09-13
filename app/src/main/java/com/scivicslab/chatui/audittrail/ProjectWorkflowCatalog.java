@@ -3,6 +3,8 @@ package com.scivicslab.chatui.audittrail;
 import com.scivicslab.turingworkflow.workflow.Interpreter;
 import com.scivicslab.turingworkflow.workflow.MatrixCode;
 
+import org.yaml.snakeyaml.Yaml;
+
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -60,6 +62,16 @@ public final class ProjectWorkflowCatalog {
     private static final Pattern NAME_LINE = Pattern.compile("(?m)^name:\\s*(.+?)\\s*$");
     private static final Pattern DESCRIPTION_LINE = Pattern.compile("(?m)^description:\\s*(.*?)\\s*$");
 
+    /** How a workflow of this engine's version reads a run's value: {@code state.getString('key')}. */
+    private static final Pattern STATE_READ =
+            Pattern.compile("state\\.get(?:String|Int|Long|Double|Boolean)?\\(\\s*['\"]([^'\"]+)['\"]");
+
+    /** How a workflow written for Turing-workflow 3 wrote it. Still found in older files. */
+    private static final Pattern PLACEHOLDER = Pattern.compile("\\$\\{([^}]+)\\}");
+
+    /** The one variable a run fills in itself: the previous transition's result. */
+    private static final String RESULT_VARIABLE = "result";
+
     /**
      * One row of the catalog.
      *
@@ -79,8 +91,27 @@ public final class ProjectWorkflowCatalog {
      * @param yaml     the file's whole text
      * @param origin   {@link #ORIGIN_PROJECT} or {@link #ORIGIN_BUNDLED}
      * @param editable whether it may be written back
+     * @param params   the inputs it declares, in declared order — see {@link #paramsOf}
      */
-    public record Document(String name, String yaml, String origin, boolean editable) {}
+    public record Document(String name, String yaml, String origin, boolean editable,
+                           List<ParamSpec> params) {}
+
+    /**
+     * One declared input of a workflow ({@code WorkflowInputParams_260701_oo01}).
+     *
+     * @param key          the name the workflow reads it by: {@code state.getString('key')}
+     * @param label        what to call it in a form, or {@code null} to use the key
+     * @param description  what it is for, or {@code ""}
+     * @param type         which form field to draw: {@code text}, {@code textarea}, {@code int},
+     *                     {@code bool}, {@code select} or {@code path}; {@code text} when absent
+     *                     or unknown to the form
+     * @param required     whether a run must be given a value: as declared, else true when there
+     *                     is no default
+     * @param defaultValue the value to start the field with, or {@code null}
+     * @param options      the choices when {@code type} is {@code select}, else empty
+     */
+    public record ParamSpec(String key, String label, String description, String type,
+                            boolean required, String defaultValue, List<String> options) {}
 
     private final Path projectDir;
 
@@ -133,7 +164,7 @@ public final class ProjectWorkflowCatalog {
             Path file = projectDir.resolve(name + ".yaml");
             if (Files.isRegularFile(file)) {
                 try {
-                    return new Document(name, Files.readString(file, StandardCharsets.UTF_8),
+                    return documentOf(name, Files.readString(file, StandardCharsets.UTF_8),
                             ORIGIN_PROJECT, true);
                 } catch (IOException e) {
                     LOG.log(Level.WARNING, "Could not read " + file, e);
@@ -143,7 +174,7 @@ public final class ProjectWorkflowCatalog {
         }
         try (InputStream in = getClass().getResourceAsStream(BUNDLED_DIR + "/" + name + ".yaml")) {
             if (in == null) return null;
-            return new Document(name, new String(in.readAllBytes(), StandardCharsets.UTF_8),
+            return documentOf(name, new String(in.readAllBytes(), StandardCharsets.UTF_8),
                     ORIGIN_BUNDLED, false);
         } catch (IOException e) {
             LOG.log(Level.WARNING, "Could not read bundled workflow " + name, e);
@@ -202,7 +233,101 @@ public final class ProjectWorkflowCatalog {
         Files.createDirectories(projectDir);
         Path file = projectDir.resolve(name + ".yaml");
         Files.writeString(file, yaml, StandardCharsets.UTF_8);
-        return new Document(name, yaml, ORIGIN_PROJECT, true);
+        return documentOf(name, yaml, ORIGIN_PROJECT, true);
+    }
+
+    /** @return the document, with the inputs {@link #paramsOf} finds in its text */
+    private static Document documentOf(String name, String yaml, String origin, boolean editable) {
+        return new Document(name, yaml, origin, editable, paramsOf(yaml));
+    }
+
+    /**
+     * The inputs a workflow asks a run to give it.
+     *
+     * <p>A workflow declares them in its {@code params} section, and the form is drawn from that
+     * declaration rather than inferred ({@code WorkflowInputParams_260701_oo01}). A workflow with
+     * no such section — every workflow written before the convention — still refers to
+     * <code>${key}</code> in its body, so those are read out of the text instead, each as a
+     * required one-line string. <code>${result}</code> is the previous transition's result, not an
+     * input, so it is never one of them.</p>
+     *
+     * @param yaml the workflow's whole text
+     * @return the inputs, declared ones in declared order, else scanned ones in the order they
+     *         appear; empty when there are none or the text cannot be read as YAML
+     */
+    public static List<ParamSpec> paramsOf(String yaml) {
+        if (yaml == null || yaml.isBlank()) return List.of();
+        List<ParamSpec> declared = declaredParams(yaml);
+        return declared.isEmpty() ? scannedParams(yaml) : declared;
+    }
+
+    /** @return the {@code params} section read as YAML, or empty when there is none */
+    private static List<ParamSpec> declaredParams(String yaml) {
+        Object params;
+        try {
+            Object doc = new Yaml().load(yaml);
+            params = doc instanceof Map<?, ?> m ? m.get("params") : null;
+        } catch (Exception e) {
+            LOG.log(Level.FINE, "Could not read the params section", e);
+            return List.of();
+        }
+        if (!(params instanceof Map<?, ?> declared)) return List.of();
+        List<ParamSpec> out = new ArrayList<>();
+        for (Map.Entry<?, ?> e : declared.entrySet()) {
+            String key = String.valueOf(e.getKey());
+            if (key.isBlank()) continue;
+            out.add(specOf(key, e.getValue()));
+        }
+        return List.copyOf(out);
+    }
+
+    /**
+     * @param declaration the value under the key: the six fields as a map, or a bare string, which
+     *                    older workflows use for the description alone
+     */
+    private static ParamSpec specOf(String key, Object declaration) {
+        if (!(declaration instanceof Map<?, ?> m)) {
+            String description = declaration == null ? "" : String.valueOf(declaration);
+            return new ParamSpec(key, null, description, "text", true, null, List.of());
+        }
+        String label = text(m.get("label"));
+        String description = text(m.get("description"));
+        String type = text(m.get("type"));
+        String defaultValue = m.get("default") == null ? null : String.valueOf(m.get("default"));
+        Object required = m.get("required");
+        boolean isRequired = required == null
+                ? defaultValue == null
+                : Boolean.parseBoolean(String.valueOf(required));
+        List<String> options = new ArrayList<>();
+        if (m.get("options") instanceof List<?> declared) {
+            for (Object o : declared) options.add(String.valueOf(o));
+        }
+        return new ParamSpec(key,
+                label == null || label.isEmpty() ? null : label,
+                description == null ? "" : description,
+                type == null || type.isEmpty() ? "text" : type,
+                isRequired, defaultValue, List.copyOf(options));
+    }
+
+    /**
+     * @return the values the text reads without declaring — {@code state.get('key')} and the older
+     *         <code>${key}</code> — in the order they appear, each once, without the result
+     */
+    private static List<ParamSpec> scannedParams(String yaml) {
+        Map<String, ParamSpec> byKey = new LinkedHashMap<>();
+        for (Pattern pattern : List.of(STATE_READ, PLACEHOLDER)) {
+            var m = pattern.matcher(yaml);
+            while (m.find()) {
+                String key = m.group(1).strip();
+                if (key.isEmpty() || RESULT_VARIABLE.equals(key) || byKey.containsKey(key)) continue;
+                byKey.put(key, new ParamSpec(key, null, "", "text", true, null, List.of()));
+            }
+        }
+        return List.copyOf(byKey.values());
+    }
+
+    private static String text(Object value) {
+        return value == null ? null : String.valueOf(value).strip();
     }
 
     /** @return the project's own workflows, basename to text; empty when it has no directory */

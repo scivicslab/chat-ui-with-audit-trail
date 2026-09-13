@@ -690,3 +690,18 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
 .sess-settings { margin: 4px 0 8px; padding: 4px 8px; border-left: 2px solid var(--accent, #6a8); font-size: 12px; }
 .sess-settings-head { color: var(--text-secondary, #888); margin-bottom: 2px; }
 .sess-settings-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Run tab: one field per input the open workflow declares (JobParameterForm_260913_oo01) */
+.jobrun-param { padding: 6px 12px; border-bottom: 1px solid var(--border-color, #1f1f1f); }
+.jobrun-param-key { display: block; font-size: 12px; margin-bottom: 2px; }
+.jobrun-param-required { color: var(--error-text, #f66); margin-left: 3px; }
+.jobrun-param input[type="text"], .jobrun-param textarea, .jobrun-param select {
+    width: 100%; box-sizing: border-box; font-size: 12px; padding: 3px 6px;
+    background: var(--bg-secondary, #1b1b1b); color: var(--text-primary, #ddd);
+    border: 1px solid var(--border-color, #333); border-radius: 3px;
+}
+.jobrun-param textarea { min-height: 4.5em; font-family: var(--font-mono, monospace); }
+.jobrun-param-desc { font-size: 11px; color: var(--text-secondary, #9aa0a6); margin-top: 2px; }
+.jobrun-param-missing input, .jobrun-param-missing textarea, .jobrun-param-missing select {
+    border-color: var(--error-text, #a44);
+}

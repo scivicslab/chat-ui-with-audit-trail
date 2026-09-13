@@ -53,19 +53,133 @@
         return !!el && el.classList.contains("active") && perspective === "project";
     }
 
-    // Run tab: mirrors what the centre pane has open.
+    // Run tab: mirrors what the centre pane has open, with one field per input that workflow
+    // declares in its params section (JobParameterForm_260913_oo01).
     function jobRunOnShow() {
         setText("jobrun-workflow", projectWfOpenName || "(none open)");
         var btn = document.getElementById("jobrun-run");
         if (btn) btn.disabled = !projectWfOpenName;
+        jobRunRenderParams();
+    }
+
+    /** @return the inputs of the workflow the centre pane has open, or [] when none is open */
+    function jobRunParams() {
+        if (!projectWfDoc || projectWfDoc.name !== projectWfOpenName) return [];
+        return projectWfDoc.params || [];
+    }
+
+    function jobRunFieldEl(p) {
+        var wrap = document.createElement("div");
+        wrap.className = "jobrun-param";
+        wrap.dataset.paramKey = p.key;
+
+        var label = document.createElement("label");
+        label.className = "jobrun-param-key";
+        label.textContent = p.label || p.key;
+        if (p.required) {
+            var star = document.createElement("span");
+            star.className = "jobrun-param-required";
+            star.textContent = "*";
+            label.appendChild(star);
+        }
+        wrap.appendChild(label);
+
+        var field;
+        if (p.type === "textarea") {
+            field = document.createElement("textarea");
+        } else if (p.type === "select" && (p.options || []).length > 0) {
+            field = document.createElement("select");
+            p.options.forEach(function (o) {
+                var opt = document.createElement("option");
+                opt.value = o;
+                opt.textContent = o;
+                field.appendChild(opt);
+            });
+        } else if (p.type === "bool") {
+            field = document.createElement("input");
+            field.type = "checkbox";
+        } else {
+            field = document.createElement("input");
+            field.type = p.type === "int" ? "number" : "text";
+        }
+        field.className = "jobrun-param-input";
+        if (p.defaultValue !== null && p.defaultValue !== undefined) {
+            if (p.type === "bool") field.checked = p.defaultValue === "true";
+            else field.value = p.defaultValue;
+        }
+        wrap.appendChild(field);
+
+        if (p.description) {
+            var desc = document.createElement("div");
+            desc.className = "jobrun-param-desc";
+            desc.textContent = p.description;
+            wrap.appendChild(desc);
+        }
+        return wrap;
+    }
+
+    function jobRunRenderParams() {
+        var box = document.getElementById("jobrun-params");
+        var hint = document.getElementById("jobrun-hint");
+        if (!box) return;
+        box.innerHTML = "";
+        var params = jobRunParams();
+        params.forEach(function (p) { box.appendChild(jobRunFieldEl(p)); });
+        if (hint) {
+            hint.style.display = params.length > 0 ? "none" : "";
+            if (projectWfOpenName && params.length === 0) {
+                hint.textContent = projectWfOpenName + " declares no inputs. Press Run to start it.";
+            } else if (!projectWfOpenName) {
+                hint.textContent = "Open a workflow in the centre pane, then Run. The job appears under"
+                    + " Batch Jobs, and its log under Job Log.";
+            }
+        }
+    }
+
+    /** @return what the fields hold, keyed by the name the workflow declared */
+    function jobRunValues() {
+        var out = {};
+        document.querySelectorAll("#jobrun-params .jobrun-param").forEach(function (wrap) {
+            var field = wrap.querySelector(".jobrun-param-input");
+            if (!field) return;
+            out[wrap.dataset.paramKey] = field.type === "checkbox"
+                ? String(field.checked)
+                : field.value;
+        });
+        return out;
+    }
+
+    /** Marks the first required field left empty and returns its key, or null when all are filled. */
+    function jobRunFirstMissing(values) {
+        var missing = null;
+        document.querySelectorAll("#jobrun-params .jobrun-param").forEach(function (wrap) {
+            wrap.classList.remove("jobrun-param-missing");
+        });
+        jobRunParams().forEach(function (p) {
+            if (missing || !p.required) return;
+            var value = values[p.key];
+            if (value !== undefined && String(value).trim() !== "") return;
+            missing = p.key;
+            var wrap = document.querySelector('#jobrun-params .jobrun-param[data-param-key="'
+                + (window.CSS && CSS.escape ? CSS.escape(p.key) : p.key) + '"]');
+            if (wrap) {
+                wrap.classList.add("jobrun-param-missing");
+                var field = wrap.querySelector(".jobrun-param-input");
+                if (field) field.focus();
+            }
+        });
+        return missing;
     }
 
     function jobRun() {
         var url = projectJobsUrl("");
         if (!url || !projectWfOpenName) return;
+        var values = jobRunValues();
+        var missing = jobRunFirstMissing(values);
+        if (missing) { setText("jobrun-status", missing + " is required"); return; }
         setText("jobrun-status", "starting…");
         fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
-                     body: JSON.stringify({ workflow: projectWfOpenName }) })
+                     body: JSON.stringify({ workflow: projectWfOpenName, parameters: values }) })
             .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; }); })
             .then(function (res) {
                 if (!res.ok) { setText("jobrun-status", (res.body && res.body.error) || ("HTTP " + res.status)); return; }

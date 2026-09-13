@@ -10,6 +10,8 @@ import com.scivicslab.turingworkflow.plugins.logoutput.MultiplexerAccumulatorAct
 import com.scivicslab.turingworkflow.workflow.IIActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 
+import org.json.JSONObject;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -210,6 +212,23 @@ public class Project {
      * @throws IllegalStateException when {@link #bind} has not run
      */
     public JobView startJob(String workflow, String yaml) {
+        return startJob(workflow, yaml, Map.of());
+    }
+
+    /**
+     * Starts one workflow as a job, with the values its <code>${key}</code> stand for.
+     *
+     * <p>The values are put into the runner's own JSON state before the run starts, which is where
+     * <code>${key}</code> is read from — the same thing {@code RunCLI} does with {@code -P}
+     * ({@code JobParameterForm_260913_oo01}). The workflow's text is left as written, so what runs
+     * is what the catalog shows and the log line below says what it ran with.</p>
+     *
+     * @param workflow   the name the catalog lists it under
+     * @param yaml       its text
+     * @param parameters the values, keyed by the name the workflow refers to; may be empty
+     * @return the job, as it is at the moment it starts
+     */
+    public JobView startJob(String workflow, String yaml, Map<String, String> parameters) {
         if (self == null || system == null) {
             throw new IllegalStateException("project " + projectId + " is not bound to an actor system");
         }
@@ -237,9 +256,11 @@ public class Project {
         // Every transition the runner leaves is one line in the job's log.
         runner.setStepListener(line -> log(name, "INFO", line));
 
+        seedParameters(runnerRef, parameters);
+
         JobView view = new JobView(jobId, name, workflow, RUNNING, Instant.now(), null, null);
         jobs.put(jobId, view);
-        log(name, "INFO", "started workflow " + workflow);
+        log(name, "INFO", "started workflow " + workflow + describe(parameters));
 
         ActorRef<Project> me = self;
         CompletableFuture<String> done = RunPlanTool.start(runnerRef, name, yaml);
@@ -251,6 +272,36 @@ public class Project {
                 runnerRef.tell(interp -> { })
                          .whenComplete((v, ignored) -> me.tell(p -> p.jobFinished(jobId, result, error))));
         return view;
+    }
+
+    /**
+     * Puts the run's values where <code>${key}</code> is read from: the runner's own JSON state,
+     * through the {@code putJson} action every {@code IIActorRef} answers. Called before the run
+     * is queued, so nothing else is on that mailbox yet.
+     */
+    private static void seedParameters(PlanRunnerIIAR runner, Map<String, String> parameters) {
+        if (parameters == null) return;
+        for (Map.Entry<String, String> e : parameters.entrySet()) {
+            if (e.getKey() == null || e.getKey().isBlank() || e.getValue() == null) continue;
+            String args = new JSONObject()
+                    .put("path", e.getKey())
+                    .put("value", e.getValue())
+                    .toString();
+            runner.callByActionName("putJson", args);
+        }
+    }
+
+    /** @return {@code " with query=…, perPage=…"}, or {@code ""} when the run was given nothing */
+    private static String describe(Map<String, String> parameters) {
+        if (parameters == null || parameters.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder(" with ");
+        boolean first = true;
+        for (Map.Entry<String, String> e : parameters.entrySet()) {
+            if (!first) sb.append(", ");
+            sb.append(e.getKey()).append('=').append(e.getValue());
+            first = false;
+        }
+        return sb.toString();
     }
 
     /**
