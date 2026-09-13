@@ -177,6 +177,70 @@ public class PlanRunner extends Interpreter {
     }
 
     /**
+     * Plan step: hands {@code prompt} to one worker slot and waits for its reply
+     * ({@code ChainedRolesInAPlan_260913_oo01}).
+     *
+     * <p>The way to give a conversation a prompt this plan computed. {@code apply} cannot: its
+     * inner {@code arguments} sit inside the outer action's arguments, and the interpreter
+     * evaluates {@code jexl:} only at the top level, so a computed prompt reaches the conversation
+     * as the text {@code jexl:…}. This method's arguments are top-level, so
+     * <code>jexl:'…' + state.getString('draft')</code> is evaluated before it is called.
+     * {@code apply} remains what fans one fixed prompt out to several slots at once.</p>
+     *
+     * @param workerId the slot's short id, as {@link #addWorker} was given it
+     * @param prompt   what to ask the conversation behind it
+     * @return {@link ActionResult} with {@code success=true} iff that slot exists and replied
+     */
+    public ActionResult askWorker(String workerId, String prompt) {
+        if (selfActorRef == null || system == null) {
+            return new ActionResult(false, "plan runner is not wired to an actor system");
+        }
+        if (workerId == null || workerId.isBlank()) return new ActionResult(false, "workerId is required");
+        if (prompt == null || prompt.isBlank()) return new ActionResult(false, "prompt is required");
+        String workerName = myName + ".worker-" + workerId;
+        Object child = system.getIIActor(workerName);
+        if (!(child instanceof PlanWorkerIIAR workerIIAR)) {
+            return new ActionResult(false, "no worker slot named " + workerName);
+        }
+        ActionResult asked = workerIIAR.worker().ask(prompt);
+        if (asked.isSuccess()) lastReply = workerIIAR.worker().lastReply();
+        return asked;
+    }
+
+    /**
+     * Plan step: puts what one worker slot last replied into this plan's own state, under
+     * {@code key}, so a later step can hand it to somebody else with
+     * <code>jexl:state.getString('key')</code> ({@code ChainedRolesInAPlan_260913_oo01}).
+     *
+     * <p>What a plan needs to pass a draft from a writer to a reviewer, and the reviewer's
+     * criticism back to the writer. {@code collectWorkerReplies} gathers every slot at once and is
+     * the end of a fan-out; this takes one slot and is the middle of a chain. An expression cannot
+     * read the slot itself: JEXL may only call methods on the engine's own packages, so
+     * {@code actors.get(…).lastReply()} answers {@code null} for a conversation's slot.</p>
+     *
+     * @param workerId the slot's short id, as {@link #addWorker} was given it
+     * @param key      where to put the reply in this plan's state
+     * @return {@link ActionResult} with {@code success=true} iff that slot exists and has replied
+     */
+    public ActionResult keepWorkerReply(String workerId, String key) {
+        if (selfActorRef == null || system == null) {
+            return new ActionResult(false, "plan runner is not wired to an actor system");
+        }
+        if (workerId == null || workerId.isBlank()) return new ActionResult(false, "workerId is required");
+        if (key == null || key.isBlank()) return new ActionResult(false, "key is required");
+        String workerName = myName + ".worker-" + workerId;
+        Object child = system.getIIActor(workerName);
+        if (!(child instanceof PlanWorkerIIAR workerIIAR)) {
+            return new ActionResult(false, "no worker slot named " + workerName);
+        }
+        String reply = workerIIAR.worker().lastReply();
+        if (reply == null) return new ActionResult(false, workerName + " has not replied yet");
+        selfActorRef.putJson(key, reply);
+        return new ActionResult(true, "kept " + reply.length() + " chars of " + workerName
+                + " as '" + key + "'");
+    }
+
+    /**
      * Plan step: gathers what every worker slot replied into this plan's result, in slot-name order
      * so the output does not depend on which slot happened to finish first.
      *
@@ -210,7 +274,23 @@ public class PlanRunner extends Interpreter {
      * @return {@link ActionResult} with {@code success=true} always
      */
     public ActionResult finish() {
-        complete(lastReply != null ? lastReply : "(plan finished with no result)");
+        return finish(null);
+    }
+
+    /**
+     * Terminal step: hands back what this plan's state holds under {@code key}, or its last reply
+     * when no key is given ({@code ChainedRolesInAPlan_260913_oo01}). A chain that kept each role's
+     * answer with {@link #keepWorkerReply} names the one that is the plan's product, rather than
+     * ending with whatever the last step happened to answer.
+     *
+     * @param key where the result is in this plan's state, or {@code null} for the last reply
+     * @return {@link ActionResult} with {@code success=true} always
+     */
+    public ActionResult finish(String key) {
+        String kept = (key == null || key.isBlank() || selfActorRef == null)
+                ? null : selfActorRef.getJsonString(key);
+        String result = kept != null && !kept.isBlank() ? kept : lastReply;
+        complete(result != null ? result : "(plan finished with no result)");
         return new ActionResult(true, "finished");
     }
 

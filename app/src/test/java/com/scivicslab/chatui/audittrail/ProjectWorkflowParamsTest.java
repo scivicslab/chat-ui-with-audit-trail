@@ -111,22 +111,21 @@ class ProjectWorkflowParamsTest {
     }
 
     @Test
-    void withoutADeclaration_theStateReadsAreTheInputsToo() {
+    void whatAWorkflowPutsInItsOwnState_isNotAnInputToAskFor() {
         String yaml = """
-                name: search
+                name: polish
                 steps:
-                  - states: ["0", "end"]
+                  - states: ["0", "1"]
+                    actions: [{actor: this, method: keepWorkerReply, arguments: ["writer", "draft"]}]
+                  - states: ["1", "end"]
                     actions:
-                      - actor: openalex
-                        method: searchWorks
-                        arguments: "jexl:state.get('query')"
-                      - actor: out
-                        method: print
-                        arguments: "jexl:state.getInt(\"perPage\", 10)"
+                      - actor: this
+                        method: askWorker
+                        arguments: ["reviewer", 'jexl:"criticise:" + state.getString("draft")']
                 """;
 
-        assertEquals(List.of("query", "perPage"), ProjectWorkflowCatalog.paramsOf(yaml).stream()
-                .map(ProjectWorkflowCatalog.ParamSpec::key).toList());
+        assertTrue(ProjectWorkflowCatalog.paramsOf(yaml).isEmpty(),
+                "draft is what the plan kept, not what a person types");
     }
 
     @Test

@@ -62,10 +62,6 @@ public final class ProjectWorkflowCatalog {
     private static final Pattern NAME_LINE = Pattern.compile("(?m)^name:\\s*(.+?)\\s*$");
     private static final Pattern DESCRIPTION_LINE = Pattern.compile("(?m)^description:\\s*(.*?)\\s*$");
 
-    /** How a workflow of this engine's version reads a run's value: {@code state.getString('key')}. */
-    private static final Pattern STATE_READ =
-            Pattern.compile("state\\.get(?:String|Int|Long|Double|Boolean)?\\(\\s*['\"]([^'\"]+)['\"]");
-
     /** How a workflow written for Turing-workflow 3 wrote it. Still found in older files. */
     private static final Pattern PLACEHOLDER = Pattern.compile("\\$\\{([^}]+)\\}");
 
@@ -310,18 +306,18 @@ public final class ProjectWorkflowCatalog {
     }
 
     /**
-     * @return the values the text reads without declaring — {@code state.get('key')} and the older
-     *         <code>${key}</code> — in the order they appear, each once, without the result
+     * @return the <code>${key}</code> the text carries, in the order they appear, each once,
+     *         without the result. {@code state.getString('key')} is deliberately not scanned: a
+     *         workflow reads its own state that way too — what {@code keepWorkerReply} put there —
+     *         and asking a person to fill those in is wrong ({@code ChainedRolesInAPlan_260913_oo01})
      */
     private static List<ParamSpec> scannedParams(String yaml) {
         Map<String, ParamSpec> byKey = new LinkedHashMap<>();
-        for (Pattern pattern : List.of(STATE_READ, PLACEHOLDER)) {
-            var m = pattern.matcher(yaml);
-            while (m.find()) {
-                String key = m.group(1).strip();
-                if (key.isEmpty() || RESULT_VARIABLE.equals(key) || byKey.containsKey(key)) continue;
-                byKey.put(key, new ParamSpec(key, null, "", "text", true, null, List.of()));
-            }
+        var m = PLACEHOLDER.matcher(yaml);
+        while (m.find()) {
+            String key = m.group(1).strip();
+            if (key.isEmpty() || RESULT_VARIABLE.equals(key) || byKey.containsKey(key)) continue;
+            byKey.put(key, new ParamSpec(key, null, "", "text", true, null, List.of()));
         }
         return List.copyOf(byKey.values());
     }

@@ -30,10 +30,19 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
             org.json.JSONArray a = arguments(arg);
             return runner().addWorker(a.length() > 0 ? a.getString(0) : "",
                     a.length() > 1 ? a.getString(1) : "");
+        } else if (actionName.equals("askWorker")) {
+            org.json.JSONArray a = arguments(arg);
+            return runner().askWorker(a.length() > 0 ? a.getString(0) : "",
+                    a.length() > 1 ? a.getString(1) : "");
+        } else if (actionName.equals("keepWorkerReply")) {
+            org.json.JSONArray a = arguments(arg);
+            return runner().keepWorkerReply(a.length() > 0 ? a.getString(0) : "",
+                    a.length() > 1 ? a.getString(1) : "");
         } else if (actionName.equals("collectWorkerReplies")) {
             return runner().collectWorkerReplies();
         } else if (actionName.equals("finish")) {
-            return runner().finish();
+            org.json.JSONArray a = arguments(arg);
+            return runner().finish(a.length() > 0 ? a.getString(0) : null);
         } else if (actionName.equals("reportFailure")) {
             return runner().reportFailure();
         }
