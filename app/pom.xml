@@ -105,6 +105,13 @@
       <groupId>org.jsoup</groupId>
       <artifactId>jsoup</artifactId>
     </dependency>
+    <!-- Carried for the web-tools plugin, whose fetch extracts PDFs to text; plugin jars must not
+         bundle their dependencies (ProviderAndToolPlugins_260912_oo01), so the body provides it. -->
+    <dependency>
+      <groupId>org.apache.pdfbox</groupId>
+      <artifactId>pdfbox</artifactId>
+      <version>${pdfbox.version}</version>
+    </dependency>
     <!-- Health probe for Kubernetes, per the project standard -->
     <dependency>
       <groupId>io.quarkus</groupId>

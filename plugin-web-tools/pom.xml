@@ -31,6 +31,14 @@
       <artifactId>json</artifactId>
       <scope>provided</scope>
     </dependency>
+    <!-- PDF text extraction for fetch. Provided by the body like jsoup: the plugin class loader's
+         parent is the body's, so a dependency bundled here would not be seen anyway. -->
+    <dependency>
+      <groupId>org.apache.pdfbox</groupId>
+      <artifactId>pdfbox</artifactId>
+      <version>${pdfbox.version}</version>
+      <scope>provided</scope>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>

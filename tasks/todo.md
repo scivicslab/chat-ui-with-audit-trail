@@ -39,6 +39,6 @@
 - [x] `WebToolsPlugin` に `scholar_search` を登録、`fetch` の説明に PDF を追記
 - [x] pom: `pdfbox.version=3.0.3`。plugin では provided、app で compile（plugin の class loader の親は本体）
 - [x] テスト: `ScholarSearchToolTest`（URL・limit・year・要旨の復元・整形）、`FetchToolPdfTest`（PDFBox で作った PDF の抽出・60 ページ上限・charset）
-- [ ] `rm -rf */target && mvn install`、OpenAlex と PDF の実機確認
-- [ ] 設計文書 `doc_SCIVICS003/.../100_providers/050_ScholarSearchAndPdfFetch_260913_oo01`
+- [x] `rm -rf */target && mvn install`（app 126・web-tools 17・harness 14 件 GREEN）。使い捨て 28040 で plugin 読み込み → `scholar_search`（OpenAlex 421 件）→ `fetch`（オープンアクセス PDF 5,030 文字）→ 回答、20 秒
+- [x] 設計文書 `doc_SCIVICS003/.../100_providers/050_ScholarSearchAndPdfFetch_260913_oo01`
 - [ ] 自分のファイルだけを commit（作業ツリーには別セッションの未コミット変更がある。`git add -A` を使わない）。push は確認を取る

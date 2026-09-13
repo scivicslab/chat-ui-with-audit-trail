@@ -31,6 +31,8 @@
     <pojo-actor.version>4.1.0</pojo-actor.version>
     <turing-workflow.version>4.1.0</turing-workflow.version>
     <jsoup.version>1.18.3</jsoup.version>
+    <!-- fetch extracts PDFs to text (ScholarSearchAndPdfFetch_260913_oo01); same version as quarkus-english-toolkit -->
+    <pdfbox.version>3.0.3</pdfbox.version>
   </properties>
 
   <dependencyManagement>
