@@ -365,6 +365,27 @@ public class PlanRunner extends Interpreter {
     }
 
     /**
+     * Plan step: copies one value of this plan's state to another key
+     * ({@code KeepTheFactsWhileCutting_260913_oo01}).
+     *
+     * <p>What lets a judge compare before with after: the text is copied aside before the step that
+     * rewrites it, and the judge is given both.</p>
+     *
+     * @param from which value to copy
+     * @param to   where to put the copy
+     * @return {@link ActionResult} with {@code success=true} iff there was something to copy
+     */
+    public ActionResult copyState(String from, String to) {
+        if (selfActorRef == null) return new ActionResult(false, "plan runner is not wired to an actor system");
+        if (from == null || from.isBlank()) return new ActionResult(false, "from is required");
+        if (to == null || to.isBlank()) return new ActionResult(false, "to is required");
+        String value = selfActorRef.getJsonString(from);
+        if (value == null) return new ActionResult(false, "nothing is kept as '" + from + "'");
+        selfActorRef.putJson(to, value);
+        return new ActionResult(true, "copied " + value.length() + " chars of '" + from + "' to '" + to + "'");
+    }
+
+    /**
      * Plan step: succeeds when what the plan kept under {@code key} begins with {@code expected}
      * ({@code OneCriterionPerTurn_260913_oo01}).
      *

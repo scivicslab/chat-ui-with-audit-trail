@@ -55,6 +55,10 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
             org.json.JSONArray a = arguments(arg);
             return runner().takeNext(a.length() > 0 ? a.getString(0) : "",
                     a.length() > 1 ? a.getString(1) : "");
+        } else if (actionName.equals("copyState")) {
+            org.json.JSONArray a = arguments(arg);
+            return runner().copyState(a.length() > 0 ? a.getString(0) : "",
+                    a.length() > 1 ? a.getString(1) : "");
         } else if (actionName.equals("checkState")) {
             org.json.JSONArray a = arguments(arg);
             return runner().checkState(a.length() > 0 ? a.getString(0) : "",

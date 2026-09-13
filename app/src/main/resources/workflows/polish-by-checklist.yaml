@@ -2,8 +2,9 @@ name: polish-by-checklist
 description: |
   Fixes one text against a checklist, one item at a time: the fixer is told a single criterion and
   nothing else, and a judge decides whether that criterion is met before the plan moves to the next
-  one. An item that is not met goes back to the fixer with the judge's words, twice, after which the
-  plan keeps the best text and carries on.
+  one. The two criteria that remove things also carry the rule that no fact may be lost — what is
+  off the thread moves to a 雑記 section — and their judges are given the text as it was before, to
+  compare against.
 params:
   text:
     label: "The text"
@@ -61,12 +62,11 @@ steps:
 
   - states: ["check-1", "redo-1"]
     label: again-1
-    note: Reached only when the judge did not accept; fails once the budget for this criterion is spent.
     actions: [{actor: this, method: countUp, arguments: ["tries-1", 'jexl:state.getString("tries")'], execution: direct}]
 
   - states: ["check-1", "fix-2"]
     label: give-up-1
-    note: Budget spent. Keeps the text as it stands and moves on to the next criterion.
+    note: Budget spent for this criterion. Keeps the text as it stands.
     actions: [{actor: this, method: keepWorkerReply, arguments: ["fixer", "text"], execution: direct}]
 
   - states: ["redo-1", "judge-1"]
@@ -85,11 +85,15 @@ steps:
   - states: ["fix-2", "judge-2"]
     label: fix-2-thread
     note: |
-      話の筋と文の並びを一致させる。筋から外れた話、言い訳、飾りの語を削る。
+      話の筋と文の並びを一致させる。筋から外れた話、言い訳、飾りの語を本文から外す。
     actions:
       - actor: this
+        method: copyState
+        arguments: ["text", "before"]
+        execution: direct
+      - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"次の観点だけで本文を直してください。ほかの観点では直さないでください。直した本文だけを返してください。\n\n観点:\n話の筋と文の並びを一致させる。筋から外れた話、言い訳、飾りの語を削る。\n\n本文:\n" + state.getString("text")']
+        arguments: ["fixer", 'jexl:"次の観点だけで本文を直してください。ほかの観点では直さないでください。直した本文だけを返してください。事実を削らないでください。筋から外れると判断した事実は、本文から外したうえで、末尾の「## 雑記」の節に箇条書きで移してください（順不同でかまいません）。「## 参考資料」の節があれば、その直前に「## 雑記」を置いてください。\n\n観点:\n話の筋と文の並びを一致させる。筋から外れた話、言い訳、飾りの語を本文から外す。\n\n本文:\n" + state.getString("text")']
         execution: direct
       - actor: this
         method: keepWorkerReply
@@ -101,7 +105,7 @@ steps:
     actions:
       - actor: this
         method: askWorker
-        arguments: ["judge", 'jexl:"次の本文が、この観点を満たしているかだけを見てください。満たしていれば ACCEPT の一語だけを返してください。満たしていなければ REVISE: に続けて、直っていない箇所を具体的に挙げてください。ほかのことは書かないでください。\n\n観点:\n話の筋と文の並びを一致させる。筋から外れた話、言い訳、飾りの語を削る。\n\n本文:\n" + state.getString("text")']
+        arguments: ["judge", 'jexl:"直した本文が、この観点を満たしているか、そして元の本文にあった事実が全部残っているかを見てください。事実は、本文の中か「## 雑記」の節のどちらかに残っていればよく、場所が変わっただけなら問題ありません。両方を満たしていれば ACCEPT の一語だけを返してください。満たしていなければ REVISE: に続けて、直っていない箇所と、消えた事実を具体的に挙げてください。ほかのことは書かないでください。\n\n観点:\n話の筋と文の並びを一致させる。筋から外れた話、言い訳、飾りの語を本文から外す。\n\n元の本文:\n" + state.getString("before") + "\n\n直した本文:\n" + state.getString("text")']
         execution: direct
       - actor: this
         method: keepWorkerReply
@@ -114,12 +118,11 @@ steps:
 
   - states: ["check-2", "redo-2"]
     label: again-2
-    note: Reached only when the judge did not accept; fails once the budget for this criterion is spent.
     actions: [{actor: this, method: countUp, arguments: ["tries-2", 'jexl:state.getString("tries")'], execution: direct}]
 
   - states: ["check-2", "fix-3"]
     label: give-up-2
-    note: Budget spent. Keeps the text as it stands and moves on to the next criterion.
+    note: Budget spent for this criterion. Keeps the text as it stands.
     actions: [{actor: this, method: keepWorkerReply, arguments: ["fixer", "text"], execution: direct}]
 
   - states: ["redo-2", "judge-2"]
@@ -127,7 +130,7 @@ steps:
     actions:
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"直りきっていないと指摘されました。同じ観点のまま、指摘に従って直してください。直した本文だけを返してください。\n\n観点:\n話の筋と文の並びを一致させる。筋から外れた話、言い訳、飾りの語を削る。\n\n指摘:\n" + state.getString("verdict") + "\n\n本文:\n" + state.getString("text")']
+        arguments: ["fixer", 'jexl:"直りきっていないと指摘されました。同じ観点のまま、指摘に従って直してください。直した本文だけを返してください。事実を削らないでください。筋から外れると判断した事実は、本文から外したうえで、末尾の「## 雑記」の節に箇条書きで移してください（順不同でかまいません）。「## 参考資料」の節があれば、その直前に「## 雑記」を置いてください。\n\n観点:\n話の筋と文の並びを一致させる。筋から外れた話、言い訳、飾りの語を本文から外す。\n\n指摘:\n" + state.getString("verdict") + "\n\n本文:\n" + state.getString("text")']
         execution: direct
       - actor: this
         method: keepWorkerReply
@@ -141,8 +144,12 @@ steps:
       「〜ではない」という否定の説明を全部消す。読者がそれを期待している場合だけ残してよい。
     actions:
       - actor: this
+        method: copyState
+        arguments: ["text", "before"]
+        execution: direct
+      - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"次の観点だけで本文を直してください。ほかの観点では直さないでください。直した本文だけを返してください。\n\n観点:\n「〜ではない」という否定の説明を全部消す。読者がそれを期待している場合だけ残してよい。\n\n本文:\n" + state.getString("text")']
+        arguments: ["fixer", 'jexl:"次の観点だけで本文を直してください。ほかの観点では直さないでください。直した本文だけを返してください。事実を削らないでください。筋から外れると判断した事実は、本文から外したうえで、末尾の「## 雑記」の節に箇条書きで移してください（順不同でかまいません）。「## 参考資料」の節があれば、その直前に「## 雑記」を置いてください。\n\n観点:\n「〜ではない」という否定の説明を全部消す。読者がそれを期待している場合だけ残してよい。\n\n本文:\n" + state.getString("text")']
         execution: direct
       - actor: this
         method: keepWorkerReply
@@ -154,7 +161,7 @@ steps:
     actions:
       - actor: this
         method: askWorker
-        arguments: ["judge", 'jexl:"次の本文が、この観点を満たしているかだけを見てください。満たしていれば ACCEPT の一語だけを返してください。満たしていなければ REVISE: に続けて、直っていない箇所を具体的に挙げてください。ほかのことは書かないでください。\n\n観点:\n「〜ではない」という否定の説明を全部消す。読者がそれを期待している場合だけ残してよい。\n\n本文:\n" + state.getString("text")']
+        arguments: ["judge", 'jexl:"直した本文が、この観点を満たしているか、そして元の本文にあった事実が全部残っているかを見てください。事実は、本文の中か「## 雑記」の節のどちらかに残っていればよく、場所が変わっただけなら問題ありません。両方を満たしていれば ACCEPT の一語だけを返してください。満たしていなければ REVISE: に続けて、直っていない箇所と、消えた事実を具体的に挙げてください。ほかのことは書かないでください。\n\n観点:\n「〜ではない」という否定の説明を全部消す。読者がそれを期待している場合だけ残してよい。\n\n元の本文:\n" + state.getString("before") + "\n\n直した本文:\n" + state.getString("text")']
         execution: direct
       - actor: this
         method: keepWorkerReply
@@ -167,12 +174,11 @@ steps:
 
   - states: ["check-3", "redo-3"]
     label: again-3
-    note: Reached only when the judge did not accept; fails once the budget for this criterion is spent.
     actions: [{actor: this, method: countUp, arguments: ["tries-3", 'jexl:state.getString("tries")'], execution: direct}]
 
   - states: ["check-3", "fix-4"]
     label: give-up-3
-    note: Budget spent. Keeps the text as it stands and moves on to the next criterion.
+    note: Budget spent for this criterion. Keeps the text as it stands.
     actions: [{actor: this, method: keepWorkerReply, arguments: ["fixer", "text"], execution: direct}]
 
   - states: ["redo-3", "judge-3"]
@@ -180,7 +186,7 @@ steps:
     actions:
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"直りきっていないと指摘されました。同じ観点のまま、指摘に従って直してください。直した本文だけを返してください。\n\n観点:\n「〜ではない」という否定の説明を全部消す。読者がそれを期待している場合だけ残してよい。\n\n指摘:\n" + state.getString("verdict") + "\n\n本文:\n" + state.getString("text")']
+        arguments: ["fixer", 'jexl:"直りきっていないと指摘されました。同じ観点のまま、指摘に従って直してください。直した本文だけを返してください。事実を削らないでください。筋から外れると判断した事実は、本文から外したうえで、末尾の「## 雑記」の節に箇条書きで移してください（順不同でかまいません）。「## 参考資料」の節があれば、その直前に「## 雑記」を置いてください。\n\n観点:\n「〜ではない」という否定の説明を全部消す。読者がそれを期待している場合だけ残してよい。\n\n指摘:\n" + state.getString("verdict") + "\n\n本文:\n" + state.getString("text")']
         execution: direct
       - actor: this
         method: keepWorkerReply
@@ -220,12 +226,11 @@ steps:
 
   - states: ["check-4", "redo-4"]
     label: again-4
-    note: Reached only when the judge did not accept; fails once the budget for this criterion is spent.
     actions: [{actor: this, method: countUp, arguments: ["tries-4", 'jexl:state.getString("tries")'], execution: direct}]
 
   - states: ["check-4", "fix-5"]
     label: give-up-4
-    note: Budget spent. Keeps the text as it stands and moves on to the next criterion.
+    note: Budget spent for this criterion. Keeps the text as it stands.
     actions: [{actor: this, method: keepWorkerReply, arguments: ["fixer", "text"], execution: direct}]
 
   - states: ["redo-4", "judge-4"]
@@ -273,12 +278,11 @@ steps:
 
   - states: ["check-5", "redo-5"]
     label: again-5
-    note: Reached only when the judge did not accept; fails once the budget for this criterion is spent.
     actions: [{actor: this, method: countUp, arguments: ["tries-5", 'jexl:state.getString("tries")'], execution: direct}]
 
   - states: ["check-5", "done"]
     label: give-up-5
-    note: Budget spent. Keeps the text as it stands and moves on to the next criterion.
+    note: Budget spent for this criterion. Keeps the text as it stands.
     actions: [{actor: this, method: keepWorkerReply, arguments: ["fixer", "text"], execution: direct}]
 
   - states: ["redo-5", "judge-5"]
