@@ -241,6 +241,64 @@ public class PlanRunner extends Interpreter {
     }
 
     /**
+     * Plan step: succeeds when what the plan kept under {@code key} begins with {@code expected}
+     * ({@code OneCriterionPerTurn_260913_oo01}).
+     *
+     * <p>How a plan branches on a judgement. A conversation asked to judge answers with words; the
+     * state machine moves on success and failure. This turns the one into the other, so
+     * {@code ACCEPT} takes the transition to the next thing to fix and anything else falls through
+     * to the redo transition written after it.</p>
+     *
+     * @param key      where the judgement is in this plan's state
+     * @param expected what the value must begin with, compared without case or surrounding space
+     * @return {@link ActionResult} with {@code success=true} iff it does
+     */
+    public ActionResult checkState(String key, String expected) {
+        if (selfActorRef == null) return new ActionResult(false, "plan runner is not wired to an actor system");
+        if (key == null || key.isBlank()) return new ActionResult(false, "key is required");
+        if (expected == null || expected.isBlank()) return new ActionResult(false, "expected is required");
+        String value = selfActorRef.getJsonString(key);
+        String head = value == null ? "" : value.strip().toUpperCase(java.util.Locale.ROOT);
+        boolean matches = head.startsWith(expected.strip().toUpperCase(java.util.Locale.ROOT));
+        String first = head.isEmpty() ? "(nothing)" : head.substring(0, Math.min(60, head.length()));
+        return new ActionResult(matches, (matches ? "accepted: " : "not yet: ") + first);
+    }
+
+    /**
+     * Plan step: counts one attempt at {@code key} and succeeds while the budget holds
+     * ({@code OneCriterionPerTurn_260913_oo01}).
+     *
+     * <p>What bounds a redo loop. The count lives in the plan's state, so each thing being fixed
+     * can have its own key and the loop for one does not spend another's budget.</p>
+     *
+     * @param key   where the count is kept
+     * @param limit how many attempts are allowed
+     * @return {@link ActionResult} with {@code success=true} iff this attempt is within the limit
+     */
+    public ActionResult countUp(String key, String limit) {
+        if (selfActorRef == null) return new ActionResult(false, "plan runner is not wired to an actor system");
+        if (key == null || key.isBlank()) return new ActionResult(false, "key is required");
+        int allowed;
+        try {
+            allowed = Integer.parseInt(limit == null ? "" : limit.strip());
+        } catch (NumberFormatException e) {
+            return new ActionResult(false, "limit must be a whole number, not '" + limit + "'");
+        }
+        int used = 0;
+        String current = selfActorRef.getJsonString(key);
+        if (current != null && !current.isBlank()) {
+            try {
+                used = Integer.parseInt(current.strip());
+            } catch (NumberFormatException e) {
+                used = 0;
+            }
+        }
+        used++;
+        selfActorRef.putJson(key, String.valueOf(used));
+        return new ActionResult(used <= allowed, "attempt " + used + " of " + allowed);
+    }
+
+    /**
      * Plan step: gathers what every worker slot replied into this plan's result, in slot-name order
      * so the output does not depend on which slot happened to finish first.
      *

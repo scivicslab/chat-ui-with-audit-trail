@@ -38,6 +38,14 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
             org.json.JSONArray a = arguments(arg);
             return runner().keepWorkerReply(a.length() > 0 ? a.getString(0) : "",
                     a.length() > 1 ? a.getString(1) : "");
+        } else if (actionName.equals("checkState")) {
+            org.json.JSONArray a = arguments(arg);
+            return runner().checkState(a.length() > 0 ? a.getString(0) : "",
+                    a.length() > 1 ? a.getString(1) : "");
+        } else if (actionName.equals("countUp")) {
+            org.json.JSONArray a = arguments(arg);
+            return runner().countUp(a.length() > 0 ? a.getString(0) : "",
+                    a.length() > 1 ? a.getString(1) : "");
         } else if (actionName.equals("collectWorkerReplies")) {
             return runner().collectWorkerReplies();
         } else if (actionName.equals("finish")) {
