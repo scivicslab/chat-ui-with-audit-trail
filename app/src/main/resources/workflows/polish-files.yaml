@@ -1,0 +1,357 @@
+name: polish-files
+description: |
+  Works through a directory of files without anybody watching: for each file in turn, the fixer is
+  given one criterion at a time and a judge decides whether it is met, and the result is written to
+  the output directory under the same name. Meant to be started and left — the Job Log says which
+  file is being worked on and which criterion needed sending back.
+params:
+  dir:
+    label: "The directory to read"
+    description: "Every file in it that ends with the suffix is worked through, in name order"
+    type: text
+  suffix:
+    description: "What a file name must end with"
+    default: ".md"
+  outDir:
+    label: "Where to write the results"
+    description: "The fixed files are written here under their own names"
+    type: text
+  fixer:
+    description: "The conversation that rewrites"
+    default: "project1/chat-02"
+  judge:
+    description: "The conversation that decides whether the criterion is met"
+    default: "project1/chat-03"
+  tries:
+    description: "How many times one criterion may be sent back, per file"
+    type: int
+    default: 2
+steps:
+  - states: ["0", "1"]
+    label: add-fixer
+    actions: [{actor: this, method: addWorker, arguments: ["fixer", 'jexl:state.getString("fixer")'], execution: direct}]
+
+  - states: ["1", "2"]
+    label: add-judge
+    actions: [{actor: this, method: addWorker, arguments: ["judge", 'jexl:state.getString("judge")'], execution: direct}]
+
+  - states: ["2", "next"]
+    label: list-files
+    actions:
+      - actor: this
+        method: listFiles
+        arguments: ['jexl:state.getString("dir")', 'jexl:state.getString("suffix")', "files"]
+        execution: direct
+
+  - states: ["next", "fix-1"]
+    label: take-next-file
+    note: |
+      Takes the next file, reads it, and clears the per-criterion budgets so each file starts with
+      a full allowance. Fails when the list is empty, and the transition after this one ends the job.
+    actions:
+      - actor: this
+        method: takeNext
+        arguments: ["files", "file"]
+        execution: direct
+      - actor: this
+        method: readFile
+        arguments: ['jexl:state.getString("file")', "text"]
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: tries-1, value: "0"}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: tries-2, value: "0"}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: tries-3, value: "0"}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: tries-4, value: "0"}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: tries-5, value: "0"}
+        execution: direct
+
+  - states: ["next", "end"]
+    label: all-done
+    note: Reached when no file is left.
+    actions: [{actor: this, method: finish, arguments: ["done"], execution: direct}]
+
+  # ── 1. subject ───────────────────────────────────────────────────────────
+  - states: ["fix-1", "judge-1"]
+    label: fix-1-subject
+    note: |
+      各文に動作主体を書く。誰が（どのオブジェクトが）その操作を行うのかを、すべての文で明示する。さらに、時系列の説明の前に、登場するオブジェクトとその関係（実行時の構造）を先に示す。
+    actions:
+      - actor: this
+        method: askWorker
+        arguments: ["fixer", 'jexl:"次の観点だけで本文を直してください。ほかの観点では直さないでください。直した本文だけを返してください。\n\n観点:\n各文に動作主体を書く。誰が（どのオブジェクトが）その操作を行うのかを、すべての文で明示する。さらに、時系列の説明の前に、登場するオブジェクトとその関係（実行時の構造）を先に示す。\n\n本文:\n" + state.getString("text")']
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["fixer", "text"]
+        execution: direct
+
+  - states: ["judge-1", "check-1"]
+    label: judge-1-subject
+    actions:
+      - actor: this
+        method: askWorker
+        arguments: ["judge", 'jexl:"次の本文が、この観点を満たしているかだけを見てください。満たしていれば ACCEPT の一語だけを返してください。満たしていなければ REVISE: に続けて、直っていない箇所を具体的に挙げてください。ほかのことは書かないでください。\n\n観点:\n各文に動作主体を書く。誰が（どのオブジェクトが）その操作を行うのかを、すべての文で明示する。さらに、時系列の説明の前に、登場するオブジェクトとその関係（実行時の構造）を先に示す。\n\n本文:\n" + state.getString("text")']
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["judge", "verdict"]
+        execution: direct
+
+  - states: ["check-1", "fix-2"]
+    label: accept-1
+    actions: [{actor: this, method: checkState, arguments: ["verdict", "ACCEPT"], execution: direct}]
+
+  - states: ["check-1", "redo-1"]
+    label: again-1
+    actions: [{actor: this, method: countUp, arguments: ["tries-1", 'jexl:state.getString("tries")'], execution: direct}]
+
+  - states: ["check-1", "fix-2"]
+    label: give-up-1
+    note: Budget spent for this criterion on this file. Keeps the text as it stands.
+    actions: [{actor: this, method: keepWorkerReply, arguments: ["fixer", "text"], execution: direct}]
+
+  - states: ["redo-1", "judge-1"]
+    label: redo-1
+    actions:
+      - actor: this
+        method: askWorker
+        arguments: ["fixer", 'jexl:"直りきっていないと指摘されました。同じ観点のまま、指摘に従って直してください。直した本文だけを返してください。\n\n観点:\n各文に動作主体を書く。誰が（どのオブジェクトが）その操作を行うのかを、すべての文で明示する。さらに、時系列の説明の前に、登場するオブジェクトとその関係（実行時の構造）を先に示す。\n\n指摘:\n" + state.getString("verdict") + "\n\n本文:\n" + state.getString("text")']
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["fixer", "text"]
+        execution: direct
+
+  # ── 2. thread ───────────────────────────────────────────────────────────
+  - states: ["fix-2", "judge-2"]
+    label: fix-2-thread
+    note: |
+      話の筋と文の並びを一致させる。筋から外れた話、言い訳、飾りの語を削る。
+    actions:
+      - actor: this
+        method: askWorker
+        arguments: ["fixer", 'jexl:"次の観点だけで本文を直してください。ほかの観点では直さないでください。直した本文だけを返してください。\n\n観点:\n話の筋と文の並びを一致させる。筋から外れた話、言い訳、飾りの語を削る。\n\n本文:\n" + state.getString("text")']
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["fixer", "text"]
+        execution: direct
+
+  - states: ["judge-2", "check-2"]
+    label: judge-2-thread
+    actions:
+      - actor: this
+        method: askWorker
+        arguments: ["judge", 'jexl:"次の本文が、この観点を満たしているかだけを見てください。満たしていれば ACCEPT の一語だけを返してください。満たしていなければ REVISE: に続けて、直っていない箇所を具体的に挙げてください。ほかのことは書かないでください。\n\n観点:\n話の筋と文の並びを一致させる。筋から外れた話、言い訳、飾りの語を削る。\n\n本文:\n" + state.getString("text")']
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["judge", "verdict"]
+        execution: direct
+
+  - states: ["check-2", "fix-3"]
+    label: accept-2
+    actions: [{actor: this, method: checkState, arguments: ["verdict", "ACCEPT"], execution: direct}]
+
+  - states: ["check-2", "redo-2"]
+    label: again-2
+    actions: [{actor: this, method: countUp, arguments: ["tries-2", 'jexl:state.getString("tries")'], execution: direct}]
+
+  - states: ["check-2", "fix-3"]
+    label: give-up-2
+    note: Budget spent for this criterion on this file. Keeps the text as it stands.
+    actions: [{actor: this, method: keepWorkerReply, arguments: ["fixer", "text"], execution: direct}]
+
+  - states: ["redo-2", "judge-2"]
+    label: redo-2
+    actions:
+      - actor: this
+        method: askWorker
+        arguments: ["fixer", 'jexl:"直りきっていないと指摘されました。同じ観点のまま、指摘に従って直してください。直した本文だけを返してください。\n\n観点:\n話の筋と文の並びを一致させる。筋から外れた話、言い訳、飾りの語を削る。\n\n指摘:\n" + state.getString("verdict") + "\n\n本文:\n" + state.getString("text")']
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["fixer", "text"]
+        execution: direct
+
+  # ── 3. negation ───────────────────────────────────────────────────────────
+  - states: ["fix-3", "judge-3"]
+    label: fix-3-negation
+    note: |
+      「〜ではない」という否定の説明を全部消す。読者がそれを期待している場合だけ残してよい。
+    actions:
+      - actor: this
+        method: askWorker
+        arguments: ["fixer", 'jexl:"次の観点だけで本文を直してください。ほかの観点では直さないでください。直した本文だけを返してください。\n\n観点:\n「〜ではない」という否定の説明を全部消す。読者がそれを期待している場合だけ残してよい。\n\n本文:\n" + state.getString("text")']
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["fixer", "text"]
+        execution: direct
+
+  - states: ["judge-3", "check-3"]
+    label: judge-3-negation
+    actions:
+      - actor: this
+        method: askWorker
+        arguments: ["judge", 'jexl:"次の本文が、この観点を満たしているかだけを見てください。満たしていれば ACCEPT の一語だけを返してください。満たしていなければ REVISE: に続けて、直っていない箇所を具体的に挙げてください。ほかのことは書かないでください。\n\n観点:\n「〜ではない」という否定の説明を全部消す。読者がそれを期待している場合だけ残してよい。\n\n本文:\n" + state.getString("text")']
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["judge", "verdict"]
+        execution: direct
+
+  - states: ["check-3", "fix-4"]
+    label: accept-3
+    actions: [{actor: this, method: checkState, arguments: ["verdict", "ACCEPT"], execution: direct}]
+
+  - states: ["check-3", "redo-3"]
+    label: again-3
+    actions: [{actor: this, method: countUp, arguments: ["tries-3", 'jexl:state.getString("tries")'], execution: direct}]
+
+  - states: ["check-3", "fix-4"]
+    label: give-up-3
+    note: Budget spent for this criterion on this file. Keeps the text as it stands.
+    actions: [{actor: this, method: keepWorkerReply, arguments: ["fixer", "text"], execution: direct}]
+
+  - states: ["redo-3", "judge-3"]
+    label: redo-3
+    actions:
+      - actor: this
+        method: askWorker
+        arguments: ["fixer", 'jexl:"直りきっていないと指摘されました。同じ観点のまま、指摘に従って直してください。直した本文だけを返してください。\n\n観点:\n「〜ではない」という否定の説明を全部消す。読者がそれを期待している場合だけ残してよい。\n\n指摘:\n" + state.getString("verdict") + "\n\n本文:\n" + state.getString("text")']
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["fixer", "text"]
+        execution: direct
+
+  # ── 4. oneaxis ───────────────────────────────────────────────────────────
+  - states: ["fix-4", "judge-4"]
+    label: fix-4-oneaxis
+    note: |
+      各節の書き方を一つに統一する。順序（時系列・手順）、構造（何がどこにあるか）、集合（MECE な分類）の三つのうち、その節で使う軸を一つだけにする。
+    actions:
+      - actor: this
+        method: askWorker
+        arguments: ["fixer", 'jexl:"次の観点だけで本文を直してください。ほかの観点では直さないでください。直した本文だけを返してください。\n\n観点:\n各節の書き方を一つに統一する。順序（時系列・手順）、構造（何がどこにあるか）、集合（MECE な分類）の三つのうち、その節で使う軸を一つだけにする。\n\n本文:\n" + state.getString("text")']
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["fixer", "text"]
+        execution: direct
+
+  - states: ["judge-4", "check-4"]
+    label: judge-4-oneaxis
+    actions:
+      - actor: this
+        method: askWorker
+        arguments: ["judge", 'jexl:"次の本文が、この観点を満たしているかだけを見てください。満たしていれば ACCEPT の一語だけを返してください。満たしていなければ REVISE: に続けて、直っていない箇所を具体的に挙げてください。ほかのことは書かないでください。\n\n観点:\n各節の書き方を一つに統一する。順序（時系列・手順）、構造（何がどこにあるか）、集合（MECE な分類）の三つのうち、その節で使う軸を一つだけにする。\n\n本文:\n" + state.getString("text")']
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["judge", "verdict"]
+        execution: direct
+
+  - states: ["check-4", "fix-5"]
+    label: accept-4
+    actions: [{actor: this, method: checkState, arguments: ["verdict", "ACCEPT"], execution: direct}]
+
+  - states: ["check-4", "redo-4"]
+    label: again-4
+    actions: [{actor: this, method: countUp, arguments: ["tries-4", 'jexl:state.getString("tries")'], execution: direct}]
+
+  - states: ["check-4", "fix-5"]
+    label: give-up-4
+    note: Budget spent for this criterion on this file. Keeps the text as it stands.
+    actions: [{actor: this, method: keepWorkerReply, arguments: ["fixer", "text"], execution: direct}]
+
+  - states: ["redo-4", "judge-4"]
+    label: redo-4
+    actions:
+      - actor: this
+        method: askWorker
+        arguments: ["fixer", 'jexl:"直りきっていないと指摘されました。同じ観点のまま、指摘に従って直してください。直した本文だけを返してください。\n\n観点:\n各節の書き方を一つに統一する。順序（時系列・手順）、構造（何がどこにあるか）、集合（MECE な分類）の三つのうち、その節で使う軸を一つだけにする。\n\n指摘:\n" + state.getString("verdict") + "\n\n本文:\n" + state.getString("text")']
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["fixer", "text"]
+        execution: direct
+
+  # ── 5. list ───────────────────────────────────────────────────────────
+  - states: ["fix-5", "judge-5"]
+    label: fix-5-list
+    note: |
+      箇条書きにする。各項目は独立して読めるようにし、ある項目を別の項目で説明しない。
+    actions:
+      - actor: this
+        method: askWorker
+        arguments: ["fixer", 'jexl:"次の観点だけで本文を直してください。ほかの観点では直さないでください。直した本文だけを返してください。\n\n観点:\n箇条書きにする。各項目は独立して読めるようにし、ある項目を別の項目で説明しない。\n\n本文:\n" + state.getString("text")']
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["fixer", "text"]
+        execution: direct
+
+  - states: ["judge-5", "check-5"]
+    label: judge-5-list
+    actions:
+      - actor: this
+        method: askWorker
+        arguments: ["judge", 'jexl:"次の本文が、この観点を満たしているかだけを見てください。満たしていれば ACCEPT の一語だけを返してください。満たしていなければ REVISE: に続けて、直っていない箇所を具体的に挙げてください。ほかのことは書かないでください。\n\n観点:\n箇条書きにする。各項目は独立して読めるようにし、ある項目を別の項目で説明しない。\n\n本文:\n" + state.getString("text")']
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["judge", "verdict"]
+        execution: direct
+
+  - states: ["check-5", "write"]
+    label: accept-5
+    actions: [{actor: this, method: checkState, arguments: ["verdict", "ACCEPT"], execution: direct}]
+
+  - states: ["check-5", "redo-5"]
+    label: again-5
+    actions: [{actor: this, method: countUp, arguments: ["tries-5", 'jexl:state.getString("tries")'], execution: direct}]
+
+  - states: ["check-5", "write"]
+    label: give-up-5
+    note: Budget spent for this criterion on this file. Keeps the text as it stands.
+    actions: [{actor: this, method: keepWorkerReply, arguments: ["fixer", "text"], execution: direct}]
+
+  - states: ["redo-5", "judge-5"]
+    label: redo-5
+    actions:
+      - actor: this
+        method: askWorker
+        arguments: ["fixer", 'jexl:"直りきっていないと指摘されました。同じ観点のまま、指摘に従って直してください。直した本文だけを返してください。\n\n観点:\n箇条書きにする。各項目は独立して読めるようにし、ある項目を別の項目で説明しない。\n\n指摘:\n" + state.getString("verdict") + "\n\n本文:\n" + state.getString("text")']
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["fixer", "text"]
+        execution: direct
+
+  - states: ["write", "next"]
+    label: write-result
+    note: Writes the fixed text under the same file name in the output directory, then takes the next file.
+    actions:
+      - actor: this
+        method: writeFile
+        arguments: ['jexl:state.getString("outDir") + "/" + state.getString("file").substring(state.getString("file").lastIndexOf("/") + 1)', "text"]
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: done, value: "written"}
+        execution: direct

@@ -38,6 +38,23 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
             org.json.JSONArray a = arguments(arg);
             return runner().keepWorkerReply(a.length() > 0 ? a.getString(0) : "",
                     a.length() > 1 ? a.getString(1) : "");
+        } else if (actionName.equals("readFile")) {
+            org.json.JSONArray a = arguments(arg);
+            return runner().readFile(a.length() > 0 ? a.getString(0) : "",
+                    a.length() > 1 ? a.getString(1) : "");
+        } else if (actionName.equals("writeFile")) {
+            org.json.JSONArray a = arguments(arg);
+            return runner().writeFile(a.length() > 0 ? a.getString(0) : "",
+                    a.length() > 1 ? a.getString(1) : "");
+        } else if (actionName.equals("listFiles")) {
+            org.json.JSONArray a = arguments(arg);
+            return runner().listFiles(a.length() > 0 ? a.getString(0) : "",
+                    a.length() > 1 ? a.getString(1) : "",
+                    a.length() > 2 ? a.getString(2) : "");
+        } else if (actionName.equals("takeNext")) {
+            org.json.JSONArray a = arguments(arg);
+            return runner().takeNext(a.length() > 0 ? a.getString(0) : "",
+                    a.length() > 1 ? a.getString(1) : "");
         } else if (actionName.equals("checkState")) {
             org.json.JSONArray a = arguments(arg);
             return runner().checkState(a.length() > 0 ? a.getString(0) : "",

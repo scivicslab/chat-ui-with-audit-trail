@@ -240,6 +240,130 @@ public class PlanRunner extends Interpreter {
                 + " as '" + key + "'");
     }
 
+    /** What this plan's file steps may touch; {@code null} means it has none. */
+    private com.scivicslab.chatui.agent.FileAccessScope fileScope;
+
+    /** @param fileScope the range of the file system {@code readFile} and {@code writeFile} may touch */
+    public void setFileScope(com.scivicslab.chatui.agent.FileAccessScope fileScope) {
+        this.fileScope = fileScope;
+    }
+
+    /**
+     * Plan step: reads a file into this plan's state, so the work that follows needs no person to
+     * paste it in ({@code UnattendedFileRuns_260913_oo01}).
+     *
+     * @param path where to read from; within the instance's read roots
+     * @param key  where to put the text in this plan's state
+     * @return {@link ActionResult} with {@code success=true} iff the file was read
+     */
+    public ActionResult readFile(String path, String key) {
+        if (selfActorRef == null) return new ActionResult(false, "plan runner is not wired to an actor system");
+        if (path == null || path.isBlank()) return new ActionResult(false, "path is required");
+        if (key == null || key.isBlank()) return new ActionResult(false, "key is required");
+        if (fileScope == null) return new ActionResult(false, "this job may not read files");
+        try {
+            java.nio.file.Path file = java.nio.file.Path.of(path.strip()).toAbsolutePath();
+            java.nio.file.Path real = file.toRealPath();
+            if (!fileScope.canRead(real)) {
+                return new ActionResult(false, "outside the readable range: " + real);
+            }
+            String text = java.nio.file.Files.readString(real);
+            selfActorRef.putJson(key, text);
+            return new ActionResult(true, "read " + text.length() + " chars of " + real + " as '" + key + "'");
+        } catch (Exception e) {
+            return new ActionResult(false, "could not read " + path + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Plan step: writes what the plan kept under {@code key} to a file, creating the directories
+     * above it ({@code UnattendedFileRuns_260913_oo01}).
+     *
+     * @param path where to write; under the instance's write root
+     * @param key  which value in this plan's state to write
+     * @return {@link ActionResult} with {@code success=true} iff the file was written
+     */
+    public ActionResult writeFile(String path, String key) {
+        if (selfActorRef == null) return new ActionResult(false, "plan runner is not wired to an actor system");
+        if (path == null || path.isBlank()) return new ActionResult(false, "path is required");
+        if (key == null || key.isBlank()) return new ActionResult(false, "key is required");
+        if (fileScope == null) return new ActionResult(false, "this job may not write files");
+        String text = selfActorRef.getJsonString(key);
+        if (text == null) return new ActionResult(false, "nothing is kept as '" + key + "'");
+        try {
+            java.nio.file.Path file = java.nio.file.Path.of(path.strip()).toAbsolutePath().normalize();
+            if (!fileScope.canWrite(file)) {
+                return new ActionResult(false, "outside the writable range: " + file);
+            }
+            if (file.getParent() != null) java.nio.file.Files.createDirectories(file.getParent());
+            java.nio.file.Files.writeString(file, text);
+            return new ActionResult(true, "wrote " + text.length() + " chars to " + file);
+        } catch (Exception e) {
+            return new ActionResult(false, "could not write " + path + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Plan step: puts the files of one directory into this plan's state, one path per line, so a
+     * job can work through them without a person naming each ({@code UnattendedFileRuns_260913_oo01}).
+     *
+     * @param dir    the directory to list; not walked into its subdirectories
+     * @param suffix what a name must end with, e.g. {@code .md}; every file when blank
+     * @param key    where to put the list
+     * @return {@link ActionResult} with {@code success=true} iff at least one file matched
+     */
+    public ActionResult listFiles(String dir, String suffix, String key) {
+        if (selfActorRef == null) return new ActionResult(false, "plan runner is not wired to an actor system");
+        if (dir == null || dir.isBlank()) return new ActionResult(false, "dir is required");
+        if (key == null || key.isBlank()) return new ActionResult(false, "key is required");
+        if (fileScope == null) return new ActionResult(false, "this job may not read files");
+        String ending = suffix == null ? "" : suffix.strip();
+        try {
+            java.nio.file.Path root = java.nio.file.Path.of(dir.strip()).toAbsolutePath().toRealPath();
+            if (!fileScope.canRead(root)) return new ActionResult(false, "outside the readable range: " + root);
+            java.util.List<String> found = new java.util.ArrayList<>();
+            try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.list(root)) {
+                files.filter(java.nio.file.Files::isRegularFile)
+                     .filter(f -> ending.isEmpty() || f.getFileName().toString().endsWith(ending))
+                     .sorted()
+                     .forEach(f -> found.add(f.toString()));
+            }
+            if (found.isEmpty()) {
+                return new ActionResult(false, "no file ending in '" + ending + "' under " + root);
+            }
+            selfActorRef.putJson(key, String.join("\n", found));
+            return new ActionResult(true, "found " + found.size() + " file(s) under " + root);
+        } catch (Exception e) {
+            return new ActionResult(false, "could not list " + dir + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Plan step: moves the first line of the list at {@code listKey} into {@code key} and shortens
+     * the list, succeeding while there was one ({@code UnattendedFileRuns_260913_oo01}).
+     *
+     * <p>What makes a loop over a list: the transition written after this one is taken when the
+     * list is empty, so a plan works through the files and then leaves.</p>
+     *
+     * @param listKey where the remaining lines are
+     * @param key     where to put the line taken
+     * @return {@link ActionResult} with {@code success=true} iff a line was taken
+     */
+    public ActionResult takeNext(String listKey, String key) {
+        if (selfActorRef == null) return new ActionResult(false, "plan runner is not wired to an actor system");
+        if (listKey == null || listKey.isBlank()) return new ActionResult(false, "listKey is required");
+        if (key == null || key.isBlank()) return new ActionResult(false, "key is required");
+        String remaining = selfActorRef.getJsonString(listKey);
+        if (remaining == null || remaining.isBlank()) return new ActionResult(false, "nothing left in '" + listKey + "'");
+        int newline = remaining.indexOf('\n');
+        String head = newline < 0 ? remaining : remaining.substring(0, newline);
+        String tail = newline < 0 ? "" : remaining.substring(newline + 1);
+        selfActorRef.putJson(key, head);
+        selfActorRef.putJson(listKey, tail);
+        long left = tail.isBlank() ? 0 : tail.lines().count();
+        return new ActionResult(true, "took " + head + " (" + left + " left)");
+    }
+
     /**
      * Plan step: succeeds when what the plan kept under {@code key} begins with {@code expected}
      * ({@code OneCriterionPerTurn_260913_oo01}).

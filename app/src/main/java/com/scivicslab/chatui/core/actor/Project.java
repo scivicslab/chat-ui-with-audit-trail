@@ -163,6 +163,8 @@ public class Project {
     private ActorRef<Project> self;
     private ActorRef<CallWatchdog> watchdog;
     private String systemLogActorName;
+    /** What a job's file steps may touch; {@code null} means none. */
+    private com.scivicslab.chatui.agent.FileAccessScope fileScope;
     private Scheduler scheduler;
     private final Map<String, JobView> jobs = new LinkedHashMap<>();
     private final Map<String, RecentEntriesAccumulator> jobLogs = new HashMap<>();
@@ -179,6 +181,19 @@ public class Project {
      */
     public void bind(String projectId, IIActorSystem system, ActorRef<Project> self,
                      ActorRef<CallWatchdog> watchdog, String systemLogActorName) {
+        bind(projectId, system, self, watchdog, systemLogActorName, null);
+    }
+
+    /**
+     * The same, with the range of the file system a job may read and write
+     * ({@code UnattendedFileRuns_260913_oo01}). A job started without one can call no file step.
+     *
+     * @param fileScope what {@code readFile} and {@code writeFile} are allowed to touch
+     */
+    public void bind(String projectId, IIActorSystem system, ActorRef<Project> self,
+                     ActorRef<CallWatchdog> watchdog, String systemLogActorName,
+                     com.scivicslab.chatui.agent.FileAccessScope fileScope) {
+        this.fileScope = fileScope;
         this.projectId = projectId;
         this.system = system;
         this.self = self;
@@ -236,6 +251,7 @@ public class Project {
         String name = projectId + "/" + jobId;
 
         PlanRunner runner = new PlanRunner(name, system, watchdog);
+        runner.setFileScope(fileScope);
         PlanRunnerIIAR runnerRef = new PlanRunnerIIAR(name, runner, system);
         runnerRef.setParentName(projectId);
         self.getNamesOfChildren().add(name);
