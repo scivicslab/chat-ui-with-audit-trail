@@ -1,0 +1,100 @@
+name: research
+description: |
+  Investigates a topic on the web and writes a short report with its sources: a searcher gathers
+  notes in two rounds, a writer turns them into a structured report, a reviewer marks what is
+  unsupported, and the writer fixes it. The job's result is the report alone.
+params:
+  topic:
+    label: "The topic"
+    description: "What to investigate"
+    type: textarea
+  angle:
+    label: "The second round's angle"
+    description: "What the second search should look for that the first would miss"
+    type: textarea
+    default: "批判・限界・反対意見"
+  searcher:
+    description: "The conversation that searches"
+    default: "project1/chat-02"
+  writer:
+    description: "The conversation that writes the report"
+    default: "project1/chat-03"
+  reviewer:
+    description: "The conversation that checks the report against the notes"
+    default: "project1/chat-04"
+steps:
+  - states: ["0", "1"]
+    label: add-searcher
+    actions: [{actor: this, method: addWorker, arguments: ["searcher", 'jexl:state.getString("searcher")'], execution: direct}]
+
+  - states: ["1", "2"]
+    label: add-writer
+    actions: [{actor: this, method: addWorker, arguments: ["writer", 'jexl:state.getString("writer")'], execution: direct}]
+
+  - states: ["2", "3"]
+    label: add-reviewer
+    actions: [{actor: this, method: addWorker, arguments: ["reviewer", 'jexl:state.getString("reviewer")'], execution: direct}]
+
+  - states: ["3", "4"]
+    label: search-first-round
+    actions:
+      - actor: this
+        method: askWorker
+        arguments: ["searcher", 'jexl:"web_search ツールで次の主題を調べ、分かったことを箇条書きの調査メモにしてください。各項目の末尾に、その根拠となるページの URL を必ず付けてください。\n\n主題:\n" + state.getString("topic")']
+        execution: direct
+
+  - states: ["4", "5"]
+    label: keep-notes
+    actions: [{actor: this, method: keepWorkerReply, arguments: ["searcher", "notes"], execution: direct}]
+
+  - states: ["5", "6"]
+    label: search-second-round
+    actions:
+      - actor: this
+        method: askWorker
+        arguments: ["searcher", 'jexl:"同じ主題について、今度は次の観点でもう一度 web_search してください。前回のメモに無い項目だけを、URL 付きの箇条書きで足してください。\n\n観点:\n" + state.getString("angle") + "\n\n主題:\n" + state.getString("topic")']
+        execution: direct
+
+  - states: ["6", "7"]
+    label: keep-more-notes
+    actions: [{actor: this, method: keepWorkerReply, arguments: ["searcher", "notes2"], execution: direct}]
+
+  - states: ["7", "8"]
+    label: write-report
+    actions:
+      - actor: this
+        method: askWorker
+        arguments: ["writer", 'jexl:"次の調査メモから、見出しを付けた短いレポートを書いてください。メモに無いことは書かないでください。各節の主張には、メモにある URL を残してください。レポート本文だけを返してください。\n\n主題:\n" + state.getString("topic") + "\n\nメモ 1:\n" + state.getString("notes") + "\n\nメモ 2:\n" + state.getString("notes2")']
+        execution: direct
+
+  - states: ["8", "9"]
+    label: keep-report
+    actions: [{actor: this, method: keepWorkerReply, arguments: ["writer", "report"], execution: direct}]
+
+  - states: ["9", "10"]
+    label: check-against-notes
+    actions:
+      - actor: this
+        method: askWorker
+        arguments: ["reviewer", 'jexl:"次のレポートを、その下の調査メモと突き合わせてください。メモに根拠が無い主張と、URL の付いていない主張だけを箇条書きで挙げてください。他のことは書かないでください。\n\nレポート:\n" + state.getString("report") + "\n\nメモ:\n" + state.getString("notes") + "\n" + state.getString("notes2")']
+        execution: direct
+
+  - states: ["10", "11"]
+    label: keep-findings
+    actions: [{actor: this, method: keepWorkerReply, arguments: ["reviewer", "findings"], execution: direct}]
+
+  - states: ["11", "12"]
+    label: fix-report
+    actions:
+      - actor: this
+        method: askWorker
+        arguments: ["writer", 'jexl:"次の指摘に従ってレポートを直してください。根拠の無い主張は削るか、メモにある根拠と URL を付けてください。直したレポート本文だけを返してください。\n\n指摘:\n" + state.getString("findings") + "\n\nレポート:\n" + state.getString("report")']
+        execution: direct
+
+  - states: ["12", "13"]
+    label: keep-final
+    actions: [{actor: this, method: keepWorkerReply, arguments: ["writer", "final"], execution: direct}]
+
+  - states: ["13", "end"]
+    label: done
+    actions: [{actor: this, method: finish, arguments: ["final"], execution: direct}]

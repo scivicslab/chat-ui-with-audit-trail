@@ -24,6 +24,15 @@ public class PlanWorker {
     /** The conversation this slot forwards to, e.g. {@code project1/chat-03}. */
     private final String targetChatName;
 
+    /**
+     * Long, for the same reason {@code PlanRunner.askChat} uses one: the conversation behind this
+     * slot runs a whole turn inside the call, and a turn that searches the web and reads what it
+     * found takes minutes. The 60 seconds {@code AskChatTool} defaults to is a conversation
+     * directing another conversation, not a plan waiting on a piece of work
+     * ({@code ChainedRolesInAPlan_260913_oo01}).
+     */
+    private static final int ASK_TIMEOUT_SECONDS = 1800;
+
     private volatile String lastReply;
 
     public PlanWorker(IIActorSystem system, ActorRef<CallWatchdog> watchdog,
@@ -47,7 +56,8 @@ public class PlanWorker {
      * @return {@link ActionResult} with {@code success=true} iff the conversation replied
      */
     public ActionResult ask(String prompt) {
-        String reply = AskChatTool.askQualified(system, watchdog, ownerName, targetChatName, prompt, null);
+        String reply = AskChatTool.askQualified(system, watchdog, ownerName, targetChatName, prompt,
+                ASK_TIMEOUT_SECONDS);
         lastReply = reply;
         return (reply == null || reply.startsWith("error:"))
                 ? new ActionResult(false, reply != null ? reply : "no reply from " + targetChatName)

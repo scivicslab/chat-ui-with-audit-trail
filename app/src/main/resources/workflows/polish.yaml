@@ -1,0 +1,69 @@
+name: polish
+description: |
+  One text through three hands: a writer rewrites it, a reviewer criticises the rewrite against
+  the given criteria, and the writer revises it once more with that criticism in hand. The job's
+  result is the revised text alone.
+params:
+  text:
+    label: "The text"
+    description: "What to polish"
+    type: textarea
+  criteria:
+    label: "What makes it good"
+    description: "What the reviewer judges against"
+    type: textarea
+    default: "完全な文で書かれていること。主題から逸れないこと。結論をぼかさないこと。同じことを繰り返さないこと。"
+  writer:
+    description: "The conversation that writes"
+    default: "project1/chat-02"
+  reviewer:
+    description: "The conversation that criticises"
+    default: "project1/chat-03"
+steps:
+  - states: ["0", "1"]
+    label: add-writer
+    actions: [{actor: this, method: addWorker, arguments: ["writer", 'jexl:state.getString("writer")'], execution: direct}]
+
+  - states: ["1", "2"]
+    label: add-reviewer
+    actions: [{actor: this, method: addWorker, arguments: ["reviewer", 'jexl:state.getString("reviewer")'], execution: direct}]
+
+  - states: ["2", "3"]
+    label: first-draft
+    actions:
+      - actor: this
+        method: askWorker
+        arguments: ["writer", 'jexl:"次の文章を、意味を変えずに読みやすく書き直してください。書き直した本文だけを返してください。\n\n" + state.getString("text")']
+        execution: direct
+
+  - states: ["3", "4"]
+    label: keep-draft
+    actions: [{actor: this, method: keepWorkerReply, arguments: ["writer", "draft"], execution: direct}]
+
+  - states: ["4", "5"]
+    label: review
+    actions:
+      - actor: this
+        method: askWorker
+        arguments: ["reviewer", 'jexl:"次の文章を、この基準で批評してください。直すべき点だけを箇条書きで挙げてください。\n\n基準:\n" + state.getString("criteria") + "\n\n文章:\n" + state.getString("draft")']
+        execution: direct
+
+  - states: ["5", "6"]
+    label: keep-critique
+    actions: [{actor: this, method: keepWorkerReply, arguments: ["reviewer", "critique"], execution: direct}]
+
+  - states: ["6", "7"]
+    label: revise
+    actions:
+      - actor: this
+        method: askWorker
+        arguments: ["writer", 'jexl:"次の批評に従って文章を直してください。直した本文だけを返してください。\n\n批評:\n" + state.getString("critique") + "\n\n文章:\n" + state.getString("draft")']
+        execution: direct
+
+  - states: ["7", "8"]
+    label: keep-final
+    actions: [{actor: this, method: keepWorkerReply, arguments: ["writer", "polished"], execution: direct}]
+
+  - states: ["8", "end"]
+    label: done
+    actions: [{actor: this, method: finish, arguments: ["polished"], execution: direct}]
