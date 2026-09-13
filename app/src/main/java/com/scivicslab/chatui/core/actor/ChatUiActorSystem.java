@@ -115,6 +115,14 @@ public class ChatUiActorSystem {
     @ConfigProperty(name = "chat-ui.plugins")
     Optional<List<String>> pluginJars = Optional.empty();
 
+    /**
+     * Turing Workflow plugins a job's workflow may load ({@code WorkflowPluginLoader_260913_oo01}),
+     * as Maven coordinates or jar paths. Unset means no {@code loader} actor exists at all, so a
+     * workflow has no way to bring in code this instance was not started with.
+     */
+    @ConfigProperty(name = "chat-ui.workflow-plugins")
+    Optional<List<String>> workflowPlugins = Optional.empty();
+
     @Inject
     IoLogStore ioLogStore;
 
@@ -204,6 +212,9 @@ public class ChatUiActorSystem {
     /**
      * Initializes the actor system and seeds a small tree so the Actors tab has something to show.
      */
+    /** The name a workflow calls the plugin loader by. */
+    public static final String WORKFLOW_LOADER = "loader";
+
     @PostConstruct
     void init() {
         actorSystem = new IIActorSystem("chat-ui");
@@ -254,6 +265,20 @@ public class ChatUiActorSystem {
         // whole system — split per project, a set_collaborator naming another project's tab would be
         // written to one graph and read from another, silently losing the assignment.
         collaborationGraphRef = housekeeperRef.createChild("collaborationGraph", new CollaborationGraph());
+
+        // The loader a job's workflow calls to bring in a Turing Workflow plugin
+        // (WorkflowPluginLoader_260913_oo01). Placed only when chat-ui.workflow-plugins names
+        // something: the loader is itself a capability, and this program decides capabilities at
+        // start-up (ProviderAndToolPlugins_260912_oo01).
+        List<String> allowedPlugins = workflowPlugins.orElse(List.of());
+        if (allowedPlugins.isEmpty()) {
+            LOG.info("Workflow plugins: none (chat-ui.workflow-plugins is unset); jobs have no loader");
+        } else {
+            WorkflowPluginLoader loader = new WorkflowPluginLoader(WORKFLOW_LOADER, actorSystem, allowedPlugins);
+            adopt(HOUSEKEEPER, loader);
+            actorSystem.addIIActor(loader);
+            LOG.info("Workflow plugins: jobs may load " + loader.allowed());
+        }
 
         // Provider kinds and plugin tools (ProviderAndToolPlugins_260912_oo01): the body's own
         // openai-compat kind, then whatever the jars named in chat-ui.plugins add. Built here, once,

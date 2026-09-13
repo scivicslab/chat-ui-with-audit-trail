@@ -1,0 +1,49 @@
+name: openalex-search
+description: |
+  Searches OpenAlex for papers on a topic and reports the top ones by citation count.
+params:
+  query:
+    label: "Search terms"
+    description: "What to look for in OpenAlex"
+    type: text
+  perPage:
+    description: "How many papers to take"
+    type: int
+    default: 5
+  sort:
+    description: "citations, relevance or newest"
+    type: select
+    options: ["relevance", "citations", "newest"]
+    default: relevance
+  plugin:
+    description: "The OpenAlex plugin this instance was started with"
+    default: "com.scivicslab.turingworkflow.plugins:plugin-openalex:4.1.0"
+steps:
+  - states: ["0", "1"]
+    label: load-plugin
+    actions:
+      - actor: loader
+        method: loadJar
+        arguments: 'jexl:state.getString("plugin")'
+
+  - states: ["1", "2"]
+    label: create-actor
+    actions:
+      - actor: loader
+        method: createChild
+        arguments: ["ROOT", "openalex", "com.scivicslab.turingworkflow.plugins.openalex.OpenAlexActor"]
+
+  - states: ["2", "3"]
+    label: search
+    actions:
+      - actor: openalex
+        method: searchWorksTopK
+        arguments: {query: 'jexl:state.getString("query")', perPage: 'jexl:state.getInt("perPage", 5)', sort: 'jexl:state.getString("sort")'}
+
+  - states: ["3", "4"]
+    label: keep-papers
+    actions: [{actor: this, method: putJson, arguments: {path: papers, value: "jexl:result"}, execution: direct}]
+
+  - states: ["4", "end"]
+    label: done
+    actions: [{actor: this, method: finish, arguments: ["papers"], execution: direct}]
