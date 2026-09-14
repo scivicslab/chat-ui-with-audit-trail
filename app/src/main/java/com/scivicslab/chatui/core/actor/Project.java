@@ -165,6 +165,8 @@ public class Project {
     private String systemLogActorName;
     /** What a job's file steps may touch; {@code null} means none. */
     private com.scivicslab.chatui.agent.FileAccessScope fileScope;
+    /** How a job puts one of its roles on a named provider kind; null when it may not. */
+    private PlanRunner.ProviderChanger providerChanger;
     private Scheduler scheduler;
     private final Map<String, JobView> jobs = new LinkedHashMap<>();
     private final Map<String, RecentEntriesAccumulator> jobLogs = new HashMap<>();
@@ -193,6 +195,21 @@ public class Project {
     public void bind(String projectId, IIActorSystem system, ActorRef<Project> self,
                      ActorRef<CallWatchdog> watchdog, String systemLogActorName,
                      com.scivicslab.chatui.agent.FileAccessScope fileScope) {
+        bind(projectId, system, self, watchdog, systemLogActorName, fileScope, null);
+    }
+
+    /**
+     * The same, with the way to put one of a job's roles on a named provider kind
+     * ({@code ChooseTheLlmPerRole_260915_oo01}). A project bound without one runs jobs that can
+     * name a model but not a provider kind, and say so rather than carry on quietly.
+     *
+     * @param providerChanger how a plan changes a conversation's provider kind
+     */
+    public void bind(String projectId, IIActorSystem system, ActorRef<Project> self,
+                     ActorRef<CallWatchdog> watchdog, String systemLogActorName,
+                     com.scivicslab.chatui.agent.FileAccessScope fileScope,
+                     PlanRunner.ProviderChanger providerChanger) {
+        this.providerChanger = providerChanger;
         this.fileScope = fileScope;
         this.projectId = projectId;
         this.system = system;
@@ -252,6 +269,7 @@ public class Project {
 
         PlanRunner runner = new PlanRunner(name, system, watchdog);
         runner.setFileScope(fileScope);
+        runner.setProviderChanger(providerChanger);
         PlanRunnerIIAR runnerRef = new PlanRunnerIIAR(name, runner, system);
         runnerRef.setParentName(projectId);
         self.getNamesOfChildren().add(name);

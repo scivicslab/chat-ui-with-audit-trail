@@ -110,6 +110,58 @@ public final class PolishWorkflowGenerator {
                 + "        execution: direct\n";
     }
 
+    /** Said to both roles when the rule and the text are files rather than text in the prompt. */
+    private static final String READ_FIRST =
+            "規則の文書と本文は、それぞれファイルにある。read ツールで両方を読んでから答えること。";
+
+    private static String judgePromptByPath(Criterion c, boolean deletes) {
+        String head = "\"" + READ_FIRST
+                + (deletes
+                   ? "直した本文が規則を満たしているか、そして元の本文にあった事実が全部残っているかを見る。"
+                     + "事実は、本文の中か「## 雑記」の節のどちらかに残っていればよく、場所が変わっただけなら問題ない。"
+                     + "両方を満たしていれば ACCEPT の一語だけを返す。"
+                     + "規則を満たしていなければ REVISE: に続けて直っていない箇所を挙げる。"
+                     + "元の本文にあった事実が消えていれば、REVISE: に続けて「削りすぎ」と書き、消えた事実を一つずつ挙げる。"
+                   : "本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。"
+                     + "本文に無い事柄が書かれていないことを理由に REVISE と判断しない。"
+                     + "満たしていれば ACCEPT の一語だけを返す。"
+                     + "満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。")
+                + "ほかのことは書かない。"
+                + "\\n\\n規則: " + c.ruleDoc()
+                + "\\n本文: \" + state.getString(\"work\")";
+        return deletes ? head + " + \"\\n元の本文: \" + state.getString(\"before-path\")" : head;
+    }
+
+    private static String redoPromptByPath(Criterion c, boolean deletes) {
+        return "\"" + READ_FIRST
+                + "指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。"
+                + "直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。"
+                + (deletes ? KEEP : "") + NOADD + STYLE
+                + "\\n\\n規則: " + c.ruleDoc()
+                + "\\n本文: \" + state.getString(\"work\")"
+                + (deletes ? " + \"\\n元の本文（ここにある事実は全部残すこと）: \" + state.getString(\"before-path\")" : "")
+                + " + \"\\n\\n指摘:\\n\" + state.getString(\"verdict\")";
+    }
+
+    private static final String VERIFY_FIX_BY_PATH =
+            "\"" + READ_FIRST
+            + "指摘された箇所だけを直し、write ツールで直した本文のファイルに同じパスで書き戻すこと。"
+            + "元の本文に無いコマンド・実行結果・数値は消す。"
+            + "元の本文にあった数値・コマンド・識別子が書き換えられていれば、元の値に戻す。"
+            + "それ以外は今のままにする。書き戻したら「done」とだけ返す。"
+            + "\\n\\n元の本文: \" + state.getString(\"orig\") + \"\\n直した本文: \" + state.getString(\"work\")"
+            + " + \"\\n\\n指摘:\\n\" + state.getString(\"verdict\")";
+
+    /** Puts what the conversation wrote back into the plan's own state. */
+    private static final String TAKE_BACK_THE_FILE =
+            "      - actor: this\n        method: readFile\n"
+            + "        arguments: ['jexl:state.getString(\"work\")', \"text\"]\n        execution: direct\n";
+
+    /** Hands the conversation the text as it stands, as a file it can read and write. */
+    private static final String PUT_THE_TEXT_IN_ITS_FILE =
+            "      - actor: this\n        method: writeFile\n"
+            + "        arguments: ['jexl:state.getString(\"work\")', \"text\"]\n        execution: direct\n";
+
     private static String rule(int index) {
         return "state.getString(\"rule-" + index + "\")";
     }
@@ -154,7 +206,73 @@ public final class PolishWorkflowGenerator {
     }
 
     /** The six transitions of one criterion: read the rule, judge, accept, send back, give up, fix. */
-    private static String block(int i, Criterion c, String next) {
+    private static String block(int i, Criterion c, String next, boolean byReference) {
+        if (byReference) {
+            return blockByReference(i, c, next);
+        }
+        return blockByValue(i, c, next);
+    }
+
+    /**
+     * One criterion, with the rule and the text named by path rather than carried in the prompt.
+     *
+     * <p>A prompt that carries a 9 KB standard and a 9 KB document is 15,000 characters, and the
+     * history it leaves behind has to be thrown away every criterion — which is what made the work
+     * invisible on screen ({@code PromptByValueHidesTheWork_260915_oo01}). Named by path, the
+     * prompt is a few hundred characters, the conversation reads what it needs with its own tools,
+     * and the turn keeps only the question and the answer. Nothing is cleared, so the conversation
+     * reads as what it is: someone working through a checklist.</p>
+     */
+    private static String blockByReference(int i, Criterion c, String next) {
+        String snapshot = c.deletes()
+                ? "      - actor: this\n        method: copyState\n"
+                  + "        arguments: [\"text\", \"before\"]\n        execution: direct\n"
+                  + "      - actor: this\n        method: writeFile\n"
+                  + "        arguments: ['jexl:state.getString(\"before-path\")', \"before\"]\n"
+                  + "        execution: direct\n"
+                : "";
+        String ruleFile = c.ruleDoc().substring(c.ruleDoc().lastIndexOf('/') + 1);
+        return "\n  # ── " + i + ". " + c.name() + " ───────────────────────────────────────────────────────────\n"
+                + "  - states: [\"enter-" + i + "\", \"judge-" + i + "\"]\n"
+                + "    label: enter-" + i + "-" + c.name() + "\n"
+                + "    note: |\n"
+                + "      規則は " + ruleFile + " にある。会話がそれを読む。\n"
+                + "      いまの本文を控え、会話が読み書きするファイルへ置く。ここではまだ本文を書き換えない。\n"
+                + "    actions:\n"
+                + snapshot
+                + "      - actor: this\n        method: copyState\n"
+                + "        arguments: [\"text\", \"kept-" + i + "\"]\n        execution: direct\n"
+                + PUT_THE_TEXT_IN_ITS_FILE
+                + "\n  - states: [\"judge-" + i + "\", \"check-" + i + "\"]\n"
+                + "    label: judge-" + i + "-" + c.name() + "\n"
+                + "    note: 本文がこの規則を満たしているかを見る。満たしていれば本文には触れない。\n"
+                + "    actions:\n"
+                + ask(judgePromptByPath(c, c.deletes()), "judge")
+                + "      - actor: this\n        method: keepWorkerReply\n"
+                + "        arguments: [\"judge\", \"verdict\"]\n        execution: direct\n"
+                + "\n  - states: [\"check-" + i + "\", \"" + next + "\"]\n"
+                + "    label: accept-" + i + "\n"
+                + "    note: 満たしている。本文はそのまま次の規則へ。\n"
+                + "    actions: [{actor: this, method: checkState, arguments: [\"verdict\", \"ACCEPT\"], execution: direct}]\n"
+                + "\n  - states: [\"check-" + i + "\", \"fix-" + i + "\"]\n"
+                + "    label: needs-fix-" + i + "\n"
+                + "    note: 満たしていない。直す回数が残っていれば直しへ。\n"
+                + "    actions: [{actor: this, method: countUp, arguments: [\"tries-" + i + "\", 'jexl:state.getString(\"tries\")'], execution: direct}]\n"
+                + "\n  - states: [\"check-" + i + "\", \"" + next + "\"]\n"
+                + "    label: give-up-" + i + "\n"
+                + "    note: |\n"
+                + "      直す回数を使い切った。この観点に入る前の本文に戻して次の観点へ進む。満たせなかった観点の\n"
+                + "      書き換えを残すと、いじり回しただけの本文になる。\n"
+                + "    actions: [{actor: this, method: copyState, arguments: [\"kept-" + i + "\", \"text\"], execution: direct}]\n"
+                + "\n  - states: [\"fix-" + i + "\", \"judge-" + i + "\"]\n"
+                + "    label: fix-" + i + "-" + c.name() + "\n"
+                + "    note: 会話がファイルを直し、書き戻したものをこの計画が読み取る。\n"
+                + "    actions:\n"
+                + ask(redoPromptByPath(c, c.deletes()), "fixer")
+                + TAKE_BACK_THE_FILE;
+    }
+
+    private static String blockByValue(int i, Criterion c, String next) {
         String load = "      - actor: this\n        method: readFile\n"
                 + "        arguments: [\"" + c.ruleDoc() + "\", \"rule-" + i + "\"]\n"
                 + "        execution: direct\n";
@@ -200,6 +318,38 @@ public final class PolishWorkflowGenerator {
                 + CLEAR + ask(redoPrompt(i, c.deletes()), "fixer")
                 + "      - actor: this\n        method: keepWorkerReply\n"
                 + "        arguments: [\"fixer\", \"text\"]\n        execution: direct\n";
+    }
+
+    private static String verifyBlock(String next, boolean byReference) {
+        if (!byReference) return verifyBlock(next);
+        return "\n  # ── last: nothing brought in, nothing altered ─────────────────────────────\n"
+                + "  - states: [\"verify\", \"verify-check\"]\n"
+                + "    label: verify-nothing-was-brought-in\n"
+                + "    note: |\n"
+                + "      Compares the text as it arrived with the text as it stands, by comparing rather than by\n"
+                + "      asking. A judge given both texts answered ACCEPT for nine documents of nine, one of which\n"
+                + "      had had a YAML block rewritten into something that does not run\n"
+                + "      (WhatAProgramCanDo_260915_oo01).\n"
+                + "    actions:\n"
+                + "      - actor: this\n        method: compareTexts\n"
+                + "        arguments: [\"original\", \"text\", \"verdict\"]\n        execution: direct\n"
+                + "\n  - states: [\"verify-check\", \"" + next + "\"]\n"
+                + "    label: accept-verify\n"
+                + "    actions: [{actor: this, method: checkState, arguments: [\"verdict\", \"ACCEPT\"], execution: direct}]\n"
+                + "\n  - states: [\"verify-check\", \"verify-fix\"]\n"
+                + "    label: needs-verify-fix\n"
+                + "    actions: [{actor: this, method: countUp, arguments: [\"tries-verify\", 'jexl:state.getString(\"tries\")'], execution: direct}]\n"
+                + "\n  - states: [\"verify-check\", \"skip\"]\n"
+                + "    label: give-up-verify\n"
+                + "    note: |\n"
+                + "      The last check could not be passed. This file is not written: what cannot be shown to be\n"
+                + "      unbroken does not replace what is there. The original stays as it is, and the job says so.\n"
+                + "    actions: [{actor: this, method: doNothing, arguments: [\"not written\"], execution: direct}]\n"
+                + "\n  - states: [\"verify-fix\", \"verify\"]\n"
+                + "    label: take-back-what-was-brought-in\n"
+                + "    actions:\n"
+                + ask(VERIFY_FIX_BY_PATH, "fixer")
+                + TAKE_BACK_THE_FILE;
     }
 
     /** The last check on a text: nothing brought in, nothing altered. */
@@ -257,10 +407,46 @@ params:
     description: "How many times one criterion may be sent back before it is left as it was"
     type: int
     default: 5
+  fixerProvider:
+    description: "The provider the fixer runs on (openai-compat / claude / codex); empty leaves the conversation as it is"
+    default: ""
+  fixerModel:
+    description: "The model the fixer runs on; empty leaves the conversation as it is"
+    default: ""
+  judgeProvider:
+    description: "The provider the judge runs on; empty leaves the conversation as it is"
+    default: ""
+  judgeModel:
+    description: "The model the judge runs on; empty leaves the conversation as it is"
+    default: ""
 steps:
-  - states: ["0", "1"]
+  - states: ["0", "on-their-llms"]
     label: add-fixer
     actions: [{actor: this, method: addWorker, arguments: ["fixer", 'jexl:state.getString("fixer")'], execution: direct}]
+
+  - states: ["on-their-llms", "1"]
+    label: put-each-role-on-its-llm
+    note: |
+      Which model judged and which model wrote is part of what this run was, so the job names them
+      rather than leaving them on the conversations. An empty value leaves a conversation as it is;
+      a provider this instance was not started with fails here (ChooseTheLlmPerRole_260915_oo01).
+    actions:
+      - actor: this
+        method: setChatProvider
+        arguments: ['jexl:state.getString("fixer")', 'jexl:state.getString("fixerProvider")', ""]
+        execution: direct
+      - actor: this
+        method: setChatModel
+        arguments: ['jexl:state.getString("fixer")', 'jexl:state.getString("fixerModel")']
+        execution: direct
+      - actor: this
+        method: setChatProvider
+        arguments: ['jexl:state.getString("judge")', 'jexl:state.getString("judgeProvider")', ""]
+        execution: direct
+      - actor: this
+        method: setChatModel
+        arguments: ['jexl:state.getString("judge")', 'jexl:state.getString("judgeModel")']
+        execution: direct
 
   - states: ["1", "enter-1"]
     label: add-judge
@@ -345,6 +531,22 @@ params:
         method: copyState
         arguments: ["text", "original"]
         execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: work, value: 'jexl:state.getString("outDir") + "/.work/" + state.getString("file").substring(state.getString("file").lastIndexOf("/") + 1)'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: orig, value: 'jexl:state.getString("work") + ".orig.md"'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: before-path, value: 'jexl:state.getString("work") + ".before.md"'}
+        execution: direct
+      - actor: this
+        method: writeFile
+        arguments: ['jexl:state.getString("orig")', "original"]
+        execution: direct
 """;
 
     private static final String WRITE_AND_SKIP = """
@@ -384,6 +586,20 @@ params:
     actions: [{actor: this, method: finish, arguments: ["text"], execution: direct}]
 """;
 
+    /**
+     * Where the text variant goes when the last check cannot be passed.
+     *
+     * <p>It has no file to leave alone, so it answers with the text as it stands and says the
+     * check did not pass — rather than dying with "no matching transition", which is what a
+     * missing state gets you.</p>
+     */
+    private static final String SKIP_TEXT = """
+
+  - states: ["skip", "end"]
+    label: the-last-check-did-not-pass
+    actions: [{actor: this, method: finish, arguments: ["text"], execution: direct}]
+""";
+
     private static final String ALL_DONE = """
 
   - states: ["next", "end"]
@@ -410,10 +626,10 @@ params:
         }
         for (int i = 1; i <= CRITERIA.size(); i++) {
             String next = i < CRITERIA.size() ? "enter-" + (i + 1) : "verify";
-            out.append(block(i, CRITERIA.get(i - 1), next));
+            out.append(block(i, CRITERIA.get(i - 1), next, overFiles));
         }
-        out.append(verifyBlock(overFiles ? "write" : "done"));
-        out.append(overFiles ? WRITE_AND_SKIP : DONE_TEXT);
+        out.append(verifyBlock(overFiles ? "write" : "done", overFiles));
+        out.append(overFiles ? WRITE_AND_SKIP : DONE_TEXT + SKIP_TEXT);
         return out.toString();
     }
 

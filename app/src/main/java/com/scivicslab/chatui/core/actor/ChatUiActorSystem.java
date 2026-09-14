@@ -450,7 +450,8 @@ public class ChatUiActorSystem {
      */
     private void wireProject(String projectId) {
         ActorRef<Project> ref = projects.get(projectId);
-        ref.tell(p -> p.bind(projectId, actorSystem, ref, callWatchdogRef, SYSTEM_LOG_ACTOR, fileScope));
+        ref.tell(p -> p.bind(projectId, actorSystem, ref, callWatchdogRef, SYSTEM_LOG_ACTOR, fileScope,
+                            this::changeProviderForPlan));
         ref.tell(Project::startWatching);
     }
 
@@ -996,6 +997,34 @@ public class ChatUiActorSystem {
                     session.getToolSetDirect(), session.getModelDirect(), temperature);
         }
         return true;
+    }
+
+    /**
+     * Puts one conversation on a named provider kind, for a job that names it
+     * ({@code ChooseTheLlmPerRole_260915_oo01}).
+     *
+     * <p>A kind this instance was not started with is refused with the reason, so a job asking for
+     * Claude Code on an instance started without the harness plugin stops there rather than
+     * running the whole checklist on the wrong model.</p>
+     *
+     * @param chatName the conversation's full actor name, e.g. {@code project1/chat-02}
+     * @param kind     the provider kind
+     * @param tools    the tool set, or {@code ""} for the kind's own default
+     * @return what went wrong, or {@code null} when the change was made
+     */
+    private String changeProviderForPlan(String chatName, String kind, String tools) {
+        String[] parts = splitTabId(chatName);
+        if (parts == null) return "not a conversation name: " + chatName;
+        try {
+            ToolSet toolSet = (tools == null || tools.isBlank())
+                    ? pluginRegistry.factory(kind.trim().toLowerCase()).map(LlmProviderFactory::defaultToolSet)
+                            .orElse(ToolSet.FULL)
+                    : ToolSet.parse(tools);
+            setProvider(parts[0], parts[1], kind, toolSet);
+            return null;
+        } catch (IllegalArgumentException e) {
+            return e.getMessage();
+        }
     }
 
     /**

@@ -19,10 +19,46 @@ params:
     description: "How many times one criterion may be sent back before it is left as it was"
     type: int
     default: 5
+  fixerProvider:
+    description: "The provider the fixer runs on (openai-compat / claude / codex); empty leaves the conversation as it is"
+    default: ""
+  fixerModel:
+    description: "The model the fixer runs on; empty leaves the conversation as it is"
+    default: ""
+  judgeProvider:
+    description: "The provider the judge runs on; empty leaves the conversation as it is"
+    default: ""
+  judgeModel:
+    description: "The model the judge runs on; empty leaves the conversation as it is"
+    default: ""
 steps:
-  - states: ["0", "1"]
+  - states: ["0", "on-their-llms"]
     label: add-fixer
     actions: [{actor: this, method: addWorker, arguments: ["fixer", 'jexl:state.getString("fixer")'], execution: direct}]
+
+  - states: ["on-their-llms", "1"]
+    label: put-each-role-on-its-llm
+    note: |
+      Which model judged and which model wrote is part of what this run was, so the job names them
+      rather than leaving them on the conversations. An empty value leaves a conversation as it is;
+      a provider this instance was not started with fails here (ChooseTheLlmPerRole_260915_oo01).
+    actions:
+      - actor: this
+        method: setChatProvider
+        arguments: ['jexl:state.getString("fixer")', 'jexl:state.getString("fixerProvider")', ""]
+        execution: direct
+      - actor: this
+        method: setChatModel
+        arguments: ['jexl:state.getString("fixer")', 'jexl:state.getString("fixerModel")']
+        execution: direct
+      - actor: this
+        method: setChatProvider
+        arguments: ['jexl:state.getString("judge")', 'jexl:state.getString("judgeProvider")', ""]
+        execution: direct
+      - actor: this
+        method: setChatModel
+        arguments: ['jexl:state.getString("judge")', 'jexl:state.getString("judgeModel")']
+        execution: direct
 
   - states: ["1", "enter-1"]
     label: add-judge
@@ -624,4 +660,8 @@ steps:
 
   - states: ["done", "end"]
     label: done
+    actions: [{actor: this, method: finish, arguments: ["text"], execution: direct}]
+
+  - states: ["skip", "end"]
+    label: the-last-check-did-not-pass
     actions: [{actor: this, method: finish, arguments: ["text"], execution: direct}]

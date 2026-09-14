@@ -1,11 +1,14 @@
 package com.scivicslab.chatui.core.actor;
 
 import com.scivicslab.chatui.agent.AskChatTool;
+import com.scivicslab.chatui.core.provider.LlmProvider;
 import com.scivicslab.pojoactor.action.ActionResult;
 import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 import com.scivicslab.turingworkflow.workflow.Interpreter;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Logger;
 
@@ -205,6 +208,199 @@ public class PlanRunner extends Interpreter {
         ActionResult asked = workerIIAR.worker().ask(prompt);
         if (asked.isSuccess()) lastReply = workerIIAR.worker().lastReply();
         return asked;
+    }
+
+    /**
+     * How a plan changes which provider kind a conversation talks to, when it is given one.
+     *
+     * <p>Changing the kind builds a provider from a plugin the instance was started with, which is
+     * {@code ChatUiActorSystem}'s work and not something reachable from an actor reference. A plan
+     * started without this can still name a model ({@code ChooseTheLlmPerRole_260915_oo01}).</p>
+     */
+    public interface ProviderChanger {
+        /**
+         * @param chatName the conversation's full actor name
+         * @param kind     the provider kind, e.g. {@code claude}
+         * @param tools    the tool set, or {@code ""} for the kind's own default
+         * @return what went wrong, or {@code null} when the change was made
+         */
+        String change(String chatName, String kind, String tools);
+    }
+
+    private ProviderChanger providerChanger;
+
+    /** @param changer how to change a conversation's provider kind; {@code null} to refuse to */
+    public void setProviderChanger(ProviderChanger changer) {
+        this.providerChanger = changer;
+    }
+
+    /**
+     * Plan step: puts one role's conversation on a named model.
+     *
+     * <p>Which model judged a document is part of what the run was. Named in the job's parameters
+     * rather than left on the conversation, the run says it itself, and the change is written to
+     * that conversation's settings record as any other would be
+     * ({@code ChooseTheLlmPerRole_260915_oo01}).</p>
+     *
+     * @param chatName the conversation's full actor name, e.g. {@code project1/chat-02}
+     * @param model    the model to run on; blank leaves the conversation as it was
+     * @return {@link ActionResult} with {@code success=true} iff that conversation was there
+     */
+    public ActionResult setChatModel(String chatName, String model) {
+        if (system == null) return new ActionResult(false, "plan runner is not wired to an actor system");
+        if (chatName == null || chatName.isBlank()) return new ActionResult(false, "chatName is required");
+        if (model == null || model.isBlank()) {
+            return new ActionResult(true, "no model named; " + chatName + " stays as it was");
+        }
+        ActorRef<LlmProvider> providerRef = system.getActor(chatName + ".chat.provider");
+        if (providerRef == null) return new ActionResult(false, "chat not found: " + chatName);
+        providerRef.tell(p -> p.setModel(model)).join();
+        return new ActionResult(true, chatName + " runs on " + model);
+    }
+
+    /**
+     * Plan step: puts one role's conversation on a named provider kind.
+     *
+     * @param chatName the conversation's full actor name
+     * @param kind     {@code openai-compat}, {@code claude}, {@code codex}; blank leaves it as it was
+     * @param tools    the tool set to give it, or blank for the kind's own default
+     * @return {@link ActionResult} with {@code success=true} iff the change was made; a kind this
+     *         instance was not started with is a failure, not a silent fallback
+     */
+    public ActionResult setChatProvider(String chatName, String kind, String tools) {
+        if (chatName == null || chatName.isBlank()) return new ActionResult(false, "chatName is required");
+        if (kind == null || kind.isBlank()) {
+            return new ActionResult(true, "no provider named; " + chatName + " stays as it was");
+        }
+        if (providerChanger == null) {
+            return new ActionResult(false,
+                    "this job cannot change a provider kind; name a model instead, or set the"
+                            + " provider on " + chatName + " before running");
+        }
+        String why = providerChanger.change(chatName, kind, tools == null ? "" : tools);
+        return why == null
+                ? new ActionResult(true, chatName + " talks to " + kind)
+                : new ActionResult(false, why);
+    }
+
+    /**
+     * Plan step: says what a rewrite changed that it had no business changing.
+     *
+     * <p>Whether a text still means what it did is a judgement; whether its commands, identifiers
+     * and numbers survived is a comparison, and a program does that exactly. A judge asked to do
+     * it read 21,000 characters and answered ACCEPT for a document whose YAML block had been
+     * rewritten into something that does not run ({@code WhatAProgramCanDo_260915_oo01}).</p>
+     *
+     * <p>Writes {@code ACCEPT} when nothing of the kind changed, and otherwise {@code REVISE:}
+     * followed by what went missing or appeared — the same shape a judge's verdict has, so the
+     * transitions around it are unchanged and the fixer is told in the same words.</p>
+     *
+     * @param beforeKey where the text as it arrived is kept
+     * @param afterKey  where the text as it stands is kept
+     * @param intoKey   where to put the verdict
+     * @return {@link ActionResult} with {@code success=true} whenever both texts were there to
+     *         compare; the verdict says whether anything changed
+     */
+    public ActionResult compareTexts(String beforeKey, String afterKey, String intoKey) {
+        if (selfActorRef == null) return new ActionResult(false, "plan runner is not wired to an actor system");
+        if (beforeKey == null || beforeKey.isBlank()) return new ActionResult(false, "beforeKey is required");
+        if (afterKey == null || afterKey.isBlank()) return new ActionResult(false, "afterKey is required");
+        if (intoKey == null || intoKey.isBlank()) return new ActionResult(false, "intoKey is required");
+        String before = selfActorRef.getJsonString(beforeKey);
+        String after = selfActorRef.getJsonString(afterKey);
+        if (before == null) return new ActionResult(false, "nothing is kept as '" + beforeKey + "'");
+        if (after == null) return new ActionResult(false, "nothing is kept as '" + afterKey + "'");
+
+        List<String> complaints = new ArrayList<>();
+        complain(complaints, "消えたコードブロック", missing(codeBlocks(before), codeBlocks(after)));
+        complain(complaints, "元の本文に無いコードブロック", missing(codeBlocks(after), codeBlocks(before)));
+        complain(complaints, "消えた識別子", missing(inlineCode(before), inlineCode(after)));
+        complain(complaints, "消えた名前", missing(names(before), names(after)));
+        complain(complaints, "消えた数値", missing(numbers(before), numbers(after)));
+        complain(complaints, "元の本文に無い数値", missing(numbers(after), numbers(before)));
+
+        String verdict = complaints.isEmpty() ? "ACCEPT"
+                : "REVISE: 元の本文にあったものが変わっています。\n" + String.join("\n", complaints);
+        selfActorRef.putJson(intoKey, verdict);
+        return new ActionResult(true, complaints.isEmpty() ? "nothing changed" : complaints.size() + " kind(s) changed");
+    }
+
+    /** How many of one kind are listed before the rest are summed up. */
+    private static final int COMPLAINTS_SHOWN = 8;
+
+    private static void complain(List<String> complaints, String what, List<String> found) {
+        if (found.isEmpty()) return;
+        List<String> shown = found.size() > COMPLAINTS_SHOWN ? found.subList(0, COMPLAINTS_SHOWN) : found;
+        StringBuilder sb = new StringBuilder("- ").append(what).append(": ");
+        sb.append(String.join(" / ", shown.stream().map(PlanRunner::oneLine).toList()));
+        if (found.size() > shown.size()) sb.append(" ほか").append(found.size() - shown.size()).append("件");
+        complaints.add(sb.toString());
+    }
+
+    /** @return what is in {@code from} and not in {@code in}, each value once, in order */
+    private static List<String> missing(List<String> from, List<String> in) {
+        List<String> rest = new ArrayList<>(in);
+        List<String> gone = new ArrayList<>();
+        for (String one : from) {
+            if (!rest.remove(one) && !gone.contains(one)) gone.add(one);
+        }
+        return gone;
+    }
+
+    private static String oneLine(String text) {
+        String flat = text.replaceAll("\\s+", " ").strip();
+        return flat.length() > 60 ? flat.substring(0, 60) + "…" : flat;
+    }
+
+    /** The fenced blocks of a markdown text, as their contents. */
+    static List<String> codeBlocks(String text) {
+        List<String> blocks = new ArrayList<>();
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("(?ms)^```[^\\n]*\\n(.*?)^```", java.util.regex.Pattern.MULTILINE)
+                .matcher(text);
+        while (m.find()) blocks.add(m.group(1).strip());
+        return blocks;
+    }
+
+    /** The backquoted spans of a markdown text: class names, paths, options, actor names. */
+    static List<String> inlineCode(String text) {
+        String withoutBlocks = text.replaceAll("(?ms)^```.*?^```", "");
+        List<String> spans = new ArrayList<>();
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("`([^`\\n]+)`").matcher(withoutBlocks);
+        while (m.find()) spans.add(m.group(1).strip());
+        return spans;
+    }
+
+    /**
+     * The names in a text's prose: {@code OpenAlex}, {@code ChatSession}, {@code JobQueueRegistry}.
+     *
+     * <p>A name written without backquotes is still a name, and one run turned {@code OpenAlex}
+     * into {@code Open Alex} where nothing was quoted. Capitals inside a word are what marks one;
+     * an ordinary English word is not reported, so rewriting a sentence is not a complaint.</p>
+     */
+    static List<String> names(String text) {
+        String withoutBlocks = text.replaceAll("(?ms)^```.*?^```", "");
+        List<String> found = new ArrayList<>();
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("\\b([A-Za-z][a-z0-9]*(?:[A-Z][A-Za-z0-9]*)+)\\b").matcher(withoutBlocks);
+        while (m.find()) found.add(m.group(1));
+        return found;
+    }
+
+    /**
+     * The numbers of a text: ports, counts, sizes.
+     *
+     * <p>Read outside the fenced blocks, which are compared whole, and with the digits of a
+     * version or a document id left out — {@code 260913_oo01} is part of a name, not a number
+     * somebody measured.</p>
+     */
+    static List<String> numbers(String text) {
+        String withoutBlocks = text.replaceAll("(?ms)^```.*?^```", "");
+        List<String> found = new ArrayList<>();
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("(?<![0-9A-Za-z_])([0-9][0-9,]*)(?![0-9A-Za-z_])").matcher(withoutBlocks);
+        while (m.find()) found.add(m.group(1).replace(",", ""));
+        return found;
     }
 
     /**
