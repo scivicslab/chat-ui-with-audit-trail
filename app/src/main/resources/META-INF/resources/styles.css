@@ -1495,3 +1495,17 @@ body { font-family: var(--font-body); }
 /* Header + status: hairline separation, tracked small labels */
 #app-header { border-bottom: 1px solid var(--border-color); }
 #connection-status { font-weight: 500; }
+
+/* Where a prompt came from (PromptOriginOnScreen_260915_oo01). A person's own prompt at this
+   screen needs no label; the other three are marked, and the bubble is tinted, so that a
+   conversation being driven on someone's behalf reads as such at a glance. */
+.origin-badge {
+    font-size: 10px; padding: 1px 6px; border-radius: 9px; white-space: nowrap;
+    border: 1px solid var(--border-color, #444); color: var(--text-secondary, #9a9a9a);
+}
+.origin-badge.origin-workflow { color: var(--accent-blue, #a5b4fc); border-color: var(--accent-blue, #a5b4fc); }
+.origin-badge.origin-chat { color: var(--accent-green, #86efac); border-color: var(--accent-green, #86efac); }
+.origin-badge.origin-api { color: var(--accent-amber, #fbbf24); border-color: var(--accent-amber, #fbbf24); }
+.message.user.from-workflow { border-left: 3px solid var(--accent-blue, #a5b4fc); }
+.message.user.from-chat { border-left: 3px solid var(--accent-green, #86efac); }
+.message.user.from-api { border-left: 3px solid var(--accent-amber, #fbbf24); }

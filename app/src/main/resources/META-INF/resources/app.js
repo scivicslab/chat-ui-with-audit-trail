@@ -249,9 +249,25 @@
         footer.appendChild(textSpan(formatTime(new Date())));
     }
 
-    function appendMessage(role, text, images) {
+    // Where a prompt came from, shown on the bubble itself: a person at this screen, a program
+    // calling the REST endpoint, another conversation, or a workflow. All four look alike once they
+    // are in the conversation, and one of them is a person's own work being done for them
+    // (PromptOriginOnScreen_260915_oo01).
+    function originBadge(origin) {
+        var badge = document.createElement("span");
+        var kind = String(origin || "").split(" ")[0];
+        badge.className = "origin-badge origin-" + (kind || "api");
+        badge.textContent = origin;
+        badge.title = "This prompt came from: " + origin;
+        return badge;
+    }
+
+    function appendMessage(role, text, images, origin) {
         var div = document.createElement("div");
         div.className = "message " + role;
+        if (role === "user" && origin && origin !== "screen") {
+            div.classList.add("from-" + String(origin).split(" ")[0]);
+        }
         if (images && images.length) {
             images.forEach(function (src) {
                 var img = document.createElement("img");
@@ -266,6 +282,7 @@
         // The prompt a human typed is worth copying back out; transient error/info bubbles are not.
         if (role === "user") {
             var footer = newFooter(div);
+            if (origin) footer.appendChild(originBadge(origin));
             footer.appendChild(textSpan(formatTime(new Date())));
             footer.appendChild(copyButton(text, "Copy"));
         }
@@ -544,7 +561,7 @@
     // Puts the text in the queue without sending it. The item sits there with its Auto off until
     // a human turns it on or advances the queue.
     function queuePrompt(text) {
-        var payload = { text: text, hold: true, images: takePendingImages() };
+        var payload = { text: text, hold: true, images: takePendingImages(), source: "screen" };
         fetch(apiUrl(chatUrl("/chat")), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -665,12 +682,14 @@
                 setBusy(false);
                 break;
             case "user":
-                appendMessage("user", event.content || "", event.images);
+                appendMessage("user", event.content || "", event.images, event.origin);
                 scrollToBottom();
                 refreshQueue(); // the item just moved from pending to sent (QueueChecklistView_260913_oo01)
                 break;
             case "mcp_user":
-                appendMessage("user", "[agent] " + (event.content || ""));
+                // Kept for an emitter that still sends this kind; a prompt from elsewhere now
+                // arrives as a "user" event carrying its origin.
+                appendMessage("user", event.content || "", null, event.origin || "api");
                 scrollToBottom();
                 refreshQueue();
                 break;
@@ -702,7 +721,7 @@
         forceScrollToBottom();
         setBusy(true);
 
-        var payload = { text: text, images: takePendingImages() };
+        var payload = { text: text, images: takePendingImages(), source: "screen" };
 
         fetch(apiUrl(chatUrl("/chat")), {
             method: "POST",
@@ -971,7 +990,7 @@
                         var div = appendMarkdownMessage(t.role, t.content);
                         newFooter(div).appendChild(copyButton(t.content, "Copy MD"));
                     } else {
-                        appendMessage(t.role, t.content);
+                        appendMessage(t.role, t.content, null, t.origin);
                     }
                 });
             })

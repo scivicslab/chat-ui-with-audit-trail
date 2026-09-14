@@ -1111,6 +1111,19 @@ public class ChatSession extends Interpreter {
     public void start(String prompt, String model, Consumer<ChatEvent> emitter,
                        ActorRef<ChatSession> self, CompletableFuture<Void> done, String resultKey,
                        boolean noThink, List<String> images) {
+        start(prompt, model, emitter, self, done, resultKey, noThink, images, null);
+    }
+
+    /**
+     * Starts a turn, saying where its prompt came from.
+     *
+     * @param source what the queue recorded about the sender ({@link #originOf(String)}); the
+     *               conversation keeps it on the user's line so a reader can tell a person's own
+     *               prompt from a workflow's ({@code PromptOriginOnScreen_260915_oo01})
+     */
+    public void start(String prompt, String model, Consumer<ChatEvent> emitter,
+                       ActorRef<ChatSession> self, CompletableFuture<Void> done, String resultKey,
+                       boolean noThink, List<String> images, String source) {
         if (busy) {
             emitter.accept(ChatEvent.error("Already processing a prompt. Please wait or cancel."));
             done.complete(null);
@@ -1123,7 +1136,7 @@ public class ChatSession extends Interpreter {
         }
 
         busy = true;
-        recordHistory("user", prompt);
+        recordHistory("user", prompt, originOf(source));
         if (resultKey != null) {
             pendingResultKeys.remove(resultKey);
             activeResultKey = resultKey;
@@ -2161,8 +2174,15 @@ public class ChatSession extends Interpreter {
      * @param content the message text
      */
     public void recordHistory(String role, String content) {
+        recordHistory(role, content, null);
+    }
+
+    /**
+     * @param origin where a user line's prompt came from, or {@code null} for every other line
+     */
+    public void recordHistory(String role, String content, String origin) {
         if (content == null || content.isBlank()) return;
-        conversationHistory.addLast(new HistoryEntry(role, content));
+        conversationHistory.addLast(new HistoryEntry(role, content, origin));
         while (conversationHistory.size() > MAX_HISTORY) conversationHistory.removeFirst();
         historySnapshot.set(List.copyOf(conversationHistory));
     }
@@ -2343,5 +2363,46 @@ public class ChatSession extends Interpreter {
      * @param role    the message role (e.g. "user" or "assistant")
      * @param content the message text
      */
-    public record HistoryEntry(String role, String content) {}
+    /**
+     * One line of the conversation.
+     *
+     * @param role    {@code user}, {@code assistant} or {@code error}
+     * @param content what was said
+     * @param origin  for a user line, which of the four ways it arrived — see
+     *                {@link #originOf(String)}; {@code null} on every other line
+     */
+    public record HistoryEntry(String role, String content, String origin) {
+        public HistoryEntry(String role, String content) {
+            this(role, content, null);
+        }
+    }
+
+    /**
+     * Turns the queue's record of where a prompt came from into what a reader is shown.
+     *
+     * <p>A conversation takes prompts from four places, and read afterwards they look alike. One
+     * of them is a person's own work being done for them by a workflow, which is the whole reason
+     * the workflow exists, so the reader is told which ({@code PromptOriginOnScreen_260915_oo01}).
+     * The screen says so itself; the REST endpoint cannot tell a program from a person, so a
+     * prompt that claims nothing is shown as coming from a program.</p>
+     *
+     * @param source what {@code PromptQueue} was given: {@code screen}, {@code human},
+     *               {@code agent:ask_chat:<name>}, {@code agent:workflow}, or anything else
+     * @return the words to show
+     */
+    public static String originOf(String source) {
+        if (source == null || source.isBlank() || "human".equals(source)) return "api";
+        if ("screen".equals(source)) return "screen";
+        if ("agent:workflow".equals(source)) return "workflow";
+        if (source.startsWith(ASK_CHAT_SOURCE_PREFIX)) {
+            String asker = source.substring(ASK_CHAT_SOURCE_PREFIX.length());
+            // A conversation's actor name is "<project>/chat-<id>"; anything else asking through
+            // the same path is a plan running as a job.
+            return (asker.matches("[^/]+/chat-[^./]+") ? "chat " : "workflow ") + asker;
+        }
+        return source;
+    }
+
+    /** What {@code AskChatTool} puts in front of the name of whoever asked. */
+    public static final String ASK_CHAT_SOURCE_PREFIX = "agent:ask_chat:";
 }

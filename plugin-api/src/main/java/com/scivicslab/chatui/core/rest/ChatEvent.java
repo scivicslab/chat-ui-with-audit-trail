@@ -47,7 +47,13 @@ public record ChatEvent(
     /** Identifier pairing a {@code tool_use} with its {@code tool_result}. */
     String toolUseId,
     /** Whether a {@code tool_result} reports a failure. */
-    Boolean isError
+    Boolean isError,
+    /**
+     * On a prompt shown to watchers, which of the four ways it arrived — {@code screen},
+     * {@code api}, {@code chat <name>} or {@code workflow <name>}
+     * ({@code PromptOriginOnScreen_260915_oo01}). {@code null} on every other kind of event.
+     */
+    String origin
 ) {
 
     /**
@@ -57,7 +63,7 @@ public record ChatEvent(
      * @return a new delta event
      */
     public static ChatEvent delta(String content) {
-        return new ChatEvent("delta", content, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new ChatEvent("delta", content, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -69,7 +75,7 @@ public record ChatEvent(
      * @return a new result event
      */
     public static ChatEvent result(String sessionId, double costUsd, long durationMs) {
-        return new ChatEvent("result", null, sessionId, costUsd, durationMs, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new ChatEvent("result", null, sessionId, costUsd, durationMs, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -83,7 +89,7 @@ public record ChatEvent(
      * @return a new result event
      */
     public static ChatEvent result(String sessionId, double costUsd, long durationMs, String model, boolean busy) {
-        return new ChatEvent("result", null, sessionId, costUsd, durationMs, model, busy, null, null, null, null, null, null, null, null, null, null);
+        return new ChatEvent("result", null, sessionId, costUsd, durationMs, model, busy, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -93,7 +99,7 @@ public record ChatEvent(
      * @return a new error event
      */
     public static ChatEvent error(String content) {
-        return new ChatEvent("error", content, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new ChatEvent("error", content, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -103,7 +109,7 @@ public record ChatEvent(
      * @return a new info event
      */
     public static ChatEvent info(String content) {
-        return new ChatEvent("info", content, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new ChatEvent("info", content, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -124,8 +130,24 @@ public record ChatEvent(
      * @return a new user event
      */
     public static ChatEvent user(String content, List<String> images) {
+        return user(content, images, null);
+    }
+
+    /**
+     * A prompt being shown to whoever is watching this conversation, saying where it came from.
+     *
+     * <p>One kind of event for all four senders ({@code PromptOriginOnScreen_260915_oo01}): the
+     * pane draws them the same way and labels the ones that are not the watcher's own. A separate
+     * kind for prompts from elsewhere dropped the images along the way.</p>
+     *
+     * @param content the prompt text
+     * @param images  data URLs attached to it, or empty
+     * @param origin  {@code screen}, {@code api}, {@code chat <name>} or {@code workflow <name>};
+     *                {@code null} when nothing is known about the sender
+     */
+    public static ChatEvent user(String content, List<String> images, String origin) {
         return new ChatEvent("user", content, null, null, null, null, null, null, null, null, null, null, null,
-                (images == null || images.isEmpty()) ? null : images, null, null, null);
+                (images == null || images.isEmpty()) ? null : images, null, null, null, origin);
     }
 
     /**
@@ -136,7 +158,7 @@ public record ChatEvent(
      * @return a new mcp_user event
      */
     public static ChatEvent mcpUser(String content) {
-        return new ChatEvent("mcp_user", content, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new ChatEvent("mcp_user", content, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -148,7 +170,7 @@ public record ChatEvent(
      * @return a new status event
      */
     public static ChatEvent status(String model, String sessionId, boolean busy) {
-        return new ChatEvent("status", null, sessionId, null, null, model, busy, null, null, null, null, null, null, null, null, null, null);
+        return new ChatEvent("status", null, sessionId, null, null, model, busy, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -158,7 +180,7 @@ public record ChatEvent(
      * @return a new thinking event
      */
     public static ChatEvent thinking(String content) {
-        return new ChatEvent("thinking", content, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new ChatEvent("thinking", content, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -167,7 +189,7 @@ public record ChatEvent(
      * @return a new heartbeat event
      */
     public static ChatEvent heartbeat() {
-        return new ChatEvent("heartbeat", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new ChatEvent("heartbeat", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -181,7 +203,7 @@ public record ChatEvent(
      */
     public static ChatEvent prompt(String promptId, String content, String promptType, List<String> options) {
         return new ChatEvent("prompt", content, null, null, null, null, null,
-                             promptId, promptType, options, null, null, null, null, null, null, null);
+                             promptId, promptType, options, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -195,7 +217,7 @@ public record ChatEvent(
      */
     public static ChatEvent log(String level, String logger, String message, long ts) {
         return new ChatEvent("log", message, null, null, null, null, null,
-                             null, null, null, level, logger, ts, null, null, null, null);
+                             null, null, null, level, logger, ts, null, null, null, null, null);
     }
 
     /**
@@ -207,7 +229,7 @@ public record ChatEvent(
      */
     public static ChatEvent translation(String content) {
         return new ChatEvent("translation", content, null, null, null, null, null,
-                             null, null, null, null, null, null, null, null, null, null);
+                             null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -218,7 +240,7 @@ public record ChatEvent(
      */
     public static ChatEvent btwDelta(String content) {
         return new ChatEvent("btw_delta", content, null, null, null, null, null,
-                             null, null, null, null, null, null, null, null, null, null);
+                             null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -228,7 +250,7 @@ public record ChatEvent(
      */
     public static ChatEvent btwResult() {
         return new ChatEvent("btw_result", null, null, null, null, null, null,
-                             null, null, null, null, null, null, null, null, null, null);
+                             null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -244,7 +266,7 @@ public record ChatEvent(
      */
     public static ChatEvent toolUse(String toolUseId, String toolName, String inputJson) {
         return new ChatEvent("tool_use", inputJson, null, null, null, null, null,
-                             null, null, null, null, null, null, null, toolName, toolUseId, null);
+                             null, null, null, null, null, null, null, toolName, toolUseId, null, null);
     }
 
     /**
@@ -258,6 +280,6 @@ public record ChatEvent(
      */
     public static ChatEvent toolResult(String toolUseId, String content, boolean isError) {
         return new ChatEvent("tool_result", content, null, null, null, null, null,
-                             null, null, null, null, null, null, null, null, toolUseId, isError);
+                             null, null, null, null, null, null, null, null, toolUseId, isError, null);
     }
 }

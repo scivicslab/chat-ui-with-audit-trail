@@ -395,7 +395,7 @@ public class PromptQueue {
         if (item == null) return;
 
         chat.start(item.prompt(), item.model(), item.emitter(), chatSessionRef, item.done(), item.resultKey(),
-                item.noThink(), item.images());
+                item.noThink(), item.images(), item.source());
         com.scivicslab.pojoactor.action.ActionResult result = chat.runUntilEnd();
         if (!result.isSuccess()) {
             LOG.warning("Agent loop did not reach 'end': " + result.getResult());
@@ -420,9 +420,11 @@ public class PromptQueue {
         // the answer to a question nobody could see. Emitted at dispatch, not at enqueue, so a held
         // item appears when it is sent rather than while it is still waiting in the queue.
         try {
-            item.emitter().accept("human".equals(item.source())
-                    ? ChatEvent.user(item.prompt(), item.images())
-                    : ChatEvent.mcpUser(item.prompt()));
+            // A person's own prompt at the screen is drawn as it always was; anything else says
+            // where it came from, so a conversation being driven on someone's behalf reads as such
+            // while it runs, not only once it is in the history (PromptOriginOnScreen_260915_oo01).
+            item.emitter().accept(ChatEvent.user(item.prompt(), item.images(),
+                    ChatSession.originOf(item.source())));
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Could not echo the dispatched prompt to the pane", e);
         }

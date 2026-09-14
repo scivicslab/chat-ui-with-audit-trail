@@ -106,6 +106,9 @@ class PromptQueueDispatchTest {
         waitUntil(() -> emitted.stream().anyMatch(e -> "user".equals(e.type())), 2000);
         ChatEvent userEvent = emitted.stream().filter(e -> "user".equals(e.type())).findFirst().orElseThrow();
         assertEquals(images, userEvent.images());
+        // A prompt that did not come from the screen is still echoed with its images, and says so
+        // (PromptOriginOnScreen_260915_oo01).
+        assertEquals("api", userEvent.origin());
     }
 
     @Test

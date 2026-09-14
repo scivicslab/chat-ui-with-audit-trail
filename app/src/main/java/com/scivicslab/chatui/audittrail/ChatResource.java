@@ -262,8 +262,13 @@ public class ChatResource {
         ActorRef<SseConnection> sseRef = actorSystem.getSseConnection(projectId, chatId);
 
         java.util.function.Consumer<ChatEvent> emitter = event -> sseRef.tell(a -> a.emit(event));
+        // What the caller says it is. The screen sends "screen"; a program calling this endpoint
+        // usually sends nothing, and is shown as a program rather than as a person
+        // (PromptOriginOnScreen_260915_oo01).
+        Object saidSource = body != null ? body.get("source") : null;
+        String source = saidSource == null ? "human" : String.valueOf(saidSource);
         promptQueueRef.tell(q -> q.enqueue(text, model, "queue", emitter,
-                chatSessionIIAR.asChatSessionRef(), "human", null, new CompletableFuture<Void>(),
+                chatSessionIIAR.asChatSessionRef(), source, null, new CompletableFuture<Void>(),
                 noThink, !hold, images));
 
         return Response.ok(Map.of("type", "accepted")).build();

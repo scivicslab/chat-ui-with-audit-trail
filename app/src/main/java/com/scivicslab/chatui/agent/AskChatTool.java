@@ -5,12 +5,14 @@ import com.scivicslab.chatui.core.actor.ChatSession;
 import com.scivicslab.chatui.core.actor.ChatSessionIIAR;
 import com.scivicslab.chatui.core.actor.ChatUiActorSystem;
 import com.scivicslab.chatui.core.actor.PromptQueue;
+import com.scivicslab.chatui.core.actor.SseConnection;
 import com.scivicslab.chatui.core.rest.ChatEvent;
 import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -99,6 +101,15 @@ public final class AskChatTool {
         if (targetQueueRef == null) {
             return "error: chat not found: " + target;
         }
+        // What the asked conversation says goes to whoever is watching that conversation, exactly
+        // as it would if a person had typed the prompt. Nothing was passed here before, so a turn
+        // a workflow asked for ran with the screen showing nothing until it was over
+        // (PromptByValueHidesTheWork_260915_oo01). Absent when no SSE actor is registered, which
+        // is the case in the unit tests.
+        ActorRef<SseConnection> targetSseRef = system.getActor(targetName + ".sse");
+        Consumer<ChatEvent> toWatchers = targetSseRef == null
+                ? event -> { }
+                : event -> targetSseRef.tell(sse -> sse.emit(event));
 
         boolean allowed;
         try {
@@ -115,7 +126,7 @@ public final class AskChatTool {
             CompletableFuture<Void> done = new CompletableFuture<>();
             String resultKey = UUID.randomUUID().toString();
             targetQueueRef.tell(q -> q.enqueue(prompt, null, "queue",
-                    (ChatEvent event) -> {},
+                    toWatchers,
                     targetChatSessionIIAR.asChatSessionRef(), "agent:ask_chat:" + myName, resultKey,
                     done));
             try {
