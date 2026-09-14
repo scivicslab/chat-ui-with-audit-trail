@@ -977,11 +977,58 @@ public class ChatUiActorSystem {
     }
 
     /**
+     * Sets what a conversation asks the server to sample at, and records it with the rest of that
+     * conversation's settings ({@code ConversationTemperature_260914_oo01}).
+     *
+     * @param projectId   owning project's id
+     * @param chatId      conversation id within that project
+     * @param temperature what to sample at, or {@code null} to ask for nothing
+     * @return {@code false} when the conversation has no provider
+     */
+    public boolean setTemperature(String projectId, String chatId, Double temperature) {
+        createChat(projectId, chatId);
+        ActorRef<LlmProvider> providerRef = getProviderRef(projectId, chatId);
+        if (providerRef == null) return false;
+        providerRef.tell(p -> p.setTemperature(temperature)).join();
+        ChatSessionIIAR session = chatSessions.get(chatActorName(projectId, chatId));
+        if (session != null) {
+            recordSettings(chatActorName(projectId, chatId), session.getProviderIdDirect(),
+                    session.getToolSetDirect(), session.getModelDirect(), temperature);
+        }
+        return true;
+    }
+
+    /**
+     * @param projectId owning project's id
+     * @param chatId    conversation id within that project
+     * @return what that conversation asks to sample at, or {@code null} when it asks for nothing
+     */
+    public Double getTemperature(String projectId, String chatId) {
+        return temperatureOf(chatActorName(projectId, chatId));
+    }
+
+    /**
      * Writes the conversation's current provider kind, tool set and model to its I/O log session
      * as one {@code settings} record ({@code ConversationSettingsRecord_260913_oo01}). All three
      * every time, so the last record is the whole state; nothing is written without a log.
      */
     private void recordSettings(String tabName, String provider, String tools, String model) {
+        recordSettings(tabName, provider, tools, model, temperatureOf(tabName));
+    }
+
+    /** @return what that conversation asks to sample at, or {@code null} when it asks for nothing */
+    private Double temperatureOf(String tabName) {
+        ActorRef<LlmProvider> providerRef = actorSystem.getActor(tabName + CHAT_SESSION_SUFFIX + PROVIDER_SUFFIX);
+        if (providerRef == null) return null;
+        try {
+            return providerRef.ask(LlmProvider::getTemperature).join();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void recordSettings(String tabName, String provider, String tools, String model,
+                                Double temperature) {
         if (ioLogStore == null) return;
         try {
             long sessionId = ioLogStore.ensureSession(tabName);
@@ -990,6 +1037,7 @@ public class ChatUiActorSystem {
             o.put("provider", provider == null ? org.json.JSONObject.NULL : provider);
             o.put("tools", tools == null ? org.json.JSONObject.NULL : tools);
             o.put("model", model == null ? org.json.JSONObject.NULL : model);
+            o.put("temperature", temperature == null ? org.json.JSONObject.NULL : temperature);
             ioLogStore.record(sessionId, "agent", IoLogView.SETTINGS_LABEL, o.toString());
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Could not record the settings of " + tabName, e);
@@ -1038,8 +1086,15 @@ public class ChatUiActorSystem {
                 providerRef.tell(p -> p.setModel(model));
             }
         }
+        if (s.temperature() != null) {
+            ActorRef<LlmProvider> providerRef = getProviderRef(projectId, chatId);
+            if (providerRef != null) {
+                Double t = s.temperature();
+                providerRef.tell(p -> p.setTemperature(t));
+            }
+        }
         LOG.info("Restored settings of " + tabName + ": provider=" + kind + ", tools=" + toolSet.id()
-                + ", model=" + s.model());
+                + ", model=" + s.model() + ", temperature=" + s.temperature());
     }
 
     /** Builds a provider of the given kind for one conversation, through the registry's factory. */

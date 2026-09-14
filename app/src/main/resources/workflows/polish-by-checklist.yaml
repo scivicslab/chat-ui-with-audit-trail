@@ -16,9 +16,9 @@ params:
     description: "The conversation that decides whether the rule is met"
     default: "project1/chat-03"
   tries:
-    description: "How many times one criterion may be sent back"
+    description: "How many times one criterion may be sent back before it is left as it was"
     type: int
-    default: 2
+    default: 5
 steps:
   - states: ["0", "1"]
     label: add-fixer
@@ -26,7 +26,15 @@ steps:
 
   - states: ["1", "enter-1"]
     label: add-judge
-    actions: [{actor: this, method: addWorker, arguments: ["judge", 'jexl:state.getString("judge")'], execution: direct}]
+    actions:
+      - actor: this
+        method: addWorker
+        arguments: ["judge", 'jexl:state.getString("judge")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["text", "original"]
+        execution: direct
 
   # ── 1. subject ───────────────────────────────────────────────────────────
   - states: ["enter-1", "judge-1"]
@@ -77,8 +85,10 @@ steps:
 
   - states: ["check-1", "enter-2"]
     label: give-up-1
-    note: 直す回数を使い切った。いまの本文のまま次の規則へ。
-    actions: [{actor: this, method: copyState, arguments: ["text", "text"], execution: direct}]
+    note: |
+      直す回数を使い切った。この観点に入る前の本文に戻して次の観点へ進む。満たせなかった観点の
+      書き換えを残すと、いじり回しただけの本文になる。
+    actions: [{actor: this, method: copyState, arguments: ["kept-1", "text"], execution: direct}]
 
   - states: ["fix-1", "judge-1"]
     label: fix-1-subject
@@ -93,7 +103,7 @@ steps:
         execution: direct
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"指摘を受けました。同じ規則のまま直してください。直した本文だけを返してください。\n\n規則:\n" + state.getString("rule-1") + "\n\n指摘:\n" + state.getString("verdict") + "\n\n本文:\n" + state.getString("text")']
+        arguments: ["fixer", 'jexl:"指摘を受けました。同じ規則のまま直してください。直した本文だけを返してください。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則:\n" + state.getString("rule-1") + "\n\n指摘:\n" + state.getString("verdict") + "\n\n本文:\n" + state.getString("text")']
         execution: direct
       - actor: this
         method: keepWorkerReply
@@ -149,8 +159,10 @@ steps:
 
   - states: ["check-2", "enter-3"]
     label: give-up-2
-    note: 直す回数を使い切った。いまの本文のまま次の規則へ。
-    actions: [{actor: this, method: copyState, arguments: ["text", "text"], execution: direct}]
+    note: |
+      直す回数を使い切った。この観点に入る前の本文に戻して次の観点へ進む。満たせなかった観点の
+      書き換えを残すと、いじり回しただけの本文になる。
+    actions: [{actor: this, method: copyState, arguments: ["kept-2", "text"], execution: direct}]
 
   - states: ["fix-2", "judge-2"]
     label: fix-2-naming
@@ -165,7 +177,7 @@ steps:
         execution: direct
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"指摘を受けました。同じ規則のまま直してください。直した本文だけを返してください。\n\n規則:\n" + state.getString("rule-2") + "\n\n指摘:\n" + state.getString("verdict") + "\n\n本文:\n" + state.getString("text")']
+        arguments: ["fixer", 'jexl:"指摘を受けました。同じ規則のまま直してください。直した本文だけを返してください。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則:\n" + state.getString("rule-2") + "\n\n指摘:\n" + state.getString("verdict") + "\n\n本文:\n" + state.getString("text")']
         execution: direct
       - actor: this
         method: keepWorkerReply
@@ -225,8 +237,10 @@ steps:
 
   - states: ["check-3", "enter-4"]
     label: give-up-3
-    note: 直す回数を使い切った。いまの本文のまま次の規則へ。
-    actions: [{actor: this, method: copyState, arguments: ["text", "text"], execution: direct}]
+    note: |
+      直す回数を使い切った。この観点に入る前の本文に戻して次の観点へ進む。満たせなかった観点の
+      書き換えを残すと、いじり回しただけの本文になる。
+    actions: [{actor: this, method: copyState, arguments: ["kept-3", "text"], execution: direct}]
 
   - states: ["fix-3", "judge-3"]
     label: fix-3-thread
@@ -241,7 +255,7 @@ steps:
         execution: direct
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"指摘を受けました。同じ規則のまま直してください。直した本文だけを返してください。指摘が「削りすぎ」であれば、消えた事実を元の本文から取り戻し、本文か「## 雑記」の節に書き戻してください。事実を削らないでください。筋から外れると判断した事実は、本文から外したうえで、末尾の「## 雑記」の節に箇条書きで移してください（順不同でかまいません）。「## 参考資料」の節があれば、その直前に「## 雑記」を置いてください。\n\n規則:\n" + state.getString("rule-3") + "\n\n指摘:\n" + state.getString("verdict") + "\n\n元の本文（ここにある事実は全部残すこと）:\n" + state.getString("before") + "\n\nいまの本文:\n" + state.getString("text")']
+        arguments: ["fixer", 'jexl:"指摘を受けました。同じ規則のまま直してください。直した本文だけを返してください。指摘が「削りすぎ」であれば、消えた事実を元の本文から取り戻し、本文か「## 雑記」の節に書き戻してください。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。事実を削らないでください。筋から外れると判断した事実は、本文から外したうえで、末尾の「## 雑記」の節に箇条書きで移してください（順不同でかまいません）。「## 参考資料」の節があれば、その直前に「## 雑記」を置いてください。\n\n規則:\n" + state.getString("rule-3") + "\n\n指摘:\n" + state.getString("verdict") + "\n\n元の本文（ここにある事実は全部残すこと）:\n" + state.getString("before") + "\n\nいまの本文:\n" + state.getString("text")']
         execution: direct
       - actor: this
         method: keepWorkerReply
@@ -301,8 +315,10 @@ steps:
 
   - states: ["check-4", "enter-5"]
     label: give-up-4
-    note: 直す回数を使い切った。いまの本文のまま次の規則へ。
-    actions: [{actor: this, method: copyState, arguments: ["text", "text"], execution: direct}]
+    note: |
+      直す回数を使い切った。この観点に入る前の本文に戻して次の観点へ進む。満たせなかった観点の
+      書き換えを残すと、いじり回しただけの本文になる。
+    actions: [{actor: this, method: copyState, arguments: ["kept-4", "text"], execution: direct}]
 
   - states: ["fix-4", "judge-4"]
     label: fix-4-negation
@@ -317,7 +333,7 @@ steps:
         execution: direct
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"指摘を受けました。同じ規則のまま直してください。直した本文だけを返してください。指摘が「削りすぎ」であれば、消えた事実を元の本文から取り戻し、本文か「## 雑記」の節に書き戻してください。事実を削らないでください。筋から外れると判断した事実は、本文から外したうえで、末尾の「## 雑記」の節に箇条書きで移してください（順不同でかまいません）。「## 参考資料」の節があれば、その直前に「## 雑記」を置いてください。\n\n規則:\n" + state.getString("rule-4") + "\n\n指摘:\n" + state.getString("verdict") + "\n\n元の本文（ここにある事実は全部残すこと）:\n" + state.getString("before") + "\n\nいまの本文:\n" + state.getString("text")']
+        arguments: ["fixer", 'jexl:"指摘を受けました。同じ規則のまま直してください。直した本文だけを返してください。指摘が「削りすぎ」であれば、消えた事実を元の本文から取り戻し、本文か「## 雑記」の節に書き戻してください。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。事実を削らないでください。筋から外れると判断した事実は、本文から外したうえで、末尾の「## 雑記」の節に箇条書きで移してください（順不同でかまいません）。「## 参考資料」の節があれば、その直前に「## 雑記」を置いてください。\n\n規則:\n" + state.getString("rule-4") + "\n\n指摘:\n" + state.getString("verdict") + "\n\n元の本文（ここにある事実は全部残すこと）:\n" + state.getString("before") + "\n\nいまの本文:\n" + state.getString("text")']
         execution: direct
       - actor: this
         method: keepWorkerReply
@@ -373,8 +389,10 @@ steps:
 
   - states: ["check-5", "enter-6"]
     label: give-up-5
-    note: 直す回数を使い切った。いまの本文のまま次の規則へ。
-    actions: [{actor: this, method: copyState, arguments: ["text", "text"], execution: direct}]
+    note: |
+      直す回数を使い切った。この観点に入る前の本文に戻して次の観点へ進む。満たせなかった観点の
+      書き換えを残すと、いじり回しただけの本文になる。
+    actions: [{actor: this, method: copyState, arguments: ["kept-5", "text"], execution: direct}]
 
   - states: ["fix-5", "judge-5"]
     label: fix-5-oneaxis
@@ -389,7 +407,7 @@ steps:
         execution: direct
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"指摘を受けました。同じ規則のまま直してください。直した本文だけを返してください。\n\n規則:\n" + state.getString("rule-5") + "\n\n指摘:\n" + state.getString("verdict") + "\n\n本文:\n" + state.getString("text")']
+        arguments: ["fixer", 'jexl:"指摘を受けました。同じ規則のまま直してください。直した本文だけを返してください。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則:\n" + state.getString("rule-5") + "\n\n指摘:\n" + state.getString("verdict") + "\n\n本文:\n" + state.getString("text")']
         execution: direct
       - actor: this
         method: keepWorkerReply
@@ -445,8 +463,10 @@ steps:
 
   - states: ["check-6", "enter-7"]
     label: give-up-6
-    note: 直す回数を使い切った。いまの本文のまま次の規則へ。
-    actions: [{actor: this, method: copyState, arguments: ["text", "text"], execution: direct}]
+    note: |
+      直す回数を使い切った。この観点に入る前の本文に戻して次の観点へ進む。満たせなかった観点の
+      書き換えを残すと、いじり回しただけの本文になる。
+    actions: [{actor: this, method: copyState, arguments: ["kept-6", "text"], execution: direct}]
 
   - states: ["fix-6", "judge-6"]
     label: fix-6-list
@@ -461,7 +481,7 @@ steps:
         execution: direct
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"指摘を受けました。同じ規則のまま直してください。直した本文だけを返してください。\n\n規則:\n" + state.getString("rule-6") + "\n\n指摘:\n" + state.getString("verdict") + "\n\n本文:\n" + state.getString("text")']
+        arguments: ["fixer", 'jexl:"指摘を受けました。同じ規則のまま直してください。直した本文だけを返してください。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則:\n" + state.getString("rule-6") + "\n\n指摘:\n" + state.getString("verdict") + "\n\n本文:\n" + state.getString("text")']
         execution: direct
       - actor: this
         method: keepWorkerReply
@@ -505,7 +525,7 @@ steps:
         arguments: ["judge", "verdict"]
         execution: direct
 
-  - states: ["check-7", "done"]
+  - states: ["check-7", "verify"]
     label: accept-7
     note: 満たしている。本文はそのまま次の規則へ。
     actions: [{actor: this, method: checkState, arguments: ["verdict", "ACCEPT"], execution: direct}]
@@ -515,10 +535,12 @@ steps:
     note: 満たしていない。直す回数が残っていれば直しへ。
     actions: [{actor: this, method: countUp, arguments: ["tries-7", 'jexl:state.getString("tries")'], execution: direct}]
 
-  - states: ["check-7", "done"]
+  - states: ["check-7", "verify"]
     label: give-up-7
-    note: 直す回数を使い切った。いまの本文のまま次の規則へ。
-    actions: [{actor: this, method: copyState, arguments: ["text", "text"], execution: direct}]
+    note: |
+      直す回数を使い切った。この観点に入る前の本文に戻して次の観点へ進む。満たせなかった観点の
+      書き換えを残すと、いじり回しただけの本文になる。
+    actions: [{actor: this, method: copyState, arguments: ["kept-7", "text"], execution: direct}]
 
   - states: ["fix-7", "judge-7"]
     label: fix-7-sections
@@ -533,7 +555,67 @@ steps:
         execution: direct
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"指摘を受けました。同じ規則のまま直してください。直した本文だけを返してください。\n\n規則:\n" + state.getString("rule-7") + "\n\n指摘:\n" + state.getString("verdict") + "\n\n本文:\n" + state.getString("text")']
+        arguments: ["fixer", 'jexl:"指摘を受けました。同じ規則のまま直してください。直した本文だけを返してください。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則:\n" + state.getString("rule-7") + "\n\n指摘:\n" + state.getString("verdict") + "\n\n本文:\n" + state.getString("text")']
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["fixer", "text"]
+        execution: direct
+
+  # ── last: nothing brought in, nothing altered ─────────────────────────────
+  - states: ["verify", "verify-check"]
+    label: verify-nothing-was-brought-in
+    note: |
+      Compares the text as it arrived with the text as it stands. The criteria may add a section,
+      but only out of what the text already says: a command, an output or a number that was not
+      there, and a value that has changed, are what this looks for.
+    actions:
+      - actor: this
+        method: clearWorker
+        arguments: ["fixer"]
+        execution: direct
+      - actor: this
+        method: clearWorker
+        arguments: ["judge"]
+        execution: direct
+      - actor: this
+        method: askWorker
+        arguments: ["judge", 'jexl:"元の本文と直した本文を見比べて、次の2つだけを見てください。(1) 元の本文に無いコマンド・実行結果・数値・設定値が、直した本文に入っていないか。(2) 元の本文にあった数値・コマンド・識別子が書き換えられていないか。どちらも無ければ ACCEPT の一語だけを返してください。あれば REVISE: に続けて、その箇所を一つずつ挙げてください。文章の善し悪しや、規則を満たしているかは見ないでください。ほかのことは書かないでください。\n\n元の本文:\n" + state.getString("original") + "\n\n直した本文:\n" + state.getString("text")']
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["judge", "verdict"]
+        execution: direct
+
+  - states: ["verify-check", "done"]
+    label: accept-verify
+    actions: [{actor: this, method: checkState, arguments: ["verdict", "ACCEPT"], execution: direct}]
+
+  - states: ["verify-check", "verify-fix"]
+    label: needs-verify-fix
+    actions: [{actor: this, method: countUp, arguments: ["tries-verify", 'jexl:state.getString("tries")'], execution: direct}]
+
+  - states: ["verify-check", "skip"]
+    label: give-up-verify
+    note: |
+      The last check could not be passed. This file is not written: what cannot be shown to be
+      unbroken does not replace what is there. The original stays as it is, and the job says so.
+    actions: [{actor: this, method: doNothing, arguments: ["not written"], execution: direct}]
+
+  - states: ["verify-fix", "verify"]
+    label: take-back-what-was-brought-in
+    actions:
+      - actor: this
+        method: clearWorker
+        arguments: ["fixer"]
+        execution: direct
+      - actor: this
+        method: clearWorker
+        arguments: ["judge"]
+        execution: direct
+      - actor: this
+        method: askWorker
+        arguments: ["fixer", 'jexl:"指摘を受けました。指摘された箇所だけを直してください。直した本文だけを返してください。元の本文に無いコマンド・実行結果・数値は消してください。他の文書にある説明をそのまま持ち込んでいる箇所は、その文書を参照する一文に置き換えてください。元の本文にあった数値・コマンド・識別子が書き換えられていれば、元の値に戻してください。それ以外は今の本文のままにしてください。\n\n指摘:\n" + state.getString("verdict") + "\n\n元の本文:\n" + state.getString("original") + "\n\nいまの本文:\n" + state.getString("text")']
         execution: direct
       - actor: this
         method: keepWorkerReply

@@ -69,6 +69,9 @@
                 </select>
                 <button id="refresh-models-btn" title="Refresh model list">&#x21bb;</button>
             </label>
+            <label id="temperature-label" title="What this conversation asks the server to sample at. Empty asks for nothing and leaves the server on its own default (ConversationTemperature_260914_oo01).">Temp:
+                <input id="temperature-input" type="number" min="0" max="2" step="0.1" placeholder="server">
+            </label>
             <label id="think-label" style="display:none" title="Enable thinking mode (Qwen3 extended CoT)">
                 <input type="checkbox" id="think-check"> Think
             </label>

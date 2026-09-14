@@ -61,6 +61,22 @@ public interface LlmProvider {
     default String promptPreface() { return ""; }
 
 
+    /**
+     * Sets what the conversation asks the server to sample at, where that means anything.
+     *
+     * <p>A number is a property of the conversation, like the model: two conversations of one
+     * instance may want different ones, and a batch that is being compared between prompt versions
+     * wants the same one every run ({@code ConversationTemperature_260914_oo01}). Providers that
+     * drive a CLI harness have no such setting and ignore it.</p>
+     *
+     * @param temperature what to sample at, or {@code null} to ask for nothing and leave the
+     *                    server on its own default
+     */
+    default void setTemperature(Double temperature) { }
+
+    /** @return what this conversation asks to sample at, or {@code null} when it asks for nothing */
+    default Double getTemperature() { return null; }
+
     /** Returns the current session ID, or null if not applicable (e.g., HTTP-based providers). */
     default String getSessionId() { return null; }
 

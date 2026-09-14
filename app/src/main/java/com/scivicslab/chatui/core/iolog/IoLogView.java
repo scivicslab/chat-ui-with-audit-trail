@@ -161,7 +161,7 @@ public class IoLogView {
     public static final String SETTINGS_LABEL = "settings";
 
     /** A conversation's provider kind, tool set and model, as one settings record holds them. */
-    public record Settings(String provider, String tools, String model) {}
+    public record Settings(String provider, String tools, String model, Double temperature) {}
 
     /**
      * The last settings record of a session, or {@code null} when it has none
@@ -173,7 +173,8 @@ public class IoLogView {
     }
 
     /** One settings record with the time it was written, for the Sessions tab's settings history. */
-    public record SettingsRecord(String time, String provider, String tools, String model) {}
+    public record SettingsRecord(String time, String provider, String tools, String model,
+                                Double temperature) {}
 
     /**
      * Every settings record of a session, oldest first: when the conversation changed its provider
@@ -186,7 +187,8 @@ public class IoLogView {
                 .map(e -> {
                     Settings s = parseSettings(e.getMessage());
                     return s == null ? null
-                            : new SettingsRecord(String.valueOf(e.getTimestamp()), s.provider(), s.tools(), s.model());
+                            : new SettingsRecord(String.valueOf(e.getTimestamp()), s.provider(),
+                                    s.tools(), s.model(), s.temperature());
                 })
                 .filter(r -> r != null)
                 .toList();
@@ -204,7 +206,9 @@ public class IoLogView {
         if (message == null || message.isBlank()) return null;
         try {
             org.json.JSONObject o = new org.json.JSONObject(message);
-            return new Settings(o.optString("provider", null), o.optString("tools", null), o.optString("model", null));
+            return new Settings(o.optString("provider", null), o.optString("tools", null),
+                    o.optString("model", null),
+                    o.has("temperature") && !o.isNull("temperature") ? o.optDouble("temperature") : null);
         } catch (Exception e) {
             return null;
         }

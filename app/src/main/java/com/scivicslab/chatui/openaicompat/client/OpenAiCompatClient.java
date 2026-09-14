@@ -151,7 +151,8 @@ public class OpenAiCompatClient {
                                                  boolean noThink, int maxTokens,
                                                  List<ToolDefinition> tools) {
         try {
-            String requestBody = buildRequestBody(model, messages, noThink, maxTokens, false, tools);
+            String requestBody = buildRequestBody(model, messages, noThink, maxTokens, false, tools,
+                    temperature);
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + "/v1/chat/completions"))
                     .header("Content-Type", "application/json")
@@ -187,7 +188,8 @@ public class OpenAiCompatClient {
                              int maxTokens, StreamCallback callback) {
         long startTime = System.currentTimeMillis();
         try {
-            String requestBody = buildRequestBody(model, history, noThink, maxTokens);
+            String requestBody = buildRequestBody(model, history, noThink, maxTokens, true,
+                    List.of(), temperature);
             HttpResponse<Stream<String>> response = sendWithRetry(requestBody);
 
             if (response.statusCode() == 400) {
@@ -270,24 +272,54 @@ public class OpenAiCompatClient {
     }
 
     /** Builds a streaming request body with no tools (backward-compatible). */
+    /**
+     * What to ask the server to sample at, or {@code null} to ask for nothing.
+     *
+     * <p>A property of the conversation, set through {@code LlmProvider.setTemperature}, kept here
+     * because this client serves one conversation ({@code ConversationTemperature_260914_oo01}).</p>
+     */
+    private volatile Double temperature;
+
+    /** @param temperature what to sample at, or {@code null} to leave it to the server */
+    public void setTemperature(Double temperature) {
+        this.temperature = temperature;
+    }
+
+    /** @return what this conversation asks to sample at, or {@code null} when it asks for nothing */
+    public Double getTemperature() {
+        return temperature;
+    }
+
     static String buildRequestBody(String model, List<ChatMessage> messages,
                                    boolean noThink, int maxTokens) {
-        return buildRequestBody(model, messages, noThink, maxTokens, true, List.of());
+        return buildRequestBody(model, messages, noThink, maxTokens, true, List.of(), null);
+    }
+
+    static String buildRequestBody(String model, List<ChatMessage> messages,
+                                   boolean noThink, int maxTokens,
+                                   boolean stream, List<ToolDefinition> tools) {
+        return buildRequestBody(model, messages, noThink, maxTokens, stream, tools, null);
     }
 
     /**
      * Builds a chat completion request body.
      *
-     * @param stream whether to request SSE streaming ({@code stream:true/false})
-     * @param tools  tool definitions to include; empty list omits the {@code tools} field
+     * @param stream      whether to request SSE streaming ({@code stream:true/false})
+     * @param tools       tool definitions to include; empty list omits the {@code tools} field
+     * @param temperature what to ask the server to sample at, or {@code null} to ask for nothing
+     *                    and leave the server on its own default. Two runs of one batch differ
+     *                    otherwise, for reasons that have nothing to do with the prompt being
+     *                    compared ({@code ConversationTemperature_260914_oo01})
      */
     static String buildRequestBody(String model, List<ChatMessage> messages,
                                    boolean noThink, int maxTokens,
-                                   boolean stream, List<ToolDefinition> tools) {
+                                   boolean stream, List<ToolDefinition> tools,
+                                   Double temperature) {
         StringBuilder sb = new StringBuilder();
         sb.append("{\"model\":\"").append(escapeJson(model))
           .append("\",\"stream\":").append(stream).append(",");
         if (maxTokens > 0) sb.append("\"max_tokens\":").append(maxTokens).append(",");
+        if (temperature != null) sb.append("\"temperature\":").append(temperature).append(",");
         if (noThink) sb.append("\"chat_template_kwargs\":{\"enable_thinking\":false},");
         if (!tools.isEmpty()) {
             sb.append("\"tools\":[");

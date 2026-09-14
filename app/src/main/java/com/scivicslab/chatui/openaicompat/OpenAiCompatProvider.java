@@ -152,6 +152,28 @@ public class OpenAiCompatProvider implements LlmProvider {
      * @param emitter callback that receives streamed {@link ChatEvent}s
      * @param ctx     provider context containing images and other request metadata
      */
+    /** What this conversation asks the server to sample at; {@code null} asks for nothing. */
+    private volatile Double temperature;
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Set on every client this provider holds: which one serves a turn depends on the model,
+     * and the conversation's temperature does not.</p>
+     */
+    @Override
+    public void setTemperature(Double temperature) {
+        this.temperature = temperature;
+        for (OpenAiCompatClient c : clients) {
+            c.setTemperature(temperature);
+        }
+    }
+
+    @Override
+    public Double getTemperature() {
+        return temperature;
+    }
+
     @Override
     public void sendPrompt(String prompt, String model, Consumer<ChatEvent> emitter, ProviderContext ctx) {
         cancelled = false;

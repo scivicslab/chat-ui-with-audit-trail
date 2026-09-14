@@ -756,6 +756,33 @@
         });
     }
 
+    // The temperature belongs to the conversation as the model does
+    // (ConversationTemperature_260914_oo01). An empty box asks the server for nothing, which is
+    // what every conversation did before this setting existed.
+    function initTemperature() {
+        var box = el("temperature-input");
+        if (!box) return;
+        box.addEventListener("change", function () {
+            var forChat = PROJECT_ID + "/" + CHAT_ID;
+            var typed = box.value.trim();
+            fetch(apiUrl(chatUrl("/temperature")), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ temperature: typed === "" ? null : typed })
+            }).then(function (r) { return r.json(); })
+              .then(function (result) {
+                  if (result && result.type === "error") {
+                      notify(result.message || "could not change the temperature", true);
+                      if (forChat === PROJECT_ID + "/" + CHAT_ID) showCurrentModel();
+                  }
+              })
+              .catch(function (err) {
+                  notify("could not change the temperature: " + err.message, true);
+                  if (forChat === PROJECT_ID + "/" + CHAT_ID) showCurrentModel();
+              });
+        });
+    }
+
     // The provider belongs to the conversation as the model does (CliHarnessProvider_260912_oo01).
     // The dropdown's value is "<kind>" or "<kind>:<tools>"; choosing one tells this conversation to
     // switch, and the model list is reloaded from the new provider.
@@ -845,6 +872,10 @@
             .then(function (s) {
                 if (forChat !== PROJECT_ID + "/" + CHAT_ID) return;
                 showProvider(s);
+                var box = el("temperature-input");
+                // Empty when this conversation asks for nothing, so the box says what is true
+                // rather than a number the server was never told.
+                if (box) box.value = (s && typeof s.temperature === "number") ? s.temperature : "";
                 var model = s && s.model;
                 if (!model) return;
                 var offered = Array.prototype.some.call(modelSelect.options, function (o) {
@@ -1136,6 +1167,7 @@
         initQueueResize();
         initModelPersistence();
         initProviderSelect();
+        initTemperature();
         loadModels();
         hydrateConversation();
         refreshQueue();

@@ -34,6 +34,16 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
             org.json.JSONArray a = arguments(arg);
             return runner().askWorker(a.length() > 0 ? a.getString(0) : "",
                     a.length() > 1 ? a.getString(1) : "");
+        } else if (actionName.equals("takeFrontMatter")) {
+            org.json.JSONArray a = arguments(arg);
+            return runner().takeFrontMatter(a.length() > 0 ? a.getString(0) : "",
+                    a.length() > 1 ? a.getString(1) : "",
+                    a.length() > 2 ? a.getString(2) : "");
+        } else if (actionName.equals("joinFrontMatter")) {
+            org.json.JSONArray a = arguments(arg);
+            return runner().joinFrontMatter(a.length() > 0 ? a.getString(0) : "",
+                    a.length() > 1 ? a.getString(1) : "",
+                    a.length() > 2 ? a.getString(2) : "");
         } else if (actionName.equals("endConversation")) {
             org.json.JSONArray a = arguments(arg);
             return runner().endConversation(a.length() > 0 ? a.getString(0) : "");

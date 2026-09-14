@@ -306,10 +306,57 @@ public class ChatResource {
         actorSystem.createChat(projectId, chatId);
         ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
         String model = chatSessionIIAR.getModelDirect();
-        return Map.of("busy", chatSessionIIAR.isBusyDirect(),
-                      "model", model == null ? "" : model,
-                      "provider", chatSessionIIAR.getProviderIdDirect(),
-                      "tools", chatSessionIIAR.getToolSetDirect());
+        Double temperature = actorSystem.getTemperature(projectId, chatId);
+        Map<String, Object> status = new java.util.LinkedHashMap<>();
+        status.put("busy", chatSessionIIAR.isBusyDirect());
+        status.put("model", model == null ? "" : model);
+        status.put("provider", chatSessionIIAR.getProviderIdDirect());
+        status.put("tools", chatSessionIIAR.getToolSetDirect());
+        // Absent rather than a made-up number when this conversation asks the server for nothing.
+        if (temperature != null) status.put("temperature", temperature);
+        return status;
+    }
+
+    /**
+     * Sets what this conversation asks the server to sample at
+     * ({@code ConversationTemperature_260914_oo01}). Like the model, it belongs to the conversation.
+     *
+     * @param projectId owning project's id
+     * @param chatId    conversation tab identifier
+     * @param body      {@code {"temperature": 0.2}}; {@code null} asks the server for nothing and
+     *                  leaves it on its own default
+     * @return {@code {"type": "accepted", "temperature": ...}}, or 400 when the value is not a
+     *         number between 0 and 2
+     */
+    @POST
+    @Path("/{projectId}/chats/{chatId}/temperature")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response temperature(@PathParam("projectId") String projectId,
+                                @PathParam("chatId") String chatId,
+                                Map<String, Object> body) {
+        Object given = body != null ? body.get("temperature") : null;
+        Double temperature = null;
+        if (given != null && !String.valueOf(given).isBlank()) {
+            try {
+                temperature = Double.valueOf(String.valueOf(given));
+            } catch (NumberFormatException e) {
+                return Response.status(400).entity(Map.of("type", "error",
+                        "message", "temperature must be a number: " + given)).build();
+            }
+            if (temperature < 0 || temperature > 2) {
+                return Response.status(400).entity(Map.of("type", "error",
+                        "message", "temperature must be between 0 and 2: " + temperature)).build();
+            }
+        }
+        if (!actorSystem.setTemperature(projectId, chatId, temperature)) {
+            return Response.status(404)
+                    .entity(Map.of("type", "error", "message", "no such conversation")).build();
+        }
+        Map<String, Object> answer = new java.util.LinkedHashMap<>();
+        answer.put("type", "accepted");
+        answer.put("temperature", temperature);
+        return Response.ok(answer).build();
     }
 
     /**

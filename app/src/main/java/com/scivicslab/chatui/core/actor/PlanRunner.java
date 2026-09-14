@@ -208,6 +208,84 @@ public class PlanRunner extends Interpreter {
     }
 
     /**
+     * Plan step: takes a document's front matter off, so that what is worked on is the text alone.
+     *
+     * <p>The {@code ---} block at the top of a document carries its {@code id}, which other
+     * documents link by. Nothing in a rewrite concerns those lines, and a run that sent them to a
+     * model got a document back without them. Taken off here and put back by
+     * {@link #joinFrontMatter} when the result is written.</p>
+     *
+     * @param textKey where the whole document is in this plan's state
+     * @param headKey where to put the front matter, ending with its closing line's newline;
+     *                {@code ""} when the document has none
+     * @param bodyKey where to put the rest; may be {@code textKey} to work on in place
+     * @return {@link ActionResult} with {@code success=true} iff there was a text to split
+     */
+    public ActionResult takeFrontMatter(String textKey, String headKey, String bodyKey) {
+        if (selfActorRef == null) return new ActionResult(false, "plan runner is not wired to an actor system");
+        if (textKey == null || textKey.isBlank()) return new ActionResult(false, "textKey is required");
+        if (headKey == null || headKey.isBlank()) return new ActionResult(false, "headKey is required");
+        if (bodyKey == null || bodyKey.isBlank()) return new ActionResult(false, "bodyKey is required");
+        String text = selfActorRef.getJsonString(textKey);
+        if (text == null) return new ActionResult(false, "nothing is kept as '" + textKey + "'");
+        int end = frontMatterEnd(text);
+        selfActorRef.putJson(headKey, end < 0 ? "" : text.substring(0, end));
+        selfActorRef.putJson(bodyKey, end < 0 ? text : text.substring(end));
+        return new ActionResult(true, end < 0 ? "no front matter" : "front matter is " + end + " chars");
+    }
+
+    /**
+     * Where a document's front matter ends, or {@code -1} when it has none.
+     *
+     * <p>Only a block at the very top counts. A line of dashes further down is a horizontal rule,
+     * and treating it as a closing line would cut the document in half.</p>
+     *
+     * @param text the whole document
+     * @return the index just past the closing line's newline
+     */
+    private static int frontMatterEnd(String text) {
+        if (!text.startsWith("---\n") && !text.startsWith("---\r\n")) return -1;
+        int from = text.indexOf('\n') + 1;
+        while (from < text.length()) {
+            int lineEnd = text.indexOf('\n', from);
+            String line = (lineEnd < 0 ? text.substring(from) : text.substring(from, lineEnd)).strip();
+            if (line.equals("---")) {
+                return lineEnd < 0 ? text.length() : lineEnd + 1;
+            }
+            if (lineEnd < 0) return -1;
+            from = lineEnd + 1;
+        }
+        return -1;
+    }
+
+    /**
+     * Plan step: puts back what {@link #takeFrontMatter} took off.
+     *
+     * @param headKey where the front matter was put; an empty value adds nothing
+     * @param bodyKey where the text is
+     * @param intoKey where to put the two together
+     * @return {@link ActionResult} with {@code success=true} iff there was a text to write
+     */
+    public ActionResult joinFrontMatter(String headKey, String bodyKey, String intoKey) {
+        if (selfActorRef == null) return new ActionResult(false, "plan runner is not wired to an actor system");
+        if (headKey == null || headKey.isBlank()) return new ActionResult(false, "headKey is required");
+        if (bodyKey == null || bodyKey.isBlank()) return new ActionResult(false, "bodyKey is required");
+        if (intoKey == null || intoKey.isBlank()) return new ActionResult(false, "intoKey is required");
+        String body = selfActorRef.getJsonString(bodyKey);
+        if (body == null) return new ActionResult(false, "nothing is kept as '" + bodyKey + "'");
+        String head = selfActorRef.getJsonString(headKey);
+        if (head == null || head.isEmpty()) {
+            selfActorRef.putJson(intoKey, body);
+            return new ActionResult(true, "there was no front matter to put back");
+        }
+        // One blank line between the two, which is how these documents are written. What comes
+        // back from a model does not always keep the one it was sent with.
+        String separator = body.startsWith("\n") ? "" : "\n";
+        selfActorRef.putJson(intoKey, head + separator + body);
+        return new ActionResult(true, "front matter put back");
+    }
+
+    /**
      * Plan step: ends one conversation — its recorded session and the history it is holding —
      * named in full, whether or not this plan ever used it.
      *
@@ -354,8 +432,11 @@ public class PlanRunner extends Interpreter {
                 return new ActionResult(false, "outside the writable range: " + file);
             }
             if (file.getParent() != null) java.nio.file.Files.createDirectories(file.getParent());
-            java.nio.file.Files.writeString(file, text);
-            return new ActionResult(true, "wrote " + text.length() + " chars to " + file);
+            // A text file ends with a newline. What a model answers with does not always have one,
+            // and without it git reports the last line as changed on every run.
+            String whole = text.isEmpty() || text.endsWith("\n") ? text : text + "\n";
+            java.nio.file.Files.writeString(file, whole);
+            return new ActionResult(true, "wrote " + whole.length() + " chars to " + file);
         } catch (Exception e) {
             return new ActionResult(false, "could not write " + path + ": " + e.getMessage());
         }
