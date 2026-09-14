@@ -208,6 +208,33 @@ public class PlanRunner extends Interpreter {
     }
 
     /**
+     * Plan step: ends one conversation — its recorded session and the history it is holding —
+     * named in full, whether or not this plan ever used it.
+     *
+     * <p>What {@code clearWorker} does for a slot this plan created, for a conversation that was
+     * already there. Removing a conversation's actor is not enough on its own: the I/O log still
+     * holds a running session for it, and {@code reopenRecordedTabs} builds a tab for every
+     * running session at start-up, so the conversation would come back at the next restart. Ending
+     * the session leaves every line it wrote in the database — {@code IoLogSearch} still finds
+     * them — and stops it being reopened.</p>
+     *
+     * @param chatName the conversation's full actor name, e.g. {@code project1/chat-t1}
+     * @return {@link ActionResult} with {@code success=true} iff that conversation was there
+     */
+    public ActionResult endConversation(String chatName) {
+        if (system == null) {
+            return new ActionResult(false, "plan runner is not wired to an actor system");
+        }
+        if (chatName == null || chatName.isBlank()) return new ActionResult(false, "chatName is required");
+        Object session = system.getIIActor(chatName + ".chat");
+        if (!(session instanceof ChatSessionIIAR chatSessionIIAR)) {
+            return new ActionResult(false, "chat not found: " + chatName);
+        }
+        chatSessionIIAR.tell(a -> ((ChatSession) a).clearHistory()).join();
+        return new ActionResult(true, "ended the conversation " + chatName);
+    }
+
+    /**
      * Plan step: empties the conversation behind one worker slot, so the next prompt starts from
      * nothing ({@code SelfContainedPromptsPerCriterion_260913_oo01}).
      *
@@ -543,10 +570,29 @@ public class PlanRunner extends Interpreter {
      */
     public ActionResult finish(String key) {
         String kept = (key == null || key.isBlank() || selfActorRef == null)
-                ? null : selfActorRef.getJsonString(key);
+                ? null : keptUnder(key);
         String result = kept != null && !kept.isBlank() ? kept : lastReply;
         complete(result != null ? result : "(plan finished with no result)");
         return new ActionResult(true, "finished");
+    }
+
+    /**
+     * What the plan stored under {@code key}, as the text to hand back.
+     *
+     * <p>A plan that collects things as it goes keeps them as a list, which is what
+     * {@code appendJson} writes. Read as text a list answers the empty string, so a job that had
+     * removed two actors reported that it had finished with no result. Anything that is not a
+     * piece of text is handed back as its JSON.</p>
+     *
+     * @param key where in this plan's state to look
+     * @return the text, or {@code null} when nothing is stored there
+     */
+    private String keptUnder(String key) {
+        com.fasterxml.jackson.databind.JsonNode kept = selfActorRef.json().select(key);
+        if (kept == null || kept.isMissingNode() || kept.isNull()) {
+            return null;
+        }
+        return kept.isTextual() ? kept.asText() : kept.toString();
     }
 
     /**

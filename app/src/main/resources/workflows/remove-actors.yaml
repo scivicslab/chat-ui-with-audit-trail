@@ -1,0 +1,56 @@
+name: remove-actors
+description: |
+  Removes the actors named in `names`, one per line, with everything below each of them. A
+  conversation is ended before it is removed, so that it is not reopened at the next start-up;
+  what it wrote stays in the log database and the Log Search tab still finds it. Nothing here
+  checks whether anything still uses an actor: the caller decides, as the workflow that created an
+  actor knows when its work is over (RemovingActorsFromAWorkflow_260913_oo01).
+params:
+  names:
+    label: "The actors to remove"
+    description: "One full actor name per line, e.g. project1/chat-t1"
+    type: textarea
+steps:
+  - states: ["0", "next"]
+    label: keep-the-list
+    actions: [{actor: this, method: copyState, arguments: ["names", "remaining"], execution: direct}]
+
+  - states: ["next", "remove"]
+    label: take-next-name
+    note: Fails when the list is empty, and the transition after this one ends the job.
+    actions: [{actor: this, method: takeNext, arguments: ["remaining", "name"], execution: direct}]
+
+  - states: ["next", "end"]
+    label: all-removed
+    actions: [{actor: this, method: finish, arguments: ["removed"], execution: direct}]
+
+  - states: ["remove", "next"]
+    label: remove-a-conversation
+    note: Ends the recorded session first, so a restart does not bring the conversation back.
+    actions:
+      - actor: this
+        method: endConversation
+        arguments: ['jexl:state.getString("name")']
+        execution: direct
+      - actor: loader
+        method: removeChild
+        arguments: ['jexl:state.getString("name")']
+      - actor: this
+        method: appendJson
+        arguments: {path: removed, value: 'jexl:state.getString("name")'}
+        execution: direct
+
+  - states: ["remove", "next"]
+    label: remove-an-actor-that-is-not-a-conversation
+    actions:
+      - actor: loader
+        method: removeChild
+        arguments: ['jexl:state.getString("name")']
+      - actor: this
+        method: appendJson
+        arguments: {path: removed, value: 'jexl:state.getString("name")'}
+        execution: direct
+
+  - states: ["remove", "end"]
+    label: could-not-remove
+    actions: [{actor: this, method: finish, arguments: ["removed"], execution: direct}]

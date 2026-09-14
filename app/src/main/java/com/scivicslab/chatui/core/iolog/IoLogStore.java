@@ -209,12 +209,24 @@ public class IoLogStore {
         return sid != null ? sid : -1;
     }
 
-    /** Ends the given tab's current session (called on "new conversation" / clear). */
+    /**
+     * Ends the given tab's session (called on "new conversation" / clear).
+     *
+     * <p>The session this process opened for the tab, or — when it opened none — the one the
+     * database still holds open for it. A tab that came back at start-up through
+     * {@link #resumableTabs()} and was never spoken to has no entry in this process's map, and
+     * ending nothing left its session running: the tab was removed, and the next start-up built it
+     * again from that same session. Nothing is deleted here; the session is marked as ended and
+     * every line it wrote stays where it is.</p>
+     *
+     * @param tabId the conversation tab's name
+     */
     public synchronized void resetSession(String tabId) {
-        Long sid = sessionIds.remove(tabId);
-        if (store != null && sid != null && sid >= 0) {
+        Long opened = sessionIds.remove(tabId);
+        long toEnd = (opened != null && opened >= 0) ? opened : findResumableSession(tabId);
+        if (store != null && toEnd >= 0) {
             try {
-                store.endSession(sid, SessionStatus.COMPLETED);
+                store.endSession(toEnd, SessionStatus.COMPLETED);
             } catch (Exception e) {
                 LOG.log(Level.WARNING, "endSession failed", e);
             }
