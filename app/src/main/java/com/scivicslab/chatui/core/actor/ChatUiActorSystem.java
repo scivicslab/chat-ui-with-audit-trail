@@ -451,7 +451,7 @@ public class ChatUiActorSystem {
     private void wireProject(String projectId) {
         ActorRef<Project> ref = projects.get(projectId);
         ref.tell(p -> p.bind(projectId, actorSystem, ref, callWatchdogRef, SYSTEM_LOG_ACTOR, fileScope,
-                            this::changeProviderForPlan));
+                            this::changeProviderForPlan, ioLogStore));
         ref.tell(Project::startWatching);
     }
 

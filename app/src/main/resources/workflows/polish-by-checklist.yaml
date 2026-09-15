@@ -109,6 +109,25 @@ steps:
         arguments: ["judge", "verdict"]
         execution: direct
 
+  - states: ["judge-1", "enter-2"]
+    label: judge-did-not-answer-1
+    note: |
+      judge が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。
+      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("judge")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-1", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点1 subject | 判定役が答えなかった"'}
+        execution: direct
+
   - states: ["check-1", "enter-2"]
     label: accept-1
     note: 満たしている。本文はそのまま次の規則へ。
@@ -144,6 +163,25 @@ steps:
       - actor: this
         method: keepWorkerReply
         arguments: ["fixer", "text"]
+        execution: direct
+
+  - states: ["fix-1", "enter-2"]
+    label: fixer-did-not-answer-1
+    note: |
+      fixer が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。
+      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("fixer")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-1", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点1 subject | 直す役が答えなかった"'}
         execution: direct
 
   # ── 2. naming ───────────────────────────────────────────────────────────
@@ -183,6 +221,25 @@ steps:
         arguments: ["judge", "verdict"]
         execution: direct
 
+  - states: ["judge-2", "enter-3"]
+    label: judge-did-not-answer-2
+    note: |
+      judge が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。
+      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("judge")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-2", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点2 naming | 判定役が答えなかった"'}
+        execution: direct
+
   - states: ["check-2", "enter-3"]
     label: accept-2
     note: 満たしている。本文はそのまま次の規則へ。
@@ -218,6 +275,25 @@ steps:
       - actor: this
         method: keepWorkerReply
         arguments: ["fixer", "text"]
+        execution: direct
+
+  - states: ["fix-2", "enter-3"]
+    label: fixer-did-not-answer-2
+    note: |
+      fixer が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。
+      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("fixer")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-2", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点2 naming | 直す役が答えなかった"'}
         execution: direct
 
   # ── 3. thread ───────────────────────────────────────────────────────────
@@ -261,6 +337,25 @@ steps:
         arguments: ["judge", "verdict"]
         execution: direct
 
+  - states: ["judge-3", "enter-4"]
+    label: judge-did-not-answer-3
+    note: |
+      judge が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。
+      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("judge")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-3", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点3 thread | 判定役が答えなかった"'}
+        execution: direct
+
   - states: ["check-3", "enter-4"]
     label: accept-3
     note: 満たしている。本文はそのまま次の規則へ。
@@ -296,6 +391,25 @@ steps:
       - actor: this
         method: keepWorkerReply
         arguments: ["fixer", "text"]
+        execution: direct
+
+  - states: ["fix-3", "enter-4"]
+    label: fixer-did-not-answer-3
+    note: |
+      fixer が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。
+      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("fixer")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-3", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点3 thread | 直す役が答えなかった"'}
         execution: direct
 
   # ── 4. negation ───────────────────────────────────────────────────────────
@@ -339,6 +453,25 @@ steps:
         arguments: ["judge", "verdict"]
         execution: direct
 
+  - states: ["judge-4", "enter-5"]
+    label: judge-did-not-answer-4
+    note: |
+      judge が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。
+      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("judge")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-4", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点4 negation | 判定役が答えなかった"'}
+        execution: direct
+
   - states: ["check-4", "enter-5"]
     label: accept-4
     note: 満たしている。本文はそのまま次の規則へ。
@@ -374,6 +507,25 @@ steps:
       - actor: this
         method: keepWorkerReply
         arguments: ["fixer", "text"]
+        execution: direct
+
+  - states: ["fix-4", "enter-5"]
+    label: fixer-did-not-answer-4
+    note: |
+      fixer が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。
+      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("fixer")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-4", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点4 negation | 直す役が答えなかった"'}
         execution: direct
 
   # ── 5. oneaxis ───────────────────────────────────────────────────────────
@@ -413,6 +565,25 @@ steps:
         arguments: ["judge", "verdict"]
         execution: direct
 
+  - states: ["judge-5", "enter-6"]
+    label: judge-did-not-answer-5
+    note: |
+      judge が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。
+      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("judge")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-5", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点5 oneaxis | 判定役が答えなかった"'}
+        execution: direct
+
   - states: ["check-5", "enter-6"]
     label: accept-5
     note: 満たしている。本文はそのまま次の規則へ。
@@ -448,6 +619,25 @@ steps:
       - actor: this
         method: keepWorkerReply
         arguments: ["fixer", "text"]
+        execution: direct
+
+  - states: ["fix-5", "enter-6"]
+    label: fixer-did-not-answer-5
+    note: |
+      fixer が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。
+      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("fixer")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-5", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点5 oneaxis | 直す役が答えなかった"'}
         execution: direct
 
   # ── 6. list ───────────────────────────────────────────────────────────
@@ -487,6 +677,25 @@ steps:
         arguments: ["judge", "verdict"]
         execution: direct
 
+  - states: ["judge-6", "enter-7"]
+    label: judge-did-not-answer-6
+    note: |
+      judge が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。
+      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("judge")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-6", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点6 list | 判定役が答えなかった"'}
+        execution: direct
+
   - states: ["check-6", "enter-7"]
     label: accept-6
     note: 満たしている。本文はそのまま次の規則へ。
@@ -522,6 +731,25 @@ steps:
       - actor: this
         method: keepWorkerReply
         arguments: ["fixer", "text"]
+        execution: direct
+
+  - states: ["fix-6", "enter-7"]
+    label: fixer-did-not-answer-6
+    note: |
+      fixer が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。
+      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("fixer")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-6", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点6 list | 直す役が答えなかった"'}
         execution: direct
 
   # ── 7. sections ───────────────────────────────────────────────────────────
@@ -561,6 +789,25 @@ steps:
         arguments: ["judge", "verdict"]
         execution: direct
 
+  - states: ["judge-7", "verify"]
+    label: judge-did-not-answer-7
+    note: |
+      judge が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。
+      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("judge")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-7", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点7 sections | 判定役が答えなかった"'}
+        execution: direct
+
   - states: ["check-7", "verify"]
     label: accept-7
     note: 満たしている。本文はそのまま次の規則へ。
@@ -598,29 +845,33 @@ steps:
         arguments: ["fixer", "text"]
         execution: direct
 
+  - states: ["fix-7", "verify"]
+    label: fixer-did-not-answer-7
+    note: |
+      fixer が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。
+      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("fixer")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-7", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点7 sections | 直す役が答えなかった"'}
+        execution: direct
+
   # ── last: nothing brought in, nothing altered ─────────────────────────────
   - states: ["verify", "verify-check"]
     label: verify-nothing-was-brought-in
-    note: |
-      Compares the text as it arrived with the text as it stands. The criteria may add a section,
-      but only out of what the text already says: a command, an output or a number that was not
-      there, and a value that has changed, are what this looks for.
+    note: 受け取ったときの本文と見比べ、コマンド・名前・数値が変わっていないかを照合する。
     actions:
       - actor: this
-        method: clearWorker
-        arguments: ["fixer"]
-        execution: direct
-      - actor: this
-        method: clearWorker
-        arguments: ["judge"]
-        execution: direct
-      - actor: this
-        method: askWorker
-        arguments: ["judge", 'jexl:"元の本文と直した本文を見比べて、次の2つだけを見てください。(1) 元の本文に無いコマンド・実行結果・数値・設定値が、直した本文に入っていないか。(2) 元の本文にあった数値・コマンド・識別子が書き換えられていないか。どちらも無ければ ACCEPT の一語だけを返してください。あれば REVISE: に続けて、その箇所を一つずつ挙げてください。文章の善し悪しや、規則を満たしているかは見ないでください。ほかのことは書かないでください。\n\n元の本文:\n" + state.getString("original") + "\n\n直した本文:\n" + state.getString("text")']
-        execution: direct
-      - actor: this
-        method: keepWorkerReply
-        arguments: ["judge", "verdict"]
+        method: compareTexts
+        arguments: ["original", "text", "verdict"]
         execution: direct
 
   - states: ["verify-check", "done"]
@@ -634,8 +885,7 @@ steps:
   - states: ["verify-check", "skip"]
     label: give-up-verify
     note: |
-      The last check could not be passed. This file is not written: what cannot be shown to be
-      unbroken does not replace what is there. The original stays as it is, and the job says so.
+      照合を通せなかった。壊していないと示せないものを、元と置き換えない。
     actions: [{actor: this, method: doNothing, arguments: ["not written"], execution: direct}]
 
   - states: ["verify-fix", "verify"]
@@ -658,10 +908,30 @@ steps:
         arguments: ["fixer", "text"]
         execution: direct
 
+  - states: ["verify-fix", "skip"]
+    label: verify-fixer-did-not-answer
+    note: |
+      fixer が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。
+      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("fixer")']
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 最後の照合の直しに答えなかった"'}
+        execution: direct
+
   - states: ["done", "end"]
     label: done
     actions: [{actor: this, method: finish, arguments: ["text"], execution: direct}]
 
   - states: ["skip", "end"]
     label: the-last-check-did-not-pass
+    actions: [{actor: this, method: finish, arguments: ["text"], execution: direct}]
+
+  - states: ["!end", "end"]
+    label: catch-all
+    note: どの遷移も通らなかった。いまの本文を返して終える。
     actions: [{actor: this, method: finish, arguments: ["text"], execution: direct}]

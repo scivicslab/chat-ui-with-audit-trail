@@ -111,8 +111,10 @@ public final class PolishWorkflowGenerator {
     }
 
     /** Said to both roles when the rule and the text are files rather than text in the prompt. */
+    /** One path per read: two in one call put 17 KB in front of a model that then never stopped. */
     private static final String READ_FIRST =
-            "規則の文書と本文は、それぞれファイルにある。read ツールで両方を読んでから答えること。";
+            "規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、"
+            + "規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。";
 
     private static String judgePromptByPath(Criterion c, boolean deletes) {
         String head = "\"" + READ_FIRST
@@ -151,6 +153,40 @@ public final class PolishWorkflowGenerator {
             + "それ以外は今のままにする。書き戻したら「done」とだけ返す。"
             + "\\n\\n元の本文: \" + state.getString(\"orig\") + \"\\n直した本文: \" + state.getString(\"work\")"
             + " + \"\\n\\n指摘:\\n\" + state.getString(\"verdict\")";
+
+    /**
+     * Where a run goes when one of its two conversations does not answer.
+     *
+     * <p>Without this the state has one candidate transition, and a conversation that times out
+     * ends the whole run with "no matching state transition" — nine documents lost to one
+     * hiccup. Whoever stopped waiting stops the work as well, the text goes back to what it was,
+     * and the run says which criterion it could not do
+     * ({@code WhenTheTwoRolesDoNotAgree_260915_oo01}).</p>
+     *
+     * @param from  the state whose only transition may fail
+     * @param label what to call this transition
+     * @param slot  the role that did not answer, {@code fixer} or {@code judge}
+     * @param back  the state to keep, or {@code null} to leave the text alone
+     * @param why   what to write in the run's report
+     * @param next  where to go
+     */
+    private static String didNotAnswer(String from, String label, String slot, String back,
+                                       String why, String next) {
+        return "\n  - states: [\"" + from + "\", \"" + next + "\"]\n"
+                + "    label: " + label + "\n"
+                + "    note: |\n"
+                + "      " + slot + " が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。\n"
+                + "      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。\n"
+                + "    actions:\n"
+                + "      - actor: this\n        method: stopChat\n"
+                + "        arguments: ['jexl:state.getString(\"" + slot + "\")']\n        execution: direct\n"
+                + (back == null ? ""
+                   : "      - actor: this\n        method: copyState\n"
+                     + "        arguments: [\"" + back + "\", \"text\"]\n        execution: direct\n")
+                + "      - actor: this\n        method: appendJson\n"
+                + "        arguments: {path: disagreements, value: 'jexl:state.getString(\"file\") + \" | " + why + "\"'}\n"
+                + "        execution: direct\n";
+    }
 
     /** Puts what the conversation wrote back into the plan's own state. */
     private static final String TAKE_BACK_THE_FILE =
@@ -250,10 +286,27 @@ public final class PolishWorkflowGenerator {
                 + ask(judgePromptByPath(c, c.deletes()), "judge")
                 + "      - actor: this\n        method: keepWorkerReply\n"
                 + "        arguments: [\"judge\", \"verdict\"]\n        execution: direct\n"
+                + didNotAnswer("judge-" + i, "judge-did-not-answer-" + i, "judge", "kept-" + i,
+                        "観点" + i + " " + c.name() + " | 判定役が答えなかった", next)
                 + "\n  - states: [\"check-" + i + "\", \"" + next + "\"]\n"
                 + "    label: accept-" + i + "\n"
                 + "    note: 満たしている。本文はそのまま次の規則へ。\n"
                 + "    actions: [{actor: this, method: checkState, arguments: [\"verdict\", \"ACCEPT\"], execution: direct}]\n"
+                + "\n  - states: [\"check-" + i + "\", \"" + next + "\"]\n"
+                + "    label: no-agreement-" + i + "\n"
+                + "    note: |\n"
+                + "      判定役が前回と同じ指摘を返した。直す役は毎回直しているので、直っていないのではなく\n"
+                + "      規則の読み方が食い違っている。回数を使い切るまで往復しても同じなので、この観点に\n"
+                + "      入る前の本文に戻し、合わなかったことを報告に残して次へ進む\n"
+                + "      (WhenTheTwoRolesDoNotAgree_260915_oo01)。\n"
+                + "    actions:\n"
+                + "      - actor: this\n        method: sameAsLast\n"
+                + "        arguments: [\"verdict\", \"last-verdict-" + i + "\"]\n        execution: direct\n"
+                + "      - actor: this\n        method: copyState\n"
+                + "        arguments: [\"kept-" + i + "\", \"text\"]\n        execution: direct\n"
+                + "      - actor: this\n        method: appendJson\n"
+                + "        arguments: {path: disagreements, value: 'jexl:state.getString(\"file\") + \" | 観点" + i + " " + c.name() + " | \" + state.getString(\"verdict\")'}\n"
+                + "        execution: direct\n"
                 + "\n  - states: [\"check-" + i + "\", \"fix-" + i + "\"]\n"
                 + "    label: needs-fix-" + i + "\n"
                 + "    note: 満たしていない。直す回数が残っていれば直しへ。\n"
@@ -263,13 +316,32 @@ public final class PolishWorkflowGenerator {
                 + "    note: |\n"
                 + "      直す回数を使い切った。この観点に入る前の本文に戻して次の観点へ進む。満たせなかった観点の\n"
                 + "      書き換えを残すと、いじり回しただけの本文になる。\n"
-                + "    actions: [{actor: this, method: copyState, arguments: [\"kept-" + i + "\", \"text\"], execution: direct}]\n"
+                + "    actions:\n"
+                + "      - actor: this\n        method: copyState\n"
+                + "        arguments: [\"kept-" + i + "\", \"text\"]\n        execution: direct\n"
+                + "      - actor: this\n        method: appendJson\n"
+                + "        arguments: {path: disagreements, value: 'jexl:state.getString(\"file\") + \" | 観点" + i + " " + c.name() + " | 回数を使い切った: \" + state.getString(\"verdict\")'}\n"
+                + "        execution: direct\n"
                 + "\n  - states: [\"fix-" + i + "\", \"judge-" + i + "\"]\n"
                 + "    label: fix-" + i + "-" + c.name() + "\n"
                 + "    note: 会話がファイルを直し、書き戻したものをこの計画が読み取る。\n"
                 + "    actions:\n"
                 + ask(redoPromptByPath(c, c.deletes()), "fixer")
-                + TAKE_BACK_THE_FILE;
+                + TAKE_BACK_THE_FILE
+                + "\n  - states: [\"fix-" + i + "\", \"" + next + "\"]\n"
+                + "    label: fixer-did-not-answer-" + i + "\n"
+                + "    note: |\n"
+                + "      直す役が答えなかった。待つのをやめた側が、相手の仕事も止める。この観点は諦めて\n"
+                + "      入る前の本文に戻し、次の観点へ進む。受け皿が無いと、会話ひとつの不調で実行全体が\n"
+                + "      「一致する遷移が無い」で終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。\n"
+                + "    actions:\n"
+                + "      - actor: this\n        method: stopChat\n"
+                + "        arguments: ['jexl:state.getString(\"fixer\")']\n        execution: direct\n"
+                + "      - actor: this\n        method: copyState\n"
+                + "        arguments: [\"kept-" + i + "\", \"text\"]\n        execution: direct\n"
+                + "      - actor: this\n        method: appendJson\n"
+                + "        arguments: {path: disagreements, value: 'jexl:state.getString(\"file\") + \" | 観点" + i + " " + c.name() + " | 直す役が答えなかった\"'}\n"
+                + "        execution: direct\n";
     }
 
     private static String blockByValue(int i, Criterion c, String next) {
@@ -298,6 +370,8 @@ public final class PolishWorkflowGenerator {
                 + CLEAR + ask(judgePrompt(i, c.deletes()), "judge")
                 + "      - actor: this\n        method: keepWorkerReply\n"
                 + "        arguments: [\"judge\", \"verdict\"]\n        execution: direct\n"
+                + didNotAnswer("judge-" + i, "judge-did-not-answer-" + i, "judge", "kept-" + i,
+                        "観点" + i + " " + c.name() + " | 判定役が答えなかった", next)
                 + "\n  - states: [\"check-" + i + "\", \"" + next + "\"]\n"
                 + "    label: accept-" + i + "\n"
                 + "    note: 満たしている。本文はそのまま次の規則へ。\n"
@@ -317,7 +391,9 @@ public final class PolishWorkflowGenerator {
                 + "    actions:\n"
                 + CLEAR + ask(redoPrompt(i, c.deletes()), "fixer")
                 + "      - actor: this\n        method: keepWorkerReply\n"
-                + "        arguments: [\"fixer\", \"text\"]\n        execution: direct\n";
+                + "        arguments: [\"fixer\", \"text\"]\n        execution: direct\n"
+                + didNotAnswer("fix-" + i, "fixer-did-not-answer-" + i, "fixer", "kept-" + i,
+                        "観点" + i + " " + c.name() + " | 直す役が答えなかった", next);
     }
 
     private static String verifyBlock(String next, boolean byReference) {
@@ -349,22 +425,24 @@ public final class PolishWorkflowGenerator {
                 + "    label: take-back-what-was-brought-in\n"
                 + "    actions:\n"
                 + ask(VERIFY_FIX_BY_PATH, "fixer")
-                + TAKE_BACK_THE_FILE;
+                + TAKE_BACK_THE_FILE
+                + didNotAnswer("verify-fix", "verify-fixer-did-not-answer", "fixer", null,
+                        "最後の照合の直しに答えなかった", "skip");
     }
 
-    /** The last check on a text: nothing brought in, nothing altered. */
+    /**
+     * The last check on a text, in the by-value workflow: the same comparison the directory one
+     * does. Whether commands, names and numbers survived is not a judgement
+     * ({@code WhatAProgramCanDo_260915_oo01}).
+     */
     private static String verifyBlock(String next) {
         return "\n  # ── last: nothing brought in, nothing altered ─────────────────────────────\n"
                 + "  - states: [\"verify\", \"verify-check\"]\n"
                 + "    label: verify-nothing-was-brought-in\n"
-                + "    note: |\n"
-                + "      Compares the text as it arrived with the text as it stands. The criteria may add a section,\n"
-                + "      but only out of what the text already says: a command, an output or a number that was not\n"
-                + "      there, and a value that has changed, are what this looks for.\n"
+                + "    note: 受け取ったときの本文と見比べ、コマンド・名前・数値が変わっていないかを照合する。\n"
                 + "    actions:\n"
-                + CLEAR + ask(VERIFY_JUDGE, "judge")
-                + "      - actor: this\n        method: keepWorkerReply\n"
-                + "        arguments: [\"judge\", \"verdict\"]\n        execution: direct\n"
+                + "      - actor: this\n        method: compareTexts\n"
+                + "        arguments: [\"original\", \"text\", \"verdict\"]\n        execution: direct\n"
                 + "\n  - states: [\"verify-check\", \"" + next + "\"]\n"
                 + "    label: accept-verify\n"
                 + "    actions: [{actor: this, method: checkState, arguments: [\"verdict\", \"ACCEPT\"], execution: direct}]\n"
@@ -374,15 +452,16 @@ public final class PolishWorkflowGenerator {
                 + "\n  - states: [\"verify-check\", \"skip\"]\n"
                 + "    label: give-up-verify\n"
                 + "    note: |\n"
-                + "      The last check could not be passed. This file is not written: what cannot be shown to be\n"
-                + "      unbroken does not replace what is there. The original stays as it is, and the job says so.\n"
+                + "      照合を通せなかった。壊していないと示せないものを、元と置き換えない。\n"
                 + "    actions: [{actor: this, method: doNothing, arguments: [\"not written\"], execution: direct}]\n"
                 + "\n  - states: [\"verify-fix\", \"verify\"]\n"
                 + "    label: take-back-what-was-brought-in\n"
                 + "    actions:\n"
                 + CLEAR + ask(VERIFY_FIX, "fixer")
                 + "      - actor: this\n        method: keepWorkerReply\n"
-                + "        arguments: [\"fixer\", \"text\"]\n        execution: direct\n";
+                + "        arguments: [\"fixer\", \"text\"]\n        execution: direct\n"
+                + didNotAnswer("verify-fix", "verify-fixer-did-not-answer", "fixer", null,
+                        "最後の照合の直しに答えなかった", "skip");
     }
 
     private static final String HEAD_TEXT = """
@@ -593,6 +672,35 @@ params:
      * check did not pass — rather than dying with "no matching transition", which is what a
      * missing state gets you.</p>
      */
+    /**
+     * The catch-all every workflow ends with ({@code SimpleWorkflow_260421_oo01}).
+     *
+     * <p>{@code !end} matches any state but {@code end}, so a state whose own transitions have all
+     * failed lands here instead of leaving the engine with nothing to match. Last in the file, or
+     * it would be taken before the transitions it is there to catch. The named fallbacks above
+     * keep a run going; this one makes sure it ends by saying what it did, whatever went wrong.</p>
+     */
+    private static final String CATCH_ALL_FILES = """
+
+  - states: ["!end", "report"]
+    label: catch-all
+    note: |
+      どの遷移も通らなかった。ここまでに分かっていることを報告して終える。
+    actions:
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:"実行が途中で止まった: " + state.getString("file", "(ファイル未定)")'}
+        execution: direct
+""";
+
+    private static final String CATCH_ALL_TEXT = """
+
+  - states: ["!end", "end"]
+    label: catch-all
+    note: どの遷移も通らなかった。いまの本文を返して終える。
+    actions: [{actor: this, method: finish, arguments: ["text"], execution: direct}]
+""";
+
     private static final String SKIP_TEXT = """
 
   - states: ["skip", "end"]
@@ -602,10 +710,37 @@ params:
 
     private static final String ALL_DONE = """
 
-  - states: ["next", "end"]
+  - states: ["next", "report"]
     label: all-done
     note: Reached when no file is left.
-    actions: [{actor: this, method: finish, arguments: ["done"], execution: direct}]
+    actions: [{actor: this, method: doNothing, arguments: ["no file left"], execution: direct}]
+
+  - states: ["report", "end"]
+    label: say-what-happened
+    note: |
+      What the run did, in the shape a workflow report has (PluginReport_260403_oo01): the files it
+      wrote, the files it left alone, and the criteria where the fixer and the judge did not agree —
+      which are the ones a person has to look at, because nothing was changed there
+      (WhenTheTwoRolesDoNotAgree_260915_oo01).
+    actions:
+      - actor: this
+        method: joinLines
+        arguments: ["done", "doneText"]
+        execution: direct
+      - actor: this
+        method: joinLines
+        arguments: ["disagreements", "disagreementsText"]
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments:
+          path: report
+          value: 'jexl:"=== 文章のブラッシュアップ ===\\n\\n--- 処理したファイル ---\\n" + state.getString("doneText") + "\\n\\n--- 意見が合わず元のままにした観点 ---\\n" + state.getString("disagreementsText")'
+        execution: direct
+      - actor: this
+        method: finish
+        arguments: ["report"]
+        execution: direct
 """;
 
     private static String build(boolean overFiles) {
@@ -629,7 +764,7 @@ params:
             out.append(block(i, CRITERIA.get(i - 1), next, overFiles));
         }
         out.append(verifyBlock(overFiles ? "write" : "done", overFiles));
-        out.append(overFiles ? WRITE_AND_SKIP : DONE_TEXT + SKIP_TEXT);
+        out.append(overFiles ? WRITE_AND_SKIP + CATCH_ALL_FILES : DONE_TEXT + SKIP_TEXT + CATCH_ALL_TEXT);
         return out.toString();
     }
 

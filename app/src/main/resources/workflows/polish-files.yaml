@@ -159,10 +159,37 @@ steps:
         arguments: {path: tries-7, value: "0"}
         execution: direct
 
-  - states: ["next", "end"]
+  - states: ["next", "report"]
     label: all-done
     note: Reached when no file is left.
-    actions: [{actor: this, method: finish, arguments: ["done"], execution: direct}]
+    actions: [{actor: this, method: doNothing, arguments: ["no file left"], execution: direct}]
+
+  - states: ["report", "end"]
+    label: say-what-happened
+    note: |
+      What the run did, in the shape a workflow report has (PluginReport_260403_oo01): the files it
+      wrote, the files it left alone, and the criteria where the fixer and the judge did not agree —
+      which are the ones a person has to look at, because nothing was changed there
+      (WhenTheTwoRolesDoNotAgree_260915_oo01).
+    actions:
+      - actor: this
+        method: joinLines
+        arguments: ["done", "doneText"]
+        execution: direct
+      - actor: this
+        method: joinLines
+        arguments: ["disagreements", "disagreementsText"]
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments:
+          path: report
+          value: 'jexl:"=== 文章のブラッシュアップ ===\n\n--- 処理したファイル ---\n" + state.getString("doneText") + "\n\n--- 意見が合わず元のままにした観点 ---\n" + state.getString("disagreementsText")'
+        execution: direct
+      - actor: this
+        method: finish
+        arguments: ["report"]
+        execution: direct
 
   # ── 1. subject ───────────────────────────────────────────────────────────
   - states: ["enter-1", "judge-1"]
@@ -186,17 +213,57 @@ steps:
     actions:
       - actor: this
         method: askWorker
-        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれファイルにある。read ツールで両方を読んでから答えること。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/080_OopSubjectClarity_260810_oo01/080_OopSubjectClarity_260810_oo01.md\n本文: " + state.getString("work")']
+        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/080_OopSubjectClarity_260810_oo01/080_OopSubjectClarity_260810_oo01.md\n本文: " + state.getString("work")']
         execution: direct
       - actor: this
         method: keepWorkerReply
         arguments: ["judge", "verdict"]
         execution: direct
 
+  - states: ["judge-1", "enter-2"]
+    label: judge-did-not-answer-1
+    note: |
+      judge が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。
+      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("judge")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-1", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点1 subject | 判定役が答えなかった"'}
+        execution: direct
+
   - states: ["check-1", "enter-2"]
     label: accept-1
     note: 満たしている。本文はそのまま次の規則へ。
     actions: [{actor: this, method: checkState, arguments: ["verdict", "ACCEPT"], execution: direct}]
+
+  - states: ["check-1", "enter-2"]
+    label: no-agreement-1
+    note: |
+      判定役が前回と同じ指摘を返した。直す役は毎回直しているので、直っていないのではなく
+      規則の読み方が食い違っている。回数を使い切るまで往復しても同じなので、この観点に
+      入る前の本文に戻し、合わなかったことを報告に残して次へ進む
+      (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: sameAsLast
+        arguments: ["verdict", "last-verdict-1"]
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-1", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点1 subject | " + state.getString("verdict")'}
+        execution: direct
 
   - states: ["check-1", "fix-1"]
     label: needs-fix-1
@@ -208,7 +275,15 @@ steps:
     note: |
       直す回数を使い切った。この観点に入る前の本文に戻して次の観点へ進む。満たせなかった観点の
       書き換えを残すと、いじり回しただけの本文になる。
-    actions: [{actor: this, method: copyState, arguments: ["kept-1", "text"], execution: direct}]
+    actions:
+      - actor: this
+        method: copyState
+        arguments: ["kept-1", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点1 subject | 回数を使い切った: " + state.getString("verdict")'}
+        execution: direct
 
   - states: ["fix-1", "judge-1"]
     label: fix-1-subject
@@ -216,11 +291,31 @@ steps:
     actions:
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれファイルにある。read ツールで両方を読んでから答えること。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/080_OopSubjectClarity_260810_oo01/080_OopSubjectClarity_260810_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
+        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/080_OopSubjectClarity_260810_oo01/080_OopSubjectClarity_260810_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
         execution: direct
       - actor: this
         method: readFile
         arguments: ['jexl:state.getString("work")', "text"]
+        execution: direct
+
+  - states: ["fix-1", "enter-2"]
+    label: fixer-did-not-answer-1
+    note: |
+      直す役が答えなかった。待つのをやめた側が、相手の仕事も止める。この観点は諦めて
+      入る前の本文に戻し、次の観点へ進む。受け皿が無いと、会話ひとつの不調で実行全体が
+      「一致する遷移が無い」で終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("fixer")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-1", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点1 subject | 直す役が答えなかった"'}
         execution: direct
 
   # ── 2. naming ───────────────────────────────────────────────────────────
@@ -245,17 +340,57 @@ steps:
     actions:
       - actor: this
         method: askWorker
-        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれファイルにある。read ツールで両方を読んでから答えること。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/023_NamingByTypeAndInstance_260628_oo01/023_NamingByTypeAndInstance_260628_oo01.md\n本文: " + state.getString("work")']
+        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/023_NamingByTypeAndInstance_260628_oo01/023_NamingByTypeAndInstance_260628_oo01.md\n本文: " + state.getString("work")']
         execution: direct
       - actor: this
         method: keepWorkerReply
         arguments: ["judge", "verdict"]
         execution: direct
 
+  - states: ["judge-2", "enter-3"]
+    label: judge-did-not-answer-2
+    note: |
+      judge が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。
+      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("judge")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-2", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点2 naming | 判定役が答えなかった"'}
+        execution: direct
+
   - states: ["check-2", "enter-3"]
     label: accept-2
     note: 満たしている。本文はそのまま次の規則へ。
     actions: [{actor: this, method: checkState, arguments: ["verdict", "ACCEPT"], execution: direct}]
+
+  - states: ["check-2", "enter-3"]
+    label: no-agreement-2
+    note: |
+      判定役が前回と同じ指摘を返した。直す役は毎回直しているので、直っていないのではなく
+      規則の読み方が食い違っている。回数を使い切るまで往復しても同じなので、この観点に
+      入る前の本文に戻し、合わなかったことを報告に残して次へ進む
+      (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: sameAsLast
+        arguments: ["verdict", "last-verdict-2"]
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-2", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点2 naming | " + state.getString("verdict")'}
+        execution: direct
 
   - states: ["check-2", "fix-2"]
     label: needs-fix-2
@@ -267,7 +402,15 @@ steps:
     note: |
       直す回数を使い切った。この観点に入る前の本文に戻して次の観点へ進む。満たせなかった観点の
       書き換えを残すと、いじり回しただけの本文になる。
-    actions: [{actor: this, method: copyState, arguments: ["kept-2", "text"], execution: direct}]
+    actions:
+      - actor: this
+        method: copyState
+        arguments: ["kept-2", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点2 naming | 回数を使い切った: " + state.getString("verdict")'}
+        execution: direct
 
   - states: ["fix-2", "judge-2"]
     label: fix-2-naming
@@ -275,11 +418,31 @@ steps:
     actions:
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれファイルにある。read ツールで両方を読んでから答えること。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/023_NamingByTypeAndInstance_260628_oo01/023_NamingByTypeAndInstance_260628_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
+        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/023_NamingByTypeAndInstance_260628_oo01/023_NamingByTypeAndInstance_260628_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
         execution: direct
       - actor: this
         method: readFile
         arguments: ['jexl:state.getString("work")', "text"]
+        execution: direct
+
+  - states: ["fix-2", "enter-3"]
+    label: fixer-did-not-answer-2
+    note: |
+      直す役が答えなかった。待つのをやめた側が、相手の仕事も止める。この観点は諦めて
+      入る前の本文に戻し、次の観点へ進む。受け皿が無いと、会話ひとつの不調で実行全体が
+      「一致する遷移が無い」で終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("fixer")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-2", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点2 naming | 直す役が答えなかった"'}
         execution: direct
 
   # ── 3. thread ───────────────────────────────────────────────────────────
@@ -312,17 +475,57 @@ steps:
     actions:
       - actor: this
         method: askWorker
-        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれファイルにある。read ツールで両方を読んでから答えること。直した本文が規則を満たしているか、そして元の本文にあった事実が全部残っているかを見る。事実は、本文の中か「## 雑記」の節のどちらかに残っていればよく、場所が変わっただけなら問題ない。両方を満たしていれば ACCEPT の一語だけを返す。規則を満たしていなければ REVISE: に続けて直っていない箇所を挙げる。元の本文にあった事実が消えていれば、REVISE: に続けて「削りすぎ」と書き、消えた事実を一つずつ挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/120_ThreadAndAsides_260913_oo01/120_ThreadAndAsides_260913_oo01.md\n本文: " + state.getString("work") + "\n元の本文: " + state.getString("before-path")']
+        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。直した本文が規則を満たしているか、そして元の本文にあった事実が全部残っているかを見る。事実は、本文の中か「## 雑記」の節のどちらかに残っていればよく、場所が変わっただけなら問題ない。両方を満たしていれば ACCEPT の一語だけを返す。規則を満たしていなければ REVISE: に続けて直っていない箇所を挙げる。元の本文にあった事実が消えていれば、REVISE: に続けて「削りすぎ」と書き、消えた事実を一つずつ挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/120_ThreadAndAsides_260913_oo01/120_ThreadAndAsides_260913_oo01.md\n本文: " + state.getString("work") + "\n元の本文: " + state.getString("before-path")']
         execution: direct
       - actor: this
         method: keepWorkerReply
         arguments: ["judge", "verdict"]
         execution: direct
 
+  - states: ["judge-3", "enter-4"]
+    label: judge-did-not-answer-3
+    note: |
+      judge が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。
+      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("judge")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-3", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点3 thread | 判定役が答えなかった"'}
+        execution: direct
+
   - states: ["check-3", "enter-4"]
     label: accept-3
     note: 満たしている。本文はそのまま次の規則へ。
     actions: [{actor: this, method: checkState, arguments: ["verdict", "ACCEPT"], execution: direct}]
+
+  - states: ["check-3", "enter-4"]
+    label: no-agreement-3
+    note: |
+      判定役が前回と同じ指摘を返した。直す役は毎回直しているので、直っていないのではなく
+      規則の読み方が食い違っている。回数を使い切るまで往復しても同じなので、この観点に
+      入る前の本文に戻し、合わなかったことを報告に残して次へ進む
+      (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: sameAsLast
+        arguments: ["verdict", "last-verdict-3"]
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-3", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点3 thread | " + state.getString("verdict")'}
+        execution: direct
 
   - states: ["check-3", "fix-3"]
     label: needs-fix-3
@@ -334,7 +537,15 @@ steps:
     note: |
       直す回数を使い切った。この観点に入る前の本文に戻して次の観点へ進む。満たせなかった観点の
       書き換えを残すと、いじり回しただけの本文になる。
-    actions: [{actor: this, method: copyState, arguments: ["kept-3", "text"], execution: direct}]
+    actions:
+      - actor: this
+        method: copyState
+        arguments: ["kept-3", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点3 thread | 回数を使い切った: " + state.getString("verdict")'}
+        execution: direct
 
   - states: ["fix-3", "judge-3"]
     label: fix-3-thread
@@ -342,11 +553,31 @@ steps:
     actions:
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれファイルにある。read ツールで両方を読んでから答えること。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。事実を削らないでください。筋から外れると判断した事実は、本文から外したうえで、末尾の「## 雑記」の節に箇条書きで移してください（順不同でかまいません）。「## 参考資料」の節があれば、その直前に「## 雑記」を置いてください。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/120_ThreadAndAsides_260913_oo01/120_ThreadAndAsides_260913_oo01.md\n本文: " + state.getString("work") + "\n元の本文（ここにある事実は全部残すこと）: " + state.getString("before-path") + "\n\n指摘:\n" + state.getString("verdict")']
+        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。事実を削らないでください。筋から外れると判断した事実は、本文から外したうえで、末尾の「## 雑記」の節に箇条書きで移してください（順不同でかまいません）。「## 参考資料」の節があれば、その直前に「## 雑記」を置いてください。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/120_ThreadAndAsides_260913_oo01/120_ThreadAndAsides_260913_oo01.md\n本文: " + state.getString("work") + "\n元の本文（ここにある事実は全部残すこと）: " + state.getString("before-path") + "\n\n指摘:\n" + state.getString("verdict")']
         execution: direct
       - actor: this
         method: readFile
         arguments: ['jexl:state.getString("work")', "text"]
+        execution: direct
+
+  - states: ["fix-3", "enter-4"]
+    label: fixer-did-not-answer-3
+    note: |
+      直す役が答えなかった。待つのをやめた側が、相手の仕事も止める。この観点は諦めて
+      入る前の本文に戻し、次の観点へ進む。受け皿が無いと、会話ひとつの不調で実行全体が
+      「一致する遷移が無い」で終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("fixer")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-3", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点3 thread | 直す役が答えなかった"'}
         execution: direct
 
   # ── 4. negation ───────────────────────────────────────────────────────────
@@ -379,17 +610,57 @@ steps:
     actions:
       - actor: this
         method: askWorker
-        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれファイルにある。read ツールで両方を読んでから答えること。直した本文が規則を満たしているか、そして元の本文にあった事実が全部残っているかを見る。事実は、本文の中か「## 雑記」の節のどちらかに残っていればよく、場所が変わっただけなら問題ない。両方を満たしていれば ACCEPT の一語だけを返す。規則を満たしていなければ REVISE: に続けて直っていない箇所を挙げる。元の本文にあった事実が消えていれば、REVISE: に続けて「削りすぎ」と書き、消えた事実を一つずつ挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/110_NegationOnlyWhenExpected_260913_oo01/110_NegationOnlyWhenExpected_260913_oo01.md\n本文: " + state.getString("work") + "\n元の本文: " + state.getString("before-path")']
+        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。直した本文が規則を満たしているか、そして元の本文にあった事実が全部残っているかを見る。事実は、本文の中か「## 雑記」の節のどちらかに残っていればよく、場所が変わっただけなら問題ない。両方を満たしていれば ACCEPT の一語だけを返す。規則を満たしていなければ REVISE: に続けて直っていない箇所を挙げる。元の本文にあった事実が消えていれば、REVISE: に続けて「削りすぎ」と書き、消えた事実を一つずつ挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/110_NegationOnlyWhenExpected_260913_oo01/110_NegationOnlyWhenExpected_260913_oo01.md\n本文: " + state.getString("work") + "\n元の本文: " + state.getString("before-path")']
         execution: direct
       - actor: this
         method: keepWorkerReply
         arguments: ["judge", "verdict"]
         execution: direct
 
+  - states: ["judge-4", "enter-5"]
+    label: judge-did-not-answer-4
+    note: |
+      judge が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。
+      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("judge")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-4", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点4 negation | 判定役が答えなかった"'}
+        execution: direct
+
   - states: ["check-4", "enter-5"]
     label: accept-4
     note: 満たしている。本文はそのまま次の規則へ。
     actions: [{actor: this, method: checkState, arguments: ["verdict", "ACCEPT"], execution: direct}]
+
+  - states: ["check-4", "enter-5"]
+    label: no-agreement-4
+    note: |
+      判定役が前回と同じ指摘を返した。直す役は毎回直しているので、直っていないのではなく
+      規則の読み方が食い違っている。回数を使い切るまで往復しても同じなので、この観点に
+      入る前の本文に戻し、合わなかったことを報告に残して次へ進む
+      (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: sameAsLast
+        arguments: ["verdict", "last-verdict-4"]
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-4", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点4 negation | " + state.getString("verdict")'}
+        execution: direct
 
   - states: ["check-4", "fix-4"]
     label: needs-fix-4
@@ -401,7 +672,15 @@ steps:
     note: |
       直す回数を使い切った。この観点に入る前の本文に戻して次の観点へ進む。満たせなかった観点の
       書き換えを残すと、いじり回しただけの本文になる。
-    actions: [{actor: this, method: copyState, arguments: ["kept-4", "text"], execution: direct}]
+    actions:
+      - actor: this
+        method: copyState
+        arguments: ["kept-4", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点4 negation | 回数を使い切った: " + state.getString("verdict")'}
+        execution: direct
 
   - states: ["fix-4", "judge-4"]
     label: fix-4-negation
@@ -409,11 +688,31 @@ steps:
     actions:
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれファイルにある。read ツールで両方を読んでから答えること。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。事実を削らないでください。筋から外れると判断した事実は、本文から外したうえで、末尾の「## 雑記」の節に箇条書きで移してください（順不同でかまいません）。「## 参考資料」の節があれば、その直前に「## 雑記」を置いてください。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/110_NegationOnlyWhenExpected_260913_oo01/110_NegationOnlyWhenExpected_260913_oo01.md\n本文: " + state.getString("work") + "\n元の本文（ここにある事実は全部残すこと）: " + state.getString("before-path") + "\n\n指摘:\n" + state.getString("verdict")']
+        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。事実を削らないでください。筋から外れると判断した事実は、本文から外したうえで、末尾の「## 雑記」の節に箇条書きで移してください（順不同でかまいません）。「## 参考資料」の節があれば、その直前に「## 雑記」を置いてください。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/110_NegationOnlyWhenExpected_260913_oo01/110_NegationOnlyWhenExpected_260913_oo01.md\n本文: " + state.getString("work") + "\n元の本文（ここにある事実は全部残すこと）: " + state.getString("before-path") + "\n\n指摘:\n" + state.getString("verdict")']
         execution: direct
       - actor: this
         method: readFile
         arguments: ['jexl:state.getString("work")', "text"]
+        execution: direct
+
+  - states: ["fix-4", "enter-5"]
+    label: fixer-did-not-answer-4
+    note: |
+      直す役が答えなかった。待つのをやめた側が、相手の仕事も止める。この観点は諦めて
+      入る前の本文に戻し、次の観点へ進む。受け皿が無いと、会話ひとつの不調で実行全体が
+      「一致する遷移が無い」で終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("fixer")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-4", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点4 negation | 直す役が答えなかった"'}
         execution: direct
 
   # ── 5. oneaxis ───────────────────────────────────────────────────────────
@@ -438,17 +737,57 @@ steps:
     actions:
       - actor: this
         method: askWorker
-        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれファイルにある。read ツールで両方を読んでから答えること。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/130_OneAxisPerSection_260913_oo01/130_OneAxisPerSection_260913_oo01.md\n本文: " + state.getString("work")']
+        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/130_OneAxisPerSection_260913_oo01/130_OneAxisPerSection_260913_oo01.md\n本文: " + state.getString("work")']
         execution: direct
       - actor: this
         method: keepWorkerReply
         arguments: ["judge", "verdict"]
         execution: direct
 
+  - states: ["judge-5", "enter-6"]
+    label: judge-did-not-answer-5
+    note: |
+      judge が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。
+      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("judge")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-5", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点5 oneaxis | 判定役が答えなかった"'}
+        execution: direct
+
   - states: ["check-5", "enter-6"]
     label: accept-5
     note: 満たしている。本文はそのまま次の規則へ。
     actions: [{actor: this, method: checkState, arguments: ["verdict", "ACCEPT"], execution: direct}]
+
+  - states: ["check-5", "enter-6"]
+    label: no-agreement-5
+    note: |
+      判定役が前回と同じ指摘を返した。直す役は毎回直しているので、直っていないのではなく
+      規則の読み方が食い違っている。回数を使い切るまで往復しても同じなので、この観点に
+      入る前の本文に戻し、合わなかったことを報告に残して次へ進む
+      (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: sameAsLast
+        arguments: ["verdict", "last-verdict-5"]
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-5", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点5 oneaxis | " + state.getString("verdict")'}
+        execution: direct
 
   - states: ["check-5", "fix-5"]
     label: needs-fix-5
@@ -460,7 +799,15 @@ steps:
     note: |
       直す回数を使い切った。この観点に入る前の本文に戻して次の観点へ進む。満たせなかった観点の
       書き換えを残すと、いじり回しただけの本文になる。
-    actions: [{actor: this, method: copyState, arguments: ["kept-5", "text"], execution: direct}]
+    actions:
+      - actor: this
+        method: copyState
+        arguments: ["kept-5", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点5 oneaxis | 回数を使い切った: " + state.getString("verdict")'}
+        execution: direct
 
   - states: ["fix-5", "judge-5"]
     label: fix-5-oneaxis
@@ -468,11 +815,31 @@ steps:
     actions:
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれファイルにある。read ツールで両方を読んでから答えること。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/130_OneAxisPerSection_260913_oo01/130_OneAxisPerSection_260913_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
+        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/130_OneAxisPerSection_260913_oo01/130_OneAxisPerSection_260913_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
         execution: direct
       - actor: this
         method: readFile
         arguments: ['jexl:state.getString("work")', "text"]
+        execution: direct
+
+  - states: ["fix-5", "enter-6"]
+    label: fixer-did-not-answer-5
+    note: |
+      直す役が答えなかった。待つのをやめた側が、相手の仕事も止める。この観点は諦めて
+      入る前の本文に戻し、次の観点へ進む。受け皿が無いと、会話ひとつの不調で実行全体が
+      「一致する遷移が無い」で終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("fixer")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-5", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点5 oneaxis | 直す役が答えなかった"'}
         execution: direct
 
   # ── 6. list ───────────────────────────────────────────────────────────
@@ -497,17 +864,57 @@ steps:
     actions:
       - actor: this
         method: askWorker
-        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれファイルにある。read ツールで両方を読んでから答えること。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/140_IndependentBullets_260913_oo01/140_IndependentBullets_260913_oo01.md\n本文: " + state.getString("work")']
+        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/140_IndependentBullets_260913_oo01/140_IndependentBullets_260913_oo01.md\n本文: " + state.getString("work")']
         execution: direct
       - actor: this
         method: keepWorkerReply
         arguments: ["judge", "verdict"]
         execution: direct
 
+  - states: ["judge-6", "enter-7"]
+    label: judge-did-not-answer-6
+    note: |
+      judge が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。
+      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("judge")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-6", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点6 list | 判定役が答えなかった"'}
+        execution: direct
+
   - states: ["check-6", "enter-7"]
     label: accept-6
     note: 満たしている。本文はそのまま次の規則へ。
     actions: [{actor: this, method: checkState, arguments: ["verdict", "ACCEPT"], execution: direct}]
+
+  - states: ["check-6", "enter-7"]
+    label: no-agreement-6
+    note: |
+      判定役が前回と同じ指摘を返した。直す役は毎回直しているので、直っていないのではなく
+      規則の読み方が食い違っている。回数を使い切るまで往復しても同じなので、この観点に
+      入る前の本文に戻し、合わなかったことを報告に残して次へ進む
+      (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: sameAsLast
+        arguments: ["verdict", "last-verdict-6"]
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-6", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点6 list | " + state.getString("verdict")'}
+        execution: direct
 
   - states: ["check-6", "fix-6"]
     label: needs-fix-6
@@ -519,7 +926,15 @@ steps:
     note: |
       直す回数を使い切った。この観点に入る前の本文に戻して次の観点へ進む。満たせなかった観点の
       書き換えを残すと、いじり回しただけの本文になる。
-    actions: [{actor: this, method: copyState, arguments: ["kept-6", "text"], execution: direct}]
+    actions:
+      - actor: this
+        method: copyState
+        arguments: ["kept-6", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点6 list | 回数を使い切った: " + state.getString("verdict")'}
+        execution: direct
 
   - states: ["fix-6", "judge-6"]
     label: fix-6-list
@@ -527,11 +942,31 @@ steps:
     actions:
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれファイルにある。read ツールで両方を読んでから答えること。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/140_IndependentBullets_260913_oo01/140_IndependentBullets_260913_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
+        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/140_IndependentBullets_260913_oo01/140_IndependentBullets_260913_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
         execution: direct
       - actor: this
         method: readFile
         arguments: ['jexl:state.getString("work")', "text"]
+        execution: direct
+
+  - states: ["fix-6", "enter-7"]
+    label: fixer-did-not-answer-6
+    note: |
+      直す役が答えなかった。待つのをやめた側が、相手の仕事も止める。この観点は諦めて
+      入る前の本文に戻し、次の観点へ進む。受け皿が無いと、会話ひとつの不調で実行全体が
+      「一致する遷移が無い」で終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("fixer")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-6", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点6 list | 直す役が答えなかった"'}
         execution: direct
 
   # ── 7. sections ───────────────────────────────────────────────────────────
@@ -556,17 +991,57 @@ steps:
     actions:
       - actor: this
         method: askWorker
-        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれファイルにある。read ツールで両方を読んでから答えること。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/150_DocumentSections_260913_oo01/150_DocumentSections_260913_oo01.md\n本文: " + state.getString("work")']
+        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/150_DocumentSections_260913_oo01/150_DocumentSections_260913_oo01.md\n本文: " + state.getString("work")']
         execution: direct
       - actor: this
         method: keepWorkerReply
         arguments: ["judge", "verdict"]
         execution: direct
 
+  - states: ["judge-7", "verify"]
+    label: judge-did-not-answer-7
+    note: |
+      judge が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。
+      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("judge")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-7", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点7 sections | 判定役が答えなかった"'}
+        execution: direct
+
   - states: ["check-7", "verify"]
     label: accept-7
     note: 満たしている。本文はそのまま次の規則へ。
     actions: [{actor: this, method: checkState, arguments: ["verdict", "ACCEPT"], execution: direct}]
+
+  - states: ["check-7", "verify"]
+    label: no-agreement-7
+    note: |
+      判定役が前回と同じ指摘を返した。直す役は毎回直しているので、直っていないのではなく
+      規則の読み方が食い違っている。回数を使い切るまで往復しても同じなので、この観点に
+      入る前の本文に戻し、合わなかったことを報告に残して次へ進む
+      (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: sameAsLast
+        arguments: ["verdict", "last-verdict-7"]
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-7", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点7 sections | " + state.getString("verdict")'}
+        execution: direct
 
   - states: ["check-7", "fix-7"]
     label: needs-fix-7
@@ -578,7 +1053,15 @@ steps:
     note: |
       直す回数を使い切った。この観点に入る前の本文に戻して次の観点へ進む。満たせなかった観点の
       書き換えを残すと、いじり回しただけの本文になる。
-    actions: [{actor: this, method: copyState, arguments: ["kept-7", "text"], execution: direct}]
+    actions:
+      - actor: this
+        method: copyState
+        arguments: ["kept-7", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点7 sections | 回数を使い切った: " + state.getString("verdict")'}
+        execution: direct
 
   - states: ["fix-7", "judge-7"]
     label: fix-7-sections
@@ -586,11 +1069,31 @@ steps:
     actions:
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれファイルにある。read ツールで両方を読んでから答えること。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/150_DocumentSections_260913_oo01/150_DocumentSections_260913_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
+        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/150_DocumentSections_260913_oo01/150_DocumentSections_260913_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
         execution: direct
       - actor: this
         method: readFile
         arguments: ['jexl:state.getString("work")', "text"]
+        execution: direct
+
+  - states: ["fix-7", "verify"]
+    label: fixer-did-not-answer-7
+    note: |
+      直す役が答えなかった。待つのをやめた側が、相手の仕事も止める。この観点は諦めて
+      入る前の本文に戻し、次の観点へ進む。受け皿が無いと、会話ひとつの不調で実行全体が
+      「一致する遷移が無い」で終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("fixer")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["kept-7", "text"]
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点7 sections | 直す役が答えなかった"'}
         execution: direct
 
   # ── last: nothing brought in, nothing altered ─────────────────────────────
@@ -627,11 +1130,26 @@ steps:
     actions:
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれファイルにある。read ツールで両方を読んでから答えること。指摘された箇所だけを直し、write ツールで直した本文のファイルに同じパスで書き戻すこと。元の本文に無いコマンド・実行結果・数値は消す。元の本文にあった数値・コマンド・識別子が書き換えられていれば、元の値に戻す。それ以外は今のままにする。書き戻したら「done」とだけ返す。\n\n元の本文: " + state.getString("orig") + "\n直した本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
+        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された箇所だけを直し、write ツールで直した本文のファイルに同じパスで書き戻すこと。元の本文に無いコマンド・実行結果・数値は消す。元の本文にあった数値・コマンド・識別子が書き換えられていれば、元の値に戻す。それ以外は今のままにする。書き戻したら「done」とだけ返す。\n\n元の本文: " + state.getString("orig") + "\n直した本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
         execution: direct
       - actor: this
         method: readFile
         arguments: ['jexl:state.getString("work")', "text"]
+        execution: direct
+
+  - states: ["verify-fix", "skip"]
+    label: verify-fixer-did-not-answer
+    note: |
+      fixer が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。
+      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("fixer")']
+        execution: direct
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 最後の照合の直しに答えなかった"'}
         execution: direct
 
   - states: ["write", "next"]
@@ -659,4 +1177,14 @@ steps:
       - actor: this
         method: appendJson
         arguments: {path: done, value: 'jexl:"not written (the last check did not pass): " + state.getString("file")'}
+        execution: direct
+
+  - states: ["!end", "report"]
+    label: catch-all
+    note: |
+      どの遷移も通らなかった。ここまでに分かっていることを報告して終える。
+    actions:
+      - actor: this
+        method: appendJson
+        arguments: {path: disagreements, value: 'jexl:"実行が途中で止まった: " + state.getString("file", "(ファイル未定)")'}
         execution: direct

@@ -284,6 +284,92 @@ public class PlanRunner extends Interpreter {
     }
 
     /**
+     * Plan step: writes a list the plan built up as one line each, for a person to read.
+     *
+     * <p>{@code appendJson} makes a list, and a list read back as text answers the empty string —
+     * a run's report had two empty sections under its headings for exactly that reason. An empty
+     * list is written as なし, so a heading never stands over nothing.</p>
+     *
+     * @param listKey where the list is
+     * @param intoKey where to put the lines
+     * @return {@link ActionResult} with {@code success=true} always; a list that is not there is
+     *         written as なし rather than treated as a fault
+     */
+    public ActionResult joinLines(String listKey, String intoKey) {
+        if (selfActorRef == null) return new ActionResult(false, "plan runner is not wired to an actor system");
+        if (listKey == null || listKey.isBlank()) return new ActionResult(false, "listKey is required");
+        if (intoKey == null || intoKey.isBlank()) return new ActionResult(false, "intoKey is required");
+        com.fasterxml.jackson.databind.JsonNode kept = selfActorRef.json().select(listKey);
+        String text;
+        if (kept == null || kept.isMissingNode() || kept.isNull()) {
+            text = "なし";
+        } else if (kept.isArray()) {
+            List<String> lines = new ArrayList<>();
+            kept.forEach(one -> lines.add(one.isTextual() ? one.asText() : one.toString()));
+            text = lines.isEmpty() ? "なし" : String.join("\n", lines);
+        } else {
+            text = kept.isTextual() ? kept.asText() : kept.toString();
+        }
+        selfActorRef.putJson(intoKey, text);
+        return new ActionResult(true, "wrote " + text.length() + " chars to " + intoKey);
+    }
+
+    /**
+     * Plan step: stops whatever a conversation is in the middle of.
+     *
+     * <p>A plan that has stopped waiting has to stop the work too. One run's fixer answered for
+     * thirty minutes and 131,000 characters; the plan timed out, the job ended, and the
+     * conversation carried on writing with the GPU to itself. The same thing the Cancel button
+     * does ({@code WhenTheTwoRolesDoNotAgree_260915_oo01}).</p>
+     *
+     * @param chatName the conversation's full actor name
+     * @return {@link ActionResult} with {@code success=true} iff that conversation was there
+     */
+    public ActionResult stopChat(String chatName) {
+        if (system == null) return new ActionResult(false, "plan runner is not wired to an actor system");
+        if (chatName == null || chatName.isBlank()) return new ActionResult(false, "chatName is required");
+        Object session = system.getIIActor(chatName + ".chat");
+        if (!(session instanceof ChatSessionIIAR chatSessionIIAR)) {
+            return new ActionResult(false, "chat not found: " + chatName);
+        }
+        chatSessionIIAR.tellNow(a -> ((ChatSession) a).cancel()).join();
+        return new ActionResult(true, "told " + chatName + " to stop");
+    }
+
+    /**
+     * Plan step: succeeds when this verdict says the same as the one before it.
+     *
+     * <p>A criterion that is not satisfied is sent back to be fixed, and the fixer usually does
+     * something. When the judge answers with the same words again, the fixer's work is not the
+     * problem: the two of them are reading the rule differently, and another round will produce
+     * the same pair of answers ({@code WhenTheTwoRolesDoNotAgree_260915_oo01}). Succeeding here is
+     * what lets a workflow take the "they do not agree" path instead of spending its whole
+     * allowance.</p>
+     *
+     * <p>Remembers this verdict either way, so the next round compares against it. Blank space is
+     * ignored: a model that indents its answer differently is not making a new complaint.</p>
+     *
+     * @param key     where the verdict is
+     * @param memoKey where to keep it for the next round; one per criterion
+     * @return {@link ActionResult} with {@code success=true} iff this verdict matches the last
+     */
+    public ActionResult sameAsLast(String key, String memoKey) {
+        if (selfActorRef == null) return new ActionResult(false, "plan runner is not wired to an actor system");
+        if (key == null || key.isBlank()) return new ActionResult(false, "key is required");
+        if (memoKey == null || memoKey.isBlank()) return new ActionResult(false, "memoKey is required");
+        String now = selfActorRef.getJsonString(key);
+        if (now == null) return new ActionResult(false, "nothing is kept as '" + key + "'");
+        String last = selfActorRef.getJsonString(memoKey);
+        selfActorRef.putJson(memoKey, now);
+        boolean same = last != null && flatten(last).equals(flatten(now));
+        return new ActionResult(same, same ? "the same verdict as last time" : "a different verdict");
+    }
+
+    private static String flatten(String text) {
+        return text.replaceAll("\\s+", " ").strip();
+    }
+
+    /**
      * Plan step: says what a rewrite changed that it had no business changing.
      *
      * <p>Whether a text still means what it did is a judgement; whether its commands, identifiers

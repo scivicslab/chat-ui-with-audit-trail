@@ -164,6 +164,25 @@ public class Project {
     private ActorRef<CallWatchdog> watchdog;
     private String systemLogActorName;
     /** What a job's file steps may touch; {@code null} means none. */
+    /**
+     * The label on an ordinary line of a job's record: one transition, as it was left.
+     *
+     * <p>A label is what a later search filters on, which is how a run is read once it is over
+     * ({@code JobRunsInTheLog_260915_oo01}).</p>
+     */
+    public static final String JOB_STEP_LABEL = "job/step";
+
+    /**
+     * The label on a line saying the two roles did not agree about a criterion.
+     *
+     * <p>These are the ones a person has to look at: nothing was changed there, and the run says
+     * so rather than leaving it to be noticed ({@code WhenTheTwoRolesDoNotAgree_260915_oo01}).</p>
+     */
+    public static final String NO_AGREEMENT_LABEL = "job/no-agreement";
+
+    /** Where a job's lines are kept so that they outlive this process; null when there is no log. */
+    private com.scivicslab.chatui.core.iolog.IoLogStore ioLogStore;
+
     private com.scivicslab.chatui.agent.FileAccessScope fileScope;
     /** How a job puts one of its roles on a named provider kind; null when it may not. */
     private PlanRunner.ProviderChanger providerChanger;
@@ -209,6 +228,22 @@ public class Project {
                      ActorRef<CallWatchdog> watchdog, String systemLogActorName,
                      com.scivicslab.chatui.agent.FileAccessScope fileScope,
                      PlanRunner.ProviderChanger providerChanger) {
+        bind(projectId, system, self, watchdog, systemLogActorName, fileScope, providerChanger, null);
+    }
+
+    /**
+     * The same, with the log a job's lines are written to
+     * ({@code JobRunsInTheLog_260915_oo01}). A project bound without one runs jobs whose lines
+     * live only in the Job Log tab's ring buffer, as they did before.
+     *
+     * @param ioLogStore where a job opens a session of its own
+     */
+    public void bind(String projectId, IIActorSystem system, ActorRef<Project> self,
+                     ActorRef<CallWatchdog> watchdog, String systemLogActorName,
+                     com.scivicslab.chatui.agent.FileAccessScope fileScope,
+                     PlanRunner.ProviderChanger providerChanger,
+                     com.scivicslab.chatui.core.iolog.IoLogStore ioLogStore) {
+        this.ioLogStore = ioLogStore;
         this.providerChanger = providerChanger;
         this.fileScope = fileScope;
         this.projectId = projectId;
@@ -287,8 +322,13 @@ public class Project {
         system.addIIActor(logActor);
         jobLogs.put(jobId, buffer);
 
-        // Every transition the runner leaves is one line in the job's log.
-        runner.setStepListener(line -> log(name, "INFO", line));
+        // Every transition the runner leaves is one line in the job's log. A line from the
+        // transition that records a disagreement carries its own label, so that a search over the
+        // log finds the criteria a run could not settle without reading every line of it
+        // (JobRunsInTheLog_260915_oo01).
+        runner.setStepListener(line -> log(name, "INFO", line,
+                line.contains("no-agreement") || line.contains("give-up")
+                        ? NO_AGREEMENT_LABEL : JOB_STEP_LABEL));
 
         seedParameters(runnerRef, parameters);
 
@@ -417,6 +457,20 @@ public class Project {
 
     /** Writes one line to a job's log actor, through its mailbox, as ChatUiActorSystem.submitPlan does. */
     private void log(String jobActorName, String type, String data) {
+        log(jobActorName, type, data, JOB_STEP_LABEL);
+    }
+
+    /**
+     * One line of a job's record, to the pane and to the log.
+     *
+     * @param label what a later search filters on; {@link #JOB_STEP_LABEL} for an ordinary
+     *              transition, {@link #NO_AGREEMENT_LABEL} for one worth looking up again
+     */
+    private void log(String jobActorName, String type, String data, String label) {
+        if (ioLogStore != null) {
+            long sessionId = ioLogStore.ensureJobSession(jobActorName);
+            ioLogStore.record(sessionId, jobActorName, label, data);
+        }
         IIActorRef<?> logRef = system.getIIActor(jobActorName + ".log");
         if (logRef == null) return;
         try {

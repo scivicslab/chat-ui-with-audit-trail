@@ -85,6 +85,8 @@ public class IoLogStore {
 
     private DistributedLogStore store;
     private final Map<String, Long> sessionIds = new HashMap<>();
+    /** One per job, keyed by the job's actor name; see ensureJobSession. */
+    private final Map<String, Long> jobSessionIds = new HashMap<>();
     private boolean failed = false;
 
     private synchronized void ensureStore() {
@@ -134,6 +136,45 @@ public class IoLogStore {
             return sid;
         } catch (Exception e) {
             LOG.log(Level.WARNING, "startSession failed", e);
+            return -1;
+        }
+    }
+
+    /** What a job's session is named after, so a conversation view never picks one up. */
+    private static final String JOB_PREFIX = "chat-ui-job-";
+
+    /**
+     * Returns the given job's session id, opening one on first use; -1 if unavailable.
+     *
+     * <p>A job's lines went to two ring buffers in memory: the Job Log tab's and the system log's.
+     * A restart lost them and a long run pushed out its own beginning, so what a run could not
+     * settle could only be read while it was still on the screen. Written here, it is in the same
+     * database the conversations are in, which the log search reads
+     * ({@code JobRunsInTheLog_260915_oo01}).</p>
+     *
+     * <p>Named apart from a conversation's session so that {@link #resumableTabs()} does not build
+     * a conversation tab out of a job at the next start-up.</p>
+     *
+     * @param jobActorName the job's actor name, e.g. {@code project1/job-01}
+     */
+    public synchronized long ensureJobSession(String jobActorName) {
+        ensureStore();
+        if (store == null) {
+            return -1;
+        }
+        Long existing = jobSessionIds.get(jobActorName);
+        if (existing != null) {
+            return existing;
+        }
+        try {
+            long sid = store.startSession(JOB_PREFIX + jobActorName, null, null, 1,
+                    System.getProperty("user.dir"), null, null,
+                    currentCommandLine(), appVersion, null);
+            jobSessionIds.put(jobActorName, sid);
+            LOG.info("I/O log session started for job " + jobActorName + ": " + sid);
+            return sid;
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "startSession failed for job " + jobActorName, e);
             return -1;
         }
     }
