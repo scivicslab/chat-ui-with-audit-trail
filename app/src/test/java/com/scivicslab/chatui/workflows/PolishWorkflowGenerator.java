@@ -632,18 +632,27 @@ params:
 
   - states: ["write", "next"]
     label: write-result
+    note: |
+      The report names the file that now exists, not the one that was read: a reader who goes to
+      look at "written: <path>" must find the rewritten text there.
     actions:
       - actor: this
         method: joinFrontMatter
         arguments: ["head", "text", "whole"]
         execution: direct
       - actor: this
+        method: putJson
+        arguments:
+          path: written
+          value: 'jexl:state.getString("outDir") + "/" + state.getString("file").substring(state.getString("file").lastIndexOf("/") + 1)'
+        execution: direct
+      - actor: this
         method: writeFile
-        arguments: ['jexl:state.getString("outDir") + "/" + state.getString("file").substring(state.getString("file").lastIndexOf("/") + 1)', "whole"]
+        arguments: ['jexl:state.getString("written")', "whole"]
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: done, value: 'jexl:"written: " + state.getString("file")'}
+        arguments: {path: done, value: 'jexl:"written: " + state.getString("written")'}
         execution: direct
 
   - states: ["skip", "next"]
