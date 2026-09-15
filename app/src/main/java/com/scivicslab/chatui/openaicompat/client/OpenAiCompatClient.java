@@ -33,7 +33,19 @@ public class OpenAiCompatClient {
 
     public interface StreamCallback {
         void onDelta(String content);
-        void onComplete(long durationMs);
+
+        /**
+         * The reply ended.
+         *
+         * @param durationMs   how long the whole call took
+         * @param finishReason why the server stopped: {@code stop} when the model said everything
+         *                     it meant to, {@code length} when it was cut off at a token limit —
+         *                     by the model's own {@code max_tokens} or by the broker's ceiling
+         *                     ({@code RunawayGenerationLimits_260915_oo01}). {@code null} when the
+         *                     server never said.
+         */
+        void onComplete(long durationMs, String finishReason);
+
         void onError(String message);
 
         /**
@@ -209,6 +221,7 @@ public class OpenAiCompatClient {
 
             StringBuilder fullResponse = new StringBuilder();
             boolean interrupted = false;
+            String finishReason = null;
             var iterator = response.body().iterator();
             while (iterator.hasNext()) {
                 if (Thread.currentThread().isInterrupted()) { interrupted = true; break; }
@@ -221,9 +234,10 @@ public class OpenAiCompatClient {
                     fullResponse.append(delta.content());
                     callback.onDelta(delta.content());
                 }
+                if (delta.finishReason() != null) finishReason = delta.finishReason();
             }
             if (interrupted) { callback.onError("Request cancelled"); return null; }
-            callback.onComplete(System.currentTimeMillis() - startTime);
+            callback.onComplete(System.currentTimeMillis() - startTime, finishReason);
             return fullResponse.length() > 0 ? fullResponse.toString() : null;
 
         } catch (InterruptedException e) {
@@ -385,11 +399,9 @@ public class OpenAiCompatClient {
         return new NonStreamingResponse(content, toolCalls, finishReason);
     }
 
+    /** As {@link #extractFinishReason}, but a whole response always has one: absent means stop. */
     static String parseNsFinishReason(String json) {
-        String marker = "\"finish_reason\":\"";
-        int idx = json.indexOf(marker);
-        if (idx < 0) return "stop";
-        String value = unescapeJsonString(json, idx + marker.length());
+        String value = extractFinishReason(json);
         return value != null && !value.isEmpty() ? value : "stop";
     }
 
@@ -474,13 +486,27 @@ public class OpenAiCompatClient {
      * @param reasoning reasoning text from {@code delta.reasoning_content}, or {@code null} when
      *                  the server does not separate reasoning or this chunk carried none
      */
-    record SseDelta(String content, String reasoning) {}
+    record SseDelta(String content, String reasoning, String finishReason) {}
 
     static SseDelta parseSseDelta(String line) {
         if (line == null || !line.startsWith("data: ")) return null;
         String data = line.substring(6).trim();
         if (data.equals("[DONE]")) return null;
-        return new SseDelta(extractDeltaContent(data), extractDeltaReasoning(data));
+        return new SseDelta(extractDeltaContent(data), extractDeltaReasoning(data),
+                extractFinishReason(data));
+    }
+
+    /**
+     * Reads {@code choices[].finish_reason} from one streamed chunk. Every chunk but the last
+     * carries {@code null} there, which is not a string and so does not match.
+     *
+     * @param json one SSE data payload
+     * @return {@code stop}, {@code length}, … or {@code null} while the reply is still running
+     */
+    static String extractFinishReason(String json) {
+        String marker = "\"finish_reason\":\"";
+        int idx = json.indexOf(marker);
+        return idx < 0 ? null : unescapeJsonString(json, idx + marker.length());
     }
 
     static String extractDeltaContent(String json) {

@@ -57,7 +57,7 @@ class OpenAiCompatClientReasoningTest {
 
         @Override public void onDelta(String content) { answer.add(content); }
         @Override public void onReasoning(String text) { reasoning.add(text); }
-        @Override public void onComplete(long durationMs) {}
+        @Override public void onComplete(long durationMs, String finishReason) {}
         @Override public void onError(String message) {}
     }
 

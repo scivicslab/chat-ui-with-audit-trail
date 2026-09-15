@@ -226,8 +226,19 @@ public class OpenAiCompatProvider implements LlmProvider {
                             // added in onComplete and out of the text parsed for tool calls.
                             emitter.accept(ChatEvent.thinking(reasoning));
                         }
-                        @Override public void onComplete(long durationMs) {
+                        @Override public void onComplete(long durationMs, String finishReason) {
                             String response = assistantBuf.toString();
+                            if (wasCutOff(finishReason)) {
+                                // Not an answer: the server stopped mid-sentence at a token limit.
+                                // Kept out of the history as well as reported, because a truncated
+                                // assistant message is what the next turn would be built on
+                                // (RunawayGenerationLimits_260915_oo01).
+                                logger.warning("Reply cut off at the token limit after "
+                                        + response.length() + " chars");
+                                emitter.accept(ChatEvent.error(
+                                        "The reply was cut off at the token limit (finish_reason=length)."));
+                                return;
+                            }
                             history.addLast(new ChatMessage.Assistant(response));
                             fitHistoryToBudget();
                             if (currentRetry > 0) {
@@ -405,6 +416,18 @@ public class OpenAiCompatProvider implements LlmProvider {
             return null;
         }
         return response.content();
+    }
+
+    /**
+     * Whether the server stopped because a token limit was reached rather than because the model
+     * had finished. Such a reply ends mid-sentence, so the text is not the answer to anything --
+     * and when it holds a tool call, the closing tag never arrived and no tool runs either
+     * ({@code RunawayGenerationLimits_260915_oo01}).
+     *
+     * @param finishReason what the server reported, or {@code null} when it reported nothing
+     */
+    static boolean wasCutOff(String finishReason) {
+        return "length".equals(finishReason);
     }
 
     private OpenAiCompatClient selectClient(String model) {
