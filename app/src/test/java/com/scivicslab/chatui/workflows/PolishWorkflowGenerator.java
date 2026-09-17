@@ -104,8 +104,20 @@ public final class PolishWorkflowGenerator {
     }
 
     /** One turn: the prompt goes to a conversation, whose reply is picked up by the caller. */
+    /**
+     * One turn: the conversation is emptied, the prompt goes to it, and the reply is picked up by
+     * the caller.
+     *
+     * <p>Emptied first because every prompt here carries everything it needs -- the path of the
+     * rule, the path of the text, and the complaint being answered -- so nothing earlier can help,
+     * while what is earlier does harm: a judge that had answered six rules in a row returned, for
+     * the seventh, the verdict it had written for the third
+     * ({@code ForgetTheConversationOnBothSides_260917_oo01}).</p>
+     */
     private static String ask(String expression, String slot) {
-        return "      - actor: this\n        method: askWorker\n"
+        return "      - actor: this\n        method: clearWorker\n"
+                + "        arguments: [\"" + slot + "\"]\n        execution: direct\n"
+                + "      - actor: this\n        method: askWorker\n"
                 + "        arguments: [\"" + slot + "\", 'jexl:" + expression + "']\n"
                 + "        execution: direct\n";
     }

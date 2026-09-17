@@ -911,8 +911,7 @@ public class ChatSession extends Interpreter {
     public List<ChatEvent> handleCommand(String input) {
         List<ChatEvent> responses = new ArrayList<>(provider.handleCommand(input));
         if (input.trim().toLowerCase().startsWith("/clear")) {
-            conversationHistory.clear();
-            historySnapshot.set(List.of());
+            clearHistory();
         }
         responses.add(ChatEvent.status(provider.getCurrentModel(), provider.getSessionId(), busy));
         return responses;
@@ -2225,10 +2224,17 @@ public class ChatSession extends Interpreter {
         return Collections.unmodifiableList(new ArrayList<>(conversationHistory.subList(from, size)));
     }
 
-    /** Removes all entries from the conversation history. */
+    /**
+     * Removes all entries from the conversation history -- both of them.
+     *
+     * <p>The record the screen shows and the context the next request is built from are separate
+     * lists. Emptying only the first leaves a conversation that looks new and answers from memory
+     * ({@code ForgetTheConversationOnBothSides_260917_oo01}).</p>
+     */
     public void clearHistory() {
         conversationHistory.clear();
         historySnapshot.set(List.of());
+        provider.clearHistory();
         // New conversation: end the current I/O-log session and renumber turns from 1.
         if (ioLog != null) ioLog.resetSession(myChatName());
         ioTurn = 0;

@@ -212,6 +212,10 @@ steps:
     note: 本文がこの規則を満たしているかを見る。満たしていれば本文には触れない。
     actions:
       - actor: this
+        method: clearWorker
+        arguments: ["judge"]
+        execution: direct
+      - actor: this
         method: askWorker
         arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/080_OopSubjectClarity_260810_oo01/080_OopSubjectClarity_260810_oo01.md\n本文: " + state.getString("work")']
         execution: direct
@@ -290,6 +294,10 @@ steps:
     note: 会話がファイルを直し、書き戻したものをこの計画が読み取る。
     actions:
       - actor: this
+        method: clearWorker
+        arguments: ["fixer"]
+        execution: direct
+      - actor: this
         method: askWorker
         arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/080_OopSubjectClarity_260810_oo01/080_OopSubjectClarity_260810_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
         execution: direct
@@ -338,6 +346,10 @@ steps:
     label: judge-2-naming
     note: 本文がこの規則を満たしているかを見る。満たしていれば本文には触れない。
     actions:
+      - actor: this
+        method: clearWorker
+        arguments: ["judge"]
+        execution: direct
       - actor: this
         method: askWorker
         arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/023_NamingByTypeAndInstance_260628_oo01/023_NamingByTypeAndInstance_260628_oo01.md\n本文: " + state.getString("work")']
@@ -417,6 +429,10 @@ steps:
     note: 会話がファイルを直し、書き戻したものをこの計画が読み取る。
     actions:
       - actor: this
+        method: clearWorker
+        arguments: ["fixer"]
+        execution: direct
+      - actor: this
         method: askWorker
         arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/023_NamingByTypeAndInstance_260628_oo01/023_NamingByTypeAndInstance_260628_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
         execution: direct
@@ -473,6 +489,10 @@ steps:
     label: judge-3-thread
     note: 本文がこの規則を満たしているかを見る。満たしていれば本文には触れない。
     actions:
+      - actor: this
+        method: clearWorker
+        arguments: ["judge"]
+        execution: direct
       - actor: this
         method: askWorker
         arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。直した本文が規則を満たしているか、そして元の本文にあった事実が全部残っているかを見る。事実は、本文の中か「## 雑記」の節のどちらかに残っていればよく、場所が変わっただけなら問題ない。両方を満たしていれば ACCEPT の一語だけを返す。規則を満たしていなければ REVISE: に続けて直っていない箇所を挙げる。元の本文にあった事実が消えていれば、REVISE: に続けて「削りすぎ」と書き、消えた事実を一つずつ挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/120_ThreadAndAsides_260913_oo01/120_ThreadAndAsides_260913_oo01.md\n本文: " + state.getString("work") + "\n元の本文: " + state.getString("before-path")']
@@ -552,6 +572,10 @@ steps:
     note: 会話がファイルを直し、書き戻したものをこの計画が読み取る。
     actions:
       - actor: this
+        method: clearWorker
+        arguments: ["fixer"]
+        execution: direct
+      - actor: this
         method: askWorker
         arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。事実を削らないでください。筋から外れると判断した事実は、本文から外したうえで、末尾の「## 雑記」の節に箇条書きで移してください（順不同でかまいません）。「## 参考資料」の節があれば、その直前に「## 雑記」を置いてください。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/120_ThreadAndAsides_260913_oo01/120_ThreadAndAsides_260913_oo01.md\n本文: " + state.getString("work") + "\n元の本文（ここにある事実は全部残すこと）: " + state.getString("before-path") + "\n\n指摘:\n" + state.getString("verdict")']
         execution: direct
@@ -608,6 +632,10 @@ steps:
     label: judge-4-negation
     note: 本文がこの規則を満たしているかを見る。満たしていれば本文には触れない。
     actions:
+      - actor: this
+        method: clearWorker
+        arguments: ["judge"]
+        execution: direct
       - actor: this
         method: askWorker
         arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。直した本文が規則を満たしているか、そして元の本文にあった事実が全部残っているかを見る。事実は、本文の中か「## 雑記」の節のどちらかに残っていればよく、場所が変わっただけなら問題ない。両方を満たしていれば ACCEPT の一語だけを返す。規則を満たしていなければ REVISE: に続けて直っていない箇所を挙げる。元の本文にあった事実が消えていれば、REVISE: に続けて「削りすぎ」と書き、消えた事実を一つずつ挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/110_NegationOnlyWhenExpected_260913_oo01/110_NegationOnlyWhenExpected_260913_oo01.md\n本文: " + state.getString("work") + "\n元の本文: " + state.getString("before-path")']
@@ -687,6 +715,10 @@ steps:
     note: 会話がファイルを直し、書き戻したものをこの計画が読み取る。
     actions:
       - actor: this
+        method: clearWorker
+        arguments: ["fixer"]
+        execution: direct
+      - actor: this
         method: askWorker
         arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。事実を削らないでください。筋から外れると判断した事実は、本文から外したうえで、末尾の「## 雑記」の節に箇条書きで移してください（順不同でかまいません）。「## 参考資料」の節があれば、その直前に「## 雑記」を置いてください。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/110_NegationOnlyWhenExpected_260913_oo01/110_NegationOnlyWhenExpected_260913_oo01.md\n本文: " + state.getString("work") + "\n元の本文（ここにある事実は全部残すこと）: " + state.getString("before-path") + "\n\n指摘:\n" + state.getString("verdict")']
         execution: direct
@@ -735,6 +767,10 @@ steps:
     label: judge-5-oneaxis
     note: 本文がこの規則を満たしているかを見る。満たしていれば本文には触れない。
     actions:
+      - actor: this
+        method: clearWorker
+        arguments: ["judge"]
+        execution: direct
       - actor: this
         method: askWorker
         arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/130_OneAxisPerSection_260913_oo01/130_OneAxisPerSection_260913_oo01.md\n本文: " + state.getString("work")']
@@ -814,6 +850,10 @@ steps:
     note: 会話がファイルを直し、書き戻したものをこの計画が読み取る。
     actions:
       - actor: this
+        method: clearWorker
+        arguments: ["fixer"]
+        execution: direct
+      - actor: this
         method: askWorker
         arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/130_OneAxisPerSection_260913_oo01/130_OneAxisPerSection_260913_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
         execution: direct
@@ -862,6 +902,10 @@ steps:
     label: judge-6-list
     note: 本文がこの規則を満たしているかを見る。満たしていれば本文には触れない。
     actions:
+      - actor: this
+        method: clearWorker
+        arguments: ["judge"]
+        execution: direct
       - actor: this
         method: askWorker
         arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/140_IndependentBullets_260913_oo01/140_IndependentBullets_260913_oo01.md\n本文: " + state.getString("work")']
@@ -941,6 +985,10 @@ steps:
     note: 会話がファイルを直し、書き戻したものをこの計画が読み取る。
     actions:
       - actor: this
+        method: clearWorker
+        arguments: ["fixer"]
+        execution: direct
+      - actor: this
         method: askWorker
         arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/140_IndependentBullets_260913_oo01/140_IndependentBullets_260913_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
         execution: direct
@@ -989,6 +1037,10 @@ steps:
     label: judge-7-sections
     note: 本文がこの規則を満たしているかを見る。満たしていれば本文には触れない。
     actions:
+      - actor: this
+        method: clearWorker
+        arguments: ["judge"]
+        execution: direct
       - actor: this
         method: askWorker
         arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/150_DocumentSections_260913_oo01/150_DocumentSections_260913_oo01.md\n本文: " + state.getString("work")']
@@ -1068,6 +1120,10 @@ steps:
     note: 会話がファイルを直し、書き戻したものをこの計画が読み取る。
     actions:
       - actor: this
+        method: clearWorker
+        arguments: ["fixer"]
+        execution: direct
+      - actor: this
         method: askWorker
         arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/150_DocumentSections_260913_oo01/150_DocumentSections_260913_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
         execution: direct
@@ -1128,6 +1184,10 @@ steps:
   - states: ["verify-fix", "verify"]
     label: take-back-what-was-brought-in
     actions:
+      - actor: this
+        method: clearWorker
+        arguments: ["fixer"]
+        execution: direct
       - actor: this
         method: askWorker
         arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された箇所だけを直し、write ツールで直した本文のファイルに同じパスで書き戻すこと。元の本文に無いコマンド・実行結果・数値は消す。元の本文にあった数値・コマンド・識別子が書き換えられていれば、元の値に戻す。それ以外は今のままにする。書き戻したら「done」とだけ返す。\n\n元の本文: " + state.getString("orig") + "\n直した本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']

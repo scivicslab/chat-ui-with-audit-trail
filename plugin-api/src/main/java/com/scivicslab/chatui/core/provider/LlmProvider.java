@@ -81,6 +81,20 @@ public interface LlmProvider {
     default String getSessionId() { return null; }
 
     /**
+     * Forgets the conversation so far, so the next prompt is built from nothing.
+     *
+     * <p>A conversation keeps two histories: the one the screen and the record show, and the one
+     * the next request is built from. Emptying the first without the second leaves a conversation
+     * that looks new and answers from memory -- which is what a judging conversation did, returning
+     * for the seventh rule the verdict it had written for the third
+     * ({@code ForgetTheConversationOnBothSides_260917_oo01}).</p>
+     *
+     * <p>Default no-op: a provider whose context lives in another process has nothing to empty
+     * here.</p>
+     */
+    default void clearHistory() { }
+
+    /**
      * Replaces the messages a just-finished turn added to this provider's conversation history
      * with the two that a later turn can still use: what was asked, and what was answered
      * ({@code TurnResourceLimits_260830_oo01}).

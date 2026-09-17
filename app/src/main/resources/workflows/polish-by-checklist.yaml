@@ -101,6 +101,10 @@ steps:
         arguments: ["judge"]
         execution: direct
       - actor: this
+        method: clearWorker
+        arguments: ["judge"]
+        execution: direct
+      - actor: this
         method: askWorker
         arguments: ["judge", 'jexl:"次の本文が、この規則を満たしているかだけを見てください。規則のうち、この本文に当てはまる項目だけで判断してください。本文に無い事柄が書かれていないことを理由に REVISE と判断しないでください。満たしていれば ACCEPT の一語だけを返してください。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げてください。ほかのことは書かないでください。\n\n規則:\n" + state.getString("rule-1") + "\n\n本文:\n" + state.getString("text")']
         execution: direct
@@ -157,6 +161,10 @@ steps:
         arguments: ["judge"]
         execution: direct
       - actor: this
+        method: clearWorker
+        arguments: ["fixer"]
+        execution: direct
+      - actor: this
         method: askWorker
         arguments: ["fixer", 'jexl:"指摘を受けました。同じ規則のまま直してください。直した本文だけを返してください。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則:\n" + state.getString("rule-1") + "\n\n指摘:\n" + state.getString("verdict") + "\n\n本文:\n" + state.getString("text")']
         execution: direct
@@ -207,6 +215,10 @@ steps:
       - actor: this
         method: clearWorker
         arguments: ["fixer"]
+        execution: direct
+      - actor: this
+        method: clearWorker
+        arguments: ["judge"]
         execution: direct
       - actor: this
         method: clearWorker
@@ -269,6 +281,10 @@ steps:
         arguments: ["judge"]
         execution: direct
       - actor: this
+        method: clearWorker
+        arguments: ["fixer"]
+        execution: direct
+      - actor: this
         method: askWorker
         arguments: ["fixer", 'jexl:"指摘を受けました。同じ規則のまま直してください。直した本文だけを返してください。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則:\n" + state.getString("rule-2") + "\n\n指摘:\n" + state.getString("verdict") + "\n\n本文:\n" + state.getString("text")']
         execution: direct
@@ -323,6 +339,10 @@ steps:
       - actor: this
         method: clearWorker
         arguments: ["fixer"]
+        execution: direct
+      - actor: this
+        method: clearWorker
+        arguments: ["judge"]
         execution: direct
       - actor: this
         method: clearWorker
@@ -385,6 +405,10 @@ steps:
         arguments: ["judge"]
         execution: direct
       - actor: this
+        method: clearWorker
+        arguments: ["fixer"]
+        execution: direct
+      - actor: this
         method: askWorker
         arguments: ["fixer", 'jexl:"指摘を受けました。同じ規則のまま直してください。直した本文だけを返してください。指摘が「削りすぎ」であれば、消えた事実を元の本文から取り戻し、本文か「## 雑記」の節に書き戻してください。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。事実を削らないでください。筋から外れると判断した事実は、本文から外したうえで、末尾の「## 雑記」の節に箇条書きで移してください（順不同でかまいません）。「## 参考資料」の節があれば、その直前に「## 雑記」を置いてください。\n\n規則:\n" + state.getString("rule-3") + "\n\n指摘:\n" + state.getString("verdict") + "\n\n元の本文（ここにある事実は全部残すこと）:\n" + state.getString("before") + "\n\nいまの本文:\n" + state.getString("text")']
         execution: direct
@@ -439,6 +463,10 @@ steps:
       - actor: this
         method: clearWorker
         arguments: ["fixer"]
+        execution: direct
+      - actor: this
+        method: clearWorker
+        arguments: ["judge"]
         execution: direct
       - actor: this
         method: clearWorker
@@ -501,6 +529,10 @@ steps:
         arguments: ["judge"]
         execution: direct
       - actor: this
+        method: clearWorker
+        arguments: ["fixer"]
+        execution: direct
+      - actor: this
         method: askWorker
         arguments: ["fixer", 'jexl:"指摘を受けました。同じ規則のまま直してください。直した本文だけを返してください。指摘が「削りすぎ」であれば、消えた事実を元の本文から取り戻し、本文か「## 雑記」の節に書き戻してください。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。事実を削らないでください。筋から外れると判断した事実は、本文から外したうえで、末尾の「## 雑記」の節に箇条書きで移してください（順不同でかまいません）。「## 参考資料」の節があれば、その直前に「## 雑記」を置いてください。\n\n規則:\n" + state.getString("rule-4") + "\n\n指摘:\n" + state.getString("verdict") + "\n\n元の本文（ここにある事実は全部残すこと）:\n" + state.getString("before") + "\n\nいまの本文:\n" + state.getString("text")']
         execution: direct
@@ -551,6 +583,10 @@ steps:
       - actor: this
         method: clearWorker
         arguments: ["fixer"]
+        execution: direct
+      - actor: this
+        method: clearWorker
+        arguments: ["judge"]
         execution: direct
       - actor: this
         method: clearWorker
@@ -613,6 +649,10 @@ steps:
         arguments: ["judge"]
         execution: direct
       - actor: this
+        method: clearWorker
+        arguments: ["fixer"]
+        execution: direct
+      - actor: this
         method: askWorker
         arguments: ["fixer", 'jexl:"指摘を受けました。同じ規則のまま直してください。直した本文だけを返してください。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則:\n" + state.getString("rule-5") + "\n\n指摘:\n" + state.getString("verdict") + "\n\n本文:\n" + state.getString("text")']
         execution: direct
@@ -663,6 +703,10 @@ steps:
       - actor: this
         method: clearWorker
         arguments: ["fixer"]
+        execution: direct
+      - actor: this
+        method: clearWorker
+        arguments: ["judge"]
         execution: direct
       - actor: this
         method: clearWorker
@@ -725,6 +769,10 @@ steps:
         arguments: ["judge"]
         execution: direct
       - actor: this
+        method: clearWorker
+        arguments: ["fixer"]
+        execution: direct
+      - actor: this
         method: askWorker
         arguments: ["fixer", 'jexl:"指摘を受けました。同じ規則のまま直してください。直した本文だけを返してください。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則:\n" + state.getString("rule-6") + "\n\n指摘:\n" + state.getString("verdict") + "\n\n本文:\n" + state.getString("text")']
         execution: direct
@@ -775,6 +823,10 @@ steps:
       - actor: this
         method: clearWorker
         arguments: ["fixer"]
+        execution: direct
+      - actor: this
+        method: clearWorker
+        arguments: ["judge"]
         execution: direct
       - actor: this
         method: clearWorker
@@ -835,6 +887,10 @@ steps:
       - actor: this
         method: clearWorker
         arguments: ["judge"]
+        execution: direct
+      - actor: this
+        method: clearWorker
+        arguments: ["fixer"]
         execution: direct
       - actor: this
         method: askWorker
@@ -898,6 +954,10 @@ steps:
       - actor: this
         method: clearWorker
         arguments: ["judge"]
+        execution: direct
+      - actor: this
+        method: clearWorker
+        arguments: ["fixer"]
         execution: direct
       - actor: this
         method: askWorker

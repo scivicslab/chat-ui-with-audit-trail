@@ -270,6 +270,16 @@ public class OpenAiCompatProvider implements LlmProvider {
     }
 
     /**
+     * Empties the context the next prompt is built from
+     * ({@code ForgetTheConversationOnBothSides_260917_oo01}).
+     */
+    @Override
+    public void clearHistory() {
+        history.clear();
+        collapsedCount = 0;
+    }
+
+    /**
      * Signals that the current streaming request should be cancelled.
      */
     @Override
