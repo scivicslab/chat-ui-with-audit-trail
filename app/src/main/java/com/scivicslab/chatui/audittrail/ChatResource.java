@@ -317,6 +317,9 @@ public class ChatResource {
         status.put("model", model == null ? "" : model);
         status.put("provider", chatSessionIIAR.getProviderIdDirect());
         status.put("tools", chatSessionIIAR.getToolSetDirect());
+        status.put("noThink", chatSessionIIAR.isNoThinkDirect());
+        String effort = chatSessionIIAR.getEffortDirect();
+        if (effort != null) status.put("effort", effort);
         // Absent rather than a made-up number when this conversation asks the server for nothing.
         if (temperature != null) status.put("temperature", temperature);
         return status;
@@ -333,6 +336,56 @@ public class ChatResource {
      * @return {@code {"type": "accepted", "temperature": ...}}, or 400 when the value is not a
      *         number between 0 and 2
      */
+    /**
+     * Sets whether this conversation asks its model to skip the thinking phase
+     * ({@code ThinkingAndEffortAreConversationSettings_260917_oo01}). A setting of the conversation,
+     * as the model and the temperature are: a workflow's {@code ask_chat} carries a prompt and
+     * nothing else, so there is nowhere else to say it.
+     *
+     * @param body {@code {"noThink": true}}
+     */
+    @POST
+    @Path("/{projectId}/chats/{chatId}/no-think")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response noThink(@PathParam("projectId") String projectId,
+                            @PathParam("chatId") String chatId,
+                            Map<String, Object> body) {
+        Object given = body != null ? body.get("noThink") : null;
+        boolean value = Boolean.parseBoolean(String.valueOf(given));
+        if (!actorSystem.setNoThink(projectId, chatId, value)) {
+            return Response.status(404)
+                    .entity(Map.of("type", "error", "message", "no such conversation")).build();
+        }
+        return Response.ok(Map.of("type", "accepted", "noThink", value)).build();
+    }
+
+    /**
+     * Sets how hard this conversation's provider should work on one answer, where it has such a
+     * setting -- a harness passes it as {@code --effort}; a plain LLM ignores it
+     * ({@code ThinkingAndEffortAreConversationSettings_260917_oo01}).
+     *
+     * @param body {@code {"effort": "..."}}; an empty value leaves the harness's own default
+     */
+    @POST
+    @Path("/{projectId}/chats/{chatId}/effort")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response effort(@PathParam("projectId") String projectId,
+                           @PathParam("chatId") String chatId,
+                           Map<String, Object> body) {
+        Object given = body != null ? body.get("effort") : null;
+        String effort = given == null || String.valueOf(given).isBlank() ? null : String.valueOf(given);
+        if (!actorSystem.setEffort(projectId, chatId, effort)) {
+            return Response.status(404)
+                    .entity(Map.of("type", "error", "message", "no such conversation")).build();
+        }
+        Map<String, Object> answer = new java.util.LinkedHashMap<>();
+        answer.put("type", "accepted");
+        answer.put("effort", effort);
+        return Response.ok(answer).build();
+    }
+
     @POST
     @Path("/{projectId}/chats/{chatId}/temperature")
     @Consumes(MediaType.APPLICATION_JSON)

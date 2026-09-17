@@ -31,6 +31,18 @@ params:
   judgeModel:
     description: "The model the judge runs on; empty leaves the conversation as it is"
     default: ""
+  fixerNoThink:
+    description: "true to ask the fixer's model to skip its thinking phase; empty leaves the conversation as it is"
+    default: ""
+  judgeNoThink:
+    description: "true to ask the judge's model to skip its thinking phase; empty leaves the conversation as it is"
+    default: ""
+  fixerEffort:
+    description: "How hard the fixer's harness should work (--effort); empty leaves it as it is"
+    default: ""
+  judgeEffort:
+    description: "How hard the judge's harness should work (--effort); empty leaves it as it is"
+    default: ""
 steps:
   - states: ["0", "on-their-llms"]
     label: add-fixer
@@ -58,6 +70,22 @@ steps:
       - actor: this
         method: setChatModel
         arguments: ['jexl:state.getString("judge")', 'jexl:state.getString("judgeModel")']
+        execution: direct
+      - actor: this
+        method: setChatNoThink
+        arguments: ['jexl:state.getString("fixer")', 'jexl:state.getString("fixerNoThink")']
+        execution: direct
+      - actor: this
+        method: setChatNoThink
+        arguments: ['jexl:state.getString("judge")', 'jexl:state.getString("judgeNoThink")']
+        execution: direct
+      - actor: this
+        method: setChatEffort
+        arguments: ['jexl:state.getString("fixer")', 'jexl:state.getString("fixerEffort")']
+        execution: direct
+      - actor: this
+        method: setChatEffort
+        arguments: ['jexl:state.getString("judge")', 'jexl:state.getString("judgeEffort")']
         execution: direct
 
   - states: ["1", "enter-1"]

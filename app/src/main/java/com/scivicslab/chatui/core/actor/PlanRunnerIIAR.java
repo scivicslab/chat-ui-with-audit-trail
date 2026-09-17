@@ -38,6 +38,14 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
             org.json.JSONArray a = arguments(arg);
             return runner().setChatModel(a.length() > 0 ? a.getString(0) : "",
                     a.length() > 1 ? a.getString(1) : "");
+        } else if (actionName.equals("setChatNoThink")) {
+            org.json.JSONArray a = arguments(arg);
+            return runner().setChatNoThink(a.length() > 0 ? a.getString(0) : "",
+                    a.length() > 1 ? a.getString(1) : "");
+        } else if (actionName.equals("setChatEffort")) {
+            org.json.JSONArray a = arguments(arg);
+            return runner().setChatEffort(a.length() > 0 ? a.getString(0) : "",
+                    a.length() > 1 ? a.getString(1) : "");
         } else if (actionName.equals("setChatProvider")) {
             org.json.JSONArray a = arguments(arg);
             return runner().setChatProvider(a.length() > 0 ? a.getString(0) : "",

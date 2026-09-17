@@ -259,6 +259,52 @@ public class PlanRunner extends Interpreter {
     }
 
     /**
+     * Plan step: says whether one role's conversation asks its model to skip the thinking phase
+     * ({@code ThinkingAndEffortAreConversationSettings_260917_oo01}).
+     *
+     * <p>{@code askWorker} carries a prompt and nothing else, so a run that wants an answer without
+     * reasoning cannot ask for it prompt by prompt. It says so once, here, as it names the model.</p>
+     *
+     * @param chatName the conversation's full actor name
+     * @param value    {@code true} or {@code false}; blank leaves the conversation as it was
+     * @return {@link ActionResult} with {@code success=true} iff that conversation was there
+     */
+    public ActionResult setChatNoThink(String chatName, String value) {
+        if (system == null) return new ActionResult(false, "plan runner is not wired to an actor system");
+        if (chatName == null || chatName.isBlank()) return new ActionResult(false, "chatName is required");
+        if (value == null || value.isBlank()) {
+            return new ActionResult(true, "nothing said about thinking; " + chatName + " stays as it was");
+        }
+        Object session = system.getIIActor(chatName + ".chat");
+        if (!(session instanceof ChatSessionIIAR chatSessionIIAR)) {
+            return new ActionResult(false, "chat not found: " + chatName);
+        }
+        boolean noThink = Boolean.parseBoolean(value.trim());
+        chatSessionIIAR.tell(a -> ((ChatSession) a).setNoThink(noThink)).join();
+        return new ActionResult(true, chatName + (noThink ? " answers without thinking" : " thinks as it did"));
+    }
+
+    /**
+     * Plan step: says how hard one role's conversation should work on an answer, where its provider
+     * has such a setting ({@code ThinkingAndEffortAreConversationSettings_260917_oo01}).
+     *
+     * @param chatName the conversation's full actor name
+     * @param effort   what the harness calls its levels; blank leaves the conversation as it was
+     * @return {@link ActionResult} with {@code success=true} iff that conversation was there
+     */
+    public ActionResult setChatEffort(String chatName, String effort) {
+        if (system == null) return new ActionResult(false, "plan runner is not wired to an actor system");
+        if (chatName == null || chatName.isBlank()) return new ActionResult(false, "chatName is required");
+        if (effort == null || effort.isBlank()) {
+            return new ActionResult(true, "no effort named; " + chatName + " stays as it was");
+        }
+        ActorRef<LlmProvider> providerRef = system.getActor(chatName + ".chat.provider");
+        if (providerRef == null) return new ActionResult(false, "chat not found: " + chatName);
+        providerRef.tell(p -> p.setEffort(effort)).join();
+        return new ActionResult(true, chatName + " works at " + effort);
+    }
+
+    /**
      * Plan step: puts one role's conversation on a named provider kind.
      *
      * @param chatName the conversation's full actor name

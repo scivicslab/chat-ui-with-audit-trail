@@ -44,6 +44,16 @@ public class IoLogStore {
     @ConfigProperty(name = "chat-ui.iolog.db-path", defaultValue = "chat-ui-iolog")
     String dbPath;
 
+    /**
+     * Puts this store's database somewhere other than the configured path. Must be called before
+     * the first line is written, which is when the file is opened.
+     *
+     * @param path the database path, without the {@code .mv.db} suffix
+     */
+    public void useDatabaseAt(String path) {
+        this.dbPath = path;
+    }
+
     // The instance's HTTP port, appended to the DB path so two instances on different ports never open
     // the same H2 file (H2 opens with AUTO_SERVER=TRUE; without this a second process would connect
     // into the first instance's database and the two would write to one shared store).

@@ -802,6 +802,36 @@
         });
     }
 
+    // Thinking and effort belong to the conversation as the model does
+    // (ThinkingAndEffortAreConversationSettings_260917_oo01). A workflow's ask_chat carries a prompt
+    // and nothing else, so a run that wants an answer without reasoning says it here, once.
+    function initThinkAndEffort() {
+        var think = el("think-check");
+        if (think) {
+            think.addEventListener("change", function () {
+                fetch(apiUrl(chatUrl("/no-think")), {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ noThink: !think.checked })
+                }).catch(function (err) {
+                    notify("could not change thinking: " + err.message, true);
+                });
+            });
+        }
+        var effort = el("effort-input");
+        if (effort) {
+            effort.addEventListener("change", function () {
+                fetch(apiUrl(chatUrl("/effort")), {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ effort: effort.value.trim() })
+                }).catch(function (err) {
+                    notify("could not change the effort: " + err.message, true);
+                });
+            });
+        }
+    }
+
     // The provider belongs to the conversation as the model does (CliHarnessProvider_260912_oo01).
     // The dropdown's value is "<kind>" or "<kind>:<tools>"; choosing one tells this conversation to
     // switch, and the model list is reloaded from the new provider.
@@ -869,13 +899,18 @@
             .then(function (r) { return r.json(); })
             .then(function (models) {
                 if (forChat !== PROJECT_ID + "/" + CHAT_ID) return;
-                modelSelect.textContent = "";
-                (models || []).forEach(function (m) {
-                    var opt = document.createElement("option");
-                    opt.value = m.name;
-                    opt.textContent = m.name;
-                    modelSelect.appendChild(opt);
-                });
+                // A busy conversation cannot answer this — the list is fetched through its mailbox
+                // and times out into an empty list. Keeping what is already there beats emptying
+                // the box for exactly the conversation being watched work.
+                if ((models || []).length > 0) {
+                    modelSelect.textContent = "";
+                    models.forEach(function (m) {
+                        var opt = document.createElement("option");
+                        opt.value = m.name;
+                        opt.textContent = m.name;
+                        modelSelect.appendChild(opt);
+                    });
+                }
                 showCurrentModel();
             })
             .catch(function () { /* leave the dropdown empty on failure */ });
@@ -895,12 +930,26 @@
                 // Empty when this conversation asks for nothing, so the box says what is true
                 // rather than a number the server was never told.
                 if (box) box.value = (s && typeof s.temperature === "number") ? s.temperature : "";
+                var think = el("think-check");
+                if (think) think.checked = !(s && s.noThink);
+                var effort = el("effort-input");
+                // Empty for a provider with no such setting, so the box says what is true.
+                if (effort) effort.value = (s && s.effort) ? s.effort : "";
                 var model = s && s.model;
                 if (!model) return;
                 var offered = Array.prototype.some.call(modelSelect.options, function (o) {
                     return o.value === model;
                 });
-                if (offered) modelSelect.value = model;
+                // A model the list does not offer is added to it rather than ignored: the box must
+                // name what this conversation is running, and the list is only what the provider
+                // happened to answer with (ModelBelongsToTheConversation_260906_oo01).
+                if (!offered) {
+                    var opt = document.createElement("option");
+                    opt.value = model;
+                    opt.textContent = model;
+                    modelSelect.appendChild(opt);
+                }
+                modelSelect.value = model;
             })
             .catch(function () { /* leave whatever the list opened on */ });
     }
@@ -1187,6 +1236,7 @@
         initModelPersistence();
         initProviderSelect();
         initTemperature();
+        initThinkAndEffort();
         loadModels();
         hydrateConversation();
         refreshQueue();

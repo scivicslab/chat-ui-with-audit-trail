@@ -72,8 +72,11 @@
             <label id="temperature-label" title="What this conversation asks the server to sample at. Empty asks for nothing and leaves the server on its own default (ConversationTemperature_260914_oo01).">Temp:
                 <input id="temperature-input" type="number" min="0" max="2" step="0.1" placeholder="server">
             </label>
-            <label id="think-label" style="display:none" title="Enable thinking mode (Qwen3 extended CoT)">
-                <input type="checkbox" id="think-check"> Think
+            <label id="think-label" title="Whether this conversation lets its model think before answering. Unticked asks the model to skip the thinking phase (ThinkingAndEffortAreConversationSettings_260917_oo01).">
+                <input type="checkbox" id="think-check" checked> Think
+            </label>
+            <label id="effort-label" title="How hard a harness should work on one answer, passed as --effort. Empty leaves the harness on its own default; a plain LLM ignores it.">Effort:
+                <input id="effort-input" type="text" size="6" placeholder="harness">
             </label>
             <span id="session-label"></span>
             <span id="activity-label"></span>

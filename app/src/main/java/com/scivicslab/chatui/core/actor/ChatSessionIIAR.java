@@ -119,6 +119,12 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     /** The conversation's tool set, read directly ({@code CliHarnessProvider_260912_oo01}). */
     public String getToolSetDirect() { return chatSession().getToolSet().id(); }
 
+    /** Whether this conversation asks its model to skip the thinking phase, read directly. */
+    public boolean isNoThinkDirect() { return chatSession().isNoThink(); }
+
+    /** How hard this conversation's provider was told to work, read directly; null when it has no such setting. */
+    public String getEffortDirect() { return chatSession().getEffort(); }
+
     private ChatSession chatSession() { return (ChatSession) object; }
 
     /**

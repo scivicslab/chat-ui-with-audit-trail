@@ -81,6 +81,20 @@ public interface LlmProvider {
     default String getSessionId() { return null; }
 
     /**
+     * Sets how hard the provider should work on one answer, where it has such a setting.
+     *
+     * <p>A harness passes this to its command line ({@code --effort}); a plain LLM has nothing of
+     * the kind and leaves it alone. Already a field of {@code CliConfig}, with no way in from the
+     * outside until now ({@code ThinkingAndEffortAreConversationSettings_260917_oo01}).</p>
+     *
+     * @param effort what the harness calls its levels, or {@code null} for the harness's own
+     */
+    default void setEffort(String effort) { }
+
+    /** @return the effort this provider was told to use, or {@code null} when it has none */
+    default String getEffort() { return null; }
+
+    /**
      * Forgets the conversation so far, so the next prompt is built from nothing.
      *
      * <p>A conversation keeps two histories: the one the screen and the record show, and the one

@@ -117,6 +117,11 @@ public class ClaudeCodeProvider implements LlmProvider {
     @Override public ProviderCapabilities capabilities() { return ProviderCapabilities.CLI; }
     @Override public String getCurrentModel() { return cliProcess.getConfig().model(); }
     @Override public void setModel(String model) { cliProcess.setConfig(cliProcess.getConfig().withModel(model)); }
+
+    /** Applied to the command line the next time the process starts, as the model is. */
+    @Override public void setEffort(String effort) { cliProcess.setConfig(cliProcess.getConfig().withEffort(effort)); }
+
+    @Override public String getEffort() { return cliProcess.getConfig().effort(); }
     @Override public String getSessionId() { return cliProcess.getLastSessionId(); }
     @Override public String detectEnvApiKey() { return System.getenv("ANTHROPIC_API_KEY"); }
     @Override public void cancel() { cliProcess.cancel(); }

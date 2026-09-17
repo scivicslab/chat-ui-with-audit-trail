@@ -386,8 +386,14 @@ public class ChatUiActorSystem {
             String projectId = parts[0];
             String chatId = parts[1];
             try {
-                projects.computeIfAbsent(projectId,
-                        id -> actorSystem.getRoot().createChild(id, new Project()));
+                if (!projects.containsKey(projectId)) {
+                    // Wired as well as created. A project that came back from the log but was never
+                    // bound looks complete -- its conversations are all there -- and refuses every
+                    // job with "project null is not bound to an actor system"
+                    // (ProjectsComeBackWiredOrNotAtAll_260917_oo01).
+                    projects.put(projectId, actorSystem.getRoot().createChild(projectId, new Project()));
+                    wireProject(projectId);
+                }
                 advanceProjectCounterPast(projectId);
                 if (chats.containsKey(chatActorName(projectId, chatId))) continue;
                 createChat(projectId, chatId);
@@ -446,7 +452,9 @@ public class ChatUiActorSystem {
 
     /**
      * Gives a freshly created project what it needs to run jobs, and starts its watch over them
-     * ({@code ProjectPerspective_260911_oo01}). Called at both places a project is created.
+     * ({@code ProjectPerspective_260911_oo01}). Called at every place a project is created --
+     * including the one that brings a project back from the log at start-up, which for a while did
+     * not ({@code ProjectsComeBackWiredOrNotAtAll_260917_oo01}).
      */
     private void wireProject(String projectId) {
         ActorRef<Project> ref = projects.get(projectId);
@@ -986,6 +994,34 @@ public class ChatUiActorSystem {
      * @param temperature what to sample at, or {@code null} to ask for nothing
      * @return {@code false} when the conversation has no provider
      */
+    /**
+     * Sets whether one conversation asks its model to skip the thinking phase
+     * ({@code ThinkingAndEffortAreConversationSettings_260917_oo01}).
+     *
+     * @return {@code false} when there is no such conversation
+     */
+    public boolean setNoThink(String projectId, String chatId, boolean value) {
+        createChat(projectId, chatId);
+        ChatSessionIIAR session = chatSessions.get(chatActorName(projectId, chatId));
+        if (session == null) return false;
+        session.tell(a -> ((ChatSession) a).setNoThink(value)).join();
+        return true;
+    }
+
+    /**
+     * Sets how hard one conversation's provider should work on an answer, where it has such a
+     * setting ({@code ThinkingAndEffortAreConversationSettings_260917_oo01}).
+     *
+     * @return {@code false} when there is no such conversation
+     */
+    public boolean setEffort(String projectId, String chatId, String effort) {
+        createChat(projectId, chatId);
+        ActorRef<LlmProvider> providerRef = getProviderRef(projectId, chatId);
+        if (providerRef == null) return false;
+        providerRef.tell(p -> p.setEffort(effort)).join();
+        return true;
+    }
+
     public boolean setTemperature(String projectId, String chatId, Double temperature) {
         createChat(projectId, chatId);
         ActorRef<LlmProvider> providerRef = getProviderRef(projectId, chatId);

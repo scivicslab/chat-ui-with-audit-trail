@@ -303,6 +303,12 @@ public class ChatSession extends Interpreter {
     private ActorRef<ChatSession> turnSelf;
     private CompletableFuture<Void> turnDone;
     private boolean turnNoThink;
+    /**
+     * Whether this conversation asks its model to skip the thinking phase, whatever one prompt
+     * says. A setting of the conversation, as the model and the temperature are
+     * ({@code ThinkingAndEffortAreConversationSettings_260917_oo01}).
+     */
+    private boolean noThinkAlways;
     /** Open I/O-log session id for this turn, or -1 when logging is disabled. Set in start(). */
     private long ioSession = -1;
     /** Which tools this conversation is shown and may call; every conversation starts with all of them. */
@@ -1148,7 +1154,8 @@ public class ChatSession extends Interpreter {
         this.turnEmitter = emitter;
         this.turnSelf = self;
         this.turnDone = done;
-        this.turnNoThink = noThink;
+        // Either side may ask for it: the conversation's own setting, or this one prompt.
+        this.turnNoThink = noThink || noThinkAlways;
         this.ioSession = (ioLog != null) ? ioLog.ensureSession(myChatName()) : -1;
         this.ioTurnNo = ++ioTurn;
         this.turnStartedAt = System.currentTimeMillis();
@@ -2222,6 +2229,36 @@ public class ChatSession extends Interpreter {
         int size = conversationHistory.size();
         int from = Math.max(0, size - limit);
         return Collections.unmodifiableList(new ArrayList<>(conversationHistory.subList(from, size)));
+    }
+
+    /**
+     * Sets whether this conversation asks its model to skip the thinking phase
+     * ({@code ThinkingAndEffortAreConversationSettings_260917_oo01}).
+     *
+     * <p>A workflow cannot pass the flag with each prompt -- {@code ask_chat} carries a prompt and
+     * nothing else -- so a run that wants a model to answer without reasoning says so here, once,
+     * the way it says which model to run on.</p>
+     */
+    public void setNoThink(boolean value) {
+        this.noThinkAlways = value;
+    }
+
+    /** @return whether this conversation asks its model to skip the thinking phase */
+    public boolean isNoThink() {
+        return noThinkAlways;
+    }
+
+    /**
+     * Tells the provider how hard to work on one answer, where it has such a setting
+     * ({@code ThinkingAndEffortAreConversationSettings_260917_oo01}).
+     */
+    public void setEffort(String effort) {
+        provider.setEffort(effort);
+    }
+
+    /** @return what the provider was told, or {@code null} when it has no such setting */
+    public String getEffort() {
+        return provider.getEffort();
     }
 
     /**
