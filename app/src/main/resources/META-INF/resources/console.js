@@ -664,6 +664,56 @@
         });
     }
 
+    // ── Project pane: the line between the workflow catalog and the one being read ────
+    // The catalog is as tall as its contents up to 40% until somebody drags the line; from then on
+    // it keeps the height it was given, here and on the next visit.
+    var PROJECT_WF_LIST_HEIGHT_KEY = "chat-ui-project-wf-list-height";
+
+    function initProjectWorkflowsResize() {
+        var list = document.getElementById("project-wf-list");
+        var handle = document.getElementById("project-wf-resize-handle");
+        if (!list || !handle) return;
+
+        function setHeight(px) {
+            list.style.height = px + "px";
+            // The stylesheet caps the catalog at 40%; a height asked for by hand is not capped.
+            list.style.maxHeight = "none";
+        }
+
+        var saved = parseInt(localStorage.getItem(PROJECT_WF_LIST_HEIGHT_KEY), 10);
+        if (saved && saved > 0) setHeight(saved);
+
+        var dragging = false;
+        var startY = 0;
+        var startHeight = 0;
+
+        handle.addEventListener("mousedown", function (e) {
+            e.preventDefault();
+            dragging = true;
+            startY = e.clientY;
+            startHeight = list.offsetHeight;
+            handle.classList.add("dragging");
+            document.body.style.cursor = "row-resize";
+            document.body.style.userSelect = "none";
+        });
+
+        document.addEventListener("mousemove", function (e) {
+            if (!dragging) return;
+            var room = list.parentElement ? list.parentElement.clientHeight : 0;
+            var most = room > 0 ? Math.max(80, room - 120) : 2000;
+            setHeight(Math.max(60, Math.min(startHeight + (e.clientY - startY), most)));
+        });
+
+        document.addEventListener("mouseup", function () {
+            if (!dragging) return;
+            dragging = false;
+            handle.classList.remove("dragging");
+            document.body.style.cursor = "";
+            document.body.style.userSelect = "";
+            localStorage.setItem(PROJECT_WF_LIST_HEIGHT_KEY, list.offsetHeight);
+        });
+    }
+
     // ── Perspective: what the centre and right panes show (ProjectPerspective_260911_oo01) ──
     // "chat" shows one conversation (#left-panel and the chat-scoped right tabs); "project" shows
     // one project (#project-panel and the project-scoped right tabs). Persisted like the theme, so
@@ -1779,6 +1829,7 @@
         initActors();
         initDock();
         initLeftDockResize();
+        initProjectWorkflowsResize();
         initIo();
         initLogs();
         initWorkflow();

@@ -42,7 +42,7 @@
     <!-- Global header bar (chat-ui3-style): app-wide controls span the full width above the panes. -->
     <div id="app-header">
         <button id="dock-toggle" title="Toggle the actor panel">&#9776;</button>
-        <h1 id="app-title">Chat UI</h1>
+        <h1 id="app-title">Chat UI with Audit Trail</h1>
         <div id="status-bar">
             <label id="theme-label">Theme:
                 <select id="theme-select">
@@ -183,6 +183,8 @@
                     <span id="project-wf-status"></span>
                 </div>
                 <div id="project-wf-list"></div>
+                <!-- Drag to give the catalog above or the workflow below more room. -->
+                <div id="project-wf-resize-handle" title="Drag to resize"></div>
                 <div id="project-wf-reading">
                     <div id="project-wf-head">Pick a workflow above to read it here.</div>
                     <!-- Reading and editing share the region: the boxes, or the editor, one at a

@@ -639,6 +639,18 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
     flex: 0 0 auto; max-height: 40%; overflow: auto;
     border-bottom: 1px solid var(--border-color, #2c2c2c);
 }
+/* Drag to move the line between the catalog and the workflow being read. Same shape as
+   #splitter, turned through a right angle. */
+#project-wf-resize-handle {
+    height: 6px;
+    flex: 0 0 auto;
+    cursor: row-resize;
+    background: var(--border-color, #333);
+    box-shadow: inset 0 1px 0 rgba(0,0,0,.4), inset 0 -1px 0 rgba(0,0,0,.4);
+}
+#project-wf-resize-handle:hover,
+#project-wf-resize-handle.dragging { background: var(--accent-blue, #6366f1); }
+
 #project-wf-reading { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 #project-wf-head {
     flex-shrink: 0; padding: 8px 12px; font-size: 12px;
