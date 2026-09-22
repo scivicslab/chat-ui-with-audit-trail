@@ -20,8 +20,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * The {@code ask_chat} tool: sends a prompt to another conversation tab's agent loop and waits for
- * its reply, so one tab's agent can direct or review another's work (graph-engineering scenarios —
+ * The {@code ask_chat} tool: sends a prompt to another ConversationSquad's agent loop and waits for
+ * its reply, so one ConversationSquad's agent can direct or review another's work (graph-engineering scenarios —
  * see {@code AskChatToolAndWatchdog_260827_oo01}).
  *
  * <p>Waits on {@link ChatSession}'s own turn-completion signal (the {@code CompletableFuture<Void>
@@ -40,7 +40,7 @@ public final class AskChatTool {
     private static final int DEFAULT_WAIT_TIMEOUT_SECONDS = 60;
 
     /**
-     * @param system      this tab's actor system, used to resolve the target tab's actors
+     * @param system      this ConversationSquad's actor system, used to resolve the target ConversationSquad's actors
      * @param watchdog    the shared {@link CallWatchdog}
      * @param myProjectId the calling conversation's project id
      * @param myChatId    the calling conversation's own id within that project
@@ -51,7 +51,7 @@ public final class AskChatTool {
      *                       use {@link #DEFAULT_WAIT_TIMEOUT_SECONDS} — callers directing a target
      *                       through a multi-hop chain (e.g. it will itself call {@code ask_chat})
      *                       should pass a longer budget ({@code AskChatNestedTimeout_260828_oo01})
-     * @return the target tab's reply text, or an {@code error: ...} string
+     * @return the target ConversationSquad's reply text, or an {@code error: ...} string
      */
     public static String ask(IIActorSystem system, ActorRef<CallWatchdog> watchdog,
                               String myProjectId, String myChatId, String target,

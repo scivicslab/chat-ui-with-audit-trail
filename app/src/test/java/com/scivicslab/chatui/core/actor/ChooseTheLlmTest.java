@@ -54,9 +54,9 @@ class ChooseTheLlmTest {
         runner.setSelfActorRef(iiar);
 
         provider = new RecordingProvider();
-        ActorRef<Object> tab = system.actorOf("project1/chat-02", new Object());
+        ActorRef<Object> conversationSquad = system.actorOf("project1/chat-02", new Object());
         ActorRef<LlmProvider> providerRef =
-                tab.createChild("project1/chat-02.chat.provider", (LlmProvider) provider);
+                conversationSquad.createChild("project1/chat-02.chat.provider", (LlmProvider) provider);
         assert providerRef != null;
     }
 

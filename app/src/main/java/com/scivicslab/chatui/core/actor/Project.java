@@ -33,7 +33,7 @@ import java.util.logging.Logger;
  * {@link CallWatchdog}/{@link CollaborationGraph}, that additionally carries the project's
  * working directory and the instructions found there.
  *
- * <p>Everything one project's execution needs — its conversation tabs ({@code chat-...}) — lives
+ * <p>Everything one project's execution needs — its ConversationSquads ({@code chat-...}) — lives
  * as a descendant of one {@code Project} instance. {@code outputMultiplexer}, {@code callWatchdog}
  * and {@code collaborationGraph} deliberately stay outside this tree — see
  * {@code ProjectScopedActorTree_260829_oo01}.</p>

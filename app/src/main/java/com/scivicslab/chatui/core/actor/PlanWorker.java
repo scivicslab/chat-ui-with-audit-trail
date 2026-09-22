@@ -11,7 +11,7 @@ import com.scivicslab.turingworkflow.workflow.IIActorSystem;
  *
  * <p>Exists because {@code Interpreter.apply} — the fan-out this pool is built on — only reaches
  * actors that are both children of the caller and registered as {@code IIActorRef}s. Conversations
- * are neither: they hang off their project, and their tab actor is a plain {@code ActorRef}. A
+ * are neither: they hang off their project, and their ConversationSquad actor is a plain {@code ActorRef}. A
  * worker slot is the plan's own child and an {@code IIActorRef}, so {@code apply} can drive several
  * at once, each standing in for one conversation.</p>
  */

@@ -1,7 +1,7 @@
 // Console script for chat-ui-with-audit-trail.
 //   - right-pane tab switching
 //   - Actors tab: fetch GET /api/actors and render the actor tree
-//   - Sessions tab: GET /api/sessions?tabId=<active tab>, trace view unchanged (ported from
+//   - Sessions tab: GET /api/sessions?conversationSquadId=<active ConversationSquad>, trace view unchanged (ported from
 //     quarkus-chat-ui3)
 //   - System Log tab: GET /api/projects/{p}/chats/{c}/log (150_TabScopedLogging_260826_oo01);
 //     falls back to GET /api/logs (LogTap, server-wide) only if no conversation is active yet
@@ -994,7 +994,7 @@
         // Actors Java created carry none, and then the tooltip falls back to the class name.
         label.title = node.note ? (node.name + "\n\n" + node.note) : (node.name + "\n\n" + (node.type || ""));
         if (node.note) label.classList.add("actor-has-note");
-        // "chat-<id>" (ConversationTab) nodes double as the tab switcher — click the name (not
+        // "chat-<id>" (ConversationSquad) nodes double as the tab switcher — click the name (not
         // the fold toggle) to switch the chat pane, instead of a separate bar in that pane
         // (ActorTreeTabSwitcher_260826_oo01). Children like "chat-<id>.chat" don't match.
         var tabMatch = /^([^/]+)\/chat-([^.]+)$/.exec(node.name);
@@ -1197,7 +1197,7 @@
             });
         }
         var c = (typeof window.chatUiGetActiveChat === "function") ? window.chatUiGetActiveChat() : null;
-        var url = c ? ("api/sessions?tabId=" + encodeURIComponent(c.projectId + "/chat-" + c.chatId))
+        var url = c ? ("api/sessions?conversationSquadId=" + encodeURIComponent(c.projectId + "/chat-" + c.chatId))
                     : "api/sessions";
         return fetch(url).then(function (r) { return r.json(); }).then(function (list) {
             if (!el) return;

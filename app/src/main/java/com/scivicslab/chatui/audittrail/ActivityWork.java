@@ -129,8 +129,8 @@ public class ActivityWork {
 
     /** @return whether this project's first conversation has anything recorded at all */
     private boolean hasConversation(String projectId) {
-        String tabId = ChatUiActorSystem.chatActorName(projectId, "01");
-        return ioLogStore != null && ioLogStore.findResumableSession(tabId) >= 0;
+        String conversationSquadId = ChatUiActorSystem.chatActorName(projectId, "01");
+        return ioLogStore != null && ioLogStore.findResumableSession(conversationSquadId) >= 0;
     }
 
     /**
@@ -141,15 +141,15 @@ public class ActivityWork {
      *         could not be reached
      */
     private String subjectOf(String projectId) {
-        String tabId = ChatUiActorSystem.chatActorName(projectId, "01");
-        long sessionId = ioLogStore == null ? -1 : ioLogStore.findResumableSession(tabId);
+        String conversationSquadId = ChatUiActorSystem.chatActorName(projectId, "01");
+        long sessionId = ioLogStore == null ? -1 : ioLogStore.findResumableSession(conversationSquadId);
         if (sessionId < 0) return "";
 
         List<IoLogView.Turn> turns;
         try {
             turns = ioLogView.conversation(sessionId, TURNS_READ);
         } catch (Exception e) {
-            LOG.log(Level.FINE, "Could not read the conversation of " + tabId, e);
+            LOG.log(Level.FINE, "Could not read the conversation of " + conversationSquadId, e);
             return "";
         }
         if (turns.isEmpty()) return "";

@@ -201,9 +201,9 @@ public class ChatResource {
     // ── SSE stream ────────────────────────────────────────────────────────────
 
     /**
-     * Opens (or re-opens, on reconnect) the SSE stream for one tab's conversation.
+     * Opens (or re-opens, on reconnect) the SSE stream for one ConversationSquad's conversation.
      *
-     * @param chatId conversation tab identifier
+     * @param chatId ConversationSquad identifier
      * @return the event stream, each element a JSON-serialized {@link ChatEvent}
      */
     @GET
@@ -216,7 +216,7 @@ public class ChatResource {
         try {
             return sseRef.ask(SseConnection::openStream).get(5, TimeUnit.SECONDS);
         } catch (Exception e) {
-            LOG.warning("Failed to open SSE stream for tab " + chatId + ": " + e.getMessage());
+            LOG.warning("Failed to open SSE stream for ConversationSquad " + chatId + ": " + e.getMessage());
             return Multi.createFrom().empty();
         }
     }
@@ -224,12 +224,12 @@ public class ChatResource {
     // ── Chat ──────────────────────────────────────────────────────────────────
 
     /**
-     * Submits a prompt to one tab's conversation. Always returns immediately with an
+     * Submits a prompt to one ConversationSquad's conversation. Always returns immediately with an
      * acknowledgement; the actual content streams back over the already-open SSE connection
      * ({@link #stream}) — see {@code ChatSessionAgentLoop_260823_oo01} "なぜ`sendPrompt`は同期的に
      * 応答を返せないか" (the same reasoning applies here: the agent loop can run many LLM calls).
      *
-     * @param chatId conversation tab identifier
+     * @param chatId ConversationSquad identifier
      * @param body  {@code {"text": "...", "model": "..." (optional), "hold": true (optional)}}.
      *              With {@code hold}, the prompt is put in the queue and left there until a human
      *              turns its Auto on or advances the queue — what the pane's Queue button sends.
@@ -275,12 +275,12 @@ public class ChatResource {
     }
 
     /**
-     * Returns one tab's committed conversation history, for hydrating the left pane on load. Reads
+     * Returns one ConversationSquad's committed conversation history, for hydrating the left pane on load. Reads
      * a safely-published snapshot directly ({@code BusyStateReadableSnapshot_260828_oo01}) instead
-     * of asking the tab's actor — so this keeps working even while the tab is busy (e.g. mid
+     * of asking the ConversationSquad's actor — so this keeps working even while the ConversationSquad is busy (e.g. mid
      * {@code ask_chat} wait), rather than queueing behind it and timing out.
      *
-     * @param chatId conversation tab identifier
+     * @param chatId ConversationSquad identifier
      * @return up to the last 200 {@link ChatSession.HistoryEntry} records
      */
     @GET
@@ -293,16 +293,16 @@ public class ChatResource {
     }
 
     /**
-     * Reports whether one tab is currently busy processing a turn — read directly, so it works even
-     * while the tab is busy ({@code BusyStateReadableSnapshot_260828_oo01}).
+     * Reports whether one ConversationSquad is currently busy processing a turn — read directly, so it works even
+     * while the ConversationSquad is busy ({@code BusyStateReadableSnapshot_260828_oo01}).
      *
-     * <p>Also reports which model this tab is on. The screen asks for both whenever it switches
-     * tabs, and one request answering both is why this is not an endpoint of its own
+     * <p>Also reports which model this ConversationSquad is on. The screen asks for both whenever it switches
+     * ConversationSquads, and one request answering both is why this is not an endpoint of its own
      * ({@code ModelBelongsToTheConversation_260906_oo01}).</p>
      *
-     * @param chatId conversation tab identifier
+     * @param chatId ConversationSquad identifier
      * @return {@code {"busy": true|false, "model": "..."}}; {@code model} is the empty string when
-     *         this tab has not settled on one yet
+     *         this ConversationSquad has not settled on one yet
      */
     @GET
     @Path("/{projectId}/chats/{chatId}/status")
@@ -330,7 +330,7 @@ public class ChatResource {
      * ({@code ConversationTemperature_260914_oo01}). Like the model, it belongs to the conversation.
      *
      * @param projectId owning project's id
-     * @param chatId    conversation tab identifier
+     * @param chatId    ConversationSquad identifier
      * @param body      {@code {"temperature": 0.2}}; {@code null} asks the server for nothing and
      *                  leaves it on its own default
      * @return {@code {"type": "accepted", "temperature": ...}}, or 400 when the value is not a
@@ -423,7 +423,7 @@ public class ChatResource {
      * conversation, and the server holds the value.
      *
      * @param projectId owning project's id
-     * @param chatId    conversation tab identifier
+     * @param chatId    ConversationSquad identifier
      * @param body      {@code {"provider": "openai-compat"|"claude"|"codex", "tools": "full"|"harness"}};
      *                  {@code tools} defaults to the kind's own default tool set
      * @return {@code {"type": "accepted", "provider": ..., "tools": ...}}, or 400 when the kind or the
@@ -458,17 +458,17 @@ public class ChatResource {
     }
 
     /**
-     * Sets which model this tab runs on.
+     * Sets which model this ConversationSquad runs on.
      *
-     * <p>The model belongs to the conversation, not to the browser: two tabs open at once are two
+     * <p>The model belongs to the conversation, not to the browser: two ConversationSquads open at once are two
      * conversations that may be on different models, and switching between them must not carry one
-     * tab's model into the other ({@code ModelBelongsToTheConversation_260906_oo01}).</p>
+     * ConversationSquad's model into the other ({@code ModelBelongsToTheConversation_260906_oo01}).</p>
      *
      * <p>Delivered to the provider's own actor, so a change made while a turn is running lands
      * after that turn rather than in the middle of it.</p>
      *
      * @param projectId owning project's id
-     * @param chatId    conversation tab identifier
+     * @param chatId    ConversationSquad identifier
      * @param body      {@code {"model": "..."}}
      * @return {@code {"type": "accepted"}}, or 400 when no model was named
      */
@@ -495,11 +495,11 @@ public class ChatResource {
     }
 
     /**
-     * Reports one tab's {@link PromptQueue} state, for the left pane's Queue indicator — this
+     * Reports one ConversationSquad's {@link PromptQueue} state, for the left pane's Queue indicator — this
      * project queues on the server (whenever {@code ChatSession} is busy), unlike
      * {@code quarkus-chat-ui3}'s client-side-only draft queue.
      *
-     * @param chatId conversation tab identifier
+     * @param chatId ConversationSquad identifier
      * @return {@code {"size": N, "hasPending": bool}}
      */
     @GET
@@ -517,7 +517,7 @@ public class ChatResource {
             return Map.of("size", items.size(), "hasPending", !items.isEmpty(), "items", items,
                           "sent", sent, "pos", sent.size());
         } catch (Exception e) {
-            LOG.warning("Failed to read queue state for tab " + chatId + ": " + e.getMessage());
+            LOG.warning("Failed to read queue state for ConversationSquad " + chatId + ": " + e.getMessage());
             return Map.of("size", 0, "hasPending", false, "items", List.of(), "sent", List.of(), "pos", 0);
         }
     }
@@ -526,14 +526,14 @@ public class ChatResource {
      * Returns one tab's recent log entries (the right-pane "System Log" tab, scoped to the
      * currently active tab — {@code 150_TabScopedLogging_260826_oo01}).
      *
-     * @param chatId conversation tab identifier
-     * @return recent entries from that tab's log multiplexer, oldest first; empty if the tab
+     * @param chatId ConversationSquad identifier
+     * @return recent entries from that ConversationSquad's log multiplexer, oldest first; empty if the ConversationSquad
      *         doesn't exist yet (no messages sent, nothing logged)
      */
     @GET
     @Path("/{projectId}/chats/{chatId}/log")
     @Produces(MediaType.APPLICATION_JSON)
-    public List<RecentEntriesAccumulator.Entry> tabLog(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
+    public List<RecentEntriesAccumulator.Entry> conversationSquadLog(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
         List<RecentEntriesAccumulator.Entry> entries = actorSystem.getChatLogEntries(projectId, chatId);
         return entries != null ? entries : List.of();
     }
@@ -543,7 +543,7 @@ public class ChatResource {
      * {@code QueueContentsEditing_260826_oo01} applies deletion to every source, not just
      * human-typed items.
      *
-     * @param chatId conversation tab identifier
+     * @param chatId ConversationSquad identifier
      * @param index position in the queue (0 = next to send)
      */
     /**
@@ -577,7 +577,7 @@ public class ChatResource {
             boolean removed = promptQueueRef.ask(q -> q.removeAt(index)).get(5, TimeUnit.SECONDS);
             return removed ? Response.ok(Map.of("type", "removed")).build() : Response.status(404).build();
         } catch (Exception e) {
-            LOG.warning("Failed to remove queue item " + index + " for tab " + chatId + ": " + e.getMessage());
+            LOG.warning("Failed to remove queue item " + index + " for ConversationSquad " + chatId + ": " + e.getMessage());
             return Response.status(500).build();
         }
     }
@@ -585,7 +585,7 @@ public class ChatResource {
     /**
      * Swaps the queued item at {@code index} with its neighbor.
      *
-     * @param chatId conversation tab identifier
+     * @param chatId ConversationSquad identifier
      * @param index position in the queue
      * @param body  {@code {"direction": "up"|"down"}}
      */
@@ -602,7 +602,7 @@ public class ChatResource {
             boolean moved = promptQueueRef.ask(q -> q.moveInQueue(index, direction)).get(5, TimeUnit.SECONDS);
             return moved ? Response.ok(Map.of("type", "moved")).build() : Response.status(409).build();
         } catch (Exception e) {
-            LOG.warning("Failed to move queue item " + index + " for tab " + chatId + ": " + e.getMessage());
+            LOG.warning("Failed to move queue item " + index + " for ConversationSquad " + chatId + ": " + e.getMessage());
             return Response.status(500).build();
         }
     }
@@ -611,7 +611,7 @@ public class ChatResource {
      * Sets whether the queued item at {@code index} auto-dispatches once it's at the front and
      * {@code ChatSession} is idle, or waits as a manual checkpoint until {@link #advanceQueue}.
      *
-     * @param chatId conversation tab identifier
+     * @param chatId ConversationSquad identifier
      * @param index position in the queue
      * @param body  {@code {"auto": true|false}}
      */
@@ -628,7 +628,7 @@ public class ChatResource {
             boolean set = promptQueueRef.ask(q -> q.setAuto(index, auto)).get(5, TimeUnit.SECONDS);
             return set ? Response.ok(Map.of("type", "updated")).build() : Response.status(404).build();
         } catch (Exception e) {
-            LOG.warning("Failed to set auto for queue item " + index + " for tab " + chatId + ": " + e.getMessage());
+            LOG.warning("Failed to set auto for queue item " + index + " for ConversationSquad " + chatId + ": " + e.getMessage());
             return Response.status(500).build();
         }
     }
@@ -638,7 +638,7 @@ public class ChatResource {
      * browser's manual "send the next one" action (empty-input Send), or the explicit resume
      * after pausing an item via {@link #setQueueItemAuto}.
      *
-     * @param chatId conversation tab identifier
+     * @param chatId ConversationSquad identifier
      */
     @POST
     @Path("/{projectId}/chats/{chatId}/queue/advance")
@@ -652,9 +652,9 @@ public class ChatResource {
     }
 
     /**
-     * Lists the models available from one tab's provider.
+     * Lists the models available from one ConversationSquad's provider.
      *
-     * @param chatId conversation tab identifier
+     * @param chatId ConversationSquad identifier
      * @return the provider's {@link LlmProvider.ModelEntry} list
      */
     @GET
@@ -666,24 +666,24 @@ public class ChatResource {
         try {
             return chatSessionIIAR.ask(interp -> ((ChatSession) interp).getAvailableModels()).get(5, TimeUnit.SECONDS);
         } catch (Exception e) {
-            LOG.warning("Failed to list models for tab " + chatId + ": " + e.getMessage());
+            LOG.warning("Failed to list models for ConversationSquad " + chatId + ": " + e.getMessage());
             return List.of();
         }
     }
 
     // ── Agent Loop tab (read-only workflow YAML viewer, tab-scoped) ─────────────
 
-    /** One entry in a tab's workflow catalog. {@code name} is the classpath basename (no {@code .yaml}). */
+    /** One entry in a ConversationSquad's workflow catalog. {@code name} is the classpath basename (no {@code .yaml}). */
     public record WorkflowInfo(String name, String title) {}
 
     /**
-     * Lists the workflow YAML files configured for one tab: its agent-loop workflow ({@code
+     * Lists the workflow YAML files configured for one ConversationSquad: its agent-loop workflow ({@code
      * ChatSessionIIAR.agentLoopWorkflowFile}) and its prompt-construction sub-workflow ({@code
-     * ChatSession.promptWorkflowFile}) — each tab can be configured independently (today both
+     * ChatSession.promptWorkflowFile}) — each ConversationSquad can be configured independently (today both
      * default to the same file since only one of each exists on the classpath).
      *
-     * @param chatId conversation tab identifier
-     * @return this tab's workflow catalog, agent loop first
+     * @param chatId ConversationSquad identifier
+     * @return this ConversationSquad's workflow catalog, agent loop first
      */
     @GET
     @Path("/{projectId}/chats/{chatId}/workflows")
@@ -697,7 +697,7 @@ public class ChatResource {
             promptFile = chatSessionIIAR.ask(interp -> ((ChatSession) interp).getPromptWorkflowFile())
                     .get(5, TimeUnit.SECONDS);
         } catch (Exception e) {
-            LOG.warning("Failed to read prompt workflow file for tab " + chatId + ": " + e.getMessage());
+            LOG.warning("Failed to read prompt workflow file for ConversationSquad " + chatId + ": " + e.getMessage());
             promptFile = null;
         }
         List<WorkflowInfo> catalog = new java.util.ArrayList<>();
@@ -710,10 +710,10 @@ public class ChatResource {
 
     /**
      * Returns one workflow's read-only YAML, read fresh from the classpath (so it always reflects
-     * the file actually bundled in this build — no per-tab in-memory copy).
+     * the file actually bundled in this build — no per-ConversationSquad in-memory copy).
      *
-     * @param chatId conversation tab identifier (unused beyond confirming the tab exists — the YAML
-     *              itself is a classpath resource, not per-tab state)
+     * @param chatId ConversationSquad identifier (unused beyond confirming the ConversationSquad exists — the YAML
+     *              itself is a classpath resource, not per-ConversationSquad state)
      * @param name  the workflow's classpath basename, as returned by {@link #workflows}
      * @return {@code {"name": ..., "yaml": ..., "editable": false}}, or 404 if not found
      */

@@ -23,11 +23,11 @@ import java.util.logging.Logger;
  * conversation-scoped session id. Application-scoped so the store and the conversation session
  * outlive any single turn.
  *
- * <p>One H2 "session" = one conversation tab: opened on first use and reused across turns for that
- * tab; {@link #resetSession(String)} (a "new conversation" / {@code /clear}) ends it. Each tab's
- * session id is tracked separately (keyed by tab id) so tabs never share one H2 session — the tab id
- * is also encoded into the session's {@code workflowName} ({@code "chat-ui-conversation-" + tabId}) so
- * the Sessions view can filter by tab without a schema change. The DB path is a startup
+ * <p>One H2 "session" = one ConversationSquad: opened on first use and reused across turns for that
+ * ConversationSquad; {@link #resetSession(String)} (a "new conversation" / {@code /clear}) ends it. Each ConversationSquad's
+ * session id is tracked separately (keyed by ConversationSquad id) so ConversationSquads never share one H2 session — the ConversationSquad id
+ * is also encoded into the session's {@code workflowName} ({@code "chat-ui-conversation-" + conversationSquadId}) so
+ * the Sessions view can filter by ConversationSquad without a schema change. The DB path is a startup
  * property ({@code chat-ui.iolog.db-path}, default {@code chat-ui-iolog}) with the instance's HTTP
  * port appended, so each instance opens its own file (e.g. {@code ./chat-ui-iolog-18090.mv.db}). The
  * port suffix keeps two instances from sharing one H2 store via {@code AUTO_SERVER}.</p>
@@ -90,7 +90,7 @@ public class IoLogStore {
         return ProcessHandle.current().info().commandLine().orElse(null);
     }
 
-    /** How far back to look for a tab's resumable session; the Sessions view uses the same depth. */
+    /** How far back to look for a ConversationSquad's resumable session; the Sessions view uses the same depth. */
     private static final int SESSION_SCAN_LIMIT = 200;
 
     private DistributedLogStore store;
@@ -114,35 +114,35 @@ public class IoLogStore {
     }
 
     /**
-     * Returns the given tab's session id, opening a session on first use; -1 if unavailable. Each tab
-     * gets its own session id (tabs never share one), tagged via {@code workflowName} so the Sessions
-     * view can filter by tab.
+     * Returns the given ConversationSquad's session id, opening a session on first use; -1 if unavailable. Each ConversationSquad
+     * gets its own session id (ConversationSquads never share one), tagged via {@code workflowName} so the Sessions
+     * view can filter by ConversationSquad.
      */
-    public synchronized long ensureSession(String tabId) {
+    public synchronized long ensureSession(String conversationSquadId) {
         ensureStore();
         if (store == null) {
             return -1;
         }
-        Long existing = sessionIds.get(tabId);
+        Long existing = sessionIds.get(conversationSquadId);
         if (existing != null) {
             return existing;
         }
-        // After a restart this map is empty although the tab's session is still in the DB. Continue
+        // After a restart this map is empty although the ConversationSquad's session is still in the DB. Continue
         // that session instead of opening another one, so the conversation can be restored from it
         // and so a restart does not leave one more orphan session behind
         // (ConversationRestoreOnRestart_260904_oo01).
-        long resumable = findResumableSession(tabId);
+        long resumable = findResumableSession(conversationSquadId);
         if (resumable >= 0) {
-            sessionIds.put(tabId, resumable);
-            LOG.info("I/O log session resumed for tab " + tabId + ": " + resumable);
+            sessionIds.put(conversationSquadId, resumable);
+            LOG.info("I/O log session resumed for ConversationSquad " + conversationSquadId + ": " + resumable);
             return resumable;
         }
         try {
-            long sid = store.startSession("chat-ui-conversation-" + tabId, null, null, 1,
+            long sid = store.startSession("chat-ui-conversation-" + conversationSquadId, null, null, 1,
                     System.getProperty("user.dir"), null, null,
                     currentCommandLine(), appVersion, null);
-            sessionIds.put(tabId, sid);
-            LOG.info("I/O log session started for tab " + tabId + ": " + sid);
+            sessionIds.put(conversationSquadId, sid);
+            LOG.info("I/O log session started for ConversationSquad " + conversationSquadId + ": " + sid);
             return sid;
         } catch (Exception e) {
             LOG.log(Level.WARNING, "startSession failed", e);
@@ -162,8 +162,8 @@ public class IoLogStore {
      * database the conversations are in, which the log search reads
      * ({@code JobRunsInTheLog_260915_oo01}).</p>
      *
-     * <p>Named apart from a conversation's session so that {@link #resumableTabs()} does not build
-     * a conversation tab out of a job at the next start-up.</p>
+     * <p>Named apart from a conversation's session so that {@link #resumableConversationSquads()} does not build
+     * a ConversationSquad out of a job at the next start-up.</p>
      *
      * @param jobActorName the job's actor name, e.g. {@code project1/job-01}
      */
@@ -190,57 +190,57 @@ public class IoLogStore {
     }
 
     /**
-     * Every conversation tab the log still holds an unfinished session for, most recent first.
+     * Every ConversationSquad the log still holds an unfinished session for, most recent first.
      *
-     * <p>This is what the tab-to-actor structure is rebuilt from after a restart. The actor tree
+     * <p>This is what the ConversationSquad-to-actor structure is rebuilt from after a restart. The actor tree
      * lives only in memory, so a process that starts with one project and one conversation shows
-     * exactly that, however many were open when it stopped. The tabs are not lost — their sessions
-     * are in the database, and {@link #ensureSession} resumes one by name as soon as a tab of that
-     * name exists again — but nothing was creating the tabs, so a conversation stayed invisible
+     * exactly that, however many were open when it stopped. The ConversationSquads are not lost — their sessions
+     * are in the database, and {@link #ensureSession} resumes one by name as soon as a ConversationSquad of that
+     * name exists again — but nothing was creating the ConversationSquads, so a conversation stayed invisible
      * until someone happened to recreate a project with the same generated name.</p>
      *
      * <p>Only {@code RUNNING} sessions count, for the reason {@link #findResumableSession} gives:
      * a conversation the user cleared has had its session ended, and must stay cleared.</p>
      *
-     * @return the tab ids, e.g. {@code "project2/chat-01"}, without duplicates
+     * @return the ConversationSquad ids, e.g. {@code "project2/chat-01"}, without duplicates
      */
-    public synchronized List<String> resumableTabs() {
+    public synchronized List<String> resumableConversationSquads() {
         ensureStore();
         if (store == null) {
             return List.of();
         }
         String prefix = "chat-ui-conversation-";
-        java.util.LinkedHashSet<String> tabs = new java.util.LinkedHashSet<>();
+        java.util.LinkedHashSet<String> conversationSquads = new java.util.LinkedHashSet<>();
         try {
             for (SessionSummary s : store.listSessions(SESSION_SCAN_LIMIT)) {
                 String name = s.getWorkflowName();
                 if (name == null || !name.startsWith(prefix)) continue;
                 if (s.getStatus() != SessionStatus.RUNNING) continue;
-                String tabId = name.substring(prefix.length());
-                if (!tabId.isBlank()) tabs.add(tabId);
+                String conversationSquadId = name.substring(prefix.length());
+                if (!conversationSquadId.isBlank()) conversationSquads.add(conversationSquadId);
             }
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "Could not list the resumable conversation tabs", e);
+            LOG.log(Level.WARNING, "Could not list the resumable ConversationSquads", e);
         }
-        return List.copyOf(tabs);
+        return List.copyOf(conversationSquads);
     }
 
     /**
-     * The tab's most recent session that was never ended, or {@code -1} when it has none.
+     * The ConversationSquad's most recent session that was never ended, or {@code -1} when it has none.
      *
      * <p>Only a {@code RUNNING} session qualifies. {@link #resetSession(String)} ends a session when
      * the user starts a new conversation, and an ended session must stay ended across a restart —
      * otherwise "new conversation" would be undone by restarting.</p>
      *
-     * @param tabId the conversation tab's name
+     * @param conversationSquadId the ConversationSquad's name
      * @return the session id to continue, or {@code -1} when none can be
      */
-    public synchronized long findResumableSession(String tabId) {
+    public synchronized long findResumableSession(String conversationSquadId) {
         ensureStore();
         if (store == null) {
             return -1;
         }
-        String workflowName = "chat-ui-conversation-" + tabId;
+        String workflowName = "chat-ui-conversation-" + conversationSquadId;
         try {
             // listSessions returns most recent first, so the first match is the one to continue.
             for (SessionSummary s : store.listSessions(SESSION_SCAN_LIMIT)) {
@@ -249,32 +249,32 @@ public class IoLogStore {
                 }
             }
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "Could not look for a resumable session for tab " + tabId, e);
+            LOG.log(Level.WARNING, "Could not look for a resumable session for ConversationSquad " + conversationSquadId, e);
         }
         return -1;
     }
 
-    /** The given tab's current log session id, or -1 if none. */
-    public synchronized long currentSessionId(String tabId) {
-        Long sid = sessionIds.get(tabId);
+    /** The given ConversationSquad's current log session id, or -1 if none. */
+    public synchronized long currentSessionId(String conversationSquadId) {
+        Long sid = sessionIds.get(conversationSquadId);
         return sid != null ? sid : -1;
     }
 
     /**
-     * Ends the given tab's session (called on "new conversation" / clear).
+     * Ends the given ConversationSquad's session (called on "new conversation" / clear).
      *
-     * <p>The session this process opened for the tab, or — when it opened none — the one the
-     * database still holds open for it. A tab that came back at start-up through
-     * {@link #resumableTabs()} and was never spoken to has no entry in this process's map, and
-     * ending nothing left its session running: the tab was removed, and the next start-up built it
+     * <p>The session this process opened for the ConversationSquad, or — when it opened none — the one the
+     * database still holds open for it. A ConversationSquad that came back at start-up through
+     * {@link #resumableConversationSquads()} and was never spoken to has no entry in this process's map, and
+     * ending nothing left its session running: the ConversationSquad was removed, and the next start-up built it
      * again from that same session. Nothing is deleted here; the session is marked as ended and
      * every line it wrote stays where it is.</p>
      *
-     * @param tabId the conversation tab's name
+     * @param conversationSquadId the ConversationSquad's name
      */
-    public synchronized void resetSession(String tabId) {
-        Long opened = sessionIds.remove(tabId);
-        long toEnd = (opened != null && opened >= 0) ? opened : findResumableSession(tabId);
+    public synchronized void resetSession(String conversationSquadId) {
+        Long opened = sessionIds.remove(conversationSquadId);
+        long toEnd = (opened != null && opened >= 0) ? opened : findResumableSession(conversationSquadId);
         if (store != null && toEnd >= 0) {
             try {
                 store.endSession(toEnd, SessionStatus.COMPLETED);
@@ -362,7 +362,7 @@ public class IoLogStore {
      */
     public synchronized int deleteSessionsOlderThan(int days) {
         if (days < 0) return 0;
-        // Excludes every tab's currently active session, not just one.
+        // Excludes every ConversationSquad's currently active session, not just one.
         Long[] active = sessionIds.values().toArray(new Long[0]);
         String placeholders = String.join(",", java.util.Collections.nCopies(active.length, "?"));
         String pred = "started_at < DATEADD('DAY', ?, CURRENT_TIMESTAMP)"

@@ -49,7 +49,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * POJO owning the entire state of one conversation tab's chat session.
+ * POJO owning the entire state of one ConversationSquad's chat session.
  *
  * <p>Extends {@link Interpreter} so that, once it loads its own agent-loop workflow
  * (see {@code ChatSessionAgentLoop_260823_oo01}), it can drive a multi-turn tool-calling
@@ -97,7 +97,7 @@ public class ChatSession extends Interpreter {
     /** This session's conversation id within its project (e.g. {@code "01"}), used to key its I/O-log session. */
     private String chatId;
     /** The shared {@link CallWatchdog}, consulted by the {@code ask_chat} tool before it waits on
-     *  another tab — distinct from {@link #watchdogName} (an unrelated, unported StallMonitor field). */
+     *  another ConversationSquad — distinct from {@link #watchdogName} (an unrelated, unported StallMonitor field). */
     private ActorRef<CallWatchdog> watchdogRef;
     /** The shared {@link CollaborationGraph}, consulted (and updated) by the {@code set_collaborator}
      *  tool and by babysitter-loop methods resolving a role (e.g. {@code "worker"}) to a chat id. */
@@ -243,12 +243,12 @@ public class ChatSession extends Interpreter {
               project) and wait for its reply. Requires "chatId" and "prompt" <parameter>
               tags; "timeoutSeconds" is an optional third <parameter> tag (default 60) — pass a
               larger value if you expect the target to take a while, e.g. because it will itself
-              call ask_chat on another tab. Use this to direct or review another tab's work.
+              call ask_chat on another ConversationSquad. Use this to direct or review another ConversationSquad's work.
             """);
         m.put("set_workflow", """
-            - set_workflow(chatId, yaml): replace another conversation tab's agent-loop workflow
+            - set_workflow(chatId, yaml): replace another ConversationSquad's agent-loop workflow
               with the given Turing-workflow YAML text (not a file path). Requires TWO <parameter>
-              tags: "chatId" and "yaml". Use this to author a workflow for another tab to run,
+              tags: "chatId" and "yaml". Use this to author a workflow for another ConversationSquad to run,
               then use ask_chat to actually kick off a turn under it.
             """);
         m.put("run_plan", """
@@ -268,8 +268,8 @@ public class ChatSession extends Interpreter {
               applies to the task at hand, load it before you act rather than after.
             """);
         m.put("set_collaborator", """
-            - set_collaborator(chatId, role, collaboratorChatId): record that, for tab "chatId",
-              the tab playing role "role" (e.g. "worker") is "collaboratorChatId". Requires THREE
+            - set_collaborator(chatId, role, collaboratorChatId): record that, for ConversationSquad "chatId",
+              the ConversationSquad playing role "role" (e.g. "worker") is "collaboratorChatId". Requires THREE
               <parameter> tags: "chatId", "role", "collaboratorChatId". A workflow installed via
               set_workflow can then resolve that role instead of a hardcoded chat id, and you can
               reassign it again later by calling this a second time.
@@ -445,7 +445,7 @@ public class ChatSession extends Interpreter {
             if (path.isEmpty() || !path.startsWith("/")) continue;
             String text = FileReadTool.read(fileScope, path);
             if (text.startsWith("error:")) {
-                logToTab("INFO", "readSources: " + text);
+                logToConversationSquad("INFO", "readSources: " + text);
                 continue;
             }
             read.append("===== ").append(path).append(" =====\n").append(text).append("\n\n");
@@ -699,7 +699,7 @@ public class ChatSession extends Interpreter {
         }
     }
 
-    // ---- Wiring — the generating side (ConversationTab) sets these; ChatSession creates none of them ----
+    // ---- Wiring — the generating side (ConversationSquad) sets these; ChatSession creates none of them ----
 
     /**
      * Makes {@code system.getActor(...)} resolvable from inside this session's own methods.
@@ -769,24 +769,24 @@ public class ChatSession extends Interpreter {
     }
 
     /**
-     * Forwards one entry to this session's tab log multiplexer ({@code <projectId>/chat-<chatId>.log}), in
+     * Forwards one entry to this session's ConversationSquad log multiplexer ({@code <projectId>/chat-<chatId>.log}), in
      * addition to (not instead of) the existing {@code logger.xxx(...)} calls near each call site —
      * those keep flowing to {@link com.scivicslab.chatui.logging.LogTap} unchanged
      * ({@code 150_TabScopedLogging_260826_oo01} "既存のLOG.xxx()を置き換えず"). Silently no-ops if
-     * the actor system or tab id isn't wired yet, or the tab log actor isn't found.
+     * the actor system or ConversationSquad id isn't wired yet, or the ConversationSquad log actor isn't found.
      */
-    private void logToTab(String type, String message) {
+    private void logToConversationSquad(String type, String message) {
         if (system == null || chatId == null) return;
         try {
-            IIActorRef<?> tabLog = system.getIIActor(myChatName() + ".log");
-            if (tabLog == null) return;
+            IIActorRef<?> conversationSquadLog = system.getIIActor(myChatName() + ".log");
+            if (conversationSquadLog == null) return;
             JSONObject args = new JSONObject();
             args.put("source", "ChatSession");
             args.put("type", type);
             args.put("data", message);
-            tabLog.callByActionName("add", args.toString());
+            conversationSquadLog.callByActionName("add", args.toString());
         } catch (Exception e) {
-            logger.log(Level.WARNING, "Failed to forward log entry to tab log", e);
+            logger.log(Level.WARNING, "Failed to forward log entry to ConversationSquad log", e);
         }
     }
 
@@ -1315,12 +1315,12 @@ public class ChatSession extends Interpreter {
         Map<String, ChatEvent> harnessToolUses = new LinkedHashMap<>();
         ActorRef<LlmProvider> providerRef = providerRef();
 
-        // The tab log used to receive nothing between here and recordStepIo() below, so a step
+        // The ConversationSquad log used to receive nothing between here and recordStepIo() below, so a step
         // spent entirely on a thinking model's reasoning left the System Log tab blank for as long
         // as the model took. Announce the call before making it, then report progress while the
         // reply streams, so the log shows that the step is alive and how far it has got.
         String stepLabel = "turn" + ioTurnNo + "/step" + stepCount + "/llm";
-        logToTab("INFO", stepLabel + " start: model=" + (turnModel == null ? "(server default)" : turnModel)
+        logToConversationSquad("INFO", stepLabel + " start: model=" + (turnModel == null ? "(server default)" : turnModel)
                 + ", promptChars=" + promptToSend.length());
         AtomicLong streamedChars = new AtomicLong();
         AtomicLong progressLoggedAt = new AtomicLong(System.currentTimeMillis());
@@ -1484,17 +1484,17 @@ public class ChatSession extends Interpreter {
     /** Marks the failed-turn record: the provider's error where the answer would be. */
     public static final String CONVERSATION_ERROR_MARKER = "ERROR:";
 
-    /** Shortest gap between two streaming-progress lines in one step's tab log. */
+    /** Shortest gap between two streaming-progress lines in one step's ConversationSquad log. */
     private static final long STREAM_PROGRESS_INTERVAL_MS = 1000L;
 
     /**
-     * Adds one streamed chunk to this step's running total and writes a progress line to the tab
+     * Adds one streamed chunk to this step's running total and writes a progress line to the ConversationSquad
      * log, at most once per {@link #STREAM_PROGRESS_INTERVAL_MS}. The throttle is what keeps this
      * usable: a chunk is often a single token, and one log line per token would bury every other
      * entry in the System Log tab and make the tab log actor the bottleneck of the turn.
      *
      * <p>Runs on whichever thread the provider streams on, not this actor's thread. That is safe
-     * because the counters are atomic and {@code logToTab} only enqueues into the tab log actor's
+     * because the counters are atomic and {@code logToConversationSquad} only enqueues into the ConversationSquad log actor's
      * mailbox.</p>
      *
      * @param stepLabel    the step this progress belongs to, e.g. {@code turn3/step2/llm}
@@ -1512,7 +1512,7 @@ public class ChatSession extends Interpreter {
         // Only the thread that wins the swap writes the line, so two chunks arriving at once do
         // not produce two lines for the same instant.
         if (!loggedAt.compareAndSet(previous, now)) return;
-        logToTab("INFO", stepLabel + " streaming: " + total + " chars");
+        logToConversationSquad("INFO", stepLabel + " streaming: " + total + " chars");
     }
 
     /**
@@ -1557,7 +1557,7 @@ public class ChatSession extends Interpreter {
             }
             m.append("\n\nUSAGE: promptTokens=0 completionTokens=0");
             ioLog.record(ioSession, "agent", "turn" + ioTurnNo + "/step" + stepCount + "/llm", m.toString());
-            logToTab("INFO", "turn" + ioTurnNo + "/step" + stepCount + "/llm done: "
+            logToConversationSquad("INFO", "turn" + ioTurnNo + "/step" + stepCount + "/llm done: "
                     + (responseText == null ? 0 : responseText.length()) + " chars, "
                     + calls.size() + " tool call(s)");
         } catch (Exception e) {
@@ -1716,7 +1716,7 @@ public class ChatSession extends Interpreter {
             String m = "TOOL: " + tc.name() + "\nINPUT:\n" + tc.argumentsJson()
                     + "\nOBSERVATION:\n" + fullObservation;
             ioLog.record(ioSession, "agent", "turn" + ioTurnNo + "/step" + stepCount + "/tool", m);
-            logToTab("INFO", "turn" + ioTurnNo + "/step" + stepCount + "/tool: " + tc.name());
+            logToConversationSquad("INFO", "turn" + ioTurnNo + "/step" + stepCount + "/tool: " + tc.name());
         } catch (Exception e) {
             logger.log(Level.WARNING, "I/O log tool record failed", e);
         }
@@ -1738,7 +1738,7 @@ public class ChatSession extends Interpreter {
         try {
             String m = "TOOL: " + toolName + "\nINPUT:\n" + input + "\nOBSERVATION:\n" + observation;
             ioLog.record(ioSession, "agent", "turn" + ioTurnNo + "/step" + stepCount + "/tool", m);
-            logToTab("INFO", "turn" + ioTurnNo + "/step" + stepCount + "/tool (harness): " + toolName);
+            logToConversationSquad("INFO", "turn" + ioTurnNo + "/step" + stepCount + "/tool (harness): " + toolName);
         } catch (Exception e) {
             logger.log(Level.WARNING, "I/O log harness tool record failed", e);
         }
@@ -1910,7 +1910,7 @@ public class ChatSession extends Interpreter {
         return new ActionResult(true, "reported failure");
     }
 
-    /** Resolves this tab's {@code "worker"} collaborator via {@link CollaborationGraph}, or {@code null}. */
+    /** Resolves this ConversationSquad's {@code "worker"} collaborator via {@link CollaborationGraph}, or {@code null}. */
     private String resolveWorker() {
         if (collaborationGraphRef == null) return null;
         try {
@@ -1972,7 +1972,7 @@ public class ChatSession extends Interpreter {
             String m = "TOOL: ask_worker\nINPUT:\n" + workerChatName + "\n" + prompt
                     + "\nOBSERVATION:\n" + (reply == null ? "no reply from worker" : reply);
             ioLog.record(ioSession, "agent", "turn" + ioTurnNo + "/step" + stepCount + "/tool", m);
-            logToTab("INFO", "turn" + ioTurnNo + "/step" + stepCount + "/tool: ask_worker "
+            logToConversationSquad("INFO", "turn" + ioTurnNo + "/step" + stepCount + "/tool: ask_worker "
                     + workerChatName);
         } catch (Exception e) {
             logger.log(Level.WARNING, "I/O log worker request record failed", e);
@@ -2213,7 +2213,7 @@ public class ChatSession extends Interpreter {
             }
             m.append("\n\nUSAGE: promptTokens=0 completionTokens=0");
             ioLog.record(ioSession, "agent", "turn" + turnNo + "/step1/llm", m.toString());
-            logToTab("INFO", "turn" + turnNo + "/step1/llm");
+            logToConversationSquad("INFO", "turn" + turnNo + "/step1/llm");
         } catch (Exception e) {
             logger.log(Level.WARNING, "I/O log turn record failed", e);
         }

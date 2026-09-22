@@ -16,7 +16,7 @@ import java.util.List;
  *
  * <p>The path this walks is the one the feature exists for: click {@code outputMultiplexer} in the
  * actor tree, type a phrase, and read the turn it was part of — in a conversation that may have no
- * tab on the screen at all, because {@code loader.removeChild} took its actor away and left the
+ * ConversationSquad on the screen at all, because {@code loader.removeChild} took its actor away and left the
  * log.</p>
  *
  * <p>Per the project's testing standard, this is a {@code main()} program against an
@@ -113,7 +113,7 @@ public class LogSearchE2E {
             check(!head.isBlank() && !head.startsWith("Pick a message"),
                     "picking a message says what is being read (" + head + ")");
             check(page.locator("#lsearch-reading-body").textContent().length() > 0,
-                    "and reads it in this tab's own pane");
+                    "and reads it in this ConversationSquad's own pane");
             check(page.locator("#io-reading-body").textContent().isBlank(),
                     "the Sessions tab's reading pane is left alone");
 

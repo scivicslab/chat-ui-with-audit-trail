@@ -208,7 +208,7 @@ public final class DocRetrievalBenchmark {
     private static Trace readTrace(String qualifiedChatName) throws Exception {
         Trace t = new Trace();
         JSONArray sessions = new JSONArray(
-                get(CHAT_UI + "/api/sessions?tabId=" + enc(qualifiedChatName)));
+                get(CHAT_UI + "/api/sessions?conversationSquadId=" + enc(qualifiedChatName)));
         if (sessions.isEmpty()) return t;
         // Most recent session for this conversation; it was created fresh for this task.
         long sessionId = sessions.getJSONObject(0).getLong("sessionId");

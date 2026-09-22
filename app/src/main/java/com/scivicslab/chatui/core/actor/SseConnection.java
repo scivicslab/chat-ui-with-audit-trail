@@ -9,8 +9,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Owns one conversation tab's SSE connection to the browser. {@link #emit} pushes a
- * {@link ChatEvent} downstream; a {@link ConversationTab} sibling of {@link ChatSession}.
+ * Owns one ConversationSquad's SSE connection to the browser. {@link #emit} pushes a
+ * {@link ChatEvent} downstream; a {@link ConversationSquad} sibling of {@link ChatSession}.
  *
  * <p>Adapted from {@code quarkus-chat-ui3}'s {@code SseActor} rather than ported verbatim from
  * {@code quarkus-chat-ui/core}'s {@code SseActor} ({@code SseConnectionPorting_260823_oo01}) —

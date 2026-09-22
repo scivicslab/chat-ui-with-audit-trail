@@ -83,15 +83,15 @@ class JobInTheLogTest {
                 "the ones worth looking up later carry their own label");
     }
 
-    /** The name says it is a job, so the conversation views do not pick it up as a tab. */
+    /** The name says it is a job, so the conversation views do not pick it up as a ConversationSquad. */
     @Test
     void aJobsRecordIsNotMistakenForAConversation() {
         ioLog.ensureJobSession("project1/job-01");
 
         SessionSummary session = ioLog.store().listSessions(10).get(0);
         assertTrue(session.getWorkflowName().contains("job"), session.getWorkflowName());
-        assertFalse(ioLog.resumableTabs().contains("project1/job-01"),
-                "a restart does not build a conversation tab out of a job: " + ioLog.resumableTabs());
+        assertFalse(ioLog.resumableConversationSquads().contains("project1/job-01"),
+                "a restart does not build a ConversationSquad out of a job: " + ioLog.resumableConversationSquads());
     }
 
     @Test

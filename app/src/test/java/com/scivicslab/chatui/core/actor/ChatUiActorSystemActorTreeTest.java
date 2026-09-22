@@ -11,8 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Pure unit test for {@link ChatUiActorSystem#getActorTree()}.
  *
  * <p>Exercises the load-bearing path: after {@code init()} builds the {@code IIActorSystem} and
- * seeds one project with one {@link ConversationTab} child, {@code getActorTree()} must return a
- * ROOT node whose only project child, in turn, has that tab as a child
+ * seeds one project with one {@link ConversationSquad} child, {@code getActorTree()} must return a
+ * ROOT node whose only project child, in turn, has that ConversationSquad as a child
  * ({@code ProjectScopedActorTree_260829_oo01} — "1 top actor = 1 project"). No CDI container and
  * no external services are involved.</p>
  */
@@ -95,7 +95,7 @@ class ChatUiActorSystemActorTreeTest {
     }
 
     @Test
-    void createProject_addsSecondProjectWithItsOwnFirstTab() {
+    void createProject_addsSecondProjectWithItsOwnFirstConversationSquad() {
         ChatUiActorSystem system = new ChatUiActorSystem();
         system.init();
 

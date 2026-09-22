@@ -29,7 +29,7 @@ class ChatSessionHarnessToolIoTest {
     private static final class CapturingIoLog extends IoLogStore {
         record Rec(String node, String label, String content) {}
         final List<Rec> records = new ArrayList<>();
-        @Override public synchronized long ensureSession(String tabId) { return 7L; }
+        @Override public synchronized long ensureSession(String conversationSquadId) { return 7L; }
         @Override public void record(long sessionId, String node, String label, String content) {
             records.add(new Rec(node, label, content));
         }

@@ -619,7 +619,7 @@ public class PlanRunner extends Interpreter {
      *
      * <p>What {@code clearWorker} does for a slot this plan created, for a conversation that was
      * already there. Removing a conversation's actor is not enough on its own: the I/O log still
-     * holds a running session for it, and {@code reopenRecordedTabs} builds a tab for every
+     * holds a running session for it, and {@code reopenRecordedConversationSquads} builds a ConversationSquad for every
      * running session at start-up, so the conversation would come back at the next restart. Ending
      * the session leaves every line it wrote in the database — {@code IoLogSearch} still finds
      * them — and stops it being reopened.</p>

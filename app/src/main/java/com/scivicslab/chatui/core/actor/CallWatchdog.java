@@ -9,7 +9,7 @@ import java.util.Map;
  * actor system, reached via {@link com.scivicslab.pojoactor.core.ActorRef#ask}/{@code tell} like
  * any other POJO-actor.
  *
- * <p>Each conversation tab's own agent loop processes one tool call at a time, so a tab is never
+ * <p>Each ConversationSquad's own agent loop processes one tool call at a time, so a ConversationSquad is never
  * waiting on more than one target at once — {@link #waitingOn} is a simple map, not a multimap.
  * {@code beginWait} checks for a cycle by following existing wait edges from the new call's target
  * back toward the caller; if it ever reaches the caller, completing the call would form a cycle,
@@ -24,8 +24,8 @@ public class CallWatchdog {
      * Records that {@code waiterId} is about to wait on {@code targetId}, unless doing so would
      * create a cycle.
      *
-     * @param waiterId  the tab about to start waiting (the caller of {@code ask_chat})
-     * @param targetId  the tab it would wait on
+     * @param waiterId  the ConversationSquad about to start waiting (the caller of {@code ask_chat})
+     * @param targetId  the ConversationSquad it would wait on
      * @return {@code true} if the wait was recorded and may proceed; {@code false} if it would
      *         create a cycle and must be refused
      */
@@ -45,7 +45,7 @@ public class CallWatchdog {
      * Clears {@code waiterId}'s recorded wait — called once its {@code ask_chat} call finishes,
      * whether it succeeded, timed out, or failed.
      *
-     * @param waiterId the tab whose wait has ended
+     * @param waiterId the ConversationSquad whose wait has ended
      */
     public void endWait(String waiterId) {
         waitingOn.remove(waiterId);

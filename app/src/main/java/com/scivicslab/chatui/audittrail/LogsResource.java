@@ -12,10 +12,10 @@ import jakarta.ws.rs.core.MediaType;
 import java.util.List;
 
 /**
- * Serves the two server-wide, non-tab-scoped log views: the raw {@link LogTap} capture ({@code
+ * Serves the two server-wide, not scoped to a ConversationSquad log views: the raw {@link LogTap} capture ({@code
  * GET /api/logs}, unchanged) and the system-wide log multiplexer ({@code GET /api/system-log},
  * new — {@code 150_TabScopedLogging_260826_oo01}). The two differ in scope: {@code LogTap} catches
- * every JVM logger unconditionally; the system-wide multiplexer only sees what each tab's own log
+ * every JVM logger unconditionally; the system-wide multiplexer only sees what each ConversationSquad's own log
  * multiplexer explicitly forwards to it, plus framework noise via {@code MultiplexerLogHandler}.
  */
 @Path("/api")
@@ -40,8 +40,8 @@ public class LogsResource {
     }
 
     /**
-     * Returns the system-wide log multiplexer's recent entries — every conversation tab's log
-     * activity, tagged with the originating tab id.
+     * Returns the system-wide log multiplexer's recent entries — every ConversationSquad's log
+     * activity, tagged with the originating ConversationSquad id.
      *
      * @return recent entries, oldest first
      */

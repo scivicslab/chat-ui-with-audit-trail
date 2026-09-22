@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Ending a conversation a job is about to remove.
  *
  * <p>Removing a conversation's actor leaves its session running in the I/O log, and
- * {@code reopenRecordedTabs} builds a tab for every running session at start-up — so the
+ * {@code reopenRecordedConversationSquads} builds a ConversationSquad for every running session at start-up — so the
  * conversation comes back at the next restart. A job that means to be rid of one ends its session
  * first ({@code RemovingActorsFromAWorkflow_260913_oo01}). What it wrote stays in the database,
  * where the log search still finds it.</p>
@@ -95,9 +95,9 @@ class EndConversationTest {
         SessionSummary session = ioLog.store().listSessions(50).stream()
                 .filter(s -> s.getSessionId() == sessionId).findFirst().orElseThrow();
         assertEquals(SessionStatus.COMPLETED, session.getStatus(),
-                "an ended session is not reopened as a tab at the next start-up");
-        assertFalse(ioLog.resumableTabs().contains(chatName),
-                "so the conversation stays gone: " + ioLog.resumableTabs());
+                "an ended session is not reopened as a ConversationSquad at the next start-up");
+        assertFalse(ioLog.resumableConversationSquads().contains(chatName),
+                "so the conversation stays gone: " + ioLog.resumableConversationSquads());
         assertTrue(session.getTotalLogEntries() > 0, "and what it wrote is still in the database");
     }
 
@@ -110,14 +110,14 @@ class EndConversationTest {
 
         runner().endConversation(ending);
 
-        assertTrue(ioLog.resumableTabs().contains(keeping),
-                "the one that was not named is still reopened: " + ioLog.resumableTabs());
+        assertTrue(ioLog.resumableConversationSquads().contains(keeping),
+                "the one that was not named is still reopened: " + ioLog.resumableConversationSquads());
     }
 
     /**
      * The case a restart produces: the session is in the database, this process never opened it.
      *
-     * <p>A tab that came back through {@code resumableTabs} and was never spoken to has no session
+     * <p>A ConversationSquad that came back through {@code resumableConversationSquads} and was never spoken to has no session
      * in this process's own map. Ending only what this process opened left such a session running,
      * so the removed conversation was built again at the next start-up — which is what the first
      * live run of the removal job did.</p>
@@ -134,14 +134,14 @@ class EndConversationTest {
         before.shutdown();
 
         conversation("project1", "t2");
-        assertTrue(ioLog.resumableTabs().contains(chatName),
-                "the tab is one a restart would build: " + ioLog.resumableTabs());
+        assertTrue(ioLog.resumableConversationSquads().contains(chatName),
+                "the ConversationSquad is one a restart would build: " + ioLog.resumableConversationSquads());
 
         ActionResult result = runner().endConversation(chatName);
 
         assertTrue(result.isSuccess(), result.getResult());
-        assertFalse(ioLog.resumableTabs().contains(chatName),
-                "and is not built again: " + ioLog.resumableTabs());
+        assertFalse(ioLog.resumableConversationSquads().contains(chatName),
+                "and is not built again: " + ioLog.resumableConversationSquads());
     }
 
     @Test

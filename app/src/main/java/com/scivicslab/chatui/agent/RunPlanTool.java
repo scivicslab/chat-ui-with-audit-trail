@@ -125,7 +125,7 @@ public final class RunPlanTool {
         PlanRunnerIIAR planIIAR =
                 new PlanRunnerIIAR(planName, new PlanRunner(planName, system, watchdog), system);
         planIIAR.setParentName(myChatName);
-        // The owning conversation is a plain ConversationTab actor, registered among `actors`, not
+        // The owning conversation is a plain ConversationSquad actor, registered among `actors`, not
         // `iiActors` — looking it up with getIIActor finds nothing, and the plan would run correctly
         // but never appear under its conversation in the Actors tree.
         ActorRef<?> owner = system.getActor(myChatName);

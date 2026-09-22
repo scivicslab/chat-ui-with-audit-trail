@@ -2,7 +2,7 @@
 //   - one persistent EventSource per conversation tab
 //   - POST /api/projects/{projectId}/chats/{chatId}/chat only acknowledges; content streams over SSE
 //   - renders delta/thinking/result/error/status ChatEvents into #chat-area
-//   - a tab bar (#conv-tab-bar) lets the user switch which ConversationTab this pane talks to
+//   - a tab bar (#conv-tab-bar) lets the user switch which ConversationSquad this pane talks to
 (function () {
     "use strict";
 
@@ -982,7 +982,7 @@
             .catch(function (e) { notify("stop_plan failed: " + e.message); });
     }
 
-    // ── Conversation tabs (switch which ConversationTab this pane talks to) ────
+    // ── Conversation tabs (switch which ConversationSquad this pane talks to) ────
     // Switching is triggered from the Actors tree in console.js (click a conversation actor's
     // name), not a bar in this pane — ActorTreeTabSwitcher_260826_oo01. switchChat is exposed on
     // window at the bottom of this file so console.js can call it.

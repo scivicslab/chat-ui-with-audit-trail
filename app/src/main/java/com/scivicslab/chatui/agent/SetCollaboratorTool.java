@@ -9,7 +9,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * The {@code set_collaborator} tool: assigns another conversation tab as {@code chatId}'s
+ * The {@code set_collaborator} tool: assigns another ConversationSquad as {@code chatId}'s
  * collaborator for a given role (e.g. {@code "worker"}), via the shared
  * {@link CollaborationGraph} ({@code CollaborationGraph_260828_oo01}).
  */

@@ -16,7 +16,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * {@code IIActorRef} adapter that lets a Turing workflow call a conversation tab's
+ * {@code IIActorRef} adapter that lets a Turing workflow call a ConversationSquad's
  * {@link ChatSession} by name — see {@code ChatSessionIIAR_260810_oo01}.
  *
  * <p>Extends {@link InterpreterIIAR} (rather than {@code IIActorRef<ChatSession>} directly)
@@ -28,12 +28,12 @@ import java.util.concurrent.CompletableFuture;
 public class ChatSessionIIAR extends InterpreterIIAR {
 
     /**
-     * This tab's agent-loop workflow, by classpath-relative file name under {@code /workflows/} —
+     * This ConversationSquad's agent-loop workflow, by classpath-relative file name under {@code /workflows/} —
      * a per-instance setting (mirrors {@link ChatSession#promptWorkflowFile}), not a fixed value.
      * Different reusable workflow files can exist (today only {@code chat-session-agent-loop.yaml},
-     * a plain tool-call loop; others — e.g. a paper-search loop — can be added later), and each tab
-     * picks which one it runs; multiple tabs may point at the same file. All tabs default to the
-     * same file today since it's the only one that exists, not because tabs are forced to share it.
+     * a plain tool-call loop; others — e.g. a paper-search loop — can be added later), and each ConversationSquad
+     * picks which one it runs; multiple ConversationSquads may point at the same file. All ConversationSquads default to the
+     * same file today since it's the only one that exists, not because ConversationSquads are forced to share it.
      */
     private String agentLoopWorkflowFile = "chat-session-agent-loop.yaml";
 
@@ -60,7 +60,7 @@ public class ChatSessionIIAR extends InterpreterIIAR {
         }
     }
 
-    /** @return this tab's agent-loop workflow file name (classpath-relative, under {@code /workflows/}) */
+    /** @return this ConversationSquad's agent-loop workflow file name (classpath-relative, under {@code /workflows/}) */
     public String getAgentLoopWorkflowFile() { return agentLoopWorkflowFile; }
 
     /**
@@ -86,16 +86,16 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     }
 
     /**
-     * Reads this tab's busy flag directly, bypassing the actor's mailbox — safe even while a long
+     * Reads this ConversationSquad's busy flag directly, bypassing the actor's mailbox — safe even while a long
      * turn (e.g. {@code ask_chat}) is in progress, since {@code ChatSession.busy} is {@code volatile}
      * and only ever written from this actor's own thread ({@code BusyStateReadableSnapshot_260828_oo01}).
      *
-     * @return {@code true} if this tab is currently processing a turn
+     * @return {@code true} if this ConversationSquad is currently processing a turn
      */
     public boolean isBusyDirect() { return chatSession().isBusy(); }
 
     /**
-     * Reads this tab's conversation-history snapshot directly, bypassing the actor's mailbox — same
+     * Reads this ConversationSquad's conversation-history snapshot directly, bypassing the actor's mailbox — same
      * rationale as {@link #isBusyDirect()}.
      *
      * @return an immutable snapshot of the conversation history as of the last recorded turn
@@ -105,8 +105,8 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     }
 
     /**
-     * Reads which model this tab is on, bypassing the actor's mailbox — same rationale as
-     * {@link #isBusyDirect()}, and needed for the same reason: the screen asks for it while the tab
+     * Reads which model this ConversationSquad is on, bypassing the actor's mailbox — same rationale as
+     * {@link #isBusyDirect()}, and needed for the same reason: the screen asks for it while the ConversationSquad
      * may be in the middle of a turn ({@code ModelBelongsToTheConversation_260906_oo01}).
      *
      * @return the model name, or {@code null} when none has been settled on yet

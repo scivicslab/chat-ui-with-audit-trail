@@ -34,20 +34,20 @@ public class SessionsResource {
     IoLogView ioLogView;
 
     /**
-     * Lists sessions (most recent first), optionally restricted to one conversation tab.
+     * Lists sessions (most recent first), optionally restricted to one ConversationSquad.
      *
-     * @param tabId when given, only sessions belonging to this tab are returned (matched via the
+     * @param conversationSquadId when given, only sessions belonging to this ConversationSquad are returned (matched via the
      *              {@code workflowName} each session was tagged with in {@link IoLogStore#ensureSession})
      * @return session summaries, shaped as {@code {sessionId, workflowName, startedAt, endedAt, status, totalLogEntries}}
      */
     @GET
     @Produces(MediaType.APPLICATION_JSON)
-    public List<Map<String, Object>> sessions(@QueryParam("tabId") String tabId) {
+    public List<Map<String, Object>> sessions(@QueryParam("conversationSquadId") String conversationSquadId) {
         DistributedLogStore store = ioLog.store();
         if (store == null) return List.of();
         List<SessionSummary> all = store.listSessions(200);
-        if (tabId != null) {
-            String want = "chat-ui-conversation-" + tabId;
+        if (conversationSquadId != null) {
+            String want = "chat-ui-conversation-" + conversationSquadId;
             all = all.stream().filter(s -> want.equals(s.getWorkflowName())).toList();
         }
         return all.stream().map(SessionsResource::toMap).toList();

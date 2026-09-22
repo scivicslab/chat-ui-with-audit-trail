@@ -14,7 +14,7 @@ import jakarta.ws.rs.core.MediaType;
  * ({@code CrossConversationLogSearch_260913_oo01}).
  *
  * <p>Separate from {@link SessionsResource}, which answers about the conversation that is open.
- * This one is asked when there is no conversation to ask through — the tab has been removed, or
+ * This one is asked when there is no conversation to ask through — the ConversationSquad has been removed, or
  * the person does not know which of them said it.</p>
  */
 @Path("/api/iolog/search")

@@ -10,9 +10,9 @@ import java.util.logging.Logger;
 
 /**
  * An {@link Accumulator} that forwards every entry it receives to another actor's {@code
- * MultiplexerAccumulatorActor}-style {@code add} action, prefixing {@code source} with this tab's
- * id so the upstream (system-wide) view can still show which tab an entry came from. Used as a
- * per-tab {@code MultiplexerAccumulator}'s target to implement the "tab logging actor delegates to
+ * MultiplexerAccumulatorActor}-style {@code add} action, prefixing {@code source} with this ConversationSquad's
+ * id so the upstream (system-wide) view can still show which ConversationSquad an entry came from. Used as a
+ * per-ConversationSquad {@code MultiplexerAccumulator}'s target to implement the "ConversationSquad logging actor delegates to
  * the system logging actor" hierarchy ({@code 150_TabScopedLogging_260826_oo01}).
  */
 public class ForwardingAccumulator implements Accumulator {
@@ -21,12 +21,12 @@ public class ForwardingAccumulator implements Accumulator {
 
     private final IIActorSystem system;
     private final String targetActorName;
-    private final String tabId;
+    private final String conversationSquadId;
 
-    public ForwardingAccumulator(IIActorSystem system, String targetActorName, String tabId) {
+    public ForwardingAccumulator(IIActorSystem system, String targetActorName, String conversationSquadId) {
         this.system = system;
         this.targetActorName = targetActorName;
-        this.tabId = tabId;
+        this.conversationSquadId = conversationSquadId;
     }
 
     @Override
@@ -37,7 +37,7 @@ public class ForwardingAccumulator implements Accumulator {
         }
         try {
             JSONObject args = new JSONObject();
-            args.put("source", tabId + ":" + source);
+            args.put("source", conversationSquadId + ":" + source);
             args.put("type", type);
             args.put("data", data);
             target.callByActionName("add", args.toString());

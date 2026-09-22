@@ -13,8 +13,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * The {@code set_workflow} tool: replaces another conversation tab's agent-loop workflow with the
- * given YAML, so one tab can author a workflow for another to run (graph-engineering scenarios —
+ * The {@code set_workflow} tool: replaces another ConversationSquad's agent-loop workflow with the
+ * given YAML, so one ConversationSquad can author a workflow for another to run (graph-engineering scenarios —
  * see {@code WorkerBabysitterOrchestration_260828_oo01}).
  *
  * <p>Takes the YAML as a string, not a file name — {@code write}-tool output lands under the OS

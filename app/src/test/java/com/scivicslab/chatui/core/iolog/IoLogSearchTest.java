@@ -29,14 +29,14 @@ class IoLogSearchTest {
 
     private static IoLogSearch search;
 
-    /** The session id of the conversation whose tab is removed below. */
-    private static long removedTabSession;
+    /** The session id of the conversation whose ConversationSquad is removed below. */
+    private static long removedConversationSquadSession;
 
     /**
      * Two conversations, recorded the way {@code ChatSession} records one, and then closed.
      *
      * <p>The second one stands for a conversation whose actor was removed: nothing is deleted when
-     * {@code loader.removeChild} takes a tab out of the registry, so in the database it is a
+     * {@code loader.removeChild} takes a ConversationSquad out of the registry, so in the database it is a
      * session like any other.</p>
      */
     @BeforeAll
@@ -52,10 +52,10 @@ class IoLogSearchTest {
         store.record(open, "project1/chat-01.chat", "turn2/step1/llm",
                 "REQUEST:\n{\"messages\":[]}\nRESPONSE:\nそれは別の話です");
 
-        removedTabSession = store.ensureSession("project1/chat-junk-2");
-        store.record(removedTabSession, "project1/chat-junk-2.chat", "turn7/step3/tool",
+        removedConversationSquadSession = store.ensureSession("project1/chat-junk-2");
+        store.record(removedConversationSquadSession, "project1/chat-junk-2.chat", "turn7/step3/tool",
                 "TOOL:\nread_file\nOBSERVATION:\nJobQueueRegistry を消したのはこの会話です");
-        store.record(removedTabSession, "project1/chat-junk-2.chat", "settings",
+        store.record(removedConversationSquadSession, "project1/chat-junk-2.chat", "settings",
                 "a row whose label names no turn");
 
         store.shutdown();
@@ -74,14 +74,14 @@ class IoLogSearchTest {
         List<String> conversations = result.hits().stream().map(IoLogSearch.Hit::conversation).toList();
         assertTrue(conversations.contains("project1/chat-01"), conversations.toString());
         assertTrue(conversations.contains("project1/chat-junk-2"),
-                "the conversation whose tab was removed is still searchable: " + conversations);
+                "the conversation whose ConversationSquad was removed is still searchable: " + conversations);
     }
 
     @Test
     void aHitSaysWhichTurnToOpen() {
         IoLogSearch.Hit hit = search.search("消したのはこの会話", 10).hits().get(0);
 
-        assertEquals(removedTabSession, hit.sessionId());
+        assertEquals(removedConversationSquadSession, hit.sessionId());
         assertEquals(7, hit.turn(), "so the hit opens on the turn it was part of");
         assertEquals("turn7/step3/tool", hit.label());
         assertTrue(hit.snippet().contains("消したのはこの会話"), hit.snippet());

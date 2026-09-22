@@ -20,7 +20,7 @@ import java.util.logging.Logger;
  * <p>The Sessions tab shows one conversation: the tab that is open. This reads the whole database
  * instead, and a conversation whose actor was removed is in it on the same terms as one that is
  * still on the screen — {@code loader.removeChild} takes the actor out of the registry and leaves
- * what it said in H2. Once the tab is gone, this is the only way back to what was said in it.</p>
+ * what it said in H2. Once the ConversationSquad is gone, this is the only way back to what was said in it.</p>
  *
  * <p>The match is a substring of the message, not a word. Japanese text has no spaces to split on,
  * and a morphological analyser drops proper nouns its dictionary does not carry, so a substring
@@ -37,7 +37,7 @@ public class IoLogSearch {
     /** How much of the message is shown around the match. */
     private static final int SNIPPET_MARGIN = 140;
 
-    /** What {@link IoLogStore} prefixes a conversation tab's name with to name its session. */
+    /** What {@link IoLogStore} prefixes a ConversationSquad's name with to name its session. */
     private static final String CONVERSATION_PREFIX = "chat-ui-conversation-";
 
     @Inject
@@ -49,7 +49,7 @@ public class IoLogSearch {
      * @param logId        the row in {@code logs}, for reading the whole entry
      * @param sessionId    the conversation it belongs to
      * @param when         when it was recorded
-     * @param conversation the conversation tab it was recorded in, e.g. {@code project1/chat-01}
+     * @param conversation the ConversationSquad it was recorded in, e.g. {@code project1/chat-01}
      * @param agent        which actor wrote it
      * @param label        the entry's label, e.g. {@code turn7/step1/llm}
      * @param turn         the turn number read out of the label, or {@code -1} when it holds none
@@ -164,7 +164,7 @@ public class IoLogSearch {
 
     /**
      * @param workflowName the session's recorded name
-     * @return the conversation tab it names, e.g. {@code project1/chat-01}; the name unchanged when
+     * @return the ConversationSquad it names, e.g. {@code project1/chat-01}; the name unchanged when
      *         it is not a conversation's (a session some other program wrote into this file)
      */
     static String conversationOf(String workflowName) {

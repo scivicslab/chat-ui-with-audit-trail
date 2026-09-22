@@ -50,36 +50,36 @@ public class PromptQueue {
 
     public void setSelf(ActorRef<PromptQueue> self) { this.self = self; }
 
-    /** Actor system + this queue's tab log actor name, for {@link #logToTab}. Both null until wired. */
+    /** Actor system + this queue's ConversationSquad log actor name, for {@link #logToConversationSquad}. Both null until wired. */
     private IIActorSystem system;
-    private String tabLogActorName;
+    private String conversationSquadLogActorName;
 
     /**
-     * @param system          lets {@link #logToTab} resolve {@code tabLogActorName}
-     * @param tabLogActorName this queue's tab's log multiplexer actor name (e.g. {@code "chat-01.log"})
+     * @param system          lets {@link #logToConversationSquad} resolve {@code conversationSquadLogActorName}
+     * @param conversationSquadLogActorName this queue's ConversationSquad's log multiplexer actor name (e.g. {@code "chat-01.log"})
      */
-    public void setLogging(IIActorSystem system, String tabLogActorName) {
+    public void setLogging(IIActorSystem system, String conversationSquadLogActorName) {
         this.system = system;
-        this.tabLogActorName = tabLogActorName;
+        this.conversationSquadLogActorName = conversationSquadLogActorName;
     }
 
     /**
-     * Forwards one entry to this queue's tab log multiplexer, in addition to (not instead of) the
+     * Forwards one entry to this queue's ConversationSquad log multiplexer, in addition to (not instead of) the
      * existing {@code LOG.xxx(...)} calls near each call site (see
-     * {@code ChatSession.logToTab}/{@code 150_TabScopedLogging_260826_oo01}).
+     * {@code ChatSession.logToConversationSquad}/{@code 150_TabScopedLogging_260826_oo01}).
      */
-    private void logToTab(String message) {
-        if (system == null || tabLogActorName == null) return;
+    private void logToConversationSquad(String message) {
+        if (system == null || conversationSquadLogActorName == null) return;
         try {
-            IIActorRef<?> tabLog = system.getIIActor(tabLogActorName);
-            if (tabLog == null) return;
+            IIActorRef<?> conversationSquadLog = system.getIIActor(conversationSquadLogActorName);
+            if (conversationSquadLog == null) return;
             JSONObject args = new JSONObject();
             args.put("source", "PromptQueue");
             args.put("type", "INFO");
             args.put("data", message);
-            tabLog.callByActionName("add", args.toString());
+            conversationSquadLog.callByActionName("add", args.toString());
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "Failed to forward log entry to tab log", e);
+            LOG.log(Level.WARNING, "Failed to forward log entry to ConversationSquad log", e);
         }
     }
 
@@ -181,7 +181,7 @@ public class PromptQueue {
                 chatSessionRef.tellNow(ChatSession::cancel);
                 emitter.accept(ChatEvent.info("Current prompt cancelled. Your message is queued."));
                 LOG.info("cancel_and_send: cancelled current prompt, queued at front (queue size=" + queue.size() + ")");
-                logToTab("cancel_and_send: queued at front (queue size=" + queue.size() + ")");
+                logToConversationSquad("cancel_and_send: queued at front (queue size=" + queue.size() + ")");
             }
             default -> {
                 // "queue" mode (default)
@@ -191,7 +191,7 @@ public class PromptQueue {
                         ? "Queued. Your message will be sent when the current prompt finishes."
                         : "Held in the queue. Turn its Auto on, or advance the queue, to send it."));
                 LOG.info("queue: queued prompt (queue size=" + queue.size() + ")");
-                logToTab("queue: queued prompt (queue size=" + queue.size() + ")");
+                logToConversationSquad("queue: queued prompt (queue size=" + queue.size() + ")");
             }
         }
 
@@ -212,7 +212,7 @@ public class PromptQueue {
         int removed = before - queue.size();
         if (removed > 0) {
             LOG.info("queue: cleared " + removed + " agent messages on cancel");
-            logToTab("queue: cleared " + removed + " agent messages on cancel");
+            logToConversationSquad("queue: cleared " + removed + " agent messages on cancel");
         }
     }
 
@@ -429,7 +429,7 @@ public class PromptQueue {
             LOG.log(Level.WARNING, "Could not echo the dispatched prompt to the pane", e);
         }
         LOG.info("Dequeuing prompt (remaining=" + queue.size() + "): " + truncate(item.prompt(), 80));
-        logToTab("Dequeuing prompt (remaining=" + queue.size() + "): " + truncate(item.prompt(), 80));
+        logToConversationSquad("Dequeuing prompt (remaining=" + queue.size() + "): " + truncate(item.prompt(), 80));
         return item;
     }
 

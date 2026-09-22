@@ -48,12 +48,12 @@ import java.util.logging.Logger;
  * Actor-system holder for {@code chat-ui-with-audit-trail}.
  *
  * <p>Builds one {@link IIActorSystem} whose auto-created {@link RootIIAR} carries a
- * {@link ConversationTab} per open conversation, and exposes the tree through
+ * {@link ConversationSquad} per open conversation, and exposes the tree through
  * {@link #getActorTree()} for the Actors tab.</p>
  *
- * <p>Each {@link ConversationTab} owns one {@link ChatSessionIIAR} (wrapping a
+ * <p>Each {@link ConversationSquad} owns one {@link ChatSessionIIAR} (wrapping a
  * {@link ChatSession}) and one {@link PromptQueue}, wired per
- * {@code ChatSessionIIAR_260810_oo01} "ConversationTab への接続" — stage 1: no agent loop,
+ * {@code ChatSessionIIAR_260810_oo01} "ConversationSquad への接続" — stage 1: no agent loop,
  * no StallMonitor, {@code openai-compat} only (see {@code ChatSessionPorting_260823_oo01}).</p>
  *
  * <p>Built eagerly rather than on first use, so the recorded conversations are reopened and the
@@ -153,7 +153,7 @@ public class ChatUiActorSystem {
 
     private IIActorSystem actorSystem;
     /** Keyed by qualified chat name ({@code project1/chat-01}), the same string used in the registry. */
-    private final Map<String, ActorRef<ConversationTab>> chats = new ConcurrentHashMap<>();
+    private final Map<String, ActorRef<ConversationSquad>> chats = new ConcurrentHashMap<>();
     private final Map<String, ChatSessionIIAR> chatSessions = new ConcurrentHashMap<>();
     private RecentEntriesAccumulator systemLogBuffer;
     private final Map<String, RecentEntriesAccumulator> chatLogBuffers = new ConcurrentHashMap<>();
@@ -177,7 +177,7 @@ public class ChatUiActorSystem {
             new java.util.concurrent.atomic.AtomicInteger(2);
 
     /**
-     * The registry name of a conversation's {@link ConversationTab} actor: the project id, a
+     * The registry name of a conversation's {@link ConversationSquad} actor: the project id, a
      * {@code /}, then {@code chat-} and the chat id ({@code Terminology_260829_oo01} "アクター名").
      *
      * @param projectId the owning project's id, e.g. {@code "project1"}
@@ -191,7 +191,7 @@ public class ChatUiActorSystem {
     /**
      * The name of one conversation's ChatSession bridge.
      *
-     * <p>The ChatSession is a child of the ConversationTab, not the tab itself, so its name is the
+     * <p>The ChatSession is a child of the ConversationSquad, not the ConversationSquad itself, so its name is the
      * conversation's with {@code .chat} on the end. Anything registered under the ChatSession — the
      * provider, the prompt builder — is named from this, not from the conversation.</p>
      *
@@ -221,7 +221,7 @@ public class ChatUiActorSystem {
 
         // System-wide log multiplexer (150_TabScopedLogging_260826_oo01): the top of the chat-log
         // hierarchy, and MultiplexerLogHandler's hardcoded forwarding target for framework/non-actor
-        // log records (Quarkus startup, HTTP layer, etc.) that never go through a ConversationTab.
+        // log records (Quarkus startup, HTTP layer, etc.) that never go through a ConversationSquad.
         // Deliberately outside any Project's subtree — see ProjectScopedActorTree_260829_oo01 "なぜ
         // outputMultiplexerはプロジェクトごとに分離しないか": MultiplexerLogHandler's lookup name is
         // hardcoded, so only one such actor can ever exist, and framework logs (e.g. Quarkus startup)
@@ -243,7 +243,7 @@ public class ChatUiActorSystem {
         MultiplexerLogHandler logHandler = new MultiplexerLogHandler(actorSystem);
         logHandler.setLevel(Level.ALL);
         // Excludes loggers that already reach outputMultiplexer via an explicit path (ChatSession/
-        // PromptQueue's own logToTab() calls, forwarded through their tab's own multiplexer) — one
+        // PromptQueue's own logToConversationSquad() calls, forwarded through their ConversationSquad's own multiplexer) — one
         // content stream, one path, matching the proven RunCLI.java wiring (explicit multiplexer.add
         // for primary content; this root-logger bridge only for content with no other path). Without
         // this filter every one of those log lines reached outputMultiplexer twice.
@@ -254,7 +254,7 @@ public class ChatUiActorSystem {
         });
         Logger.getLogger("").addHandler(logHandler);
 
-        // ask_chat cross-tab tool support (AskChatToolAndWatchdog_260827_oo01): one CallWatchdog for
+        // ask_chat cross-ConversationSquad tool support (AskChatToolAndWatchdog_260827_oo01): one CallWatchdog for
         // the whole system, refusing ask_chat calls that would create a circular wait. Deliberately
         // NOT per-project — a wait chain spans projects whenever a cross-project ask_chat happens, and
         // detecting a cycle needs the whole chain in one place (ProjectScopedActorTree_260829_oo01
@@ -262,7 +262,7 @@ public class ChatUiActorSystem {
         callWatchdogRef = housekeeperRef.createChild("callWatchdog", new CallWatchdog());
 
         // Graph-engineering role assignments (CollaborationGraph_260828_oo01): likewise one for the
-        // whole system — split per project, a set_collaborator naming another project's tab would be
+        // whole system — split per project, a set_collaborator naming another project's ConversationSquad would be
         // written to one graph and read from another, silently losing the assignment.
         collaborationGraphRef = housekeeperRef.createChild("collaborationGraph", new CollaborationGraph());
 
@@ -317,7 +317,7 @@ public class ChatUiActorSystem {
         LOG.info("Action catalog available as actor '" + catalogRef.getName() + "'");
 
         createChat(DEFAULT_PROJECT_ID, "01");
-        reopenRecordedTabs();
+        reopenRecordedConversationSquads();
         LOG.info("Actor system initialised with " + projects.size() + " project(s), "
                 + chats.size() + " conversation(s)");
 
@@ -364,24 +364,24 @@ public class ChatUiActorSystem {
      * invisible. What was open before the restart is what should be open after it.</p>
      *
      * <p>{@link #createChat} restores each conversation's own contents, so this only has to make
-     * the tabs exist. The project counter is moved past every recorded name, so a later "+" cannot
+     * the ConversationSquads exist. The project counter is moved past every recorded name, so a later "+" cannot
      * hand out a name that is already in use.</p>
      */
-    private void reopenRecordedTabs() {
+    private void reopenRecordedConversationSquads() {
         if (ioLogStore == null) return;
-        List<String> tabs;
+        List<String> conversationSquads;
         try {
-            tabs = ioLogStore.resumableTabs();
+            conversationSquads = ioLogStore.resumableConversationSquads();
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "Could not list the recorded conversation tabs", e);
+            LOG.log(Level.WARNING, "Could not list the recorded ConversationSquads", e);
             return;
         }
         // Oldest first, so projects and conversations come back in the order they were created.
-        List<String> ordered = new ArrayList<>(tabs);
+        List<String> ordered = new ArrayList<>(conversationSquads);
         java.util.Collections.reverse(ordered);
         int reopened = 0;
-        for (String tabId : ordered) {
-            String[] parts = splitTabId(tabId);
+        for (String conversationSquadId : ordered) {
+            String[] parts = splitConversationSquadId(conversationSquadId);
             if (parts == null) continue;
             String projectId = parts[0];
             String chatId = parts[1];
@@ -399,27 +399,27 @@ public class ChatUiActorSystem {
                 createChat(projectId, chatId);
                 reopened++;
             } catch (Exception e) {
-                LOG.log(Level.WARNING, "Could not re-open conversation " + tabId, e);
+                LOG.log(Level.WARNING, "Could not re-open conversation " + conversationSquadId, e);
             }
         }
         if (reopened > 0) LOG.info("Re-opened " + reopened + " recorded conversation(s)");
     }
 
     /**
-     * Splits a recorded tab id back into the project and conversation it names — the inverse of
+     * Splits a recorded ConversationSquad id back into the project and conversation it names — the inverse of
      * {@link #chatActorName}.
      *
-     * @param tabId e.g. {@code "project2/chat-01"}
+     * @param conversationSquadId e.g. {@code "project2/chat-01"}
      * @return {@code {projectId, chatId}}, or {@code null} when the name is not one
      *         {@link #chatActorName} produced
      */
-    static String[] splitTabId(String tabId) {
-        if (tabId == null) return null;
-        int at = tabId.indexOf("/chat-");
+    static String[] splitConversationSquadId(String conversationSquadId) {
+        if (conversationSquadId == null) return null;
+        int at = conversationSquadId.indexOf("/chat-");
         if (at <= 0) return null;
-        String chatId = tabId.substring(at + "/chat-".length());
+        String chatId = conversationSquadId.substring(at + "/chat-".length());
         if (chatId.isBlank()) return null;
-        return new String[] {tabId.substring(0, at), chatId};
+        return new String[] {conversationSquadId.substring(0, at), chatId};
     }
 
     /** Keeps {@code createProject} from handing out a name a recorded project already holds. */
@@ -594,7 +594,7 @@ public class ChatUiActorSystem {
      * @param chatId    conversation id within that project, e.g. {@code "01"}
      * @return the conversation's actor reference
      */
-    public synchronized ActorRef<ConversationTab> createChat(String projectId, String chatId) {
+    public synchronized ActorRef<ConversationSquad> createChat(String projectId, String chatId) {
         return createChat(projectId, chatId, null);
     }
 
@@ -612,10 +612,10 @@ public class ChatUiActorSystem {
      * @param parentChatId the conversation to place this one under, or {@code null} for the project
      * @return the conversation's actor reference
      */
-    public synchronized ActorRef<ConversationTab> createChat(String projectId, String chatId,
+    public synchronized ActorRef<ConversationSquad> createChat(String projectId, String chatId,
                                                               String parentChatId) {
         String qualifiedName = chatActorName(projectId, chatId);
-        ActorRef<ConversationTab> existing = chats.get(qualifiedName);
+        ActorRef<ConversationSquad> existing = chats.get(qualifiedName);
         if (existing != null) {
             return existing;
         }
@@ -625,37 +625,37 @@ public class ChatUiActorSystem {
         }
         ActorRef<?> parentRef = projectRef;
         if (parentChatId != null && !parentChatId.isBlank()) {
-            ActorRef<ConversationTab> parentChat =
+            ActorRef<ConversationSquad> parentChat =
                     chats.get(resolveChatName(projectId, parentChatId));
             if (parentChat == null) {
                 throw new IllegalArgumentException("Unknown parent conversation: " + parentChatId);
             }
             parentRef = parentChat;
         }
-        ActorRef<ConversationTab> tabRef = parentRef.createChild(qualifiedName, new ConversationTab());
-        chats.put(qualifiedName, tabRef);
+        ActorRef<ConversationSquad> conversationSquadRef = parentRef.createChild(qualifiedName, new ConversationSquad());
+        chats.put(qualifiedName, conversationSquadRef);
 
         // Tab log multiplexer (150_TabScopedLogging_260826_oo01): this tab's own recent-entries
         // buffer, plus delegation up to the system-wide multiplexer via ForwardingAccumulator.
-        String tabLogActorName = tabRef.getName() + ".log";
-        RecentEntriesAccumulator tabLogBuffer = new RecentEntriesAccumulator(TAB_LOG_CAPACITY);
-        chatLogBuffers.put(qualifiedName, tabLogBuffer);
-        MultiplexerAccumulator tabMux = new MultiplexerAccumulator();
-        tabMux.addTarget(tabLogBuffer);
-        tabMux.addTarget(new ForwardingAccumulator(actorSystem, SYSTEM_LOG_ACTOR, qualifiedName));
-        MultiplexerAccumulatorActor tabLogActor =
-                new MultiplexerAccumulatorActor(tabLogActorName, tabMux, actorSystem);
-        adopt(tabRef.getName(), tabLogActor);
-        actorSystem.addIIActor(tabLogActor);
+        String conversationSquadLogActorName = conversationSquadRef.getName() + ".log";
+        RecentEntriesAccumulator conversationSquadLogBuffer = new RecentEntriesAccumulator(TAB_LOG_CAPACITY);
+        chatLogBuffers.put(qualifiedName, conversationSquadLogBuffer);
+        MultiplexerAccumulator conversationSquadMux = new MultiplexerAccumulator();
+        conversationSquadMux.addTarget(conversationSquadLogBuffer);
+        conversationSquadMux.addTarget(new ForwardingAccumulator(actorSystem, SYSTEM_LOG_ACTOR, qualifiedName));
+        MultiplexerAccumulatorActor conversationSquadLogActor =
+                new MultiplexerAccumulatorActor(conversationSquadLogActorName, conversationSquadMux, actorSystem);
+        adopt(conversationSquadRef.getName(), conversationSquadLogActor);
+        actorSystem.addIIActor(conversationSquadLogActor);
 
-        // ChatSessionIIAR — manual IIActorRef bridge, since ConversationTab is a plain POJO and
-        // cannot call addChildActor itself (ChatSessionIIAR_260810_oo01 "ConversationTab への接続").
+        // ChatSessionIIAR — manual IIActorRef bridge, since ConversationSquad is a plain POJO and
+        // cannot call addChildActor itself (ChatSessionIIAR_260810_oo01 "ConversationSquad への接続").
         LlmProvider provider = newProvider(OpenAiCompatProviderFactory.KIND, ToolSet.FULL, projectId, chatId);
         ChatSessionIIAR chatSessionIIAR = new ChatSessionIIAR(
-                tabRef.getName() + CHAT_SESSION_SUFFIX, provider, Optional.empty(), ioLogStore,
+                conversationSquadRef.getName() + CHAT_SESSION_SUFFIX, provider, Optional.empty(), ioLogStore,
                 actorSystem);
-        chatSessionIIAR.setParentName(tabRef.getName());
-        tabRef.getNamesOfChildren().add(chatSessionIIAR.getName());
+        chatSessionIIAR.setParentName(conversationSquadRef.getName());
+        conversationSquadRef.getNamesOfChildren().add(chatSessionIIAR.getName());
         actorSystem.addIIActor(chatSessionIIAR);
         chatSessions.put(qualifiedName, chatSessionIIAR);
         chatSessionIIAR.tell(a -> ((ChatSession) a).setChatIdentity(projectId, chatId));
@@ -688,23 +688,23 @@ public class ChatUiActorSystem {
         chatSessionIIAR.getNamesOfChildren().add(promptBuilder.getName());
         actorSystem.addIIActor(promptBuilder);
 
-        // PromptQueue — plain createChild, same as any other ConversationTab sibling.
+        // PromptQueue — plain createChild, same as any other ConversationSquad sibling.
         ActorRef<PromptQueue> promptQueueRef =
-                tabRef.createChild(tabRef.getName() + ".queue", new PromptQueue());
+                conversationSquadRef.createChild(conversationSquadRef.getName() + ".queue", new PromptQueue());
         chatSessionIIAR.tell(a -> ((ChatSession) a).setPromptQueueName(promptQueueRef.getName()));
         // Lets PromptQueue's own dispatch-request handlers (enqueue/onPromptComplete/advance)
         // hand the actual queue.remove(0) back to its own actor thread via self.ask(...) instead
         // of mutating `queue` directly from ChatSession's thread (see PromptQueueThreadSafety
         // fix — mirrors how ChatSession receives its own setActorSystem/setProviderName).
         promptQueueRef.tell(q -> q.setSelf(promptQueueRef));
-        promptQueueRef.tell(q -> q.setLogging(actorSystem, tabLogActorName));
+        promptQueueRef.tell(q -> q.setLogging(actorSystem, conversationSquadLogActorName));
 
         // SseConnection — plain createChild, same as PromptQueue (ChatResourceDesign_260823_oo01).
-        tabRef.createChild(tabRef.getName() + ".sse", new SseConnection(objectMapper));
+        conversationSquadRef.createChild(conversationSquadRef.getName() + ".sse", new SseConnection(objectMapper));
 
         restoreConversation(qualifiedName, chatSessionIIAR, providerRef);
 
-        return tabRef;
+        return conversationSquadRef;
     }
 
     /**
@@ -718,17 +718,17 @@ public class ChatUiActorSystem {
      * conversation without the model remembering it; filling only the second would do the
      * reverse.</p>
      *
-     * <p>Nothing happens when the tab has no resumable session, which is the case for a genuinely
+     * <p>Nothing happens when the ConversationSquad has no resumable session, which is the case for a genuinely
      * new conversation and for one the user cleared before the restart.</p>
      *
-     * @param tabName         the conversation's qualified actor name, which is also its log tab id
+     * @param conversationSquadName         the conversation's qualified actor name, which is also its log ConversationSquad id
      * @param chatSessionIIAR the conversation's ChatSession bridge
      * @param providerRef     the conversation's own provider
      */
-    private void restoreConversation(String tabName, ChatSessionIIAR chatSessionIIAR,
+    private void restoreConversation(String conversationSquadName, ChatSessionIIAR chatSessionIIAR,
                                      ActorRef<LlmProvider> providerRef) {
         if (ioLogStore == null || ioLogView == null) return;
-        long sessionId = ioLogStore.findResumableSession(tabName);
+        long sessionId = ioLogStore.findResumableSession(conversationSquadName);
         if (sessionId < 0) return;
 
         List<IoLogView.Turn> turns;
@@ -737,7 +737,7 @@ public class ChatUiActorSystem {
             turns = ioLogView.conversation(sessionId, RESTORED_TURNS);
             lastTurn = ioLogView.lastTurnNumber(sessionId);
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "Could not read the recorded conversation for " + tabName, e);
+            LOG.log(Level.WARNING, "Could not read the recorded conversation for " + conversationSquadName, e);
             return;
         }
 
@@ -748,10 +748,10 @@ public class ChatUiActorSystem {
         }
 
         if (turns.isEmpty()) {
-            LOG.info("I/O log session " + sessionId + " holds no restorable turn for " + tabName
+            LOG.info("I/O log session " + sessionId + " holds no restorable turn for " + conversationSquadName
                     + "; continuing it from turn " + (lastTurn + 1));
-            String[] ids = splitTabId(tabName);
-            if (ids != null) applyRecordedSettings(tabName, sessionId, ids[0], ids[1]);
+            String[] ids = splitConversationSquadId(conversationSquadName);
+            if (ids != null) applyRecordedSettings(conversationSquadName, sessionId, ids[0], ids[1]);
             return;
         }
 
@@ -774,15 +774,15 @@ public class ChatUiActorSystem {
         }
         // The questions go on the queue's sent list too, so the checklist the browser draws
         // starts where the conversation left off (QueueChecklistView_260913_oo01).
-        ActorRef<PromptQueue> queueRef = actorSystem.getActor(tabName + ".queue");
+        ActorRef<PromptQueue> queueRef = actorSystem.getActor(conversationSquadName + ".queue");
         if (queueRef != null) {
             List<String> questions = turns.stream().map(IoLogView.Turn::question).toList();
             queueRef.tell(q -> q.seedSent(questions));
         }
-        LOG.info("Restored " + turns.size() + " turn(s) into " + tabName
+        LOG.info("Restored " + turns.size() + " turn(s) into " + conversationSquadName
                 + " from I/O log session " + sessionId);
-        String[] ids = splitTabId(tabName);
-        if (ids != null) applyRecordedSettings(tabName, sessionId, ids[0], ids[1]);
+        String[] ids = splitConversationSquadId(conversationSquadName);
+        if (ids != null) applyRecordedSettings(conversationSquadName, sessionId, ids[0], ids[1]);
     }
 
     /**
@@ -1049,7 +1049,7 @@ public class ChatUiActorSystem {
      * @return what went wrong, or {@code null} when the change was made
      */
     private String changeProviderForPlan(String chatName, String kind, String tools) {
-        String[] parts = splitTabId(chatName);
+        String[] parts = splitConversationSquadId(chatName);
         if (parts == null) return "not a conversation name: " + chatName;
         try {
             ToolSet toolSet = (tools == null || tools.isBlank())
@@ -1077,13 +1077,13 @@ public class ChatUiActorSystem {
      * as one {@code settings} record ({@code ConversationSettingsRecord_260913_oo01}). All three
      * every time, so the last record is the whole state; nothing is written without a log.
      */
-    private void recordSettings(String tabName, String provider, String tools, String model) {
-        recordSettings(tabName, provider, tools, model, temperatureOf(tabName));
+    private void recordSettings(String conversationSquadName, String provider, String tools, String model) {
+        recordSettings(conversationSquadName, provider, tools, model, temperatureOf(conversationSquadName));
     }
 
     /** @return what that conversation asks to sample at, or {@code null} when it asks for nothing */
-    private Double temperatureOf(String tabName) {
-        ActorRef<LlmProvider> providerRef = actorSystem.getActor(tabName + CHAT_SESSION_SUFFIX + PROVIDER_SUFFIX);
+    private Double temperatureOf(String conversationSquadName) {
+        ActorRef<LlmProvider> providerRef = actorSystem.getActor(conversationSquadName + CHAT_SESSION_SUFFIX + PROVIDER_SUFFIX);
         if (providerRef == null) return null;
         try {
             return providerRef.ask(LlmProvider::getTemperature).join();
@@ -1092,11 +1092,11 @@ public class ChatUiActorSystem {
         }
     }
 
-    private void recordSettings(String tabName, String provider, String tools, String model,
+    private void recordSettings(String conversationSquadName, String provider, String tools, String model,
                                 Double temperature) {
         if (ioLogStore == null) return;
         try {
-            long sessionId = ioLogStore.ensureSession(tabName);
+            long sessionId = ioLogStore.ensureSession(conversationSquadName);
             if (sessionId < 0) return;
             org.json.JSONObject o = new org.json.JSONObject();
             o.put("provider", provider == null ? org.json.JSONObject.NULL : provider);
@@ -1105,7 +1105,7 @@ public class ChatUiActorSystem {
             o.put("temperature", temperature == null ? org.json.JSONObject.NULL : temperature);
             ioLogStore.record(sessionId, "agent", IoLogView.SETTINGS_LABEL, o.toString());
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "Could not record the settings of " + tabName, e);
+            LOG.log(Level.WARNING, "Could not record the settings of " + conversationSquadName, e);
         }
     }
 
@@ -1115,12 +1115,12 @@ public class ChatUiActorSystem {
      * with — a harness plugin not passed on the command line — leaves the default in place and
      * says so.
      */
-    private void applyRecordedSettings(String tabName, long sessionId, String projectId, String chatId) {
+    private void applyRecordedSettings(String conversationSquadName, long sessionId, String projectId, String chatId) {
         IoLogView.Settings s;
         try {
             s = ioLogView.latestSettings(sessionId);
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "Could not read the recorded settings of " + tabName, e);
+            LOG.log(Level.WARNING, "Could not read the recorded settings of " + conversationSquadName, e);
             return;
         }
         if (s == null) return;
@@ -1129,18 +1129,18 @@ public class ChatUiActorSystem {
         try {
             if (s.tools() != null) toolSet = ToolSet.parse(s.tools());
         } catch (IllegalArgumentException e) {
-            LOG.warning(tabName + ": recorded tool set '" + s.tools() + "' is unknown; using full");
+            LOG.warning(conversationSquadName + ": recorded tool set '" + s.tools() + "' is unknown; using full");
         }
         if (!OpenAiCompatProviderFactory.KIND.equals(kind) || toolSet != ToolSet.FULL) {
             if (pluginRegistry.factory(kind).isEmpty()) {
-                LOG.warning(tabName + " was on provider '" + kind + "', which this instance was not started with"
+                LOG.warning(conversationSquadName + " was on provider '" + kind + "', which this instance was not started with"
                         + " (available: " + String.join(", ", pluginRegistry.kinds()) + "); staying on the default");
                 return;
             }
             try {
                 setProvider(projectId, chatId, kind, toolSet, false);
             } catch (IllegalArgumentException e) {
-                LOG.warning(tabName + ": recorded provider could not be restored: " + e.getMessage());
+                LOG.warning(conversationSquadName + ": recorded provider could not be restored: " + e.getMessage());
                 return;
             }
         }
@@ -1158,7 +1158,7 @@ public class ChatUiActorSystem {
                 providerRef.tell(p -> p.setTemperature(t));
             }
         }
-        LOG.info("Restored settings of " + tabName + ": provider=" + kind + ", tools=" + toolSet.id()
+        LOG.info("Restored settings of " + conversationSquadName + ": provider=" + kind + ", tools=" + toolSet.id()
                 + ", model=" + s.model() + ", temperature=" + s.temperature());
     }
 
@@ -1227,9 +1227,9 @@ public class ChatUiActorSystem {
     /**
      * @param projectId owning project's id
      * @param chatId    conversation id within that project
-     * @return the conversation's {@link ConversationTab}, or {@code null} if none was created
+     * @return the conversation's {@link ConversationSquad}, or {@code null} if none was created
      */
-    public ActorRef<ConversationTab> getChat(String projectId, String chatId) {
+    public ActorRef<ConversationSquad> getChat(String projectId, String chatId) {
         return chats.get(chatActorName(projectId, chatId));
     }
 
