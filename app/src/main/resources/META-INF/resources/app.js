@@ -303,6 +303,7 @@
     }
 
     var queuePollTimer = null;
+    var queueCount = 0;
 
     function setBusy(v) {
         busy = v;
@@ -362,6 +363,13 @@
     // MCP agent) — QueueContentsEditing_260826_oo01. Index-addressed: a concurrent submitter
     // (agent/workflow) could shift indices between fetch and action, same simplification
     // quarkus-chat-ui3's own single-browser queue effectively has too.
+    // What the queue looked like the last time it was drawn. While ChatSession is busy this runs
+    // every 2s, and rebuilding the rows each time took the queue away from whoever was using it:
+    // the button being aimed at was replaced mid-click and the scroll position jumped to the
+    // bottom. The contents rarely change during a turn, so compare first and draw only on a
+    // change. quarkus-chat-ui has no such symptom because its queue never leaves the browser.
+    var queueDrawn = null;
+
     function refreshQueue() {
         if (!queueArea) return;
         fetch(apiUrl(chatUrl("/queue")))
@@ -370,6 +378,20 @@
                 var sent = (q && q.sent) || [];
                 var pending = (q && q.items) || [];
                 var total = sent.length + pending.length;
+
+                // Everything the drawing below depends on, and nothing else.
+                var shape = JSON.stringify([
+                    sent.map(function (it) { return it.prompt; }),
+                    pending.map(function (it) { return [it.prompt, it.auto]; }),
+                    queueArea.dataset.forcedOpen || "0",
+                    busy   // the first pending row is marked "waiting" only while idle
+                ]);
+                if (shape === queueDrawn) return;
+                var grew = queueDrawn !== null && total > queueCount;
+                var keepScroll = queueArea.scrollTop;
+                queueDrawn = shape;
+                queueCount = total;
+
                 queueArea.textContent = "";
                 var header = document.createElement("div");
                 header.className = "queue-header";
@@ -459,7 +481,8 @@
                 var visible = (total > 0 || queueArea.dataset.forcedOpen === "1");
                 queueArea.style.display = visible ? "block" : "none";
                 if (queueResizeHandle) queueResizeHandle.style.display = visible ? "block" : "none";
-                queueArea.scrollTop = queueArea.scrollHeight;
+                // Only follow the end when something was added; otherwise stay where the reader was.
+                queueArea.scrollTop = grew ? queueArea.scrollHeight : keepScroll;
             })
             .catch(function () { /* leave the last known state on failure */ });
     }
@@ -1003,6 +1026,7 @@
         thinkingEl = null;
         setBusy(false);
         if (queueArea) { queueArea.style.display = "none"; queueArea.dataset.forcedOpen = "0"; }
+        queueDrawn = null;   // another conversation: draw its queue even if it has the same shape
 
         loadModels();
         hydrateConversation();
