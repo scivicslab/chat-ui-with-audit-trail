@@ -219,11 +219,11 @@ steps:
         arguments: ["report"]
         execution: direct
 
-  # ── 1. subject ───────────────────────────────────────────────────────────
+  # ── 1. problemdef ───────────────────────────────────────────────────────────
   - states: ["enter-1", "judge-1"]
-    label: enter-1-subject
+    label: enter-1-problemdef
     note: |
-      規則は 080_OopSubjectClarity_260810_oo01.md にある。会話がそれを読む。
+      規則は 020_AntiPatternProblemDefinition_260922_oo01.md にある。会話がそれを読む。
       いまの本文を控え、会話が読み書きするファイルへ置く。ここではまだ本文を書き換えない。
     actions:
       - actor: this
@@ -236,7 +236,7 @@ steps:
         execution: direct
 
   - states: ["judge-1", "check-1"]
-    label: judge-1-subject
+    label: judge-1-problemdef
     note: 本文がこの規則を満たしているかを見る。満たしていれば本文には触れない。
     actions:
       - actor: this
@@ -245,7 +245,7 @@ steps:
         execution: direct
       - actor: this
         method: askWorker
-        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/080_OopSubjectClarity_260810_oo01/080_OopSubjectClarity_260810_oo01.md\n本文: " + state.getString("work")']
+        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/020_AntiPatternProblemDefinition_260922_oo01/020_AntiPatternProblemDefinition_260922_oo01.md\n本文: " + state.getString("work")']
         execution: direct
       - actor: this
         method: keepWorkerReply
@@ -268,7 +268,7 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点1 subject | 判定役が答えなかった"'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点1 problemdef | 判定役が答えなかった"'}
         execution: direct
 
   - states: ["check-1", "enter-2"]
@@ -294,7 +294,7 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点1 subject | " + state.getString("verdict")'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点1 problemdef | " + state.getString("verdict")'}
         execution: direct
 
   - states: ["check-1", "fix-1"]
@@ -314,11 +314,11 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点1 subject | 回数を使い切った: " + state.getString("verdict")'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点1 problemdef | 回数を使い切った: " + state.getString("verdict")'}
         execution: direct
 
   - states: ["fix-1", "judge-1"]
-    label: fix-1-subject
+    label: fix-1-problemdef
     note: 会話がファイルを直し、書き戻したものをこの計画が読み取る。
     actions:
       - actor: this
@@ -327,7 +327,7 @@ steps:
         execution: direct
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/080_OopSubjectClarity_260810_oo01/080_OopSubjectClarity_260810_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
+        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/020_AntiPatternProblemDefinition_260922_oo01/020_AntiPatternProblemDefinition_260922_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
         execution: direct
       - actor: this
         method: readFile
@@ -351,14 +351,14 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点1 subject | 直す役が答えなかった"'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点1 problemdef | 直す役が答えなかった"'}
         execution: direct
 
-  # ── 2. naming ───────────────────────────────────────────────────────────
+  # ── 2. howto ───────────────────────────────────────────────────────────
   - states: ["enter-2", "judge-2"]
-    label: enter-2-naming
+    label: enter-2-howto
     note: |
-      規則は 023_NamingByTypeAndInstance_260628_oo01.md にある。会話がそれを読む。
+      規則は 025_AntiPatternHowToDoIt_260922_oo01.md にある。会話がそれを読む。
       いまの本文を控え、会話が読み書きするファイルへ置く。ここではまだ本文を書き換えない。
     actions:
       - actor: this
@@ -371,7 +371,7 @@ steps:
         execution: direct
 
   - states: ["judge-2", "check-2"]
-    label: judge-2-naming
+    label: judge-2-howto
     note: 本文がこの規則を満たしているかを見る。満たしていれば本文には触れない。
     actions:
       - actor: this
@@ -380,7 +380,7 @@ steps:
         execution: direct
       - actor: this
         method: askWorker
-        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/023_NamingByTypeAndInstance_260628_oo01/023_NamingByTypeAndInstance_260628_oo01.md\n本文: " + state.getString("work")']
+        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/025_AntiPatternHowToDoIt_260922_oo01/025_AntiPatternHowToDoIt_260922_oo01.md\n本文: " + state.getString("work")']
         execution: direct
       - actor: this
         method: keepWorkerReply
@@ -403,7 +403,7 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点2 naming | 判定役が答えなかった"'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点2 howto | 判定役が答えなかった"'}
         execution: direct
 
   - states: ["check-2", "enter-3"]
@@ -429,7 +429,7 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点2 naming | " + state.getString("verdict")'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点2 howto | " + state.getString("verdict")'}
         execution: direct
 
   - states: ["check-2", "fix-2"]
@@ -449,11 +449,11 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点2 naming | 回数を使い切った: " + state.getString("verdict")'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点2 howto | 回数を使い切った: " + state.getString("verdict")'}
         execution: direct
 
   - states: ["fix-2", "judge-2"]
-    label: fix-2-naming
+    label: fix-2-howto
     note: 会話がファイルを直し、書き戻したものをこの計画が読み取る。
     actions:
       - actor: this
@@ -462,7 +462,7 @@ steps:
         execution: direct
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/023_NamingByTypeAndInstance_260628_oo01/023_NamingByTypeAndInstance_260628_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
+        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/025_AntiPatternHowToDoIt_260922_oo01/025_AntiPatternHowToDoIt_260922_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
         execution: direct
       - actor: this
         method: readFile
@@ -486,24 +486,16 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点2 naming | 直す役が答えなかった"'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点2 howto | 直す役が答えなかった"'}
         execution: direct
 
-  # ── 3. thread ───────────────────────────────────────────────────────────
+  # ── 3. oneaxis ───────────────────────────────────────────────────────────
   - states: ["enter-3", "judge-3"]
-    label: enter-3-thread
+    label: enter-3-oneaxis
     note: |
-      規則は 120_ThreadAndAsides_260913_oo01.md にある。会話がそれを読む。
+      規則は 030_OneAxisPerSection_260913_oo01.md にある。会話がそれを読む。
       いまの本文を控え、会話が読み書きするファイルへ置く。ここではまだ本文を書き換えない。
     actions:
-      - actor: this
-        method: copyState
-        arguments: ["text", "before"]
-        execution: direct
-      - actor: this
-        method: writeFile
-        arguments: ['jexl:state.getString("before-path")', "before"]
-        execution: direct
       - actor: this
         method: copyState
         arguments: ["text", "kept-3"]
@@ -514,7 +506,7 @@ steps:
         execution: direct
 
   - states: ["judge-3", "check-3"]
-    label: judge-3-thread
+    label: judge-3-oneaxis
     note: 本文がこの規則を満たしているかを見る。満たしていれば本文には触れない。
     actions:
       - actor: this
@@ -523,7 +515,7 @@ steps:
         execution: direct
       - actor: this
         method: askWorker
-        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。直した本文が規則を満たしているか、そして元の本文にあった事実が全部残っているかを見る。事実は、本文の中か「## 雑記」の節のどちらかに残っていればよく、場所が変わっただけなら問題ない。両方を満たしていれば ACCEPT の一語だけを返す。規則を満たしていなければ REVISE: に続けて直っていない箇所を挙げる。元の本文にあった事実が消えていれば、REVISE: に続けて「削りすぎ」と書き、消えた事実を一つずつ挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/120_ThreadAndAsides_260913_oo01/120_ThreadAndAsides_260913_oo01.md\n本文: " + state.getString("work") + "\n元の本文: " + state.getString("before-path")']
+        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/030_OneAxisPerSection_260913_oo01/030_OneAxisPerSection_260913_oo01.md\n本文: " + state.getString("work")']
         execution: direct
       - actor: this
         method: keepWorkerReply
@@ -546,7 +538,7 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点3 thread | 判定役が答えなかった"'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点3 oneaxis | 判定役が答えなかった"'}
         execution: direct
 
   - states: ["check-3", "enter-4"]
@@ -572,7 +564,7 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点3 thread | " + state.getString("verdict")'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点3 oneaxis | " + state.getString("verdict")'}
         execution: direct
 
   - states: ["check-3", "fix-3"]
@@ -592,11 +584,11 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点3 thread | 回数を使い切った: " + state.getString("verdict")'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点3 oneaxis | 回数を使い切った: " + state.getString("verdict")'}
         execution: direct
 
   - states: ["fix-3", "judge-3"]
-    label: fix-3-thread
+    label: fix-3-oneaxis
     note: 会話がファイルを直し、書き戻したものをこの計画が読み取る。
     actions:
       - actor: this
@@ -605,7 +597,7 @@ steps:
         execution: direct
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。事実を削らないでください。筋から外れると判断した事実は、本文から外したうえで、末尾の「## 雑記」の節に箇条書きで移してください（順不同でかまいません）。「## 参考資料」の節があれば、その直前に「## 雑記」を置いてください。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/120_ThreadAndAsides_260913_oo01/120_ThreadAndAsides_260913_oo01.md\n本文: " + state.getString("work") + "\n元の本文（ここにある事実は全部残すこと）: " + state.getString("before-path") + "\n\n指摘:\n" + state.getString("verdict")']
+        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/030_OneAxisPerSection_260913_oo01/030_OneAxisPerSection_260913_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
         execution: direct
       - actor: this
         method: readFile
@@ -629,24 +621,16 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点3 thread | 直す役が答えなかった"'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点3 oneaxis | 直す役が答えなかった"'}
         execution: direct
 
-  # ── 4. negation ───────────────────────────────────────────────────────────
+  # ── 4. naming ───────────────────────────────────────────────────────────
   - states: ["enter-4", "judge-4"]
-    label: enter-4-negation
+    label: enter-4-naming
     note: |
-      規則は 110_NegationOnlyWhenExpected_260913_oo01.md にある。会話がそれを読む。
+      規則は 040_AntiPatternNaming_260922_oo01.md にある。会話がそれを読む。
       いまの本文を控え、会話が読み書きするファイルへ置く。ここではまだ本文を書き換えない。
     actions:
-      - actor: this
-        method: copyState
-        arguments: ["text", "before"]
-        execution: direct
-      - actor: this
-        method: writeFile
-        arguments: ['jexl:state.getString("before-path")', "before"]
-        execution: direct
       - actor: this
         method: copyState
         arguments: ["text", "kept-4"]
@@ -657,7 +641,7 @@ steps:
         execution: direct
 
   - states: ["judge-4", "check-4"]
-    label: judge-4-negation
+    label: judge-4-naming
     note: 本文がこの規則を満たしているかを見る。満たしていれば本文には触れない。
     actions:
       - actor: this
@@ -666,7 +650,7 @@ steps:
         execution: direct
       - actor: this
         method: askWorker
-        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。直した本文が規則を満たしているか、そして元の本文にあった事実が全部残っているかを見る。事実は、本文の中か「## 雑記」の節のどちらかに残っていればよく、場所が変わっただけなら問題ない。両方を満たしていれば ACCEPT の一語だけを返す。規則を満たしていなければ REVISE: に続けて直っていない箇所を挙げる。元の本文にあった事実が消えていれば、REVISE: に続けて「削りすぎ」と書き、消えた事実を一つずつ挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/110_NegationOnlyWhenExpected_260913_oo01/110_NegationOnlyWhenExpected_260913_oo01.md\n本文: " + state.getString("work") + "\n元の本文: " + state.getString("before-path")']
+        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/040_AntiPatternNaming_260922_oo01/040_AntiPatternNaming_260922_oo01.md\n本文: " + state.getString("work")']
         execution: direct
       - actor: this
         method: keepWorkerReply
@@ -689,7 +673,7 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点4 negation | 判定役が答えなかった"'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点4 naming | 判定役が答えなかった"'}
         execution: direct
 
   - states: ["check-4", "enter-5"]
@@ -715,7 +699,7 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点4 negation | " + state.getString("verdict")'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点4 naming | " + state.getString("verdict")'}
         execution: direct
 
   - states: ["check-4", "fix-4"]
@@ -735,11 +719,11 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点4 negation | 回数を使い切った: " + state.getString("verdict")'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点4 naming | 回数を使い切った: " + state.getString("verdict")'}
         execution: direct
 
   - states: ["fix-4", "judge-4"]
-    label: fix-4-negation
+    label: fix-4-naming
     note: 会話がファイルを直し、書き戻したものをこの計画が読み取る。
     actions:
       - actor: this
@@ -748,7 +732,7 @@ steps:
         execution: direct
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。事実を削らないでください。筋から外れると判断した事実は、本文から外したうえで、末尾の「## 雑記」の節に箇条書きで移してください（順不同でかまいません）。「## 参考資料」の節があれば、その直前に「## 雑記」を置いてください。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/110_NegationOnlyWhenExpected_260913_oo01/110_NegationOnlyWhenExpected_260913_oo01.md\n本文: " + state.getString("work") + "\n元の本文（ここにある事実は全部残すこと）: " + state.getString("before-path") + "\n\n指摘:\n" + state.getString("verdict")']
+        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/040_AntiPatternNaming_260922_oo01/040_AntiPatternNaming_260922_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
         execution: direct
       - actor: this
         method: readFile
@@ -772,14 +756,14 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点4 negation | 直す役が答えなかった"'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点4 naming | 直す役が答えなかった"'}
         execution: direct
 
-  # ── 5. oneaxis ───────────────────────────────────────────────────────────
+  # ── 5. reference ───────────────────────────────────────────────────────────
   - states: ["enter-5", "judge-5"]
-    label: enter-5-oneaxis
+    label: enter-5-reference
     note: |
-      規則は 130_OneAxisPerSection_260913_oo01.md にある。会話がそれを読む。
+      規則は 045_AntiPatternReference_260922_oo01.md にある。会話がそれを読む。
       いまの本文を控え、会話が読み書きするファイルへ置く。ここではまだ本文を書き換えない。
     actions:
       - actor: this
@@ -792,7 +776,7 @@ steps:
         execution: direct
 
   - states: ["judge-5", "check-5"]
-    label: judge-5-oneaxis
+    label: judge-5-reference
     note: 本文がこの規則を満たしているかを見る。満たしていれば本文には触れない。
     actions:
       - actor: this
@@ -801,7 +785,7 @@ steps:
         execution: direct
       - actor: this
         method: askWorker
-        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/130_OneAxisPerSection_260913_oo01/130_OneAxisPerSection_260913_oo01.md\n本文: " + state.getString("work")']
+        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/045_AntiPatternReference_260922_oo01/045_AntiPatternReference_260922_oo01.md\n本文: " + state.getString("work")']
         execution: direct
       - actor: this
         method: keepWorkerReply
@@ -824,7 +808,7 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点5 oneaxis | 判定役が答えなかった"'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点5 reference | 判定役が答えなかった"'}
         execution: direct
 
   - states: ["check-5", "enter-6"]
@@ -850,7 +834,7 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点5 oneaxis | " + state.getString("verdict")'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点5 reference | " + state.getString("verdict")'}
         execution: direct
 
   - states: ["check-5", "fix-5"]
@@ -870,11 +854,11 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点5 oneaxis | 回数を使い切った: " + state.getString("verdict")'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点5 reference | 回数を使い切った: " + state.getString("verdict")'}
         execution: direct
 
   - states: ["fix-5", "judge-5"]
-    label: fix-5-oneaxis
+    label: fix-5-reference
     note: 会話がファイルを直し、書き戻したものをこの計画が読み取る。
     actions:
       - actor: this
@@ -883,7 +867,7 @@ steps:
         execution: direct
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/130_OneAxisPerSection_260913_oo01/130_OneAxisPerSection_260913_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
+        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/045_AntiPatternReference_260922_oo01/045_AntiPatternReference_260922_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
         execution: direct
       - actor: this
         method: readFile
@@ -907,14 +891,14 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点5 oneaxis | 直す役が答えなかった"'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点5 reference | 直す役が答えなかった"'}
         execution: direct
 
-  # ── 6. list ───────────────────────────────────────────────────────────
+  # ── 6. terms ───────────────────────────────────────────────────────────
   - states: ["enter-6", "judge-6"]
-    label: enter-6-list
+    label: enter-6-terms
     note: |
-      規則は 140_IndependentBullets_260913_oo01.md にある。会話がそれを読む。
+      規則は 050_AntiPatternSystemDiagram_260922_oo01.md にある。会話がそれを読む。
       いまの本文を控え、会話が読み書きするファイルへ置く。ここではまだ本文を書き換えない。
     actions:
       - actor: this
@@ -927,7 +911,7 @@ steps:
         execution: direct
 
   - states: ["judge-6", "check-6"]
-    label: judge-6-list
+    label: judge-6-terms
     note: 本文がこの規則を満たしているかを見る。満たしていれば本文には触れない。
     actions:
       - actor: this
@@ -936,7 +920,7 @@ steps:
         execution: direct
       - actor: this
         method: askWorker
-        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/140_IndependentBullets_260913_oo01/140_IndependentBullets_260913_oo01.md\n本文: " + state.getString("work")']
+        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/050_AntiPatternSystemDiagram_260922_oo01/050_AntiPatternSystemDiagram_260922_oo01.md\n本文: " + state.getString("work")']
         execution: direct
       - actor: this
         method: keepWorkerReply
@@ -959,7 +943,7 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点6 list | 判定役が答えなかった"'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点6 terms | 判定役が答えなかった"'}
         execution: direct
 
   - states: ["check-6", "enter-7"]
@@ -985,7 +969,7 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点6 list | " + state.getString("verdict")'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点6 terms | " + state.getString("verdict")'}
         execution: direct
 
   - states: ["check-6", "fix-6"]
@@ -1005,11 +989,11 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点6 list | 回数を使い切った: " + state.getString("verdict")'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点6 terms | 回数を使い切った: " + state.getString("verdict")'}
         execution: direct
 
   - states: ["fix-6", "judge-6"]
-    label: fix-6-list
+    label: fix-6-terms
     note: 会話がファイルを直し、書き戻したものをこの計画が読み取る。
     actions:
       - actor: this
@@ -1018,7 +1002,7 @@ steps:
         execution: direct
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/140_IndependentBullets_260913_oo01/140_IndependentBullets_260913_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
+        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/050_AntiPatternSystemDiagram_260922_oo01/050_AntiPatternSystemDiagram_260922_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
         execution: direct
       - actor: this
         method: readFile
@@ -1042,16 +1026,24 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点6 list | 直す役が答えなかった"'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点6 terms | 直す役が答えなかった"'}
         execution: direct
 
-  # ── 7. sections ───────────────────────────────────────────────────────────
+  # ── 7. redundancy ───────────────────────────────────────────────────────────
   - states: ["enter-7", "judge-7"]
-    label: enter-7-sections
+    label: enter-7-redundancy
     note: |
-      規則は 150_DocumentSections_260913_oo01.md にある。会話がそれを読む。
+      規則は 060_AntiPatternRedundancy_260922_oo01.md にある。会話がそれを読む。
       いまの本文を控え、会話が読み書きするファイルへ置く。ここではまだ本文を書き換えない。
     actions:
+      - actor: this
+        method: copyState
+        arguments: ["text", "before"]
+        execution: direct
+      - actor: this
+        method: writeFile
+        arguments: ['jexl:state.getString("before-path")', "before"]
+        execution: direct
       - actor: this
         method: copyState
         arguments: ["text", "kept-7"]
@@ -1062,7 +1054,7 @@ steps:
         execution: direct
 
   - states: ["judge-7", "check-7"]
-    label: judge-7-sections
+    label: judge-7-redundancy
     note: 本文がこの規則を満たしているかを見る。満たしていれば本文には触れない。
     actions:
       - actor: this
@@ -1071,7 +1063,7 @@ steps:
         execution: direct
       - actor: this
         method: askWorker
-        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。本文がこの規則を満たしているかだけを見る。規則のうち、この本文に当てはまる項目だけで判断する。本文に無い事柄が書かれていないことを理由に REVISE と判断しない。満たしていれば ACCEPT の一語だけを返す。満たしていなければ REVISE: に続けて、満たしていない箇所を具体的に挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/150_DocumentSections_260913_oo01/150_DocumentSections_260913_oo01.md\n本文: " + state.getString("work")']
+        arguments: ["judge", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。直した本文が規則を満たしているか、そして元の本文にあった事実が全部残っているかを見る。事実は、本文の中か「## 雑記」の節のどちらかに残っていればよく、場所が変わっただけなら問題ない。両方を満たしていれば ACCEPT の一語だけを返す。規則を満たしていなければ REVISE: に続けて直っていない箇所を挙げる。元の本文にあった事実が消えていれば、REVISE: に続けて「削りすぎ」と書き、消えた事実を一つずつ挙げる。ほかのことは書かない。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/060_AntiPatternRedundancy_260922_oo01/060_AntiPatternRedundancy_260922_oo01.md\n本文: " + state.getString("work") + "\n元の本文: " + state.getString("before-path")']
         execution: direct
       - actor: this
         method: keepWorkerReply
@@ -1094,7 +1086,7 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点7 sections | 判定役が答えなかった"'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点7 redundancy | 判定役が答えなかった"'}
         execution: direct
 
   - states: ["check-7", "verify"]
@@ -1120,7 +1112,7 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点7 sections | " + state.getString("verdict")'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点7 redundancy | " + state.getString("verdict")'}
         execution: direct
 
   - states: ["check-7", "fix-7"]
@@ -1140,11 +1132,11 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点7 sections | 回数を使い切った: " + state.getString("verdict")'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点7 redundancy | 回数を使い切った: " + state.getString("verdict")'}
         execution: direct
 
   - states: ["fix-7", "judge-7"]
-    label: fix-7-sections
+    label: fix-7-redundancy
     note: 会話がファイルを直し、書き戻したものをこの計画が読み取る。
     actions:
       - actor: this
@@ -1153,7 +1145,7 @@ steps:
         execution: direct
       - actor: this
         method: askWorker
-        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards/150_DocumentSections_260913_oo01/150_DocumentSections_260913_oo01.md\n本文: " + state.getString("work") + "\n\n指摘:\n" + state.getString("verdict")']
+        arguments: ["fixer", 'jexl:"規則の文書と本文は、それぞれ別のファイルにある。read ツールを1回に1つのパスで2回呼び、規則を読んでから本文を読むこと。2つのパスを1回の read にまとめないこと。指摘された点を直し、write ツールで本文のファイルに同じパスで書き戻すこと。直した本文を返事に書かなくてよい。書き戻したら「done」とだけ返す。事実を削らないでください。筋から外れると判断した事実は、本文から外したうえで、末尾の「## 雑記」の節に箇条書きで移してください（順不同でかまいません）。「## 参考資料」の節があれば、その直前に「## 雑記」を置いてください。本文にある事実・数値・コマンド・識別子は書き換えないでください。節を足す必要があるときは、元の本文にある事実だけを使って書いてください。他の文書から文をそのまま持ち込まないでください。他の文書にある説明は、その文書を参照する一文で足ります。確かめていないコマンド・実行結果・設定値を書かないでください。本文の文体を変えないでください。ですます体で書かれていればですます体のまま、である体で書かれていればである体のまま直してください。規則の文書の文体に合わせないでください。実体に名前を与えるときは、短い名詞句にしてください。説明文をそのまま名前にしないでください。名前を置き換えたら、表の列や本文が読めるかを確かめてください。\n\n規則: /home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/060_AntiPatternRedundancy_260922_oo01/060_AntiPatternRedundancy_260922_oo01.md\n本文: " + state.getString("work") + "\n元の本文（ここにある事実は全部残すこと）: " + state.getString("before-path") + "\n\n指摘:\n" + state.getString("verdict")']
         execution: direct
       - actor: this
         method: readFile
@@ -1177,7 +1169,7 @@ steps:
         execution: direct
       - actor: this
         method: appendJson
-        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点7 sections | 直す役が答えなかった"'}
+        arguments: {path: disagreements, value: 'jexl:state.getString("file") + " | 観点7 redundancy | 直す役が答えなかった"'}
         execution: direct
 
   # ── last: nothing brought in, nothing altered ─────────────────────────────

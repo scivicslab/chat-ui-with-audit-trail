@@ -26,9 +26,15 @@ import java.util.List;
  */
 public final class PolishWorkflowGenerator {
 
-    /** Where the standards the criteria read live. */
+    /** Where the anti-pattern collection the criteria read lives. */
     private static final String STD =
-            "/home/devteam/works/doc_Base010/docs/ProjectStandard/010_ProjectStandards";
+            "/home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject"
+            + "/200_documentation/100_AntiPattern";
+
+    /** Where the rules that are written as "do it this way" live, one level above the collection. */
+    private static final String HOWTO =
+            "/home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject"
+            + "/200_documentation";
 
     /** Where the generated workflows are written. */
     private static final String BUNDLED =
@@ -45,13 +51,13 @@ public final class PolishWorkflowGenerator {
     private record Criterion(String name, String ruleDoc, boolean deletes) {}
 
     private static final List<Criterion> CRITERIA = List.of(
-            new Criterion("subject", STD + "/080_OopSubjectClarity_260810_oo01/080_OopSubjectClarity_260810_oo01.md", false),
-            new Criterion("naming", STD + "/023_NamingByTypeAndInstance_260628_oo01/023_NamingByTypeAndInstance_260628_oo01.md", false),
-            new Criterion("thread", STD + "/120_ThreadAndAsides_260913_oo01/120_ThreadAndAsides_260913_oo01.md", true),
-            new Criterion("negation", STD + "/110_NegationOnlyWhenExpected_260913_oo01/110_NegationOnlyWhenExpected_260913_oo01.md", true),
-            new Criterion("oneaxis", STD + "/130_OneAxisPerSection_260913_oo01/130_OneAxisPerSection_260913_oo01.md", false),
-            new Criterion("list", STD + "/140_IndependentBullets_260913_oo01/140_IndependentBullets_260913_oo01.md", false),
-            new Criterion("sections", STD + "/150_DocumentSections_260913_oo01/150_DocumentSections_260913_oo01.md", false));
+            new Criterion("problemdef", STD + "/020_AntiPatternProblemDefinition_260922_oo01/020_AntiPatternProblemDefinition_260922_oo01.md", false),
+            new Criterion("howto", STD + "/025_AntiPatternHowToDoIt_260922_oo01/025_AntiPatternHowToDoIt_260922_oo01.md", false),
+            new Criterion("oneaxis", HOWTO + "/030_OneAxisPerSection_260913_oo01/030_OneAxisPerSection_260913_oo01.md", false),
+            new Criterion("naming", STD + "/040_AntiPatternNaming_260922_oo01/040_AntiPatternNaming_260922_oo01.md", false),
+            new Criterion("reference", STD + "/045_AntiPatternReference_260922_oo01/045_AntiPatternReference_260922_oo01.md", false),
+            new Criterion("terms", STD + "/050_AntiPatternSystemDiagram_260922_oo01/050_AntiPatternSystemDiagram_260922_oo01.md", false),
+            new Criterion("redundancy", STD + "/060_AntiPatternRedundancy_260922_oo01/060_AntiPatternRedundancy_260922_oo01.md", true));
 
     /** Said to the fixer in every criterion: what a rewrite may not do to the text it is given. */
     private static final String STYLE =
