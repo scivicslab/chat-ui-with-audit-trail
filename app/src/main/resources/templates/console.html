@@ -33,10 +33,10 @@
 
     <!--
       Two-pane console (chat-ui3-style).
-        - #left-panel  : the existing Claude chat UI, embedded inline and unchanged (app.js owns it).
+        - #main-panel  : the existing Claude chat UI, embedded inline and unchanged (app.js owns it).
         - #splitter    : draggable divider.
         - #right-panel : tabbed workspace (Sessions / System Log / Agent Loop).
-      Everything from the original chat-ui <body> is kept verbatim inside #left-panel so app.js
+      Everything from the original chat-ui <body> is kept verbatim inside #main-panel so app.js
       finds every element id it expects (header, chat, queue, log panel, input, overlays).
     -->
     <!-- Global header bar (chat-ui3-style): app-wide controls span the full width above the panes. -->
@@ -114,11 +114,11 @@
 
         <!-- (3) Main pane: (3-1) centre sub-pane | (3-2) right sub-pane (tabs).
              data-perspective decides what both sub-panes show (ProjectPerspective_260911_oo01):
-               "chat"    — one conversation: #left-panel, and the chat-scoped right tabs
+               "chat"    — one conversation: #main-panel, and the chat-scoped right tabs
                "project" — one project: #project-panel, and the project-scoped right tabs
              Clicking a chat-<id> actor picks "chat"; clicking a Project actor picks "project". -->
         <div id="console-root" data-perspective="chat">
-        <div id="left-panel">
+        <div id="main-panel">
             <!-- ===== BEGIN chat-ui markup (unchanged: Claude features kept) ===== -->
             <div id="app">
                 <!-- Conversation-tab switching happens via the Actors tree (#left-dock) now —
@@ -165,7 +165,7 @@
         </div>
 
         <!-- Centre sub-pane for the "project" perspective: the project's Turing workflows —
-             find one, read it, edit it. Shown in place of #left-panel when a Project actor is
+             find one, read it, edit it. Shown in place of #main-panel when a Project actor is
              selected (ProjectPerspective_260911_oo01). The catalog and the editor arrive in later
              steps; this is the pane they go into. -->
         <div id="project-panel">

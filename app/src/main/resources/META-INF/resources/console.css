@@ -1,5 +1,5 @@
 /* Two-pane console shell (index.html), single-DOM / inline embed.
-   The chat-ui markup lives inside #left-panel unchanged; styles.css is loaded
+   The chat-ui markup lives inside #main-panel unchanged; styles.css is loaded
    first and left pristine — every rule here only ADDS the surrounding shell or
    OVERRIDES the few viewport-bound sizings (#app height) with higher specificity.
    The right pane reuses chat-ui's theme variables so it follows the active theme. */
@@ -12,7 +12,7 @@
     overflow: hidden;
 }
 
-#left-panel {
+#main-panel {
     width: 60%;            /* initial width; the splitter sets an inline width at runtime */
     flex-shrink: 0;
     min-width: 320px;
@@ -22,7 +22,7 @@
 }
 
 /* chat-ui's #app is height:100vh; inside the pane make it track the pane height. */
-#left-panel > #app { height: 100%; }
+#main-panel > #app { height: 100%; }
 
 /* Draggable splitter between the two panels */
 #splitter {
@@ -593,7 +593,7 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
    The selectors below are more specific than .rtab-content.active, so a tab of the other
    perspective stays hidden even while it still carries "active". */
 #project-panel {
-    width: 60%;            /* same initial width as #left-panel; the splitter sets it at runtime */
+    width: 60%;            /* same initial width as #main-panel; the splitter sets it at runtime */
     flex-shrink: 0;
     min-width: 320px;
     height: 100%;
@@ -619,7 +619,7 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
 .project-placeholder { color: var(--text-secondary, #9aa0a6); padding: 12px; }
 
 #console-root[data-perspective="chat"] #project-panel { display: none; }
-#console-root[data-perspective="project"] #left-panel { display: none; }
+#console-root[data-perspective="project"] #main-panel { display: none; }
 #console-root[data-perspective="chat"] .rtab-btn[data-perspective="project"],
 #console-root[data-perspective="chat"] .rtab-content[data-perspective="project"] { display: none; }
 #console-root[data-perspective="project"] .rtab-btn[data-perspective="chat"],

@@ -715,7 +715,7 @@
     }
 
     // ── Perspective: what the centre and right panes show (ProjectPerspective_260911_oo01) ──
-    // "chat" shows one conversation (#left-panel and the chat-scoped right tabs); "project" shows
+    // "chat" shows one conversation (#main-panel and the chat-scoped right tabs); "project" shows
     // one project (#project-panel and the project-scoped right tabs). Persisted like the theme, so
     // a reload comes back to the same view.
     var PERSPECTIVE_KEY = "chat-ui-perspective";
