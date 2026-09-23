@@ -22,6 +22,7 @@ import com.scivicslab.chatui.core.rest.ChatEvent;
 import com.scivicslab.chatui.core.service.AuthMode;
 import com.scivicslab.pojoactor.action.ActionResult;
 import com.scivicslab.pojoactor.core.ActorRef;
+import com.scivicslab.chatui.agent.CalcExpression;
 import com.scivicslab.turingworkflow.examples.jshell.JShellCalculator;
 import com.scivicslab.turingworkflow.workflow.IIActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
@@ -2004,7 +2005,13 @@ public class ChatSession extends Interpreter {
             case "read" -> FileReadTool.read(fileScope, extractInput(args, "path"));
             case "write" -> FileWriteTool.write(fileScope,
                     extractInput(args, "path"), extractInput(args, "content"));
-            case "calc" -> calculator().evaluate(extractInput(args, "expression"));
+            case "calc" -> {
+                // JShell evaluates Java, not arithmetic, and does it in this process
+                // (CalcExpression). Read the argument before it gets there.
+                String expression = extractInput(args, "expression");
+                String refusal = CalcExpression.reject(expression);
+                yield refusal != null ? refusal : calculator().evaluate(expression);
+            }
             case "search_docs" -> DocSearchTool.search(extractInput(args, "query"), 0);
             case "list_references" -> ReferenceLinkTool.list(extractInput(args, "id"),
                     extractInput(args, "direction"), extractInput(args, "relation"));
