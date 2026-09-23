@@ -23,6 +23,7 @@ import com.scivicslab.chatui.core.service.AuthMode;
 import com.scivicslab.pojoactor.action.ActionResult;
 import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.chatui.agent.CalcExpression;
+import com.scivicslab.chatui.agent.FileRemoveTool;
 import com.scivicslab.turingworkflow.examples.jshell.JShellCalculator;
 import com.scivicslab.turingworkflow.workflow.IIActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
@@ -237,6 +238,13 @@ public class ChatSession extends Interpreter {
               subdirectory without making it first. An existing file is OVERWRITTEN, not appended
               to — read it first if you meant to add to it. The reply gives the absolute path
               written and how many characters went into it.
+            """);
+        m.put("remove", """
+            - remove(path): take one file away from the working directory. It is MOVED to
+              .trash/<timestamp>/ keeping the path it had, not deleted, so a wrong one can be put
+              back and nothing is lost. The reply gives both paths. One file per call: a directory
+              is refused, so clear a tree one file at a time or leave it to a person. Emptying the
+              trash is a person's job — do not try to.
             """);
         m.put("ask_chat", """
             - ask_chat(chatId, prompt, timeoutSeconds): send an instruction to another conversation
@@ -2012,6 +2020,7 @@ public class ChatSession extends Interpreter {
                 String refusal = CalcExpression.reject(expression);
                 yield refusal != null ? refusal : calculator().evaluate(expression);
             }
+            case "remove" -> FileRemoveTool.remove(fileScope, extractInput(args, "path"));
             case "search_docs" -> DocSearchTool.search(extractInput(args, "query"), 0);
             case "list_references" -> ReferenceLinkTool.list(extractInput(args, "id"),
                     extractInput(args, "direction"), extractInput(args, "relation"));

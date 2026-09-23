@@ -15,6 +15,7 @@
     <module>plugin-api</module>
     <module>app</module>
     <module>plugin-web-tools</module>
+    <module>plugin-shell</module>
     <module>plugin-harness</module>
   </modules>
 

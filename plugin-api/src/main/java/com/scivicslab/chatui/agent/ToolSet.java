@@ -7,9 +7,9 @@ import java.util.Set;
  * ({@code HarnessPrefaceAndToolSplit_260912_oo01}).
  *
  * <p>A conversation whose provider is a CLI harness (Claude Code, Codex) already has file and shell
- * tools of its own. Offering this conversation's {@code read}, {@code write} and {@code calc} as well
+ * tools of its own. Offering this conversation's {@code read}, {@code write}, {@code remove} and {@code calc} as well
  * would show the same capability twice under different names, so such a conversation is given
- * {@link #HARNESS}: every registered tool except those three. Web tools and the tools that reach
+ * {@link #HARNESS}: every registered tool except those four. Web tools and the tools that reach
  * other conversations and the document index stay in, since a harness either lacks them or reaches
  * them differently, and calls through this conversation are recorded in its own form.</p>
  */
@@ -19,7 +19,7 @@ public enum ToolSet {
     FULL(Set.of()),
 
     /** Every tool except the ones a harness duplicates with its own file and shell tools. */
-    HARNESS(Set.of("read", "write", "calc"));
+    HARNESS(Set.of("read", "write", "remove", "calc"));
 
     /** The names this set leaves out. */
     private final Set<String> excluded;
