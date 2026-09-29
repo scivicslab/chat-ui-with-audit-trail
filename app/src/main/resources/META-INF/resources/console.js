@@ -735,7 +735,112 @@
         var title = document.getElementById("project-panel-title");
         if (title && kind === "project") title.textContent = perspectiveProjectId || "Project";
         activateFirstTabOf(kind);
-        if (kind === "project") projectWfOnShow();
+        if (kind === "project") {
+            projectWfOnShow();
+            projectPropLoad();
+        }
+    }
+
+    // ── Project perspective, right pane: the project's own name and working directory ──────────
+    // GET api/projects/{p} reads both, POST .../name and POST .../working-dir set them, and
+    // POST .../chats adds a conversation with an id the server allocates
+    // (ProjectProperty_260929_oo01).
+    function projectPropStatus(msg) {
+        var el = document.getElementById("projectprop-status");
+        if (el) el.textContent = msg || "";
+    }
+
+    function projectPropLoad() {
+        var idEl = document.getElementById("projectprop-id");
+        var nameEl = document.getElementById("projectprop-name");
+        var dirEl = document.getElementById("projectprop-dir");
+        if (!perspectiveProjectId) {
+            if (idEl) idEl.textContent = "(none selected)";
+            return;
+        }
+        if (idEl) idEl.textContent = perspectiveProjectId;
+        fetch("api/projects/" + encodeURIComponent(perspectiveProjectId))
+            .then(function (r) {
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                return r.json();
+            })
+            .then(function (body) {
+                if (nameEl) nameEl.value = body.name || "";
+                if (dirEl) dirEl.value = body.workingDir || "";
+                projectPropStatus("");
+            })
+            .catch(function (err) { projectPropStatus("error: " + err.message); });
+    }
+
+    function projectPropSaveName() {
+        if (!perspectiveProjectId) return;
+        var nameEl = document.getElementById("projectprop-name");
+        projectPropStatus("saving...");
+        fetch("api/projects/" + encodeURIComponent(perspectiveProjectId) + "/name", {
+            method: "POST",
+            headers: { "Content-Type": "text/plain" },
+            body: nameEl ? nameEl.value : ""
+        })
+            .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+            .then(function (res) {
+                projectPropStatus(res.body.message || (res.ok ? "saved" : "error"));
+                // The tree shows the name beside the id, so it has to be redrawn.
+                refreshActors();
+            })
+            .catch(function (err) { projectPropStatus("error: " + err.message); });
+    }
+
+    function projectPropSaveDir() {
+        if (!perspectiveProjectId) return;
+        var dirEl = document.getElementById("projectprop-dir");
+        var outcome = document.getElementById("projectprop-dir-outcome");
+        projectPropStatus("saving...");
+        fetch("api/projects/" + encodeURIComponent(perspectiveProjectId) + "/working-dir", {
+            method: "POST",
+            headers: { "Content-Type": "text/plain" },
+            body: dirEl ? dirEl.value : ""
+        })
+            .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+            .then(function (res) {
+                projectPropStatus(res.ok ? "saved" : "error");
+                if (outcome) outcome.textContent = res.body.message || "";
+            })
+            .catch(function (err) { projectPropStatus("error: " + err.message); });
+    }
+
+    function projectPropAddChat() {
+        if (!perspectiveProjectId) return;
+        projectPropStatus("adding...");
+        fetch("api/projects/" + encodeURIComponent(perspectiveProjectId) + "/chats", { method: "POST" })
+            .then(function (r) {
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                return r.json();
+            })
+            .then(function (body) {
+                projectPropStatus("added chat-" + body.chatId);
+                refreshActors();
+                if (body.chatId && window.chatUiSwitchChat) {
+                    window.chatUiSwitchChat(perspectiveProjectId, body.chatId);
+                }
+            })
+            .catch(function (err) { projectPropStatus("error: " + err.message); });
+    }
+
+    function initProjectProp() {
+        var nameBtn = document.getElementById("projectprop-name-save");
+        var dirBtn = document.getElementById("projectprop-dir-save");
+        var addBtn = document.getElementById("projectprop-add-chat");
+        if (nameBtn) nameBtn.addEventListener("click", projectPropSaveName);
+        if (dirBtn) dirBtn.addEventListener("click", projectPropSaveDir);
+        if (addBtn) addBtn.addEventListener("click", projectPropAddChat);
+        var nameEl = document.getElementById("projectprop-name");
+        if (nameEl) nameEl.addEventListener("keydown", function (e) {
+            if (e.key === "Enter") { e.preventDefault(); projectPropSaveName(); }
+        });
+        var dirEl = document.getElementById("projectprop-dir");
+        if (dirEl) dirEl.addEventListener("keydown", function (e) {
+            if (e.key === "Enter") { e.preventDefault(); projectPropSaveDir(); }
+        });
     }
 
     // ── Project perspective, centre pane: the project's workflows ─────────────
@@ -971,7 +1076,11 @@
         if (parentName && n.indexOf(parentName) === 0 && n.length > parentName.length) {
             n = n.substring(parentName.length).replace(/^[./]+/, "");
         }
-        return n || node.name;
+        n = n || node.name;
+        // A named project reads "the name (project1)": the id stays because the REST paths and
+        // every conversation's name are built from it (ProjectProperty_260929_oo01).
+        if (node.displayName) return node.displayName + " (" + n + ")";
+        return n;
     }
 
     function actorNodeEl(node, parentName) {
@@ -1838,6 +1947,7 @@
         initProjectWorkflows();
         initProjectWorkflowEditor();
         initJobs();
+        initProjectProp();
         restorePerspective(); // before the tree renders, so its highlight matches
         refreshActors();   // the actor dock is visible by default
         ioOnShow();         // Sessions is the default-active right-pane tab

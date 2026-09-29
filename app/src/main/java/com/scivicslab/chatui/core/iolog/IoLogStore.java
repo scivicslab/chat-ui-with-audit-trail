@@ -97,6 +97,8 @@ public class IoLogStore {
     private final Map<String, Long> sessionIds = new HashMap<>();
     /** One per job, keyed by the job's actor name; see ensureJobSession. */
     private final Map<String, Long> jobSessionIds = new HashMap<>();
+    /** One per project, keyed by the project's id; see ensureProjectSession. */
+    private final Map<String, Long> projectSessionIds = new HashMap<>();
     private boolean failed = false;
 
     private synchronized void ensureStore() {
@@ -152,6 +154,7 @@ public class IoLogStore {
 
     /** What a job's session is named after, so a conversation view never picks one up. */
     private static final String JOB_PREFIX = "chat-ui-job-";
+    private static final String PROJECT_PREFIX = "chat-ui-project-";
 
     /**
      * Returns the given job's session id, opening one on first use; -1 if unavailable.
@@ -187,6 +190,73 @@ public class IoLogStore {
             LOG.log(Level.WARNING, "startSession failed for job " + jobActorName, e);
             return -1;
         }
+    }
+
+    /**
+     * The session a project's own properties are written to, opening one on first use; -1 when
+     * logging is unavailable.
+     *
+     * <p>A project's name and working directory are one current value each, which is the shape the
+     * conversations' provider and model already have: the last {@code settings} entry of the
+     * session is the value, and the entries before it are its history
+     * ({@code ProjectProperty_260929_oo01}).</p>
+     *
+     * <p>Named apart from a conversation's session, for the reason {@link #ensureJobSession} gives:
+     * {@link #resumableConversationSquads()} must not build a ConversationSquad out of a project.
+     * Unlike a job's session, this one is resumed rather than opened afresh — the properties
+     * written before the last restart are read back from it.</p>
+     *
+     * @param projectId the project's id, e.g. {@code project1}
+     */
+    public synchronized long ensureProjectSession(String projectId) {
+        ensureStore();
+        if (store == null) {
+            return -1;
+        }
+        Long existing = projectSessionIds.get(projectId);
+        if (existing != null) {
+            return existing;
+        }
+        long resumable = findProjectSession(projectId);
+        if (resumable >= 0) {
+            projectSessionIds.put(projectId, resumable);
+            return resumable;
+        }
+        try {
+            long sid = store.startSession(PROJECT_PREFIX + projectId, null, null, 1,
+                    System.getProperty("user.dir"), null, null,
+                    currentCommandLine(), appVersion, null);
+            projectSessionIds.put(projectId, sid);
+            LOG.info("I/O log session started for project " + projectId + ": " + sid);
+            return sid;
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "startSession failed for project " + projectId, e);
+            return -1;
+        }
+    }
+
+    /**
+     * The project's still-open session, or {@code -1} when the log holds none.
+     *
+     * @param projectId the project's id
+     */
+    public synchronized long findProjectSession(String projectId) {
+        ensureStore();
+        if (store == null) {
+            return -1;
+        }
+        String workflowName = PROJECT_PREFIX + projectId;
+        try {
+            // listSessions returns most recent first, so the first match is the one to continue.
+            for (SessionSummary s : store.listSessions(SESSION_SCAN_LIMIT)) {
+                if (workflowName.equals(s.getWorkflowName()) && s.getStatus() == SessionStatus.RUNNING) {
+                    return s.getSessionId();
+                }
+            }
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not look for the session of project " + projectId, e);
+        }
+        return -1;
     }
 
     /**

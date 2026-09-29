@@ -221,6 +221,7 @@
                 <button class="rtab-btn" data-tab="syslog" data-perspective="chat">System Log</button>
                 <button class="rtab-btn" data-tab="agentloop" data-perspective="chat">Agent Loop</button>
                 <button class="rtab-btn" data-tab="logsearch" data-perspective="chat">Log Search</button>
+                <button class="rtab-btn" data-tab="projectprop" data-perspective="project">Project Property</button>
                 <button class="rtab-btn" data-tab="jobrun" data-perspective="project">Run</button>
                 <button class="rtab-btn" data-tab="joblog" data-perspective="project">Job Log</button>
                 <button class="rtab-btn" data-tab="jobs" data-perspective="project">Batch Jobs</button>
@@ -307,6 +308,38 @@
                 <!-- Run: the workflow open in the centre pane, started as a batch job
                      (POST api/projects/PROJECT/jobs). No braces in this file's comments: Qute
                      reads them as expressions and the page fails to render. -->
+                <!-- Project Property: this project's own name and working directory, and the
+                     button that adds a conversation (ProjectProperty_260929_oo01). Both values are
+                     kept in the project's own log session, so they survive a restart. -->
+                <section id="tab-projectprop" class="rtab-content" data-perspective="project">
+                    <div class="tab-toolbar">
+                        <span class="tab-auto">Project: <b id="projectprop-id">(none selected)</b></span>
+                        <span id="projectprop-status"></span>
+                    </div>
+                    <div class="projectprop-form">
+                        <label class="projectprop-row">
+                            <span class="projectprop-label">Name</span>
+                            <input type="text" id="projectprop-name" placeholder="What this project is for">
+                            <button id="projectprop-name-save" type="button">Save</button>
+                        </label>
+                        <label class="projectprop-row">
+                            <span class="projectprop-label">Working directory</span>
+                            <input type="text" id="projectprop-dir" placeholder="/home/devteam/works/...">
+                            <button id="projectprop-dir-save" type="button">Save</button>
+                        </label>
+                        <div id="projectprop-dir-outcome" class="projectprop-outcome"></div>
+                        <div class="projectprop-row">
+                            <span class="projectprop-label">Conversations</span>
+                            <button id="projectprop-add-chat" type="button">+ New Chat</button>
+                        </div>
+                        <div id="projectprop-hint" class="project-placeholder">
+                            The name appears beside the project in the Actors tree. The working directory
+                            is where a CLI harness runs, and its AGENTS.md or CLAUDE.md becomes every
+                            conversation's instructions.
+                        </div>
+                    </div>
+                </section>
+
                 <section id="tab-jobrun" class="rtab-content" data-perspective="project">
                     <div class="tab-toolbar">
                         <span class="tab-auto">Workflow: <b id="jobrun-workflow">(none open)</b></span>

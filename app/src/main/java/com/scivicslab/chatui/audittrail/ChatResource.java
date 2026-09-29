@@ -59,6 +59,75 @@ public class ChatResource {
     }
 
     /**
+     * The project's own properties, for the Project Property tab
+     * ({@code ProjectProperty_260929_oo01}).
+     *
+     * @param projectId the project to describe
+     * @return {@code {"projectId":..., "name":..., "workingDir":...}}; {@code name} and
+     *         {@code workingDir} are null when unset
+     */
+    @GET
+    @Path("/{projectId}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response project(@PathParam("projectId") String projectId) {
+        var projectRef = actorSystem.getProject(projectId);
+        if (projectRef == null) {
+            return Response.status(404).entity(Map.of("type", "error",
+                    "message", "unknown project: " + projectId)).build();
+        }
+        Map<String, Object> body = new java.util.HashMap<>();
+        body.put("projectId", projectId);
+        body.put("name", actorSystem.getProjectName(projectId));
+        java.nio.file.Path dir = null;
+        try {
+            dir = projectRef.ask(com.scivicslab.chatui.core.actor.Project::getWorkingDir)
+                    .get(5, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Exception e) {
+            // Left null: the tab shows an empty field rather than failing the whole request.
+        }
+        body.put("workingDir", dir == null ? null : dir.toString());
+        return Response.ok(body).build();
+    }
+
+    /**
+     * Sets the name a person reads for a project ({@code ProjectProperty_260929_oo01}).
+     *
+     * @param projectId the project to name
+     * @param name      the name; an empty body clears it
+     * @return {@code {"type":"ok","message":...}}, or 400 with the reason
+     */
+    @POST
+    @Path("/{projectId}/name")
+    @Consumes(MediaType.TEXT_PLAIN)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response setProjectName(@PathParam("projectId") String projectId, String name) {
+        String outcome = actorSystem.setProjectName(projectId, name == null ? null : name.strip());
+        if (outcome.startsWith("error:")) {
+            return Response.status(400).entity(Map.of("type", "error", "message", outcome)).build();
+        }
+        return Response.ok(Map.of("type", "ok", "message", outcome)).build();
+    }
+
+    /**
+     * Adds a conversation to the project, letting the actor system allocate its id
+     * ({@code ProjectProperty_260929_oo01}). The sibling that takes an id in its path is for a
+     * caller that already knows which conversation it means.
+     *
+     * @param projectId the project to add a conversation to
+     * @return {@code {"chatId": "02"}}, or 400 with the reason
+     */
+    @POST
+    @Path("/{projectId}/chats")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response addChat(@PathParam("projectId") String projectId) {
+        try {
+            return Response.ok(Map.of("chatId", actorSystem.createChat(projectId))).build();
+        } catch (IllegalArgumentException e) {
+            return Response.status(400).entity(Map.of("type", "error", "message", e.getMessage())).build();
+        }
+    }
+
+    /**
      * Points a project at a working directory and loads that directory's {@code AGENTS.md} — or
      * {@code CLAUDE.md} when there is no {@code AGENTS.md} — as instructions for every conversation
      * in that project ({@code SkillAndAgentsFile_260830_oo01}).

@@ -67,6 +67,23 @@ public class Project {
     private Path workingDir;
     private Path instructionsFile;
     private String instructions;
+    private String name;
+
+    /**
+     * Sets the name a person reads, or clears it when {@code newName} is null or blank.
+     *
+     * <p>Separate from the actor's own name ({@code project1}), which stays as it is: the REST
+     * paths and every conversation's name are built from it, while this one is meant to change
+     * whenever the work does ({@code ProjectProperty_260929_oo01}).</p>
+     */
+    public void setName(String newName) {
+        name = newName == null || newName.isBlank() ? null : newName.strip();
+    }
+
+    /** @return the name a person reads, or {@code null} when none has been set */
+    public String getName() {
+        return name;
+    }
 
     /**
      * Points this project at a directory and reads that directory's instructions, preferring

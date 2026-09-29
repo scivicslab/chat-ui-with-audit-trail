@@ -318,6 +318,12 @@ public class ChatUiActorSystem {
 
         createChat(DEFAULT_PROJECT_ID, "01");
         reopenRecordedConversationSquads();
+        // After every project exists, whether init created it or the log brought it back. Hanging
+        // this off the "create it if absent" branch of the loop above left out the one project that
+        // is always created here (ProjectProperty_260929_oo01).
+        for (String projectId : List.copyOf(projects.keySet())) {
+            restoreProjectProperties(projectId);
+        }
         LOG.info("Actor system initialised with " + projects.size() + " project(s), "
                 + chats.size() + " conversation(s)");
 
@@ -594,6 +600,41 @@ public class ChatUiActorSystem {
      * @param chatId    conversation id within that project, e.g. {@code "01"}
      * @return the conversation's actor reference
      */
+    /**
+     * Creates the project's next conversation, allocating its id here rather than taking one
+     * ({@code ProjectProperty_260929_oo01}).
+     *
+     * <p>The id is one past the highest the project has, formatted to two digits, and never a gap
+     * left by a conversation that went away: a reused id would name the log session of the old
+     * conversation, and the next start-up would restore that conversation's history into the new
+     * one.</p>
+     *
+     * <p>Allocated on this side because the screen cannot allocate safely. Two screens reading the
+     * list and adding one both arrive at the same number, and the second of them is handed the
+     * conversation the first just made.</p>
+     *
+     * @param projectId the project to add a conversation to
+     * @return the new conversation's id, e.g. {@code "02"}
+     */
+    public synchronized String createChat(String projectId) {
+        if (!projects.containsKey(projectId)) {
+            throw new IllegalArgumentException("Unknown project: " + projectId);
+        }
+        String prefix = projectId + "/chat-";
+        int highest = 0;
+        for (String name : chats.keySet()) {
+            if (!name.startsWith(prefix)) continue;
+            try {
+                highest = Math.max(highest, Integer.parseInt(name.substring(prefix.length())));
+            } catch (NumberFormatException e) {
+                // A conversation whose id is not a number does not take part in the numbering.
+            }
+        }
+        String chatId = String.format("%02d", highest + 1);
+        createChat(projectId, chatId);
+        return chatId;
+    }
+
     public synchronized ActorRef<ConversationSquad> createChat(String projectId, String chatId) {
         return createChat(projectId, chatId, null);
     }
@@ -855,6 +896,106 @@ public class ChatUiActorSystem {
      * @param workingDir the directory, or {@code null} to clear it
      * @return a one-line account of what was loaded, or an {@code error: ...} string
      */
+    /**
+     * Sets the name a person reads for a project, and records it
+     * ({@code ProjectProperty_260929_oo01}).
+     *
+     * @param projectId the project to name
+     * @param name      the name, or null/blank to clear it
+     * @return {@code "ok: ..."}, or {@code "error: ..."} when there is no such project
+     */
+    public String setProjectName(String projectId, String name) {
+        ActorRef<Project> projectRef = projects.get(projectId);
+        if (projectRef == null) return "error: unknown project: " + projectId;
+        try {
+            projectRef.tell(p -> p.setName(name)).get(10, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Failed to set the name of " + projectId, e);
+            return "error: " + e.getMessage();
+        }
+        recordProjectProperties(projectId);
+        String applied = getProjectName(projectId);
+        return applied == null ? "ok: name cleared" : "ok: name set to " + applied;
+    }
+
+    /** @return the name a person reads for the project, or null when it has none */
+    public String getProjectName(String projectId) {
+        ActorRef<Project> projectRef = projects.get(projectId);
+        if (projectRef == null) return null;
+        try {
+            return projectRef.ask(Project::getName).get(5, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not read the name of " + projectId, e);
+            return null;
+        }
+    }
+
+    /**
+     * Writes the project's name and working directory to its own log session as one entry.
+     *
+     * <p>Both values in one entry, because the last entry of the session is the current value: an
+     * entry carrying only the name would read back as a project whose working directory had been
+     * cleared ({@code ProjectProperty_260929_oo01}).</p>
+     */
+    private void recordProjectProperties(String projectId) {
+        if (ioLogStore == null) return;
+        try {
+            long sessionId = ioLogStore.ensureProjectSession(projectId);
+            if (sessionId < 0) return;
+            ActorRef<Project> projectRef = projects.get(projectId);
+            String name = getProjectName(projectId);
+            Path dir = projectRef == null ? null : projectRef.ask(Project::getWorkingDir).get(5, TimeUnit.SECONDS);
+            org.json.JSONObject o = new org.json.JSONObject();
+            o.put("name", name == null ? org.json.JSONObject.NULL : name);
+            o.put("workingDir", dir == null ? org.json.JSONObject.NULL : dir.toString());
+            ioLogStore.record(sessionId, "agent", IoLogView.SETTINGS_LABEL, o.toString());
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not record the properties of " + projectId, e);
+        }
+    }
+
+    /**
+     * Puts a project that came back from the log onto the name and working directory its last
+     * entry names. The working directory goes through {@link #setProjectWorkingDir} rather than
+     * straight onto the actor, so that the directory's instructions are read and handed to the
+     * conversations exactly as they are when a person sets it.
+     */
+    private void restoreProjectProperties(String projectId) {
+        if (ioLogStore == null || ioLogView == null) return;
+        restoringProperties = true;
+        try {
+            long sessionId = ioLogStore.findProjectSession(projectId);
+            if (sessionId < 0) return;
+            String json = ioLogView.latestSettingsJson(sessionId);
+            if (json == null) return;
+            org.json.JSONObject o = new org.json.JSONObject(json);
+            String name = o.isNull("name") ? null : o.getString("name");
+            if (name != null) {
+                ActorRef<Project> projectRef = projects.get(projectId);
+                if (projectRef != null) projectRef.tell(p -> p.setName(name));
+            }
+            String dir = o.isNull("workingDir") ? null : o.getString("workingDir");
+            if (dir != null && !dir.isBlank()) {
+                String outcome = setProjectWorkingDir(projectId, Path.of(dir));
+                if (outcome.startsWith("error:")) {
+                    LOG.warning("Restoring the working directory of " + projectId + ": " + outcome);
+                }
+            }
+            LOG.info("Restored the properties of " + projectId + ": name=" + name + ", workingDir=" + dir);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not restore the properties of " + projectId, e);
+        } finally {
+            restoringProperties = false;
+        }
+    }
+
+    /**
+     * Set while {@link #restoreProjectProperties} runs, so that the {@link #setProjectWorkingDir}
+     * it calls does not write the entry it has just read back. Without it every restart appends one
+     * more entry saying what the previous one already said.
+     */
+    private boolean restoringProperties;
+
     public String setProjectWorkingDir(String projectId, Path workingDir) {
         ActorRef<Project> projectRef = projects.get(projectId);
         if (projectRef == null) return "error: unknown project: " + projectId;
@@ -871,6 +1012,7 @@ public class ChatUiActorSystem {
             if (!entry.getKey().startsWith(prefix)) continue;
             entry.getValue().tell(a -> ((ChatSession) a).setProjectInstructions(instructions));
         }
+        if (!restoringProperties) recordProjectProperties(projectId);
         return outcome;
     }
 
@@ -1250,7 +1392,7 @@ public class ChatUiActorSystem {
      */
     public ActorNode getActorTree() {
         if (actorSystem == null) {
-            return new ActorNode("chat-ui", "IIActorSystem", null, false, List.of());
+            return new ActorNode("chat-ui", "IIActorSystem", null, null, false, List.of());
         }
         RootIIAR root = actorSystem.getRoot();
         return buildActorNode(root.getName(), root);
@@ -1278,6 +1420,8 @@ public class ChatUiActorSystem {
             }
             children.add(buildActorNode(childName, childRef));
         }
-        return new ActorNode(name, type, ActorNotes.noteOf(name), ref.isAlive(), children);
+        // A project is the one actor a person names; every other node has none.
+        String displayName = projects.containsKey(name) ? getProjectName(name) : null;
+        return new ActorNode(name, type, ActorNotes.noteOf(name), displayName, ref.isAlive(), children);
     }
 }

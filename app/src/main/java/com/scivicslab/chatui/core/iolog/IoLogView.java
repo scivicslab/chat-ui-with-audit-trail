@@ -172,6 +172,21 @@ public class IoLogView {
         return latestSettingsOf(allLogs(sessionId));
     }
 
+    /**
+     * The raw JSON of a session's last settings entry, or {@code null} when it has none.
+     *
+     * <p>A project's entry carries its own fields ({@code name}, {@code workingDir}), not a
+     * conversation's, so the caller parses it rather than taking a {@link Settings}
+     * ({@code ProjectProperty_260929_oo01}).</p>
+     */
+    public String latestSettingsJson(long sessionId) {
+        return allLogs(sessionId).stream()
+                .filter(e -> SETTINGS_LABEL.equals(e.getLabel()))
+                .max(Comparator.comparingLong(LogEntry::getId))
+                .map(LogEntry::getMessage)
+                .orElse(null);
+    }
+
     /** One settings record with the time it was written, for the Sessions tab's settings history. */
     public record SettingsRecord(String time, String provider, String tools, String model,
                                 Double temperature) {}
