@@ -9,6 +9,7 @@ import com.scivicslab.chatui.core.rest.ChatEvent;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
@@ -45,6 +46,7 @@ public class ClaudeCodeProvider implements LlmProvider {
     );
 
     private final CliProcess cliProcess;
+    private final SlashCommandHandler commandHandler;
     private final Path sessionFile;
     private final ToolSet toolSet;
     private final Set<String> pendingPermissionIds = Collections.newSetFromMap(new ConcurrentHashMap<>());
@@ -69,6 +71,35 @@ public class ClaudeCodeProvider implements LlmProvider {
         if (toolSet == ToolSet.FULL) config = config.withTools("");
         config = restoreSession(config);
         this.cliProcess = new CliProcess("claude", "ANTHROPIC_API_KEY", config);
+        this.commandHandler = new SlashCommandHandler(cliProcess);
+    }
+
+    /**
+     * @param input the raw text a person typed
+     * @return whether this provider answers it itself rather than sending it to {@code claude}
+     *         ({@code SlashCommandsAndClearButton_260929_oo01})
+     */
+    @Override
+    public boolean isCommand(String input) { return commandHandler.isCommand(input); }
+
+    /**
+     * Carries out one command and returns what the person should see.
+     *
+     * <p>{@code /clear} also deletes the file this provider keeps its session id in. Left there,
+     * the id would be read back the next time a provider is created for this conversation, and the
+     * conversation the command was meant to leave behind would come back.</p>
+     *
+     * @param input the whole line, leading slash included
+     * @return one event per thing to show
+     */
+    @Override
+    public List<ChatEvent> handleCommand(String input) {
+        List<ChatEvent> responses = new ArrayList<>();
+        commandHandler.handle(input, responses::add);
+        if (input.trim().toLowerCase().startsWith("/clear")) {
+            deleteSessionFile();
+        }
+        return responses;
     }
 
     /** @return the conversation's tool set this provider was created for */

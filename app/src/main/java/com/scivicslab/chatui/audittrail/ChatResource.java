@@ -331,6 +331,18 @@ public class ChatResource {
         ActorRef<SseConnection> sseRef = actorSystem.getSseConnection(projectId, chatId);
 
         java.util.function.Consumer<ChatEvent> emitter = event -> sseRef.tell(a -> a.emit(event));
+
+        // A line beginning with a slash is answered here and never reaches the queue
+        // (SlashCommandsAndClearButton_260929_oo01). Queueing it would make "/session" report the
+        // state as it was when the line was typed rather than now, and would put a turn in the
+        // I/O log for something that is not one exchange of the conversation.
+        if (isProviderCommand(chatSessionIIAR, text)) {
+            for (ChatEvent event : runProviderCommand(chatSessionIIAR, text)) {
+                emitter.accept(event);
+            }
+            return Response.ok(Map.of("type", "accepted")).build();
+        }
+
         // What the caller says it is. The screen sends "screen"; a program calling this endpoint
         // usually sends nothing, and is shown as a program rather than as a person
         // (PromptOriginOnScreen_260915_oo01).
@@ -341,6 +353,26 @@ public class ChatResource {
                 noThink, !hold, images));
 
         return Response.ok(Map.of("type", "accepted")).build();
+    }
+
+    /** Whether the conversation's provider answers this line itself. False when it cannot be asked. */
+    private boolean isProviderCommand(ChatSessionIIAR chatSessionIIAR, String text) {
+        try {
+            return chatSessionIIAR.ask(a -> ((ChatSession) a).isCommand(text)).get(5, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOG.log(java.util.logging.Level.WARNING, "Could not ask whether '" + text + "' is a command", e);
+            return false;
+        }
+    }
+
+    /** What the provider says should be shown for this command, or one error event. */
+    private List<ChatEvent> runProviderCommand(ChatSessionIIAR chatSessionIIAR, String text) {
+        try {
+            return chatSessionIIAR.ask(a -> ((ChatSession) a).handleCommand(text)).get(30, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOG.log(java.util.logging.Level.WARNING, "Command '" + text + "' failed", e);
+            return List.of(ChatEvent.error("Command failed: " + e.getMessage()));
+        }
     }
 
     /**
@@ -359,6 +391,34 @@ public class ChatResource {
         actorSystem.createChat(projectId, chatId);
         ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
         return chatSessionIIAR.getHistorySnapshotDirect();
+    }
+
+    /**
+     * Starts this conversation over: the {@code ChatSession} drops the turns it would send as
+     * context, and its I/O-log session is ended so the next turn opens a new one
+     * ({@code SlashCommandsAndClearButton_260929_oo01}).
+     *
+     * <p>Nothing is deleted. The ended session stays in the log with all its turns and is read
+     * from the Sessions tab; only {@code Delete old} there removes one.</p>
+     *
+     * @param projectId owning project's id
+     * @param chatId    conversation id within that project
+     * @return {@code {"type":"cleared"}}
+     */
+    @DELETE
+    @Path("/{projectId}/chats/{chatId}/conversation")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response clearConversation(@PathParam("projectId") String projectId,
+                                      @PathParam("chatId") String chatId) {
+        actorSystem.createChat(projectId, chatId);
+        ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
+        try {
+            chatSessionIIAR.tell(a -> ((ChatSession) a).clearHistory()).get(10, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOG.log(java.util.logging.Level.WARNING, "Could not clear " + projectId + "/" + chatId, e);
+            return Response.status(500).entity(Map.of("type", "error", "message", e.getMessage())).build();
+        }
+        return Response.ok(Map.of("type", "cleared")).build();
     }
 
     /**

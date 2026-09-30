@@ -717,7 +717,11 @@
                 refreshQueue();
                 break;
             case "info":
-                notify(event.content || "");
+                // In the pane, not only in the notification bar: a slash command's answer is what
+                // the person asked for, and /help is seven lines that a bar which fades cannot
+                // hold (SlashCommandsAndClearButton_260929_oo01). quarkus-chat-ui renders info the
+                // same way.
+                appendMessage("info", event.content || "");
                 break;
             case "heartbeat":
                 break;
@@ -1051,6 +1055,57 @@
 
     // ── History hydration ────────────────────────────────────────────────────
 
+    // ── Left-pane header buttons (SlashCommandsAndClearButton_260929_oo01) ────────────────────
+    // Clear starts the conversation over: the pane empties and the ChatSession drops the turns it
+    // would otherwise send as context, which is what someone pressing it wants. Nothing is
+    // deleted -- the I/O-log session ends and stays in the Sessions tab with all its turns.
+    // Save Chat reads the same GET /conversation the pane is drawn from.
+    function clearChatDisplay() {
+        chatArea.textContent = "";
+        streamingEl = null;
+        streamingMarkdown = "";
+        thinkingEl = null;
+        if (promptInput) promptInput.focus();
+        fetch(apiUrl(chatUrl("/conversation")), { method: "DELETE" })
+            .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); })
+            .catch(function (err) { notify("Could not clear the conversation: " + err.message); });
+    }
+
+    function saveChatAsMarkdown() {
+        fetch(apiUrl(chatUrl("/conversation")))
+            .then(function (r) { return r.json(); })
+            .then(function (turns) {
+                // Saying so rather than doing nothing: a button that answers a click with no
+                // change is indistinguishable from one that is not wired up at all, which is how
+                // this one spent its first weeks (SlashCommandsAndClearButton_260929_oo01).
+                if (!turns || turns.length === 0) {
+                    notify("Nothing to save: this conversation has no turns yet.");
+                    return;
+                }
+                var now = new Date();
+                var pad = function (n) { return String(n).padStart(2, "0"); };
+                var stamp = now.getFullYear() + "-" + pad(now.getMonth() + 1) + "-" + pad(now.getDate())
+                    + " " + pad(now.getHours()) + ":" + pad(now.getMinutes());
+                var lines = ["# " + PROJECT_ID + "/chat-" + CHAT_ID + " - " + stamp, ""];
+                turns.forEach(function (t) {
+                    if (t.role === "user") lines.push("## User", "", t.content, "");
+                    else if (t.role === "assistant") lines.push("## Assistant", "", t.content, "");
+                    else lines.push("> [" + t.role + "] " + t.content, "");
+                });
+                var url = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/markdown" }));
+                var a = document.createElement("a");
+                a.href = url;
+                a.download = "conversation-" + PROJECT_ID + "-chat" + CHAT_ID + "-"
+                    + now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate())
+                    + pad(now.getHours()) + pad(now.getMinutes()) + ".md";
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            })
+            .catch(function () { /* nothing to save when the conversation cannot be read */ });
+    }
+
     function hydrateConversation() {
         fetch(apiUrl(chatUrl("/conversation")))
             .then(function (r) { return r.json(); })
@@ -1210,6 +1265,11 @@
         imageFileInput = el("image-file-input");
         imageAttachments = el("image-attachments");
         inputResizeHandle = el("input-resize-handle");
+
+        var clearChatBtn = el("clear-chat-btn");
+        if (clearChatBtn) clearChatBtn.addEventListener("click", clearChatDisplay);
+        var saveChatBtn = el("save-chat-btn");
+        if (saveChatBtn) saveChatBtn.addEventListener("click", saveChatAsMarkdown);
 
         if (sendBtn) sendBtn.addEventListener("click", sendPrompt);
         if (promptInput) {
