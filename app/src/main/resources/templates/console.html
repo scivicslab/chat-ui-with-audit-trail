@@ -317,25 +317,34 @@
                         <span id="projectprop-status"></span>
                     </div>
                     <div class="projectprop-form">
-                        <label class="projectprop-row">
-                            <span class="projectprop-label">Name</span>
-                            <input type="text" id="projectprop-name" placeholder="What this project is for">
-                            <button id="projectprop-name-save" type="button">Save</button>
-                        </label>
-                        <label class="projectprop-row">
-                            <span class="projectprop-label">Working directory</span>
-                            <input type="text" id="projectprop-dir" placeholder="/home/devteam/works/...">
-                            <button id="projectprop-dir-save" type="button">Save</button>
-                        </label>
-                        <div id="projectprop-dir-outcome" class="projectprop-outcome"></div>
-                        <div class="projectprop-row">
-                            <span class="projectprop-label">Conversations</span>
-                            <button id="projectprop-add-chat" type="button">+ New Chat</button>
+                        <div class="projectprop-field">
+                            <label class="projectprop-label" for="projectprop-name">Name</label>
+                            <div class="projectprop-control">
+                                <input type="text" id="projectprop-name" placeholder="What this project is for">
+                                <button id="projectprop-name-save" type="button">Save</button>
+                            </div>
+                            <div class="projectprop-desc">Shown beside the project in the Actors tree.</div>
                         </div>
-                        <div id="projectprop-hint" class="project-placeholder">
-                            The name appears beside the project in the Actors tree. The working directory
-                            is where a CLI harness runs, and its AGENTS.md or CLAUDE.md becomes every
-                            conversation's instructions.
+                        <div class="projectprop-field">
+                            <label class="projectprop-label" for="projectprop-dir">Working directory</label>
+                            <div class="projectprop-control">
+                                <input type="text" id="projectprop-dir" placeholder="/home/devteam/works/...">
+                                <button id="projectprop-dir-save" type="button">Save</button>
+                            </div>
+                            <div class="projectprop-desc">
+                                Where a CLI harness runs. Its AGENTS.md, or CLAUDE.md when there is no
+                                AGENTS.md, becomes every conversation's instructions.
+                            </div>
+                            <div id="projectprop-dir-outcome" class="projectprop-outcome"></div>
+                        </div>
+                        <div class="projectprop-field">
+                            <span class="projectprop-label">Conversations</span>
+                            <div class="projectprop-control">
+                                <button id="projectprop-add-chat" type="button">+ New Chat</button>
+                            </div>
+                            <div class="projectprop-desc">
+                                Adds one to this project. Its id is the next free two-digit number.
+                            </div>
                         </div>
                     </div>
                 </section>
