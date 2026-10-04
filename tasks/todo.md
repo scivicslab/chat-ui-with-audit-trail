@@ -37,3 +37,36 @@
 - `turing-workflow` 4.1.0 では値の読み出しは `jexl:state.getString('key')`
 
 次（別タスク）: 具体的応用。文章をブラッシュアップさせるワークフロー、文献を調査して詳細なレポートを作り上げるワークフロー。
+
+---
+
+# 右ペインに Actions タブ（chat と project の両パースペクティブ）
+
+## 経緯
+quarkus-chat-ui の Workflow タブと Actions タブを移す話から始まり、Workflow タブは要らないと決めた。
+quarkus-chat-ui では workflow の実行器（harness）が会話の provider に直接ターンを送るので workflow は
+会話の 1 ターンの代わりになり、プロンプトキューの項目として並ぶ意味があった。CUAT では workflow は別の actor
+（`PlanRunner`、project の `job-NN` か会話の `.plan`）が実行し、会話には `sendPrompt` でプロンプトを入れる側
+なので、キューの項目にはならない。実行の入口は project パースペクティブの Run が既にある。
+
+## やったこと
+- [x] 親 pom: turing-workflow 4.3.0-SNAPSHOT。各モジュールの pom が 4.2.0 を直書きしていたのを親のプロパティに
+- [x] app/pom.xml: doclet 実行（`META-INF/turing-plugin/<groupId>.<artifactId>.json` と services の索引）。
+      JSON Schema 生成器に module のパスを渡す（4 モジュール化以来 reactor root の空の target/classes を見て
+      schema を 1 つも書いていなかった）
+- [x] `PlanRunnerIIAR` の 26 step と `PlanWorkerIIAR.ask` を `@Action` メソッドに。Javadoc は第一文・本文・
+      同梱 YAML から取った `<pre>` の step・`@param args` の位置
+- [x] `ChatUiActorSystem.actorClassOf`（`this` → `PlanRunnerIIAR`、会話の修飾名 → その `ChatSessionIIAR`、
+      それ以外は生きている actor のクラス）と `workflowActorNames`
+- [x] `ActionsResource`: `GET /api/actions`、`/api/actions/list?actor=`、`/api/actions/describe?actor=&action=`
+      （actor 名に `/` が入るのでクエリ）
+- [x] console.html / console.js / console.css: Actions タブ。ボタンは perspective ごとに 1 つずつ、section は
+      perspective 無しで両方に出る。Show・Clear・一覧に第一文・1 件表示に引数・本文・YAML
+- [x] `ActionDescriptionTest`（4 件）。259 テスト緑。使い捨てポート 28042 で両パースペクティブをヘッドレス確認
+
+## Review
+- `this` は 43 action（plan の 26 と engine の 17）が全部説明付き。`project1/chat-01` は 46 action のうち
+  27 に説明がある: `ChatSessionIIAR` の 29 のうち Javadoc に第一文が無いものは名前と組み立てた step だけ出る。
+  書くなら `ChatSessionIIAR` の Javadoc を書けば次のビルドで出る。
+- actor の候補は `this` と actor 木の全名（19 件、`promptBuilder` などの内部 actor も含む）。
+- 稼働中の 28014・28030・28031 と `~/works` のリンクは触っていない。

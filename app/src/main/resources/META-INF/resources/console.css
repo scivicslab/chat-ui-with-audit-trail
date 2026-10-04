@@ -762,3 +762,17 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
     font-size: 11px; color: var(--text-secondary, #9aa0a6); margin-top: 4px;
     font-family: var(--font-mono, monospace); word-break: break-all;
 }
+
+/* ── Actions tab: one actor's actions and the description of the chosen one ─────────────── */
+.act-list { flex: 1; overflow: auto; margin-top: 6px; font-size: 0.9em; }
+.act-list:empty { display: none; }
+.act-item { padding: 4px 0; border-bottom: 1px dotted var(--border-color, #2c2c2c); }
+.act-item:last-child { border-bottom: none; }
+.act-head { color: var(--accent-blue, #a5b4fc); font-weight: 600; background: none; border: none; padding: 0; cursor: pointer; font: inherit; }
+.act-desc { color: var(--text-primary, #e6e6e6); margin: 2px 0 0 0; }
+.act-details { color: var(--text-secondary, #8a8a8a); margin: 2px 0 0 0; white-space: pre-line; }
+.act-fields { margin: 2px 0 0 12px; padding: 0; list-style: none; color: var(--text-secondary, #8a8a8a); }
+.act-fields code { color: var(--text-primary, #e6e6e6); }
+.act-example-label { color: var(--text-secondary, #8a8a8a); margin: 6px 0 0 0; font-size: 0.9em; }
+.act-example { margin: 2px 0 0 0; padding: 6px 8px; background: var(--bg-tertiary, #1e1e2e); color: var(--text-primary, #e6e6e6); border-radius: 4px; overflow: auto; font-size: 0.9em; }
+.act-problem { color: var(--accent-red, #f38ba8); margin: 2px 0 0 0; }

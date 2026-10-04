@@ -1,5 +1,6 @@
 package com.scivicslab.chatui.core.actor;
 
+import com.scivicslab.pojoactor.action.Action;
 import com.scivicslab.pojoactor.action.ActionResult;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 import com.scivicslab.turingworkflow.workflow.InterpreterIIAR;
@@ -7,6 +8,14 @@ import com.scivicslab.turingworkflow.workflow.InterpreterIIAR;
 /**
  * {@code IIActorRef} adapter that lets a plan's workflow call its own {@link PlanRunner} by
  * {@code actor: this} — the same bridge {@link ChatSessionIIAR} provides for a conversation.
+ *
+ * <p>Each plan step is one {@code @Action} method whose Javadoc the build writes into the action
+ * manifest, so the Actions tab can show what the step does, what its arguments are and how a
+ * workflow writes it ({@code ActionCatalogWithJavadoc_260930_oo01}). Every step takes its arguments
+ * as a JSON array, in the order the {@code @param args} line gives; the bundled workflows write
+ * them as {@code arguments: ["first", "second"]}. A {@code jexl:} text reaches the step as the value
+ * the expression answers. The engine's own steps — {@code putJson}, {@code appendJson},
+ * {@code onlyIf}, {@code call}, ... — come from {@link InterpreterIIAR} and are listed with these.</p>
  */
 public class PlanRunnerIIAR extends InterpreterIIAR {
 
@@ -19,114 +28,529 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
 
     private PlanRunner runner() { return (PlanRunner) object; }
 
-    @Override
-    public ActionResult callByActionName(String actionName, String arg) {
-        if (actionName.equals("askChat")) {
-            org.json.JSONArray a = arguments(arg);
-            String target = a.length() > 0 ? a.getString(0) : "";
-            String prompt = a.length() > 1 ? a.getString(1) : "";
-            return runner().askChat(target, prompt);
-        } else if (actionName.equals("addWorker")) {
-            org.json.JSONArray a = arguments(arg);
-            return runner().addWorker(a.length() > 0 ? a.getString(0) : "",
-                    a.length() > 1 ? a.getString(1) : "");
-        } else if (actionName.equals("askWorker")) {
-            org.json.JSONArray a = arguments(arg);
-            return runner().askWorker(a.length() > 0 ? a.getString(0) : "",
-                    a.length() > 1 ? a.getString(1) : "");
-        } else if (actionName.equals("setChatModel")) {
-            org.json.JSONArray a = arguments(arg);
-            return runner().setChatModel(a.length() > 0 ? a.getString(0) : "",
-                    a.length() > 1 ? a.getString(1) : "");
-        } else if (actionName.equals("setChatNoThink")) {
-            org.json.JSONArray a = arguments(arg);
-            return runner().setChatNoThink(a.length() > 0 ? a.getString(0) : "",
-                    a.length() > 1 ? a.getString(1) : "");
-        } else if (actionName.equals("setChatEffort")) {
-            org.json.JSONArray a = arguments(arg);
-            return runner().setChatEffort(a.length() > 0 ? a.getString(0) : "",
-                    a.length() > 1 ? a.getString(1) : "");
-        } else if (actionName.equals("setChatProvider")) {
-            org.json.JSONArray a = arguments(arg);
-            return runner().setChatProvider(a.length() > 0 ? a.getString(0) : "",
-                    a.length() > 1 ? a.getString(1) : "",
-                    a.length() > 2 ? a.getString(2) : "");
-        } else if (actionName.equals("joinLines")) {
-            org.json.JSONArray a = arguments(arg);
-            return runner().joinLines(a.length() > 0 ? a.getString(0) : "",
-                    a.length() > 1 ? a.getString(1) : "");
-        } else if (actionName.equals("stopChat")) {
-            org.json.JSONArray a = arguments(arg);
-            return runner().stopChat(a.length() > 0 ? a.getString(0) : "");
-        } else if (actionName.equals("sameAsLast")) {
-            org.json.JSONArray a = arguments(arg);
-            return runner().sameAsLast(a.length() > 0 ? a.getString(0) : "",
-                    a.length() > 1 ? a.getString(1) : "");
-        } else if (actionName.equals("compareTexts")) {
-            org.json.JSONArray a = arguments(arg);
-            return runner().compareTexts(a.length() > 0 ? a.getString(0) : "",
-                    a.length() > 1 ? a.getString(1) : "",
-                    a.length() > 2 ? a.getString(2) : "");
-        } else if (actionName.equals("takeFrontMatter")) {
-            org.json.JSONArray a = arguments(arg);
-            return runner().takeFrontMatter(a.length() > 0 ? a.getString(0) : "",
-                    a.length() > 1 ? a.getString(1) : "",
-                    a.length() > 2 ? a.getString(2) : "");
-        } else if (actionName.equals("joinFrontMatter")) {
-            org.json.JSONArray a = arguments(arg);
-            return runner().joinFrontMatter(a.length() > 0 ? a.getString(0) : "",
-                    a.length() > 1 ? a.getString(1) : "",
-                    a.length() > 2 ? a.getString(2) : "");
-        } else if (actionName.equals("endConversation")) {
-            org.json.JSONArray a = arguments(arg);
-            return runner().endConversation(a.length() > 0 ? a.getString(0) : "");
-        } else if (actionName.equals("clearWorker")) {
-            org.json.JSONArray a = arguments(arg);
-            return runner().clearWorker(a.length() > 0 ? a.getString(0) : "");
-        } else if (actionName.equals("keepWorkerReply")) {
-            org.json.JSONArray a = arguments(arg);
-            return runner().keepWorkerReply(a.length() > 0 ? a.getString(0) : "",
-                    a.length() > 1 ? a.getString(1) : "");
-        } else if (actionName.equals("readFile")) {
-            org.json.JSONArray a = arguments(arg);
-            return runner().readFile(a.length() > 0 ? a.getString(0) : "",
-                    a.length() > 1 ? a.getString(1) : "");
-        } else if (actionName.equals("writeFile")) {
-            org.json.JSONArray a = arguments(arg);
-            return runner().writeFile(a.length() > 0 ? a.getString(0) : "",
-                    a.length() > 1 ? a.getString(1) : "");
-        } else if (actionName.equals("listFiles")) {
-            org.json.JSONArray a = arguments(arg);
-            return runner().listFiles(a.length() > 0 ? a.getString(0) : "",
-                    a.length() > 1 ? a.getString(1) : "",
-                    a.length() > 2 ? a.getString(2) : "",
-                    a.length() > 3 ? a.getString(3) : null);
-        } else if (actionName.equals("takeNext")) {
-            org.json.JSONArray a = arguments(arg);
-            return runner().takeNext(a.length() > 0 ? a.getString(0) : "",
-                    a.length() > 1 ? a.getString(1) : "");
-        } else if (actionName.equals("copyState")) {
-            org.json.JSONArray a = arguments(arg);
-            return runner().copyState(a.length() > 0 ? a.getString(0) : "",
-                    a.length() > 1 ? a.getString(1) : "");
-        } else if (actionName.equals("checkState")) {
-            org.json.JSONArray a = arguments(arg);
-            return runner().checkState(a.length() > 0 ? a.getString(0) : "",
-                    a.length() > 1 ? a.getString(1) : "");
-        } else if (actionName.equals("countUp")) {
-            org.json.JSONArray a = arguments(arg);
-            return runner().countUp(a.length() > 0 ? a.getString(0) : "",
-                    a.length() > 1 ? a.getString(1) : "");
-        } else if (actionName.equals("collectWorkerReplies")) {
-            return runner().collectWorkerReplies();
-        } else if (actionName.equals("finish")) {
-            org.json.JSONArray a = arguments(arg);
-            return runner().finish(a.length() > 0 ? a.getString(0) : null);
-        } else if (actionName.equals("reportFailure")) {
-            return runner().reportFailure();
-        }
-        // reset / readYaml / runUntilEnd / requestStop etc. come from InterpreterIIAR itself.
-        return super.callByActionName(actionName, arg);
+    /**
+     * Sends a prompt to a conversation and waits for its reply; the message is the reply.
+     *
+     * <p>The target is a qualified conversation name, since a plan is written knowing which
+     * conversations it drives. Fails when the conversation did not reply. For several
+     * conversations at once, give each a worker slot with {@code addWorker} and drive them with
+     * {@code apply}.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: askChat
+     *   arguments: ["project1/chat-02", "Summarize the file you were given."]
+     * }</pre>
+     *
+     * @param args {@code [target, prompt]}: the conversation's qualified name, then what to ask it
+     */
+    @Action("askChat")
+    public ActionResult askChat(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().askChat(at(a, 0), at(a, 1));
+    }
+
+    /**
+     * Gives this plan a worker slot standing in for one conversation; the message names the slot.
+     *
+     * <p>The slot is this plan's child {@code <plan>.worker-<id>}, so several slots can be driven
+     * at once with {@code apply} and the pattern {@code *.worker-*}, and one slot can be asked with
+     * {@code askWorker}. Fails when the slot could not be created.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: addWorker
+     *   arguments: ["a", "project1/chat-02"]
+     * }</pre>
+     *
+     * @param args {@code [workerId, chatName]}: a short id for the slot, then the conversation it
+     *             forwards to
+     */
+    @Action("addWorker")
+    public ActionResult addWorker(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().addWorker(at(a, 0), at(a, 1));
+    }
+
+    /**
+     * Hands a prompt to one worker slot and waits for its reply; the message is the reply.
+     *
+     * <p>The slot is one {@code addWorker} made. The prompt is a top-level argument, so a
+     * {@code jexl:} expression that builds it from the plan's state is evaluated — inside an
+     * {@code apply} it would not be. Fails when the slot does not exist or did not reply.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: askWorker
+     *   arguments: ["judge", 'jexl:"Does this text follow the rule?\n\n" + state.getString("text")']
+     * }</pre>
+     *
+     * @param args {@code [workerId, prompt]}: the slot's id, then what to ask the conversation behind it
+     */
+    @Action("askWorker")
+    public ActionResult askWorker(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().askWorker(at(a, 0), at(a, 1));
+    }
+
+    /**
+     * Puts one conversation on a named model.
+     *
+     * <p>The change is written to that conversation's settings record as any other would be. A
+     * blank model leaves the conversation as it was. Fails when there is no such conversation.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: setChatModel
+     *   arguments: ['jexl:state.getString("fixer")', 'jexl:state.getString("fixerModel")']
+     * }</pre>
+     *
+     * @param args {@code [chatName, model]}: the conversation's qualified name, then the model
+     */
+    @Action("setChatModel")
+    public ActionResult setChatModel(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().setChatModel(at(a, 0), at(a, 1));
+    }
+
+    /**
+     * Says whether one conversation asks its model to skip the thinking phase.
+     *
+     * <p>A blank value leaves the conversation as it was. Fails when there is no such conversation.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: setChatNoThink
+     *   arguments: ["project1/chat-02", "true"]
+     * }</pre>
+     *
+     * @param args {@code [chatName, value]}: the conversation's qualified name, then {@code true} or {@code false}
+     */
+    @Action("setChatNoThink")
+    public ActionResult setChatNoThink(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().setChatNoThink(at(a, 0), at(a, 1));
+    }
+
+    /**
+     * Says how hard one conversation's provider should work on an answer, where it has such a setting.
+     *
+     * <p>A blank effort leaves the conversation as it was. Fails when there is no such conversation.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: setChatEffort
+     *   arguments: ["project1/chat-02", "high"]
+     * }</pre>
+     *
+     * @param args {@code [chatName, effort]}: the conversation's qualified name, then the level as
+     *             its provider names it
+     */
+    @Action("setChatEffort")
+    public ActionResult setChatEffort(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().setChatEffort(at(a, 0), at(a, 1));
+    }
+
+    /**
+     * Puts one conversation on a named provider kind, with a tool set.
+     *
+     * <p>A blank kind leaves the conversation as it was; a blank tool set gives the kind's own
+     * default. Fails when the change could not be made, for example when no plugin provides the kind.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: setChatProvider
+     *   arguments: ["project1/chat-02", "claude", ""]
+     * }</pre>
+     *
+     * @param args {@code [chatName, kind, tools]}: the conversation's qualified name, then
+     *             {@code openai-compat}, {@code claude} or {@code codex}, then the tool set
+     */
+    @Action("setChatProvider")
+    public ActionResult setChatProvider(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().setChatProvider(at(a, 0), at(a, 1), at(a, 2));
+    }
+
+    /**
+     * Writes a list the plan built up as one line each, for a person to read.
+     *
+     * <p>The list is one {@code appendJson} filled. An empty list is written as なし, so a heading
+     * never stands over nothing.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: joinLines
+     *   arguments: ["done", "doneText"]
+     * }</pre>
+     *
+     * @param args {@code [listKey, intoKey]}: where the list is in this plan's state, then where to
+     *             put the lines
+     */
+    @Action("joinLines")
+    public ActionResult joinLines(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().joinLines(at(a, 0), at(a, 1));
+    }
+
+    /**
+     * Stops whatever a conversation is in the middle of — the same thing the Cancel button does.
+     *
+     * <p>Fails when there is no such conversation.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: stopChat
+     *   arguments: ['jexl:state.getString("judge")']
+     * }</pre>
+     *
+     * @param args {@code [chatName]}: the conversation's qualified name
+     */
+    @Action("stopChat")
+    public ActionResult stopChat(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().stopChat(at(a, 0));
+    }
+
+    /**
+     * Succeeds when this verdict says the same as the one before it.
+     *
+     * <p>When a judge answers with the same words twice, another round will not change them; the
+     * success lets the workflow take the "they do not agree" path. Whitespace and markdown emphasis
+     * are ignored. Keep one memo key per criterion.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: sameAsLast
+     *   arguments: ["verdict", "last-verdict-1"]
+     * }</pre>
+     *
+     * @param args {@code [key, memoKey]}: where the verdict is, then where to keep it for the next round
+     */
+    @Action("sameAsLast")
+    public ActionResult sameAsLast(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().sameAsLast(at(a, 0), at(a, 1));
+    }
+
+    /**
+     * Says what a rewrite changed that it had no business changing; the verdict is stored.
+     *
+     * <p>Compares the fenced blocks, the backquoted spans, the proper names and the numbers of two
+     * texts, and writes {@code ACCEPT}, or {@code REVISE:} followed by what went missing or appeared,
+     * in the shape a judge's verdict has. Fails only when a text was not there.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: compareTexts
+     *   arguments: ["original", "text", "verdict"]
+     * }</pre>
+     *
+     * @param args {@code [beforeKey, afterKey, intoKey]}: the text as it arrived, the text as it
+     *             stands, then where to put the verdict
+     */
+    @Action("compareTexts")
+    public ActionResult compareTexts(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().compareTexts(at(a, 0), at(a, 1), at(a, 2));
+    }
+
+    /**
+     * Takes a document's front matter off, so that what is worked on is the text alone.
+     *
+     * <p>{@code joinFrontMatter} puts it back. The body key may be the text key, to work in place.
+     * Fails when there was no text to split.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: takeFrontMatter
+     *   arguments: ["text", "head", "text"]
+     * }</pre>
+     *
+     * @param args {@code [textKey, headKey, bodyKey]}: where the whole document is, where to put
+     *             the front matter, then where to put the rest
+     */
+    @Action("takeFrontMatter")
+    public ActionResult takeFrontMatter(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().takeFrontMatter(at(a, 0), at(a, 1), at(a, 2));
+    }
+
+    /**
+     * Puts back what {@code takeFrontMatter} took off.
+     *
+     * <p>An empty head adds nothing. Fails when there was no text to write.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: joinFrontMatter
+     *   arguments: ["head", "text", "whole"]
+     * }</pre>
+     *
+     * @param args {@code [headKey, bodyKey, intoKey]}: where the front matter was put, where the
+     *             text is, then where to put the two together
+     */
+    @Action("joinFrontMatter")
+    public ActionResult joinFrontMatter(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().joinFrontMatter(at(a, 0), at(a, 1), at(a, 2));
+    }
+
+    /**
+     * Ends one conversation: its recorded session and the history it is holding.
+     *
+     * <p>Every line it wrote stays in the I/O log; the session is closed, so the conversation is not
+     * reopened at the next restart. Fails when there is no such conversation.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: endConversation
+     *   arguments: ['jexl:state.getString("name")']
+     * }</pre>
+     *
+     * @param args {@code [chatName]}: the conversation's qualified name
+     */
+    @Action("endConversation")
+    public ActionResult endConversation(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().endConversation(at(a, 0));
+    }
+
+    /**
+     * Empties the conversation behind one worker slot, so the next prompt starts from nothing.
+     *
+     * <p>Between self-contained prompts the history adds nothing and costs context. Fails when the
+     * slot's conversation was not found.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: clearWorker
+     *   arguments: ["fixer"]
+     * }</pre>
+     *
+     * @param args {@code [workerId]}: the slot's id, as {@code addWorker} was given it
+     */
+    @Action("clearWorker")
+    public ActionResult clearWorker(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().clearWorker(at(a, 0));
+    }
+
+    /**
+     * Puts what one worker slot last replied into this plan's state.
+     *
+     * <p>The middle of a chain: one role's answer, kept under a key, becomes the next role's input.
+     * {@code collectWorkerReplies} is the end of a fan-out and gathers every slot at once. Fails when
+     * the slot does not exist or has not replied.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: keepWorkerReply
+     *   arguments: ["judge", "verdict"]
+     * }</pre>
+     *
+     * @param args {@code [workerId, key]}: the slot's id, then where to put the reply
+     */
+    @Action("keepWorkerReply")
+    public ActionResult keepWorkerReply(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().keepWorkerReply(at(a, 0), at(a, 1));
+    }
+
+    /**
+     * Reads a file into this plan's state, so the work that follows needs no person to paste it in.
+     *
+     * <p>The path must be within the instance's read roots. Fails when the file could not be read.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: readFile
+     *   arguments: ["/home/devteam/works/notes/rule-1.md", "rule-1"]
+     * }</pre>
+     *
+     * @param args {@code [path, key]}: where to read from, then where to put the text
+     */
+    @Action("readFile")
+    public ActionResult readFile(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().readFile(at(a, 0), at(a, 1));
+    }
+
+    /**
+     * Writes what the plan kept under a key to a file, creating the directories above it.
+     *
+     * <p>The path must be under the instance's write root. Fails when the file could not be written.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: writeFile
+     *   arguments: ['jexl:state.getString("orig")', "original"]
+     * }</pre>
+     *
+     * @param args {@code [path, key]}: where to write, then which value of this plan's state to write
+     */
+    @Action("writeFile")
+    public ActionResult writeFile(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().writeFile(at(a, 0), at(a, 1));
+    }
+
+    /**
+     * Puts the files of one directory into this plan's state, one path per line.
+     *
+     * <p>{@code takeNext} then works through them. Fails when no file matched.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: listFiles
+     *   arguments: ['jexl:state.getString("dir")', ".md", "files", "3"]
+     * }</pre>
+     *
+     * @param args {@code [dir, suffix, key, depth]}: the directory, what a name must end with (every
+     *             file when blank), where to put the list, then how many levels to walk (this
+     *             directory alone when absent)
+     */
+    @Action("listFiles")
+    public ActionResult listFiles(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().listFiles(at(a, 0), at(a, 1), at(a, 2), a.length() > 3 ? a.getString(3) : null);
+    }
+
+    /**
+     * Moves the first line of a list into a key and shortens the list; fails when the list is empty.
+     *
+     * <p>The failure is what ends a loop over files: the transition falls through when nothing is left.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: takeNext
+     *   arguments: ["files", "file"]
+     * }</pre>
+     *
+     * @param args {@code [listKey, key]}: where the remaining lines are, then where to put the line taken
+     */
+    @Action("takeNext")
+    public ActionResult takeNext(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().takeNext(at(a, 0), at(a, 1));
+    }
+
+    /**
+     * Copies one value of this plan's state to another key.
+     *
+     * <p>Keeps a text as it arrived before a role rewrites it, so a judge can be given both. Fails
+     * when there was nothing to copy.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: copyState
+     *   arguments: ["text", "original"]
+     * }</pre>
+     *
+     * @param args {@code [from, to]}: which value to copy, then where to put the copy
+     */
+    @Action("copyState")
+    public ActionResult copyState(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().copyState(at(a, 0), at(a, 1));
+    }
+
+    /**
+     * Succeeds when the value under a key begins with the expected text, compared without case or
+     * surrounding space.
+     *
+     * <p>Turns a verdict kept in the state into a transition: {@code ACCEPT} takes this transition
+     * and anything else falls through to the one written after it.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: checkState
+     *   arguments: ["verdict", "ACCEPT"]
+     * }</pre>
+     *
+     * @param args {@code [key, expected]}: where the value is, then what it must begin with
+     */
+    @Action("checkState")
+    public ActionResult checkState(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().checkState(at(a, 0), at(a, 1));
+    }
+
+    /**
+     * Counts one attempt at a key and succeeds while the budget holds.
+     *
+     * <p>Each criterion can have its own key, so one loop does not spend another's budget. Fails on
+     * the attempt past the limit.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: countUp
+     *   arguments: ["tries-1", 'jexl:state.getString("tries")']
+     * }</pre>
+     *
+     * @param args {@code [key, limit]}: where the count is kept, then how many attempts are allowed
+     */
+    @Action("countUp")
+    public ActionResult countUp(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().countUp(at(a, 0), at(a, 1));
+    }
+
+    /**
+     * Gathers what every worker slot replied into this plan's result, in slot-name order.
+     *
+     * <p>The end of a fan-out over {@code apply}. Fails when no slot had a reply.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: collectWorkerReplies
+     * }</pre>
+     *
+     * @param args ignored
+     */
+    @Action("collectWorkerReplies")
+    public ActionResult collectWorkerReplies(String args) {
+        return runner().collectWorkerReplies();
+    }
+
+    /**
+     * Terminal step: hands the plan's product back to whoever is waiting on it.
+     *
+     * <p>With a key, the product is what this plan's state holds there; without one, the last reply
+     * a step received. Put it on the transition into {@code end}.</p>
+     *
+     * <pre>{@code
+     * - actor: this
+     *   method: finish
+     *   arguments: ["text"]
+     * }</pre>
+     *
+     * @param args {@code [key]}: where the result is in this plan's state; empty for the last reply
+     */
+    @Action("finish")
+    public ActionResult finish(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().finish(a.length() > 0 ? a.getString(0) : null);
+    }
+
+    /**
+     * Fallback step: tells whoever is waiting that the plan failed, instead of leaving them to time out.
+     *
+     * <p>Put it on the transition a failed {@code askChat} or {@code askWorker} falls through to.</p>
+     *
+     * <pre>{@code
+     * - states: ["ask", "end"]
+     *   actions:
+     *     - actor: this
+     *       method: reportFailure
+     * }</pre>
+     *
+     * @param args ignored
+     */
+    @Action("reportFailure")
+    public ActionResult reportFailure(String args) {
+        return runner().reportFailure();
     }
 
     /** An action's {@code arguments} as a JSON array, empty if it has none. */
@@ -137,5 +561,10 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
         } catch (Exception e) {
             return new org.json.JSONArray();
         }
+    }
+
+    /** The {@code i}th element as text, or "" when the array is shorter. */
+    private static String at(org.json.JSONArray a, int i) {
+        return a.length() > i ? a.getString(i) : "";
     }
 }

@@ -44,13 +44,13 @@
     <dependency>
       <groupId>com.scivicslab</groupId>
       <artifactId>pojo-actor</artifactId>
-      <version>4.2.0</version>
+      <version>${pojo-actor.version}</version>
     </dependency>
     <!-- Turing Workflow: provides IIActorSystem and its auto-created RootIIAR root actor -->
     <dependency>
       <groupId>com.scivicslab</groupId>
       <artifactId>turing-workflow</artifactId>
-      <version>4.2.0</version>
+      <version>${turing-workflow.version}</version>
     </dependency>
 
     <!-- turing-workflow:3.7.0's own published pom omits this, even though Interpreter (which
@@ -148,7 +148,7 @@
           <dependency>
             <groupId>com.scivicslab</groupId>
             <artifactId>turing-workflow</artifactId>
-            <version>4.2.0</version>
+            <version>${turing-workflow.version}</version>
           </dependency>
           <dependency>
             <groupId>com.github.victools</groupId>
@@ -164,6 +164,50 @@
             <configuration>
               <includePluginDependencies>true</includePluginDependencies>
               <mainClass>com.scivicslab.pojoactor.action.schema.ActionSchemaGenerator</mainClass>
+              <!-- Absolute paths: in a multi-module build the working directory is the reactor root,
+                   and without them the generator scanned an empty target/classes there and wrote
+                   no schema at all. -->
+              <arguments>
+                <argument>${project.build.outputDirectory}</argument>
+                <argument>${project.build.outputDirectory}/action-schemas</argument>
+              </arguments>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- This module's action manifest: each @Action method's Javadoc (first sentence, body, <pre> example,
+           @param prose), read back by ActionManifest and shown in the Actions tab
+           (ActionCatalogWithJavadoc_260930_oo01). The resource is named after the module and indexed in a
+           services file, because the uber-jar keeps only one entry per name. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-javadoc-plugin</artifactId>
+        <version>3.6.3</version>
+        <executions>
+          <execution>
+            <id>generate-plugin-manifest</id>
+            <goals><goal>javadoc</goal></goals>
+            <!-- Before the test phase, so tests see the manifest on the classpath as the app does. -->
+            <phase>process-classes</phase>
+            <configuration>
+              <outputDirectory>${project.build.directory}/plugin-manifest-javadoc</outputDirectory>
+              <reportOutputDirectory>${project.build.directory}/plugin-manifest-javadoc</reportOutputDirectory>
+              <doclet>com.scivicslab.pojoactor.doclet.TuringPluginDoclet</doclet>
+              <docletArtifact>
+                <groupId>com.scivicslab</groupId>
+                <artifactId>turing-workflow</artifactId>
+                <version>${turing-workflow.version}</version>
+              </docletArtifact>
+              <useStandardDocletOptions>false</useStandardDocletOptions>
+              <additionalOptions>
+                <additionalOption>-turingClassesDir</additionalOption>
+                <additionalOption>${project.build.outputDirectory}</additionalOption>
+                <additionalOption>-turingManifestResource</additionalOption>
+                <additionalOption>META-INF/turing-plugin/${project.groupId}.${project.artifactId}.json</additionalOption>
+              </additionalOptions>
+              <doclint>none</doclint>
+              <failOnError>false</failOnError>
             </configuration>
           </execution>
         </executions>

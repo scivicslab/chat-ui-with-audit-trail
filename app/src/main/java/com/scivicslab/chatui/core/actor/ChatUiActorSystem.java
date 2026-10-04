@@ -1390,6 +1390,51 @@ public class ChatUiActorSystem {
      *
      * @return the root {@link ActorNode}
      */
+    /**
+     * The class whose {@code @Action} methods a workflow calls under this actor name, or null when
+     * nothing answers to it. {@code this} is the plan's own runner, since a plan is what a person
+     * writes against the Actions tab; a live actor is looked up as the interpreter would look it up.
+     *
+     * @param name the actor name as a workflow writes it
+     */
+    public Class<?> actorClassOf(String name) {
+        if (name == null || name.isBlank() || actorSystem == null) return null;
+        if (name.equals("this")) return PlanRunnerIIAR.class;
+        // A conversation is named by its qualified name, which the registry holds a ConversationSquad
+        // under; the actions a workflow calls on it are its ChatSessionIIAR's.
+        ChatSessionIIAR chat = chatSessions.get(name);
+        if (chat != null) return chat.getClass();
+        IIActorRef<?> ii = actorSystem.getIIActor(name);
+        if (ii != null) return ii.getClass();
+        ActorRef<?> ref = actorSystem.getActor(name);
+        if (ref == null) return null;
+        // A plain actor carries its actions on the object it holds, not on the reference.
+        try {
+            @SuppressWarnings("unchecked")
+            ActorRef<Object> r = (ActorRef<Object>) ref;
+            return r.askNow(o -> (Class<?>) o.getClass()).get(2, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * The actor names a workflow may write: {@code this}, then every live actor's qualified name,
+     * in the order the actor tree lists them.
+     */
+    public List<String> workflowActorNames() {
+        List<String> names = new ArrayList<>();
+        names.add("this");
+        collectNames(getActorTree(), names);
+        return names;
+    }
+
+    private static void collectNames(ActorNode node, List<String> into) {
+        if (node == null) return;
+        if (node.name() != null && !node.name().isBlank() && !into.contains(node.name())) into.add(node.name());
+        for (ActorNode child : node.children()) collectNames(child, into);
+    }
+
     public ActorNode getActorTree() {
         if (actorSystem == null) {
             return new ActorNode("chat-ui", "IIActorSystem", null, null, false, List.of());
