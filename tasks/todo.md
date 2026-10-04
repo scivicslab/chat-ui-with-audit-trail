@@ -70,3 +70,13 @@ quarkus-chat-ui では workflow の実行器（harness）が会話の provider �
   書くなら `ChatSessionIIAR` の Javadoc を書けば次のビルドで出る。
 - actor の候補は `this` と actor 木の全名（19 件、`promptBuilder` などの内部 actor も含む）。
 - 稼働中の 28014・28030・28031 と `~/works` のリンクは触っていない。
+
+## 続き: Actions タブを上下 2 段に（actor の一覧 / 選んだ actor の action）
+- actor は増えていくので、名前を打つ field をやめ、上段に actor の一覧（`this` と生きている actor 全部、
+  origin ごとの見出し、絞り込みの field）、下段に選んだ actor の action（第一文付き）。action を押すと説明に
+  変わり、「← <actor>'s actions」で一覧に戻る。段の境はドラッグで動き高さは localStorage に残る。Clear は
+  選択と絞り込みを消す。
+- `GET /api/actions` は `{name, type, origin}` の行を返す。会話の行の type はその `ChatSessionIIAR`。
+  `list`/`describe` は `origin` も受ける（名前が重複する quarkus-chat-ui と同じ形にするため）。
+- 使い捨てポート 28042 でヘッドレス確認: 19 行、`project1/chat-01` を選ぶと 46 action、`sendPrompt` を開くと
+  step が出て戻れる、絞り込み・Clear・ドラッグが効く、ブラウザのエラー無し。

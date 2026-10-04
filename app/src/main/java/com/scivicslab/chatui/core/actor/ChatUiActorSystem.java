@@ -1419,14 +1419,22 @@ public class ChatUiActorSystem {
     }
 
     /**
-     * The actor names a workflow may write: {@code this}, then every live actor's qualified name,
-     * in the order the actor tree lists them.
+     * The actors a workflow may write under {@code actor:}, for the Actions tab's upper pane:
+     * {@code this} (the plan's own runner, origin {@code plan}), then every live actor by its qualified
+     * name (origin {@code application}), in the order the actor tree lists them. Each row carries the
+     * simple name of the class whose {@code @Action} methods answer for it — for a conversation that is
+     * its {@code ChatSessionIIAR}, not the {@code ConversationSquad} the registry holds.
      */
-    public List<String> workflowActorNames() {
+    public List<Map<String, String>> workflowActors() {
+        List<Map<String, String>> rows = new ArrayList<>();
+        rows.add(Map.of("name", "this", "type", PlanRunnerIIAR.class.getSimpleName(), "origin", "plan"));
         List<String> names = new ArrayList<>();
-        names.add("this");
         collectNames(getActorTree(), names);
-        return names;
+        for (String name : names) {
+            Class<?> type = actorClassOf(name);
+            rows.add(Map.of("name", name, "type", type == null ? "?" : type.getSimpleName(), "origin", "application"));
+        }
+        return rows;
     }
 
     private static void collectNames(ActorNode node, List<String> into) {

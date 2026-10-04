@@ -38,23 +38,28 @@ public class ActionsResource {
     @Inject
     ChatUiActorSystem actorSystem;
 
-    /** The actor names a workflow may use, for the actor field to offer: {@code {actors:[...]}}. */
+    /**
+     * The actors a workflow may name, for the tab's upper pane:
+     * {@code {actors:[{name, type, origin}, ...]}} — {@code this} first, then every live actor.
+     */
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     public Response actors() {
-        return Response.ok(Map.of("actors", actorSystem.workflowActorNames())).build();
+        return Response.ok(Map.of("actors", actorSystem.workflowActors())).build();
     }
 
     /**
      * The actions of one actor, each with the first sentence of its Javadoc:
      * {@code {actor, class, actions:[{name, description}, ...]}}.
      *
-     * @param actor the actor name as a workflow writes it
+     * @param actor  the actor name as a workflow writes it
+     * @param origin the row's origin as {@link #actors} gave it; names are unique here, so it only
+     *               keeps the request the same shape as quarkus-chat-ui's
      */
     @GET
     @Path("/list")
     @Produces(MediaType.APPLICATION_JSON)
-    public Response list(@QueryParam("actor") String actor) {
+    public Response list(@QueryParam("actor") String actor, @QueryParam("origin") String origin) {
         Class<?> cls = actorSystem.actorClassOf(actor);
         if (cls == null) return Response.status(404).entity(Map.of("error", "unknown actor: " + actor)).build();
         SortedSet<String> names = ActionCatalog.actionNamesOf(cls);
@@ -73,11 +78,13 @@ public class ActionsResource {
      *
      * @param actor  the actor name as a workflow writes it
      * @param action the action name
+     * @param origin the row's origin as {@link #actors} gave it; not needed to resolve a name here
      */
     @GET
     @Path("/describe")
     @Produces(MediaType.APPLICATION_JSON)
-    public Response describe(@QueryParam("actor") String actor, @QueryParam("action") String action) {
+    public Response describe(@QueryParam("actor") String actor, @QueryParam("action") String action,
+                             @QueryParam("origin") String origin) {
         Class<?> cls = actorSystem.actorClassOf(actor);
         if (cls == null) return Response.status(404).entity(Map.of("error", "unknown actor: " + actor)).build();
         if (action == null || !ActionCatalog.actionNamesOf(cls).contains(action)) {

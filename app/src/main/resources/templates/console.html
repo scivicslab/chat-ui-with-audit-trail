@@ -311,16 +311,16 @@
                      lists its actions with their first sentence; naming an action shows its
                      description, its arguments and the step as the YAML writes it. -->
                 <section id="tab-actions" class="rtab-content">
+                    <!-- Actions: the actors a workflow may name (upper pane) and the chosen one's actions
+                         (lower pane), from the action catalog, without a run
+                         (ActionCatalogWithJavadoc_260930_oo01). -->
                     <div class="tab-toolbar">
-                        <label for="act-actor">actor</label>
-                        <input id="act-actor" type="text" list="act-actor-names" placeholder="this">
-                        <datalist id="act-actor-names"></datalist>
-                        <label for="act-action">action</label>
-                        <input id="act-action" type="text" placeholder="askWorker">
-                        <button id="act-show" type="button">Show</button>
+                        <input id="act-filter" type="text" placeholder="filter actors">
                         <button id="act-clear" type="button">Clear</button>
                         <span id="act-status"></span>
                     </div>
+                    <div id="act-actors" class="act-actors"></div>
+                    <div id="act-resize-handle" class="act-resize-handle" title="Drag to resize"></div>
                     <div id="act-list" class="act-list"></div>
                 </section>
 
