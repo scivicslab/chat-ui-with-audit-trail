@@ -638,7 +638,9 @@
             case "agent-loop": return "agent loop";
             case "plan": return "plan";
             case "application": return "application";
-            default: return origin || "";
+            default:
+                if (origin && origin.indexOf("running:") === 0) return "running: " + origin.substring(8);
+                return origin || "";
         }
     }
 
