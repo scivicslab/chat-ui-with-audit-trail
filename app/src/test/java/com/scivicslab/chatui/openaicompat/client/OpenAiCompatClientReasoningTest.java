@@ -50,6 +50,54 @@ class OpenAiCompatClientReasoningTest {
         assertNull(OpenAiCompatClient.parseSseDelta(null));
     }
 
+    // vLLM (qwen3.8-flash-next, google/gemma-4-26B-A4B-it) writes compact JSON: no space after a
+    // colon. llama.cpp (qwen3.8-flash-next-iq3_xxs, -iq3_xxs-radeon, -tensorfold) writes a space
+    // after every colon. Observed on the broker (192.168.5.21:30805) with "stream":true:
+    //   vLLM:      {"delta":{"content":"OK"},"finish_reason":null}
+    //   llama.cpp: {"delta": {"content": "OK"}, "finish_reason": null}
+    // Both chunks carry the same value. A parser that only matched the no-space form read nothing
+    // from every llama.cpp chunk — not content, not reasoning_content, not finish_reason — for the
+    // whole reply. The turn then ended with an empty answer and no tool call recognized, with no
+    // error anywhere: reproduced live through chat-ui-with-audit-trail against
+    // qwen3.8-flash-next-iq3_xxs on 2026-10-09 (turn finished in 5.6s, trace held one step with
+    // every field blank and finalAnswer=true, while the model had in fact written a web_search
+    // <invoke> block that chat-ui never saw).
+    private static final String SPACED_CONTENT_CHUNK = """
+            data: {"id": "chatcmpl-x", "choices": [{"index": 0, "delta": {"content": "<invoke"}, \
+            "finish_reason": null}]}""";
+
+    private static final String SPACED_REASONING_CHUNK = """
+            data: {"id": "chatcmpl-x", "choices": [{"index": 0, "delta": {"reasoning_content": \
+            "We need"}, "finish_reason": null}]}""";
+
+    private static final String SPACED_FINAL_CHUNK = """
+            data: {"id": "chatcmpl-x", "choices": [{"index": 0, "delta": {}, "finish_reason": \
+            "stop"}]}""";
+
+    @Test
+    void parseSseDelta_llamaCppSpacing_contentChunk_yieldsContent() {
+        OpenAiCompatClient.SseDelta delta = OpenAiCompatClient.parseSseDelta(SPACED_CONTENT_CHUNK);
+
+        assertEquals("<invoke", delta.content());
+        assertNull(delta.reasoning());
+        assertNull(delta.finishReason(), "an in-progress chunk's finish_reason is the JSON null, not a string");
+    }
+
+    @Test
+    void parseSseDelta_llamaCppSpacing_reasoningChunk_yieldsReasoning() {
+        OpenAiCompatClient.SseDelta delta = OpenAiCompatClient.parseSseDelta(SPACED_REASONING_CHUNK);
+
+        assertEquals("We need", delta.reasoning());
+        assertNull(delta.content());
+    }
+
+    @Test
+    void parseSseDelta_llamaCppSpacing_finalChunk_yieldsFinishReason() {
+        OpenAiCompatClient.SseDelta delta = OpenAiCompatClient.parseSseDelta(SPACED_FINAL_CHUNK);
+
+        assertEquals("stop", delta.finishReason());
+    }
+
     /** Records which callback each chunk reached, in order. */
     private static final class RecordingCallback implements OpenAiCompatClient.StreamCallback {
         final List<String> answer = new ArrayList<>();

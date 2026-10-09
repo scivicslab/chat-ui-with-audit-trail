@@ -41,4 +41,20 @@ class CutOffReplySseTest {
                 "{\"choices\":[{\"message\":{\"content\":\"…\"},\"finish_reason\":\"length\"}]}"));
         assertEquals("stop", OpenAiCompatClient.parseNsFinishReason("{\"choices\":[]}"));
     }
+
+    // llama.cpp's non-streaming response writes a space after every colon, same as its streamed
+    // chunks (see OpenAiCompatClientReasoningTest's llama.cpp-spacing cases). parseNsContent and
+    // parseNsFinishReason read the same bytes sendNonStreaming hands back, so they must tolerate it
+    // too: this is the path WebPageSummarizer and completeOutsideConversation call.
+    @Test
+    void parseNsFinishReason_llamaCppSpacing_readsTheValue() {
+        assertEquals("length", OpenAiCompatClient.parseNsFinishReason(
+                "{\"choices\": [{\"message\": {\"content\": \"…\"}, \"finish_reason\": \"length\"}]}"));
+    }
+
+    @Test
+    void parseNsContent_llamaCppSpacing_readsTheValue() {
+        assertEquals("the summary", OpenAiCompatClient.parseNsContent(
+                "{\"choices\": [{\"message\": {\"role\": \"assistant\", \"content\": \"the summary\"}}]}"));
+    }
 }

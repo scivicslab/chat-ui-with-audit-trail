@@ -408,16 +408,7 @@ public class OpenAiCompatClient {
     static String parseNsContent(String json) {
         int msgIdx = json.indexOf("\"message\":");
         if (msgIdx < 0) return null;
-        String marker = "\"content\":";
-        int contentIdx = json.indexOf(marker, msgIdx);
-        if (contentIdx < 0) return null;
-        int pos = contentIdx + marker.length();
-        while (pos < json.length() && json.charAt(pos) == ' ') pos++;
-        if (pos >= json.length()) return null;
-        char c = json.charAt(pos);
-        if (c == 'n') return null; // null
-        if (c == '"') return unescapeJsonString(json, pos + 1);
-        return null;
+        return readStringField(json, "\"content\":", msgIdx);
     }
 
     static List<ChatMessage.ToolCallRequest.ToolCall> parseNsToolCalls(String json) {
@@ -500,17 +491,22 @@ public class OpenAiCompatClient {
      * Reads {@code choices[].finish_reason} from one streamed chunk. Every chunk but the last
      * carries {@code null} there, which is not a string and so does not match.
      *
+     * <p>vLLM writes compact JSON ({@code "finish_reason":"stop"}); llama.cpp writes a space after
+     * every colon ({@code "finish_reason": "stop"}). The two chunks carry the same value, so the
+     * space is skipped rather than made part of what is searched for — a marker with the value's
+     * opening quote built in, as this used to have, matches vLLM's chunks and silently matches
+     * nothing in llama.cpp's, which then look exactly like an in-progress chunk that has not
+     * finished yet.</p>
+     *
      * @param json one SSE data payload
      * @return {@code stop}, {@code length}, … or {@code null} while the reply is still running
      */
     static String extractFinishReason(String json) {
-        String marker = "\"finish_reason\":\"";
-        int idx = json.indexOf(marker);
-        return idx < 0 ? null : unescapeJsonString(json, idx + marker.length());
+        return readStringField(json, "\"finish_reason\":", 0);
     }
 
     static String extractDeltaContent(String json) {
-        return extractDeltaField(json, "\"content\":\"");
+        return extractDeltaField(json, "\"content\":");
     }
 
     /**
@@ -523,15 +519,35 @@ public class OpenAiCompatClient {
      * @return the reasoning text of this chunk, or {@code null} when the field is absent
      */
     static String extractDeltaReasoning(String json) {
-        return extractDeltaField(json, "\"reasoning_content\":\"");
+        return extractDeltaField(json, "\"reasoning_content\":");
     }
 
+    /** As {@link #extractFinishReason}, scoped to the {@code delta} object a streamed chunk carries. */
     private static String extractDeltaField(String json, String marker) {
         int deltaIdx = json.indexOf("\"delta\"");
         if (deltaIdx < 0) return null;
-        int fieldIdx = json.indexOf(marker, deltaIdx);
-        if (fieldIdx < 0) return null;
-        return unescapeJsonString(json, fieldIdx + marker.length());
+        return readStringField(json, marker, deltaIdx);
+    }
+
+    /**
+     * Finds {@code marker} (a key and its colon, e.g. {@code "\"content\":"}) at or after
+     * {@code fromIndex} and reads the string value that follows, tolerating the space llama.cpp
+     * writes after the colon (vLLM does not). A non-string value — {@code null}, mid-stream — means
+     * the field is not there yet, so this returns {@code null} rather than reading past it into
+     * whatever string literal happens to follow in the rest of the chunk.
+     *
+     * @param json      one SSE data payload, or a whole non-streaming response body
+     * @param marker    the key to find, including its trailing colon but not the value
+     * @param fromIndex where to start searching, so a caller can scope the search to one sub-object
+     * @return the field's string value, or {@code null} when absent or not a string
+     */
+    private static String readStringField(String json, String marker, int fromIndex) {
+        int idx = json.indexOf(marker, fromIndex);
+        if (idx < 0) return null;
+        int pos = idx + marker.length();
+        while (pos < json.length() && json.charAt(pos) == ' ') pos++;
+        if (pos >= json.length() || json.charAt(pos) != '"') return null;
+        return unescapeJsonString(json, pos + 1);
     }
 
     static boolean isContextLengthError(String body) {
