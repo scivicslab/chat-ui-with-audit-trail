@@ -1313,6 +1313,66 @@ public class ChatSession extends Interpreter {
         // LLM call. A later step's promptToSend is a tool observation, not that message, so it
         // carries no images of its own.
         List<String> stepImages = (stepCount == 1) ? pendingImages : List.of();
+
+        LlmStepOutcome outcome;
+        try {
+            outcome = callLlmStep(promptToSend, stepImages);
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "Agent-loop LLM call failed", e);
+            turnEmitter.accept(ChatEvent.error("Error: " + e.getMessage()));
+            finalAnswer = null;
+            return new ActionResult(false, "error: " + e.getMessage());
+        }
+
+        // No tool call, no text and no error is not a final answer — a genuine one always has
+        // prose, and a genuine failure sets turnError. This is finish_reason=stop with nothing
+        // written, observed on qwen3.8-flash-next-iq3_xxs after a long tool observation: the
+        // model's chain of thought ran to a stop token before it ever reached <invoke> or an
+        // answer. Retried once, same prompt, as its own step — a second draw from the same model
+        // most often lands on a tool call or an answer (EmptyStopRetry_261009_oo01).
+        if (outcome.calls().isEmpty() && outcome.text().isBlank() && turnError == null) {
+            turnEmitter.accept(ChatEvent.thinking(
+                    "\n→ retrying: the reply had no text and no tool call\n"));
+            stepCount++;
+            try {
+                outcome = callLlmStep(promptToSend, stepImages);
+            } catch (Exception e) {
+                logger.log(Level.WARNING, "Agent-loop LLM retry failed", e);
+                turnEmitter.accept(ChatEvent.error("Error: " + e.getMessage()));
+                finalAnswer = null;
+                return new ActionResult(false, "error: " + e.getMessage());
+            }
+        }
+
+        if (!outcome.calls().isEmpty()) {
+            pendingCalls = outcome.calls();
+            for (ToolCall tc : outcome.calls()) {
+                turnEmitter.accept(ChatEvent.thinking("\n→ " + tc.name() + "(" + tc.argumentsJson() + ")\n"));
+            }
+            return new ActionResult(true, "action");
+        }
+
+        if (outcome.text().isBlank() && turnError != null) {
+            finalAnswer = null;
+            return new ActionResult(false, "error: " + turnError);
+        }
+        finalAnswer = outcome.text().trim();
+        return new ActionResult(false, "final");
+    }
+
+    /** What one {@link #callLlmStep} call produced: the text to keep, and what it parsed from it. */
+    private record LlmStepOutcome(String text, List<ToolCall> calls) {}
+
+    /**
+     * Sends one prompt to the provider and returns what came back, recorded to the I/O log as its
+     * own {@code turn{N}/step{stepCount}/llm} entry. {@link #stepExpectingAction} calls this once
+     * per attempt and increments {@link #stepCount} before each call, so a retry is its own step
+     * in the record rather than a second draft overwriting the first.
+     *
+     * @throws Exception whatever {@code providerRef.ask(...).get()} threw; the caller decides how
+     *                    a failed call ends the turn
+     */
+    private LlmStepOutcome callLlmStep(String promptToSend, List<String> stepImages) throws Exception {
         ProviderContext ctx = new ProviderContext(apiKey, stepImages, turnNoThink, () -> {});
         StringBuilder assistantBuf = new StringBuilder();
         // The reasoning is kept for the record, not for the answer: it goes to the I/O log's
@@ -1334,85 +1394,65 @@ public class ChatSession extends Interpreter {
         AtomicLong streamedChars = new AtomicLong();
         AtomicLong progressLoggedAt = new AtomicLong(System.currentTimeMillis());
 
-        try {
-            providerRef.ask(p -> {
-                // Relabel the provider's own "delta"/"result" as "thinking" / (dropped): this step
-                // might still be a tool call, not the final answer, so its streamed text goes to the
-                // browser's live trace, not the answer bubble — only finish() emits the browser's
-                // "delta"/"result" for the answer, exactly once, with the confirmed final text.
-                // Forwarding the provider's raw per-step "delta"/"result" here would (a) show
-                // intermediate steps' raw <invoke> text as if it were the answer, and (b) show the
-                // final step's answer text twice (once streamed here, once from finish()) — both
-                // observed live before this fix.
-                Consumer<ChatEvent> wrapped = event -> {
-                    if ("delta".equals(event.type()) && event.content() != null) {
-                        assistantBuf.append(event.content());
+        providerRef.ask(p -> {
+            // Relabel the provider's own "delta"/"result" as "thinking" / (dropped): this step
+            // might still be a tool call, not the final answer, so its streamed text goes to the
+            // browser's live trace, not the answer bubble — only finish() emits the browser's
+            // "delta"/"result" for the answer, exactly once, with the confirmed final text.
+            // Forwarding the provider's raw per-step "delta"/"result" here would (a) show
+            // intermediate steps' raw <invoke> text as if it were the answer, and (b) show the
+            // final step's answer text twice (once streamed here, once from finish()) — both
+            // observed live before this fix.
+            Consumer<ChatEvent> wrapped = event -> {
+                if ("delta".equals(event.type()) && event.content() != null) {
+                    assistantBuf.append(event.content());
+                    noteStreamProgress(stepLabel, streamedChars, progressLoggedAt, event.content());
+                    turnEmitter.accept(ChatEvent.thinking(event.content()));
+                } else if ("result".equals(event.type())) {
+                    // The provider's own per-call completion signal; the agent loop's real
+                    // completion signal is finish()'s result event, emitted once for the turn.
+                } else if ("tool_use".equals(event.type())) {
+                    // The harness called one of its own tools. Recorded when its result
+                    // arrives, so the log holds the call and its observation as one entry,
+                    // the same shape runTool writes for this conversation's own tools.
+                    harnessToolUses.put(event.toolUseId(), event);
+                    noteStreamProgress(stepLabel, streamedChars, progressLoggedAt, event.content());
+                    turnEmitter.accept(ChatEvent.thinking(
+                            "\n→ " + event.toolName() + "(" + event.content() + ")\n"));
+                } else if ("error".equals(event.type())) {
+                    // Remembered as well as relayed: a step that ends with an error and no
+                    // text is a failed turn, not an empty answer (TurnErrorInConversation_260913_oo01).
+                    turnError = event.content() == null ? "unknown error" : event.content();
+                    turnEmitter.accept(event);
+                } else if ("tool_result".equals(event.type())) {
+                    ChatEvent use = harnessToolUses.remove(event.toolUseId());
+                    String observation = (event.isError() != null && event.isError())
+                            ? "error: " + (event.content() == null ? "" : event.content())
+                            : (event.content() == null ? "" : event.content());
+                    recordHarnessToolIo(use, observation);
+                    String toolName = use == null ? "tool" : use.toolName();
+                    turnEmitter.accept(ChatEvent.thinking("Observation (" + toolName + "): "
+                            + observation.substring(0, Math.min(200, observation.length())) + "\n"));
+                } else {
+                    // Reaches here as the provider's own "thinking" event, which is how a
+                    // server that separates reasoning (delta.reasoning_content) delivers a
+                    // thinking model's chain of thought. Counting it is what makes the log
+                    // move during a step that produces no answer text at all.
+                    if ("thinking".equals(event.type())) {
+                        if (event.content() != null) thinkingBuf.append(event.content());
                         noteStreamProgress(stepLabel, streamedChars, progressLoggedAt, event.content());
-                        turnEmitter.accept(ChatEvent.thinking(event.content()));
-                    } else if ("result".equals(event.type())) {
-                        // The provider's own per-call completion signal; the agent loop's real
-                        // completion signal is finish()'s result event, emitted once for the turn.
-                    } else if ("tool_use".equals(event.type())) {
-                        // The harness called one of its own tools. Recorded when its result
-                        // arrives, so the log holds the call and its observation as one entry,
-                        // the same shape runTool writes for this conversation's own tools.
-                        harnessToolUses.put(event.toolUseId(), event);
-                        noteStreamProgress(stepLabel, streamedChars, progressLoggedAt, event.content());
-                        turnEmitter.accept(ChatEvent.thinking(
-                                "\n→ " + event.toolName() + "(" + event.content() + ")\n"));
-                    } else if ("error".equals(event.type())) {
-                        // Remembered as well as relayed: a step that ends with an error and no
-                        // text is a failed turn, not an empty answer (TurnErrorInConversation_260913_oo01).
-                        turnError = event.content() == null ? "unknown error" : event.content();
-                        turnEmitter.accept(event);
-                    } else if ("tool_result".equals(event.type())) {
-                        ChatEvent use = harnessToolUses.remove(event.toolUseId());
-                        String observation = (event.isError() != null && event.isError())
-                                ? "error: " + (event.content() == null ? "" : event.content())
-                                : (event.content() == null ? "" : event.content());
-                        recordHarnessToolIo(use, observation);
-                        String toolName = use == null ? "tool" : use.toolName();
-                        turnEmitter.accept(ChatEvent.thinking("Observation (" + toolName + "): "
-                                + observation.substring(0, Math.min(200, observation.length())) + "\n"));
-                    } else {
-                        // Reaches here as the provider's own "thinking" event, which is how a
-                        // server that separates reasoning (delta.reasoning_content) delivers a
-                        // thinking model's chain of thought. Counting it is what makes the log
-                        // move during a step that produces no answer text at all.
-                        if ("thinking".equals(event.type())) {
-                            if (event.content() != null) thinkingBuf.append(event.content());
-                            noteStreamProgress(stepLabel, streamedChars, progressLoggedAt, event.content());
-                        }
-                        turnEmitter.accept(event);
                     }
-                };
-                p.sendPrompt(promptToSend, turnModel, wrapped, ctx);
-                return null;
-            }, system.getManagedThreadPool()).get();
-        } catch (Exception e) {
-            logger.log(Level.WARNING, "Agent-loop LLM call failed", e);
-            turnEmitter.accept(ChatEvent.error("Error: " + e.getMessage()));
-            finalAnswer = null;
-            return new ActionResult(false, "error: " + e.getMessage());
-        }
+                    turnEmitter.accept(event);
+                }
+            };
+            p.sendPrompt(promptToSend, turnModel, wrapped, ctx);
+            return null;
+        }, system.getManagedThreadPool()).get();
 
         String text = assistantBuf.toString();
         List<ToolCall> calls = TextToolCallParser.parse(text);
         recordStepIo(promptToSend, text, thinkingBuf.toString(), calls);
-        if (!calls.isEmpty()) {
-            pendingCalls = calls;
-            for (ToolCall tc : calls) {
-                turnEmitter.accept(ChatEvent.thinking("\n→ " + tc.name() + "(" + tc.argumentsJson() + ")\n"));
-            }
-            return new ActionResult(true, "action");
-        }
-
-        if (text.isBlank() && turnError != null) {
-            finalAnswer = null;
-            return new ActionResult(false, "error: " + turnError);
-        }
-        finalAnswer = text.trim();
-        return new ActionResult(false, "final");
+        return new LlmStepOutcome(text, calls);
     }
 
     /**
