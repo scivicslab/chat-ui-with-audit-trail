@@ -334,7 +334,11 @@ public class OpenAiCompatClient {
           .append("\",\"stream\":").append(stream).append(",");
         if (maxTokens > 0) sb.append("\"max_tokens\":").append(maxTokens).append(",");
         if (temperature != null) sb.append("\"temperature\":").append(temperature).append(",");
-        if (noThink) sb.append("\"chat_template_kwargs\":{\"enable_thinking\":false},");
+        // Sent both ways. The servers serving one model default differently -- Strata thinks unless
+        // told not to, vLLM and TensorFold do not unless told to -- so leaving it out when thinking
+        // is wanted left the Think box to whichever server the broker picked
+        // (ThinkFlagAlwaysSent_261011_oo01).
+        sb.append("\"chat_template_kwargs\":{\"enable_thinking\":").append(!noThink).append("},");
         if (!tools.isEmpty()) {
             sb.append("\"tools\":[");
             for (int i = 0; i < tools.size(); i++) {
