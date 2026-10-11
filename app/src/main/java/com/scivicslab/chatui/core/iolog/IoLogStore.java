@@ -275,6 +275,21 @@ public class IoLogStore {
      * @return the ConversationSquad ids, e.g. {@code "project2/chat-01"}, without duplicates
      */
     public synchronized List<String> resumableConversationSquads() {
+        return conversationSquads(true);
+    }
+
+    /**
+     * Every ConversationSquad the log holds a session for, whether or not it was ended, most recent
+     * first. Ended ones are not reopened, but their names stay on the sessions, so a new project
+     * must not be given one of them ({@code ProjectDeletion_261011_oo01}).
+     *
+     * @return the ConversationSquad ids, e.g. {@code "project2/chat-01"}, without duplicates
+     */
+    public synchronized List<String> recordedConversationSquads() {
+        return conversationSquads(false);
+    }
+
+    private List<String> conversationSquads(boolean runningOnly) {
         ensureStore();
         if (store == null) {
             return List.of();
@@ -285,12 +300,12 @@ public class IoLogStore {
             for (SessionSummary s : store.listSessions(SESSION_SCAN_LIMIT)) {
                 String name = s.getWorkflowName();
                 if (name == null || !name.startsWith(prefix)) continue;
-                if (s.getStatus() != SessionStatus.RUNNING) continue;
+                if (runningOnly && s.getStatus() != SessionStatus.RUNNING) continue;
                 String conversationSquadId = name.substring(prefix.length());
                 if (!conversationSquadId.isBlank()) conversationSquads.add(conversationSquadId);
             }
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "Could not list the resumable ConversationSquads", e);
+            LOG.log(Level.WARNING, "Could not list the recorded ConversationSquads", e);
         }
         return List.copyOf(conversationSquads);
     }

@@ -368,6 +368,20 @@
                                 Adds one to this project. Its id is the next free two-digit number.
                             </div>
                         </div>
+                        <!-- Delete: not shown for project1, which every start creates again
+                             (ProjectDeletion_261011_oo01). -->
+                        <div class="projectprop-field" id="projectprop-delete-field">
+                            <span class="projectprop-label">Delete</span>
+                            <div class="projectprop-control">
+                                <button id="projectprop-delete" type="button" class="projectprop-danger">Delete project</button>
+                            </div>
+                            <div class="projectprop-desc">
+                                Removes this project and its conversations from the tree. What they
+                                said stays in the Sessions tab. A project with a conversation still
+                                answering, prompts waiting in a queue, or a job running is not deleted.
+                            </div>
+                            <div id="projectprop-delete-outcome" class="projectprop-outcome"></div>
+                        </div>
                     </div>
                 </section>
 

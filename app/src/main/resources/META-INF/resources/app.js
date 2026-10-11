@@ -1331,5 +1331,7 @@
     // Exposed for console.js's Actors-tree click handler (ActorTreeTabSwitcher_260826_oo01) —
     // clicking a conversation actor's name calls window.chatUiSwitchChat(projectId, chatId).
     window.chatUiSwitchChat = switchChat;
+    // Which conversation this pane shows, so console.js can move it off a project it deletes.
+    window.chatUiCurrentProjectId = function () { return PROJECT_ID; };
     window.chatUiGetActiveChat = function () { return { projectId: PROJECT_ID, chatId: CHAT_ID }; };
 })();

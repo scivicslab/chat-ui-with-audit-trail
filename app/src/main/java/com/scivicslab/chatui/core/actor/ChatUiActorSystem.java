@@ -409,6 +409,14 @@ public class ChatUiActorSystem {
             }
         }
         if (reopened > 0) LOG.info("Re-opened " + reopened + " recorded conversation(s)");
+
+        // A project whose conversations were all ended -- it was deleted -- is not reopened, but its
+        // name is still on those sessions, and a new project must not take it
+        // (ProjectDeletion_261011_oo01).
+        for (String conversationSquadId : ioLogStore.recordedConversationSquads()) {
+            String[] parts = splitConversationSquadId(conversationSquadId);
+            if (parts != null) advanceProjectCounterPast(parts[0]);
+        }
     }
 
     /**
@@ -454,6 +462,103 @@ public class ChatUiActorSystem {
         wireProject(projectId);
         createChat(projectId, "01");
         return projectId;
+    }
+
+    /**
+     * What {@link #deleteProject} did: deleted the project, or refused and changed nothing.
+     *
+     * @param kind          which of the two, and why when refused
+     * @param conversations how many conversations went with the project; 0 when refused
+     * @param reason        what a person is shown when refused; empty when deleted
+     */
+    public record ProjectDeletion(Kind kind, int conversations, String reason) {
+        /** {@code DELETED}, or the reason nothing was changed. */
+        public enum Kind { DELETED, DEFAULT_PROJECT, UNKNOWN, BUSY }
+
+        static ProjectDeletion refused(Kind kind, String reason) {
+            return new ProjectDeletion(kind, 0, reason);
+        }
+    }
+
+    /**
+     * Deletes a project and its conversations, so it leaves the actor tree and does not come back
+     * at the next start-up ({@code ProjectDeletion_261011_oo01}).
+     *
+     * <p>Everything that would stop the deletion is checked first, and nothing is changed when one
+     * applies: {@code project1}, which {@link #init} creates on every start; a project that does
+     * not exist; and a project with a conversation answering or holding queued prompts, or a batch
+     * job running. Stopping those instead would lose work the person may want.</p>
+     *
+     * <p>Each conversation's I/O log session is ended the way Clear ends one, not deleted: the
+     * project stops coming back because {@link IoLogStore#resumableConversationSquads} lists only
+     * running sessions, and what was said stays readable in the Sessions tab. The project's
+     * number is not handed out again.</p>
+     *
+     * @param projectId the project to delete
+     * @return what was done
+     */
+    public synchronized ProjectDeletion deleteProject(String projectId) {
+        if (DEFAULT_PROJECT_ID.equals(projectId)) {
+            return ProjectDeletion.refused(ProjectDeletion.Kind.DEFAULT_PROJECT,
+                    DEFAULT_PROJECT_ID + " is created on every start and cannot be deleted");
+        }
+        ActorRef<Project> projectRef = projects.get(projectId);
+        if (projectRef == null) {
+            return ProjectDeletion.refused(ProjectDeletion.Kind.UNKNOWN, "no such project: " + projectId);
+        }
+        String prefix = projectId + "/chat-";
+        List<String> conversations = chats.keySet().stream().filter(n -> n.startsWith(prefix)).sorted().toList();
+
+        List<String> running = new ArrayList<>();
+        for (String name : conversations) {
+            ChatSessionIIAR session = chatSessions.get(name);
+            if (session != null && session.isBusyDirect()) running.add(name + " is answering");
+            ActorRef<PromptQueue> queue = actorSystem.getActor(name + ".queue");
+            if (queue != null && !askOrDefault(queue, PromptQueue::snapshot, List.<PromptQueue.QueueEntry>of()).isEmpty()) {
+                running.add(name + " has queued prompts");
+            }
+        }
+        for (Project.JobView job : askOrDefault(projectRef, Project::jobs, List.<Project.JobView>of())) {
+            if (Project.RUNNING.equals(job.state())) running.add("job " + job.jobId() + " is running");
+        }
+        if (!running.isEmpty()) {
+            return ProjectDeletion.refused(ProjectDeletion.Kind.BUSY, String.join("; ", running));
+        }
+
+        for (String name : conversations) {
+            ChatSessionIIAR session = chatSessions.get(name);
+            if (session != null) {
+                ActorRef<LlmProvider> provider = actorSystem.getActor(session.getName() + PROVIDER_SUFFIX);
+                if (provider != null) {
+                    try {
+                        provider.ask(p -> { p.cancel(); return null; }).get(5, TimeUnit.SECONDS);
+                    } catch (Exception e) {
+                        LOG.log(Level.WARNING, "Provider of " + name + " did not cancel cleanly", e);
+                    }
+                }
+            }
+            if (ioLogStore != null) ioLogStore.resetSession(name);
+        }
+        projectRef.tell(Project::stopWatching);
+        actorSystem.removeActorRecursively(projectId);
+        for (String name : conversations) {
+            chats.remove(name);
+            chatSessions.remove(name);
+            chatLogBuffers.remove(name);
+        }
+        projects.remove(projectId);
+        LOG.info("Deleted project " + projectId + " with " + conversations.size() + " conversation(s)");
+        return new ProjectDeletion(ProjectDeletion.Kind.DELETED, conversations.size(), "");
+    }
+
+    /** Asks an actor for a value, or gives {@code fallback} when it does not answer in 5 seconds. */
+    private static <T, R> R askOrDefault(ActorRef<T> actor, java.util.function.Function<T, R> question, R fallback) {
+        try {
+            return actor.ask(question).get(5, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not ask " + actor.getName(), e);
+            return fallback;
+        }
     }
 
     /**

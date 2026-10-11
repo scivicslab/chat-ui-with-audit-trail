@@ -1027,6 +1027,8 @@
     var PERSPECTIVE_PROJECT_KEY = "chat-ui-perspective-project";
     var perspective = "chat";
     var perspectiveProjectId = null;
+    // The project every start creates; it has no delete button (ProjectDeletion_261011_oo01).
+    var DEFAULT_PROJECT_ID = "project1";
 
     function switchPerspective(kind, projectId) {
         if (kind !== "project") kind = "chat";
@@ -1050,6 +1052,10 @@
     // GET api/projects/{p} reads both, POST .../name and POST .../working-dir set them, and
     // POST .../chats adds a conversation with an id the server allocates
     // (ProjectProperty_260929_oo01).
+    // A message to show once the tab has loaded, for an action that moves the tab to another
+    // project (deleting one) and so would otherwise have its message cleared by that load.
+    var projectPropNotice = "";
+
     function projectPropStatus(msg) {
         var el = document.getElementById("projectprop-status");
         if (el) el.textContent = msg || "";
@@ -1064,6 +1070,10 @@
             return;
         }
         if (idEl) idEl.textContent = perspectiveProjectId;
+        var deleteField = document.getElementById("projectprop-delete-field");
+        if (deleteField) deleteField.style.display = perspectiveProjectId === DEFAULT_PROJECT_ID ? "none" : "";
+        var deleteOutcome = document.getElementById("projectprop-delete-outcome");
+        if (deleteOutcome) deleteOutcome.textContent = "";
         fetch("api/projects/" + encodeURIComponent(perspectiveProjectId))
             .then(function (r) {
                 if (!r.ok) throw new Error("HTTP " + r.status);
@@ -1072,7 +1082,8 @@
             .then(function (body) {
                 if (nameEl) nameEl.value = body.name || "";
                 if (dirEl) dirEl.value = body.workingDir || "";
-                projectPropStatus("");
+                projectPropStatus(projectPropNotice);
+                projectPropNotice = "";
             })
             .catch(function (err) { projectPropStatus("error: " + err.message); });
     }
@@ -1131,6 +1142,44 @@
             .catch(function (err) { projectPropStatus("error: " + err.message); });
     }
 
+    // Asks first, naming the project and how many conversations go with it. On success the
+    // console moves to project1, and so does the chat pane if it was showing one of the
+    // deleted conversations. A refusal (409: something is still running) is shown under the
+    // button and changes nothing.
+    function projectPropDelete() {
+        var projectId = perspectiveProjectId;
+        if (!projectId || projectId === DEFAULT_PROJECT_ID) return;
+        var outcome = document.getElementById("projectprop-delete-outcome");
+        var nameEl = document.getElementById("projectprop-name");
+        var label = projectId + (nameEl && nameEl.value ? " (" + nameEl.value + ")" : "");
+        fetch("api/projects/" + encodeURIComponent(projectId) + "/chats")
+            .then(function (r) { return r.ok ? r.json() : []; })
+            .then(function (chats) {
+                var n = Array.isArray(chats) ? chats.length : 0;
+                if (!window.confirm("Delete project " + label + " and its " + n + " conversation(s)?\n"
+                        + "What they said stays in the Sessions tab.")) return null;
+                projectPropStatus("deleting...");
+                return fetch("api/projects/" + encodeURIComponent(projectId), { method: "DELETE" })
+                    .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); });
+            })
+            .then(function (res) {
+                if (!res) return;
+                if (!res.ok) {
+                    projectPropStatus("not deleted");
+                    if (outcome) outcome.textContent = res.body.message || "";
+                    return;
+                }
+                if (window.chatUiCurrentProjectId && window.chatUiCurrentProjectId() === projectId
+                        && window.chatUiSwitchChat) {
+                    window.chatUiSwitchChat(DEFAULT_PROJECT_ID, "01");
+                }
+                projectPropNotice = "deleted " + projectId;
+                switchPerspective("project", DEFAULT_PROJECT_ID);
+                refreshActors();
+            })
+            .catch(function (err) { projectPropStatus("error: " + err.message); });
+    }
+
     function initProjectProp() {
         var nameBtn = document.getElementById("projectprop-name-save");
         var dirBtn = document.getElementById("projectprop-dir-save");
@@ -1138,6 +1187,8 @@
         if (nameBtn) nameBtn.addEventListener("click", projectPropSaveName);
         if (dirBtn) dirBtn.addEventListener("click", projectPropSaveDir);
         if (addBtn) addBtn.addEventListener("click", projectPropAddChat);
+        var deleteBtn = document.getElementById("projectprop-delete");
+        if (deleteBtn) deleteBtn.addEventListener("click", projectPropDelete);
         var nameEl = document.getElementById("projectprop-name");
         if (nameEl) nameEl.addEventListener("keydown", function (e) {
             if (e.key === "Enter") { e.preventDefault(); projectPropSaveName(); }

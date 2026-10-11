@@ -757,6 +757,7 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
     padding: 5px 12px; cursor: pointer; font-size: 12px;
 }
 .projectprop-control button:hover { filter: brightness(1.2); }
+.projectprop-control button.projectprop-danger { border-color: var(--error-text, #f66); color: var(--error-text, #f66); }
 .projectprop-desc { font-size: 11px; color: var(--text-secondary, #9aa0a6); margin-top: 4px; }
 .projectprop-outcome {
     font-size: 11px; color: var(--text-secondary, #9aa0a6); margin-top: 4px;

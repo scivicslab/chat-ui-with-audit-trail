@@ -90,6 +90,32 @@ public class ChatResource {
     }
 
     /**
+     * Deletes a project and its conversations ({@code ProjectDeletion_261011_oo01}). The
+     * conversations' sessions stay in the I/O log; the project does not come back on restart.
+     *
+     * @param projectId the project to delete
+     * @return {@code {"deleted": projectId, "conversations": n}}; 400 for {@code project1}, 404 for
+     *         an unknown project, 409 when a conversation is answering or holds queued prompts or a
+     *         job is running — with the reason, and nothing changed
+     */
+    @DELETE
+    @Path("/{projectId}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response deleteProject(@PathParam("projectId") String projectId) {
+        ChatUiActorSystem.ProjectDeletion outcome = actorSystem.deleteProject(projectId);
+        int status = switch (outcome.kind()) {
+            case DELETED -> 200;
+            case DEFAULT_PROJECT -> 400;
+            case UNKNOWN -> 404;
+            case BUSY -> 409;
+        };
+        if (status == 200) {
+            return Response.ok(Map.of("deleted", projectId, "conversations", outcome.conversations())).build();
+        }
+        return Response.status(status).entity(Map.of("type", "error", "message", outcome.reason())).build();
+    }
+
+    /**
      * Sets the name a person reads for a project ({@code ProjectProperty_260929_oo01}).
      *
      * @param projectId the project to name
