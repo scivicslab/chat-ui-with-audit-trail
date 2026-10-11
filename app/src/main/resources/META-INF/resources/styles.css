@@ -542,7 +542,9 @@ header h1[contenteditable]:focus {
 /* Code blocks: wrap toggle and copy (CodeBlockWrapAndCopy_261011_oo01). The wrapper holds the
    buttons outside the <pre>, so they stay at the top right while the code scrolls sideways. */
 .code-block { position: relative; }
-.code-block > pre { padding-top: 30px; }   /* room for the buttons above the first line */
+/* Room for the buttons above the first line. As specific as `.message.assistant pre`, which sets
+   the padding, and after it, so this one wins. */
+.message .code-block > pre { padding-top: 30px; }
 .code-tools {
     position: absolute;
     top: 6px;
