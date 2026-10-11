@@ -37,6 +37,7 @@
             if (tab === "jobs") jobsOnShow();
             if (tab === "joblog") jobLogOnShow();
             if (tab === "actions") actOnShow();
+            if (tab === "methodsearch") msOnShow();
         });
     }
 
@@ -913,6 +914,124 @@
         var f = document.getElementById("act-filter");
         if (f) f.addEventListener("input", actRenderActors);
         actInitResize();
+    }
+
+    // ── Method Search tab (MethodSearch_261011_oo01) ────────────────────────
+    // Part of a method name in, one row per class and action out, from api/actions/search. A row
+    // opens the action's full description through api/actions/describe with the first actor that
+    // has it, drawn by actRow as the Actions tab draws it.
+    var msTimer = null;
+    var MS_ACTORS_SHOWN = 3;
+
+    function msStatus(text) {
+        var el = document.getElementById("ms-status");
+        if (el) el.textContent = text || "";
+    }
+
+    function msActorsLine(actors) {
+        var shown = actors.slice(0, MS_ACTORS_SHOWN).join(", ");
+        var rest = actors.length - MS_ACTORS_SHOWN;
+        return "actors: " + shown + (rest > 0 ? " and " + rest + " more" : "");
+    }
+
+    function msSearch() {
+        var input = document.getElementById("ms-query");
+        var panel = document.getElementById("ms-list");
+        if (!input || !panel) return;
+        var q = input.value.trim();
+        if (!q) {
+            panel.textContent = "";
+            msStatus("type part of a method name");
+            return;
+        }
+        msStatus("searching…");
+        fetch("api/actions/search?q=" + encodeURIComponent(q))
+            .then(function (r) { return r.json(); })
+            .then(function (body) {
+                if (input.value.trim() !== q) return;   // a newer query is on its way
+                msRender(q, body.matches || []);
+            })
+            .catch(function (e) { msStatus(e.message); });
+    }
+
+    function msRender(q, matches) {
+        var panel = document.getElementById("ms-list");
+        panel.textContent = "";
+        msStatus(matches.length + " match" + (matches.length === 1 ? "" : "es"));
+        matches.forEach(function (m) {
+            var row = document.createElement("div");
+            row.className = "act-item";
+            var head = document.createElement("button");
+            head.type = "button";
+            head.className = "act-head";
+            head.textContent = m.action;
+            var cls = document.createElement("span");
+            cls.className = "ms-class";
+            cls.textContent = m.class;
+            head.appendChild(cls);
+            head.addEventListener("click", function () { msShow(q, m); });
+            row.appendChild(head);
+            if (m.description) {
+                var desc = document.createElement("p");
+                desc.className = "act-desc";
+                desc.textContent = m.description;
+                row.appendChild(desc);
+            }
+            var who = document.createElement("p");
+            who.className = "ms-actors";
+            who.textContent = msActorsLine(m.actors || []);
+            row.appendChild(who);
+            panel.appendChild(row);
+        });
+    }
+
+    /** One match in full, with a way back to the results it came from. */
+    function msShow(q, m) {
+        var panel = document.getElementById("ms-list");
+        var actor = (m.actors || [])[0];
+        if (!panel || !actor) return;
+        msStatus("loading " + m.action + "…");
+        fetch("api/actions/describe?actor=" + encodeURIComponent(actor) + "&action=" + encodeURIComponent(m.action))
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                panel.textContent = "";
+                var back = document.createElement("button");
+                back.type = "button";
+                back.className = "act-back";
+                back.textContent = "← results for \"" + q + "\"";
+                back.addEventListener("click", msSearch);
+                panel.appendChild(back);
+                panel.appendChild(actRow(actor, m.action, d));
+                var who = document.createElement("p");
+                who.className = "ms-actors";
+                who.textContent = "also callable as: " + (m.actors.length > 1 ? m.actors.slice(1).join(", ") : "(none)");
+                panel.appendChild(who);
+                msStatus("");
+            })
+            .catch(function (e) { msStatus(e.message); });
+    }
+
+    function msOnShow() {
+        var input = document.getElementById("ms-query");
+        if (input) input.focus();
+        if (input && input.value.trim()) msSearch();
+        else msStatus("type part of a method name");
+    }
+
+    function initMethodSearch() {
+        var input = document.getElementById("ms-query");
+        if (!input) return;
+        input.addEventListener("input", function () {
+            if (msTimer) clearTimeout(msTimer);
+            msTimer = setTimeout(msSearch, 300);
+        });
+        input.addEventListener("keydown", function (e) {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                if (msTimer) clearTimeout(msTimer);
+                msSearch();
+            }
+        });
     }
 
     // ── (2) Collapsible left dock (actor tree) ──────────────────────────────
@@ -2305,6 +2424,7 @@
         initProjectWorkflowEditor();
         initJobs();
         initProjectProp();
+        initMethodSearch();
         restorePerspective(); // before the tree renders, so its highlight matches
         refreshActors();   // the actor dock is visible by default
         ioOnShow();         // Sessions is the default-active right-pane tab

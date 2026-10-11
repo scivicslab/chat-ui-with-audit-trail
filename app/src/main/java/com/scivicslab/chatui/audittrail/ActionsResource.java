@@ -72,6 +72,29 @@ public class ActionsResource {
     }
 
     /**
+     * Actions whose name contains {@code q}, case-insensitively, over every actor a workflow may name
+     * ({@code MethodSearch_261011_oo01}): {@code {query, matches:[{action, class, description,
+     * actors:[...]}, ...]}}, one match per class and action. A blank {@code q} matches nothing.
+     *
+     * @param q part of an action name
+     */
+    @GET
+    @Path("/search")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response search(@QueryParam("q") String q) {
+        List<String> names = actorSystem.workflowActors().stream().map(row -> row.get("name")).toList();
+        List<Map<String, Object>> matches = new ArrayList<>();
+        for (ActionSearch.Match m : ActionSearch.search(q, names, actorSystem::actorClassOf, (cls, action) -> {
+            ActionManifest.ActionDoc doc = MANIFEST.docFor(cls, action);
+            return doc == null ? null : doc.description();
+        })) {
+            matches.add(Map.of("action", m.action(), "class", m.className(),
+                    "description", m.description(), "actors", m.actors()));
+        }
+        return Response.ok(Map.of("query", q == null ? "" : q, "matches", matches)).build();
+    }
+
+    /**
      * The description of one action: the Javadoc's first sentence, the rest as {@code details}, its
      * {@code <pre>} block as {@code example}; the JSON {@code schema} of a record argument or the
      * {@code argument} of a raw-String one; and {@code yaml}, the step as a workflow writes it.

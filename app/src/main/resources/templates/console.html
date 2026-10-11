@@ -225,6 +225,7 @@
                 <button class="rtab-btn" data-tab="jobrun" data-perspective="project">Run</button>
                 <button class="rtab-btn" data-tab="joblog" data-perspective="project">Job Log</button>
                 <button class="rtab-btn" data-tab="jobs" data-perspective="project">Batch Jobs</button>
+                <button class="rtab-btn" data-tab="methodsearch" data-perspective="project">Method Search</button>
                 <!-- Actions belongs to both perspectives: one button per perspective, one section
                      without a perspective, so it stays shown whichever is active. -->
                 <button class="rtab-btn" data-tab="actions" data-perspective="chat">Actions</button>
@@ -333,6 +334,17 @@
                 <!-- Project Property: this project's own name and working directory, and the
                      button that adds a conversation (ProjectProperty_260929_oo01). Both values are
                      kept in the project's own log session, so they survive a restart. -->
+                <!-- Method Search: part of a method name finds the actions that have it, one row per
+                     class and action, with the actors a workflow may name to call it; choosing a row
+                     shows it the way the Actions tab does (MethodSearch_261011_oo01). -->
+                <section id="tab-methodsearch" class="rtab-content" data-perspective="project">
+                    <div class="tab-toolbar">
+                        <input id="ms-query" type="text" placeholder="method name, e.g. putJson">
+                        <span id="ms-status"></span>
+                    </div>
+                    <div id="ms-list" class="act-list"></div>
+                </section>
+
                 <section id="tab-projectprop" class="rtab-content" data-perspective="project">
                     <div class="tab-toolbar">
                         <span class="tab-auto">Project: <b id="projectprop-id">(none selected)</b></span>

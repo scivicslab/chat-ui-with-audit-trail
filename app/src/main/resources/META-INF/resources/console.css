@@ -787,3 +787,9 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
 .act-example-label { color: var(--text-secondary, #8a8a8a); margin: 6px 0 0 0; font-size: 0.9em; }
 .act-example { margin: 2px 0 0 0; padding: 6px 8px; background: var(--bg-tertiary, #1e1e2e); color: var(--text-primary, #e6e6e6); border-radius: 4px; overflow: auto; font-size: 0.9em; }
 .act-problem { color: var(--accent-red, #f38ba8); margin: 2px 0 0 0; }
+
+/* ── Method Search tab (MethodSearch_261011_oo01): rows reuse the Actions tab's look ─────────── */
+#ms-query { flex: 1; min-width: 0; }
+#ms-list { padding: 0 8px; }
+.ms-class { color: var(--text-secondary, #8a8a8a); font-weight: normal; margin-left: 6px; }
+.ms-actors { color: var(--text-secondary, #8a8a8a); margin: 2px 0 0 0; font-size: 0.9em; word-break: break-all; }
