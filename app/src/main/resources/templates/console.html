@@ -39,7 +39,8 @@
       Everything from the original chat-ui <body> is kept verbatim inside #main-panel so app.js
       finds every element id it expects (header, chat, queue, log panel, input, overlays).
     -->
-    <!-- Global header bar (chat-ui3-style): app-wide controls span the full width above the panes. -->
+    <!-- Global header bar (chat-ui3-style): app-wide controls span the full width above the panes.
+         Settings of one chat live in that chat's header below. -->
     <div id="app-header">
         <button id="dock-toggle" title="Toggle the actor panel">&#9776;</button>
         <h1 id="app-title">Chat UI with Audit Trail</h1>
@@ -58,28 +59,7 @@
                     <option value="light-red">Light Red</option>
                 </select>
             </label>
-            <label id="provider-label" title="Which provider this conversation talks to (CliHarnessProvider_260912_oo01)">Provider:
-                <select id="provider-select">
-                    <!-- Populated from GET /api/plugins: only the kinds this instance was started with -->
-                </select>
-            </label>
-            <label id="model-label">Model:
-                <select id="model-select">
-                    <!-- Populated dynamically from /api/models -->
-                </select>
-                <button id="refresh-models-btn" title="Refresh model list">&#x21bb;</button>
-            </label>
-            <label id="temperature-label" title="What this conversation asks the server to sample at. Empty asks for nothing and leaves the server on its own default (ConversationTemperature_260914_oo01).">Temp:
-                <input id="temperature-input" type="number" min="0" max="2" step="0.1" placeholder="server">
-            </label>
-            <label id="think-label" title="Whether this conversation lets its model think before answering. Unticked asks the model to skip the thinking phase (ThinkingAndEffortAreConversationSettings_260917_oo01).">
-                <input type="checkbox" id="think-check" checked> Think
-            </label>
-            <label id="effort-label" title="How hard a harness should work on one answer, passed as --effort. Empty leaves the harness on its own default; a plain LLM ignores it.">Effort:
-                <input id="effort-input" type="text" size="6" placeholder="harness">
-            </label>
             <span id="session-label"></span>
-            <span id="activity-label"></span>
             <span id="user-label" style="display:none"></span>
             <button id="logout-btn" style="display:none" title="Logout">Logout</button>
             <div id="extensions-menu" class="ext-menu">
@@ -125,7 +105,32 @@
                      clicking a "chat-<id>" actor's name switches this pane (ActorTreeTabSwitcher_260826_oo01)
                      — instead of a dedicated bar here. -->
                 <!-- Left-pane header: actions that operate only on this pane's chat (chat-ui3-style). -->
+                <!-- This chat's own settings: the server keeps them per chat actor and the page
+                     reloads them when another chat is opened (ChatSettingsInTheChatHeader_261012_oo01). -->
                 <header>
+                    <div id="chat-settings" class="chat-settings">
+                        <label id="provider-label" title="Which provider this conversation talks to (CliHarnessProvider_260912_oo01)">Provider:
+                            <select id="provider-select">
+                                <!-- Populated from GET /api/plugins: only the kinds this instance was started with -->
+                            </select>
+                        </label>
+                        <label id="model-label">Model:
+                            <select id="model-select">
+                                <!-- Populated dynamically from /api/models -->
+                            </select>
+                            <button id="refresh-models-btn" title="Refresh model list">&#x21bb;</button>
+                        </label>
+                        <label id="temperature-label" title="What this conversation asks the server to sample at. Empty asks for nothing and leaves the server on its own default (ConversationTemperature_260914_oo01).">Temp:
+                            <input id="temperature-input" type="number" min="0" max="2" step="0.1" placeholder="server">
+                        </label>
+                        <label id="think-label" title="Whether this conversation lets its model think before answering. Unticked asks the model to skip the thinking phase (ThinkingAndEffortAreConversationSettings_260917_oo01).">
+                            <input type="checkbox" id="think-check" checked> Think
+                        </label>
+                        <label id="effort-label" title="How hard a harness should work on one answer, passed as --effort. Empty leaves the harness on its own default; a plain LLM ignores it.">Effort:
+                            <input id="effort-input" type="text" size="6" placeholder="harness">
+                        </label>
+                        <span id="activity-label"></span>
+                    </div>
                     <div class="left-pane-actions" style="display:flex;align-items:center;gap:8px">
                         <button id="save-chat-btn" title="Save conversation as Markdown">Save Chat</button>
                         <button id="clear-chat-btn" title="Clear chat display (session continues)">Clear</button>
