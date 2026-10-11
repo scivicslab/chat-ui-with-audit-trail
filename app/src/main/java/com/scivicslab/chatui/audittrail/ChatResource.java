@@ -950,6 +950,31 @@ public class ChatResource {
     }
 
     /**
+     * Deletes one conversation ({@code ConversationDeletion_261011_oo01}). Its session stays in the
+     * I/O log; the conversation does not come back on restart.
+     *
+     * @return {@code {"deleted": "<project>/chat-<id>"}}; 400 for project1's chat-01 or the project's
+     *         last conversation, 404 for no such conversation, 409 when it is answering, holds queued
+     *         prompts or has conversations under it — with the reason, and nothing changed
+     */
+    @DELETE
+    @Path("/{projectId}/chats/{chatId}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response deleteChat(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
+        ChatUiActorSystem.ChatDeletion outcome = actorSystem.deleteChat(projectId, chatId);
+        int status = switch (outcome.kind()) {
+            case DELETED -> 200;
+            case DEFAULT_CHAT, LAST_CHAT -> 400;
+            case UNKNOWN -> 404;
+            case BUSY, HAS_NESTED -> 409;
+        };
+        if (status == 200) {
+            return Response.ok(Map.of("deleted", ChatUiActorSystem.chatActorName(projectId, chatId))).build();
+        }
+        return Response.status(status).entity(Map.of("type", "error", "message", outcome.reason())).build();
+    }
+
+    /**
      * Creates the conversation if it does not already exist. Sending a prompt also creates it
      * lazily, so this exists only for the "+ New Chat" button, which needs the (initially empty)
      * conversation to appear in the list before any prompt is sent.

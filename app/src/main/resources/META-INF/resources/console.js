@@ -1193,6 +1193,9 @@
         if (deleteField) deleteField.style.display = perspectiveProjectId === DEFAULT_PROJECT_ID ? "none" : "";
         var deleteOutcome = document.getElementById("projectprop-delete-outcome");
         if (deleteOutcome) deleteOutcome.textContent = "";
+        var chatsOutcome = document.getElementById("projectprop-chats-outcome");
+        if (chatsOutcome) chatsOutcome.textContent = "";
+        projectPropListChats();
         fetch("api/projects/" + encodeURIComponent(perspectiveProjectId))
             .then(function (r) {
                 if (!r.ok) throw new Error("HTTP " + r.status);
@@ -1253,6 +1256,7 @@
             })
             .then(function (body) {
                 projectPropStatus("added chat-" + body.chatId);
+                projectPropListChats();
                 refreshActors();
                 if (body.chatId && window.chatUiSwitchChat) {
                     window.chatUiSwitchChat(perspectiveProjectId, body.chatId);
@@ -1294,6 +1298,68 @@
                 }
                 projectPropNotice = "deleted " + projectId;
                 switchPerspective("project", DEFAULT_PROJECT_ID);
+                refreshActors();
+            })
+            .catch(function (err) { projectPropStatus("error: " + err.message); });
+    }
+
+    // The project's conversations, each with a Delete button; project1's chat-01, which every start
+    // creates, has none (ConversationDeletion_261011_oo01).
+    function projectPropListChats() {
+        var list = document.getElementById("projectprop-chats");
+        var projectId = perspectiveProjectId;
+        if (!list || !projectId) return;
+        fetch("api/projects/" + encodeURIComponent(projectId) + "/chats")
+            .then(function (r) { return r.ok ? r.json() : []; })
+            .then(function (chatIds) {
+                if (projectId !== perspectiveProjectId) return;   // another project was chosen meanwhile
+                list.textContent = "";
+                (chatIds || []).forEach(function (chatId) {
+                    var li = document.createElement("li");
+                    var name = document.createElement("span");
+                    name.textContent = "chat-" + chatId;
+                    li.appendChild(name);
+                    if (!(projectId === DEFAULT_PROJECT_ID && chatId === "01")) {
+                        var del = document.createElement("button");
+                        del.type = "button";
+                        del.className = "projectprop-danger";
+                        del.textContent = "Delete";
+                        del.title = "Delete chat-" + chatId;
+                        del.addEventListener("click", function () { projectPropDeleteChat(projectId, chatId); });
+                        li.appendChild(del);
+                    }
+                    list.appendChild(li);
+                });
+            })
+            .catch(function () { /* leave the list as it was */ });
+    }
+
+    // Asks first. On success the list and the tree are redrawn, and the chat pane moves to the
+    // project's first remaining conversation if it was showing the deleted one. A refusal is shown
+    // under the list and changes nothing.
+    function projectPropDeleteChat(projectId, chatId) {
+        var outcome = document.getElementById("projectprop-chats-outcome");
+        if (!window.confirm("Delete conversation " + projectId + "/chat-" + chatId + "?\n"
+                + "What it said stays in the Sessions tab.")) return;
+        projectPropStatus("deleting...");
+        fetch("api/projects/" + encodeURIComponent(projectId) + "/chats/" + encodeURIComponent(chatId), { method: "DELETE" })
+            .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+            .then(function (res) {
+                if (!res.ok) {
+                    projectPropStatus("not deleted");
+                    if (outcome) outcome.textContent = res.body.message || "";
+                    return;
+                }
+                projectPropStatus("deleted chat-" + chatId);
+                if (outcome) outcome.textContent = "";
+                if (window.chatUiCurrentProjectId && window.chatUiCurrentProjectId() === projectId
+                        && window.chatUiCurrentChatId && window.chatUiCurrentChatId() === chatId
+                        && window.chatUiSwitchChat) {
+                    fetch("api/projects/" + encodeURIComponent(projectId) + "/chats")
+                        .then(function (r) { return r.ok ? r.json() : []; })
+                        .then(function (left) { if (left && left.length) window.chatUiSwitchChat(projectId, left[0]); });
+                }
+                projectPropListChats();
                 refreshActors();
             })
             .catch(function (err) { projectPropStatus("error: " + err.message); });

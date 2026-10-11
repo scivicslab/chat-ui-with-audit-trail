@@ -467,6 +467,80 @@ public class ChatUiActorSystem {
     }
 
     /**
+     * What {@link #deleteChat} did: deleted the conversation, or refused and changed nothing.
+     *
+     * @param kind   which of the two, and why when refused
+     * @param reason what a person is shown when refused; empty when deleted
+     */
+    public record ChatDeletion(Kind kind, String reason) {
+        /** {@code DELETED}, or the reason nothing was changed. */
+        public enum Kind { DELETED, DEFAULT_CHAT, LAST_CHAT, UNKNOWN, BUSY, HAS_NESTED }
+
+        static ChatDeletion refused(Kind kind, String reason) {
+            return new ChatDeletion(kind, reason);
+        }
+    }
+
+    /**
+     * Deletes one conversation of a project, the way {@link #deleteProject} deletes a project
+     * ({@code ConversationDeletion_261011_oo01}): its I/O log session is ended rather than deleted,
+     * so it does not come back at the next start-up and what was said stays in the Sessions tab.
+     *
+     * <p>Nothing is changed when any of these applies: {@code project1}'s {@code chat-01}, which
+     * {@link #init} creates on every start; a conversation that does not exist; the project's last
+     * conversation, since a project with none is not rebuilt at start-up and deleting the project is
+     * what that amounts to; a conversation answering or holding queued prompts; and one with a
+     * conversation nested under it, whose own session would be left running.</p>
+     */
+    public synchronized ChatDeletion deleteChat(String projectId, String chatId) {
+        if (DEFAULT_PROJECT_ID.equals(projectId) && "01".equals(chatId)) {
+            return ChatDeletion.refused(ChatDeletion.Kind.DEFAULT_CHAT,
+                    DEFAULT_PROJECT_ID + "/chat-01 is created on every start and cannot be deleted");
+        }
+        String name = chatActorName(projectId, chatId);
+        ActorRef<ConversationSquad> squad = chats.get(name);
+        if (squad == null) {
+            return ChatDeletion.refused(ChatDeletion.Kind.UNKNOWN, "no such conversation: " + name);
+        }
+        String prefix = projectId + "/chat-";
+        if (chats.keySet().stream().filter(n -> n.startsWith(prefix)).count() <= 1) {
+            return ChatDeletion.refused(ChatDeletion.Kind.LAST_CHAT,
+                    name + " is the project's last conversation; delete the project instead");
+        }
+        List<String> nested = squad.getNamesOfChildren().stream().filter(chats::containsKey).sorted().toList();
+        if (!nested.isEmpty()) {
+            return ChatDeletion.refused(ChatDeletion.Kind.HAS_NESTED,
+                    name + " has conversations under it; delete them first: " + String.join(", ", nested));
+        }
+        ChatSessionIIAR session = chatSessions.get(name);
+        if (session != null && session.isBusyDirect()) {
+            return ChatDeletion.refused(ChatDeletion.Kind.BUSY, name + " is answering");
+        }
+        ActorRef<PromptQueue> queue = actorSystem.getActor(name + ".queue");
+        if (queue != null && !askOrDefault(queue, PromptQueue::snapshot, List.<PromptQueue.QueueEntry>of()).isEmpty()) {
+            return ChatDeletion.refused(ChatDeletion.Kind.BUSY, name + " has queued prompts");
+        }
+
+        if (session != null) {
+            ActorRef<LlmProvider> provider = actorSystem.getActor(session.getName() + PROVIDER_SUFFIX);
+            if (provider != null) {
+                try {
+                    provider.ask(p -> { p.cancel(); return null; }).get(5, TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    LOG.log(Level.WARNING, "Provider of " + name + " did not cancel cleanly", e);
+                }
+            }
+        }
+        if (ioLogStore != null) ioLogStore.resetSession(name);
+        actorSystem.removeActorRecursively(name);
+        chats.remove(name);
+        chatSessions.remove(name);
+        chatLogBuffers.remove(name);
+        LOG.info("Deleted conversation " + name);
+        return new ChatDeletion(ChatDeletion.Kind.DELETED, "");
+    }
+
+    /**
      * What {@link #deleteProject} did: deleted the project, or refused and changed nothing.
      *
      * @param kind          which of the two, and why when refused
@@ -798,8 +872,13 @@ public class ChatUiActorSystem {
             throw new IllegalArgumentException("Unknown project: " + projectId);
         }
         String prefix = projectId + "/chat-";
+        // Every conversation the log holds a session for counts too, ended ones included: a deleted
+        // conversation's session keeps its name, and a new one must not take it
+        // (ConversationDeletion_261011_oo01).
+        List<String> named = new ArrayList<>(chats.keySet());
+        if (ioLogStore != null) named.addAll(ioLogStore.recordedConversationSquads());
         int highest = 0;
-        for (String name : chats.keySet()) {
+        for (String name : named) {
             if (!name.startsWith(prefix)) continue;
             try {
                 highest = Math.max(highest, Integer.parseInt(name.substring(prefix.length())));
