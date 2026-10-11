@@ -214,6 +214,88 @@
         return span;
     }
 
+    // ── Translate one message (MessageTranslation_261011_oo01) ───────────────────────────────
+    // The languages come from the server once; every message's footer gets a list drawn from them.
+    // Choosing a language asks the server for that message in it and shows the result inside the
+    // message, above the footer. Nothing is added to the conversation.
+    var translationLanguages = [];
+
+    function loadTranslationLanguages() {
+        fetch(apiUrl("api/translation-languages"))
+            .then(function (r) { return r.ok ? r.json() : []; })
+            .then(function (list) { translationLanguages = list || []; })
+            .catch(function () { translationLanguages = []; });
+    }
+
+    /**
+     * @param div          the message's box; the translation is placed in it, above the footer
+     * @param sourceText   the message as written, markdown included
+     * @param asMarkdown   whether the translation is drawn as markdown (an answer) or as text (a prompt)
+     */
+    function translateSelect(div, sourceText, asMarkdown) {
+        var select = document.createElement("select");
+        select.className = "translate-select";
+        select.title = "Translate this message";
+        var first = document.createElement("option");
+        first.value = "";
+        first.textContent = "Translate…";
+        select.appendChild(first);
+        // A message restored as the page loads may be drawn before the list has arrived, so the
+        // options are filled in whenever the list is opened and still holds only the first one.
+        function fillLanguages() {
+            if (select.options.length > 1) return;
+            translationLanguages.forEach(function (l) {
+                var o = document.createElement("option");
+                o.value = l.code;
+                o.textContent = l.name;
+                select.appendChild(o);
+            });
+        }
+        fillLanguages();
+        select.addEventListener("focus", fillLanguages);
+        select.addEventListener("mousedown", fillLanguages);
+        select.addEventListener("change", function () {
+            var code = select.value;
+            if (!code) return;
+            var box = div.querySelector(":scope > .translated");
+            if (!box) {
+                box = document.createElement("div");
+                box.className = "translated";
+                var footer = div.querySelector(":scope > .message-footer");
+                div.insertBefore(box, footer);
+            }
+            var name = select.options[select.selectedIndex].textContent;
+            box.textContent = "Translating into " + name + "…";
+            select.disabled = true;
+            fetch(apiUrl(chatUrl("/translate")), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text: sourceText, language: code })
+            })
+                .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+                .then(function (res) {
+                    if (!res.ok) {
+                        box.textContent = name + ": " + (res.body.message || "translation failed");
+                        box.classList.add("translated-error");
+                        return;
+                    }
+                    box.classList.remove("translated-error");
+                    box.textContent = "";
+                    var label = document.createElement("div");
+                    label.className = "translated-label";
+                    label.textContent = name + (res.body.model ? " — " + res.body.model : "");
+                    box.appendChild(label);
+                    var body = document.createElement("div");
+                    if (asMarkdown) body.innerHTML = renderMarkdown(res.body.translation);
+                    else body.textContent = res.body.translation;
+                    box.appendChild(body);
+                })
+                .catch(function (e) { box.textContent = name + ": " + e.message; })
+                .then(function () { select.disabled = false; select.value = ""; });
+        });
+        return select;
+    }
+
     function newFooter(div) {
         var footer = document.createElement("div");
         footer.className = "message-footer";
@@ -246,6 +328,7 @@
         var modelName = event.model || (modelSelect && modelSelect.value) || "";
         if (modelName) footer.appendChild(textSpan(shorten(modelName, 30), modelName));
         footer.appendChild(copyButton(markdownText, "Copy MD"));
+        footer.appendChild(translateSelect(div, markdownText, true));
         footer.appendChild(textSpan(formatTime(new Date())));
     }
 
@@ -285,6 +368,7 @@
             if (origin) footer.appendChild(originBadge(origin));
             footer.appendChild(textSpan(formatTime(new Date())));
             footer.appendChild(copyButton(text, "Copy"));
+            footer.appendChild(translateSelect(div, text, false));
         }
         chatArea.appendChild(div);
         scrollToBottom();
@@ -1116,7 +1200,9 @@
                         // GET /conversation returns the role and the text and nothing else, and a
                         // footer filled with the time of the reload would state something false.
                         var div = appendMarkdownMessage(t.role, t.content);
-                        newFooter(div).appendChild(copyButton(t.content, "Copy MD"));
+                        var footer = newFooter(div);
+                        footer.appendChild(copyButton(t.content, "Copy MD"));
+                        footer.appendChild(translateSelect(div, t.content, true));
                     } else {
                         appendMessage(t.role, t.content, null, t.origin);
                     }
@@ -1321,6 +1407,7 @@
         initProviderSelect();
         initTemperature();
         initThinkAndEffort();
+        loadTranslationLanguages();
         loadModels();
         hydrateConversation();
         refreshQueue();

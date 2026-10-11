@@ -481,6 +481,30 @@ header h1[contenteditable]:focus {
     border-color: var(--accent-blue);
 }
 
+/* Translate one message (MessageTranslation_261011_oo01): the list in the footer, and the
+   translation drawn inside the message above the footer. */
+.translate-select {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 1px 4px;
+    font-size: 11px;
+    cursor: pointer;
+}
+.translate-select:hover { color: var(--text-primary); border-color: var(--accent-blue); }
+.translated {
+    margin-top: 8px;
+    padding: 6px 10px;
+    border-left: 3px solid var(--accent-blue);
+    background: var(--bg-tertiary);
+    border-radius: 4px;
+    white-space: pre-wrap;
+}
+.message.assistant .translated { white-space: normal; }
+.translated-label { font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; }
+.translated-error { border-left-color: var(--accent-red, #f38ba8); color: var(--text-secondary); }
+
 /* Markdown content styles */
 .message.assistant h1,
 .message.assistant h2,

@@ -14,6 +14,8 @@ import com.scivicslab.chatui.core.provider.LlmProvider;
 import com.scivicslab.chatui.logging.ForwardingAccumulator;
 import com.scivicslab.chatui.logging.RecentEntriesAccumulator;
 import com.scivicslab.chatui.openaicompat.OpenAiCompatProvider;
+import com.scivicslab.chatui.translation.TranslationLanguages;
+import com.scivicslab.chatui.translation.TranslationPrompt;
 import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.turingworkflow.plugins.logoutput.MultiplexerAccumulator;
 import com.scivicslab.turingworkflow.plugins.logoutput.MultiplexerAccumulatorActor;
@@ -549,6 +551,76 @@ public class ChatUiActorSystem {
         projects.remove(projectId);
         LOG.info("Deleted project " + projectId + " with " + conversations.size() + " conversation(s)");
         return new ProjectDeletion(ProjectDeletion.Kind.DELETED, conversations.size(), "");
+    }
+
+    /**
+     * What {@link #translate} gave back: the translation and the model that wrote it, or why there
+     * is none.
+     */
+    public record Translation(Kind kind, String text, String model, String reason) {
+        /** {@code DONE}, or why nothing was translated. */
+        public enum Kind { DONE, UNKNOWN_LANGUAGE, UNKNOWN_CHAT, NO_ANSWER }
+
+        static Translation refused(Kind kind, String reason) {
+            return new Translation(kind, null, null, reason);
+        }
+    }
+
+    /** The translation provider, created the first time a message is translated. */
+    private ActorRef<LlmProvider> translatorRef;
+
+    /**
+     * Translates one message of a conversation ({@code MessageTranslation_261011_oo01}).
+     *
+     * <p>Through one Local LLM provider kept for translating, not the conversation's own: a
+     * conversation's provider answers one request at a time, so asking it while it is answering
+     * would wait for the answer to finish, and a conversation on Claude Code or Codex has no
+     * provider to ask. The translation is not added to the conversation; what was sent and what came
+     * back are recorded in the conversation's I/O log session under the label {@code translation}.</p>
+     *
+     * @param projectId    the conversation's project
+     * @param chatId       the conversation
+     * @param text         the message, unchanged
+     * @param languageCode a code from {@link TranslationLanguages#ALL}
+     */
+    public Translation translate(String projectId, String chatId, String text, String languageCode) {
+        var language = TranslationLanguages.find(languageCode);
+        if (language.isEmpty()) {
+            return Translation.refused(Translation.Kind.UNKNOWN_LANGUAGE, "unknown language: " + languageCode);
+        }
+        String conversation = chatActorName(projectId, chatId);
+        if (!chats.containsKey(conversation)) {
+            return Translation.refused(Translation.Kind.UNKNOWN_CHAT, "no such conversation: " + conversation);
+        }
+        String prompt = TranslationPrompt.of(text, language.get().name());
+        String[] answer;
+        try {
+            answer = translator().ask(p -> {
+                OpenAiCompatProvider local = (OpenAiCompatProvider) p;
+                return new String[] { local.completeOutsideConversation(prompt), local.getCurrentModel() };
+            }).get(5, TimeUnit.MINUTES);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Translation of a message in " + conversation + " failed", e);
+            answer = new String[] { null, null };
+        }
+        String translation = answer[0] == null ? null : answer[0].strip();
+        if (ioLogStore != null) {
+            ioLogStore.record(ioLogStore.ensureSession(conversation), conversation, "translation",
+                    "LANGUAGE: " + language.get().code() + "\nMODEL: " + answer[1]
+                            + "\n\nINPUT:\n" + prompt + "\n\nOUTPUT:\n" + (translation == null ? "(no answer)" : translation));
+        }
+        if (translation == null || translation.isEmpty()) {
+            return Translation.refused(Translation.Kind.NO_ANSWER, "the model gave no translation");
+        }
+        return new Translation(Translation.Kind.DONE, translation, answer[1], "");
+    }
+
+    private synchronized ActorRef<LlmProvider> translator() {
+        if (translatorRef == null) {
+            translatorRef = housekeeperRef.createChild("translator",
+                    newProvider(OpenAiCompatProviderFactory.KIND, ToolSet.FULL, DEFAULT_PROJECT_ID, "translator"));
+        }
+        return translatorRef;
     }
 
     /** Asks an actor for a value, or gives {@code fallback} when it does not answer in 5 seconds. */

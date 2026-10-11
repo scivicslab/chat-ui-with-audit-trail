@@ -116,6 +116,41 @@ public class ChatResource {
     }
 
     /**
+     * Translates one message of this conversation ({@code MessageTranslation_261011_oo01}). The
+     * translation is not added to the conversation.
+     *
+     * @param body {@code {"text": ..., "language": a code from GET /api/translation-languages}}
+     * @return {@code {"translation", "language", "model"}}; 400 for no text or an unknown language,
+     *         404 for no such conversation, 502 when the model gave no translation
+     */
+    @POST
+    @Path("/{projectId}/chats/{chatId}/translate")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response translate(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId,
+                              Map<String, Object> body) {
+        Object textVal = body != null ? body.get("text") : null;
+        Object langVal = body != null ? body.get("language") : null;
+        String text = textVal == null ? "" : String.valueOf(textVal);
+        if (text.isBlank()) {
+            return Response.status(400).entity(Map.of("type", "error", "message", "text is required")).build();
+        }
+        String language = langVal == null ? "" : String.valueOf(langVal);
+        ChatUiActorSystem.Translation t = actorSystem.translate(projectId, chatId, text, language);
+        int status = switch (t.kind()) {
+            case DONE -> 200;
+            case UNKNOWN_LANGUAGE -> 400;
+            case UNKNOWN_CHAT -> 404;
+            case NO_ANSWER -> 502;
+        };
+        if (status != 200) {
+            return Response.status(status).entity(Map.of("type", "error", "message", t.reason())).build();
+        }
+        return Response.ok(Map.of("translation", t.text(), "language", language,
+                "model", t.model() == null ? "" : t.model())).build();
+    }
+
+    /**
      * Sets the name a person reads for a project ({@code ProjectProperty_260929_oo01}).
      *
      * @param projectId the project to name
