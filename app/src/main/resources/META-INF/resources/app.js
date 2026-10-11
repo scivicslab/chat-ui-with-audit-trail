@@ -582,7 +582,7 @@
         var text = document.createElement("span");
         text.className = "queue-text";
         text.textContent = item.prompt;
-        // The row shows one line; the hover text is the whole prompt.
+        // The row shows at most three lines; the hover text is the whole prompt.
         text.title = (item.source && item.source !== "human")
                 ? "source: " + item.source + "\n\n" + item.prompt
                 : item.prompt;

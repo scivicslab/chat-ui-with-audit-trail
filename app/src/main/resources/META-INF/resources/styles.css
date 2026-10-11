@@ -710,6 +710,13 @@ header h1[contenteditable]:focus {
     white-space: pre-wrap;
     word-break: break-word;
     color: var(--text-primary);
+    /* Show at most 3 lines, as quarkus-chat-ui does; the title attribute carries the whole
+       prompt on hover. */
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
 }
 
 .queue-item .queue-auto {
