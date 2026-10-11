@@ -207,6 +207,64 @@
         return btn;
     }
 
+    // ── Code blocks: wrap toggle and copy (CodeBlockWrapAndCopy_261011_oo01) ─────────────────
+    // Every <pre> drawn from markdown gets two buttons at its top right: one switches that block
+    // between scrolling sideways (the default) and wrapping at the pane's width, the other copies
+    // the block's code alone. The buttons sit in a wrapper outside the <pre>, so they stay put while
+    // the code scrolls sideways.
+    function decorateCodeBlocks(container) {
+        var blocks = container.querySelectorAll("pre");
+        for (var i = 0; i < blocks.length; i++) {
+            var pre = blocks[i];
+            if (pre.parentNode && pre.parentNode.classList && pre.parentNode.classList.contains("code-block")) continue;
+            var wrapper = document.createElement("div");
+            wrapper.className = "code-block";
+            pre.parentNode.insertBefore(wrapper, pre);
+            wrapper.appendChild(pre);
+            var tools = document.createElement("div");
+            tools.className = "code-tools";
+            tools.appendChild(wrapToggleButton(pre));
+            tools.appendChild(codeCopyButton(pre));
+            wrapper.appendChild(tools);
+        }
+    }
+
+    function wrapToggleButton(pre) {
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "code-tool-btn";
+        function label() {
+            var wrapped = pre.classList.contains("wrapped");
+            btn.textContent = wrapped ? "No wrap" : "Wrap";
+            btn.title = wrapped ? "Stop wrapping: long lines scroll sideways" : "Wrap long lines at the pane's width";
+        }
+        label();
+        btn.addEventListener("click", function () {
+            pre.classList.toggle("wrapped");
+            label();
+        });
+        return btn;
+    }
+
+    function codeCopyButton(pre) {
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "code-tool-btn";
+        btn.textContent = "Copy";
+        btn.title = "Copy this code";
+        btn.addEventListener("click", function () {
+            copyTextToClipboard(pre.textContent).then(function () {
+                btn.textContent = "Copied!";
+                setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+            }).catch(function (e) {
+                btn.textContent = "Copy failed";
+                notify("copy failed: " + e.message, true);
+                setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+            });
+        });
+        return btn;
+    }
+
     function textSpan(text, title) {
         var span = document.createElement("span");
         span.textContent = text;
@@ -286,7 +344,10 @@
                     label.textContent = name + (res.body.model ? " — " + res.body.model : "");
                     box.appendChild(label);
                     var body = document.createElement("div");
-                    if (asMarkdown) body.innerHTML = renderMarkdown(res.body.translation);
+                    if (asMarkdown) {
+                        body.innerHTML = renderMarkdown(res.body.translation);
+                        decorateCodeBlocks(body);
+                    }
                     else body.textContent = res.body.translation;
                     box.appendChild(body);
                 })
@@ -381,6 +442,7 @@
         var div = document.createElement("div");
         div.className = "message " + role;
         div.innerHTML = renderMarkdown(text);
+        decorateCodeBlocks(div);
         chatArea.appendChild(div);
         scrollToBottom();
         return div;

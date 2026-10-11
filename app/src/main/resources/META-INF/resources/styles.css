@@ -539,6 +539,35 @@ header h1[contenteditable]:focus {
     padding: 0;
 }
 
+/* Code blocks: wrap toggle and copy (CodeBlockWrapAndCopy_261011_oo01). The wrapper holds the
+   buttons outside the <pre>, so they stay at the top right while the code scrolls sideways. */
+.code-block { position: relative; }
+.code-block > pre { padding-top: 30px; }   /* room for the buttons above the first line */
+.code-tools {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: flex;
+    gap: 4px;
+    opacity: 0.55;
+}
+.code-block:hover .code-tools { opacity: 1; }
+.code-tool-btn {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 11px;
+    cursor: pointer;
+}
+.code-tool-btn:hover { color: var(--text-primary); border-color: var(--accent-blue); }
+.message pre.wrapped,
+.message pre.wrapped code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
 .message.assistant ul, .message.assistant ol {
     padding-left: 24px;
     margin: 6px 0;
