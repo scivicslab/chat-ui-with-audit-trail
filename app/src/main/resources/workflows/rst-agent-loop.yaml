@@ -1,0 +1,248 @@
+name: rst-agent-loop
+description: |
+  Has an LLM fill one rst-on-lisp rule file, one :instruction per turn (RstAgentLoop_261012_oo01).
+  The start file is <dir>/.rst-on-lisp/<id>.0.lisp. For each rule that carries an :instruction, the
+  plan sends two turns to the same conversation: a work turn (read about rst-on-lisp if needed, sum
+  up the file's meaning structure, explain how the line with the :instruction relates to the other
+  lines in the RST sense, then do that one :instruction and answer with the whole rule file), and a
+  review turn (check what was just written against the writing anti-patterns). Every rule file the
+  writer returns is kept as <id>.1.lisp, <id>.2.lisp, … beside the start file. When no :instruction
+  is left, the last rule file is written as <dir>/<name>.lisp, beside <name>.md, for make-markdown
+  (or html-saurus's Rebuild) to turn into markdown.
+params:
+  dir:
+    label: "The document's directory"
+    description: "Absolute path (no ~) of the directory holding <name>.md, e.g. /home/devteam/works/doc_Base010/docs/rst-on-lisp/010_concepts/070_RstAgentLoop_261012_oo01"
+    type: text
+    required: true
+  name:
+    label: "The document's file name, without extension"
+    description: "e.g. 070_RstAgentLoop_261012_oo01; the id is the part after the first underscore"
+    type: text
+    required: true
+  writer:
+    description: "The conversation that writes"
+    default: "project1/chat-02"
+  writerModel:
+    description: "The model the writer runs on; empty leaves the conversation as it is"
+    default: ""
+  writerNoThink:
+    description: "true asks the writer's model to skip its thinking phase. A model that thinks can spend its whole output on reasoning after reading the reference documents and answer with nothing"
+    default: "true"
+  maxInstructions:
+    description: "How many :instruction rules one run handles at most; the run fails past it, which also stops a writer that keeps leaving an :instruction in place"
+    type: int
+    default: 20
+steps:
+  - states: ["0", "1"]
+    label: add-writer
+    actions:
+      - actor: this
+        method: addWorker
+        arguments: ["writer", 'jexl:state.getString("writer")']
+        execution: direct
+      - actor: this
+        method: setChatModel
+        arguments: ['jexl:state.getString("writer")', 'jexl:state.getString("writerModel")']
+        execution: direct
+      - actor: this
+        method: setChatNoThink
+        arguments: ['jexl:state.getString("writer")', 'jexl:state.getString("writerNoThink")']
+        execution: direct
+
+  - states: ["1", "pick"]
+    label: name-the-files
+    note: |
+      Every file is named from dir and name. The start file and each rule file the writer returns sit
+      in <dir>/.rst-on-lisp, where html-saurus builds no page and make-markdown writes no markdown.
+      "cur" is the rule file as it stands; "cur-path" is where that version is kept.
+    actions:
+      - actor: this
+        method: putJson
+        arguments: {path: id, value: 'jexl:state.getString("name").substring(state.getString("name").indexOf("_") + 1)'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: work, value: 'jexl:state.getString("dir") + "/.rst-on-lisp/" + state.getString("id")'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: cur-path, value: 'jexl:state.getString("work") + ".0.lisp"'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: final, value: 'jexl:state.getString("dir") + "/" + state.getString("name") + ".lisp"'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: marker, value: ':instruction "'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: n, value: "0"}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: done, value: "0"}
+        execution: direct
+      - actor: this
+        method: readFile
+        arguments: ['jexl:state.getString("cur-path")', "cur"]
+        execution: direct
+
+  - states: ["1", "failed"]
+    label: no-start-file
+    actions: [{actor: this, method: doNothing, arguments: ["the start file could not be read"], execution: direct}]
+
+  - states: ["pick", "work"]
+    label: pick-the-next-instruction
+    note: |
+      Takes the first rule in the file that still carries an :instruction, as the line of the file it
+      is on. The marker is ':instruction "' so that `:instruction` written inside a sentence is not
+      taken for one. countUp bounds the run.
+    actions:
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("cur").indexOf(state.getString("marker")) >= 0'
+        execution: direct
+      - actor: this
+        method: countUp
+        arguments: ["done", 'jexl:state.getString("maxInstructions")']
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: line, value: 'jexl:state.getString("cur").substring(state.getString("cur").lastIndexOf("\n", state.getString("cur").indexOf(state.getString("marker"))) + 1, state.getString("cur").indexOf("\n", state.getString("cur").indexOf(state.getString("marker"))) < 0 ? state.getString("cur").length() : state.getString("cur").indexOf("\n", state.getString("cur").indexOf(state.getString("marker"))))'}
+        execution: direct
+
+  - states: ["pick", "install"]
+    label: no-instruction-left
+    note: Reached when no rule carries an :instruction any more.
+    actions: [{actor: this, method: doNothing, arguments: ["no :instruction left"], execution: direct}]
+
+  - states: ["work", "keep-work"]
+    label: work-turn
+    note: |
+      Steps 1 to 4 of RstAgentLoop_261012_oo01 for one :instruction, in one turn. The prompt first says
+      what rst-on-lisp is and has the writer read its explanation, before the task is named; then the
+      summary of the meaning structure and the line's relation to the other lines are still in front
+      of the writer when it writes. Files are given by path; the writer reads them with its read tool.
+    actions:
+      - actor: this
+        method: askWorker
+        arguments:
+          - writer
+          - 'jexl:"これから、rst-on-lisp という書き方で書かれた文書の規則ファイルを扱います。rst-on-lisp は、文書を Lisp の規則（defrule）の集まりとして書き、節の並びという形式的構造と、文と文の関係（RST の関係）という意味的構造を規則で表す書き方です。作業に入る前に、次の文書を必ず read で読んでください。\n   ~/works/doc_Base010/docs/rst-on-lisp/010_concepts/020_RstOnLispConcept_261005_oo01/020_RstOnLispConcept_261005_oo01.md （rst-on-lisp のコンセプト）\n   ~/works/doc_Base010/docs/rst-on-lisp/010_concepts/025_RstMeaningAndForm_261012_oo01/025_RstMeaningAndForm_261012_oo01.md （意味と形式）\n   ~/works/rst-on-lisp/grammar.lisp （共有文法）\n   ~/works/doc_Base010/docs/rst-on-lisp/010_concepts/060_ImprovingTextWithSemanticTags_261009_oo01/060_ImprovingTextWithSemanticTags_261009_oo01.md （:instruction の付いた規則の埋め方）\n\n読み終えたら、次の規則ファイルの :instruction を 1 つ処理してください。\n規則ファイル: " + state.getString("cur-path") + "\n処理する :instruction がある行:\n" + state.getString("line") + "\n\n1. 規則ファイルを read で読み、その意味的構造を要約してください。段落ごとに核の主張を 1 文で書き、ほかの文がその核にどう関わるかを関係の名前で書きます。節の名前と話題を並べた目次は書きません。\n\n2. この :instruction がある行は、他の行と意味的に（RST 的に）どのような関係があるか説明してください。\n\n3. その上で、この行の :instruction の指示に従って、この行の規則だけを書いてください。書いた規則からは :instruction と :source を消します。ほかの規則は一字も変えません。\n\n返事は「## 意味的構造の要約」（1.）、「## この行とほかの行の関係」（2.）に続けて、規則ファイルの全文を ```lisp で始まるコードブロック 1 つで書いてください。"'
+        execution: direct
+
+  - states: ["work", "failed"]
+    label: work-turn-failed
+    actions: [{actor: this, method: doNothing, arguments: ["the writer gave no answer in a work turn"], execution: direct}]
+
+  - states: ["keep-work", "review"]
+    label: keep-work-turn
+    note: The answer is kept as <id>.<n>.answer.md and its rule file as <id>.<n>.lisp, which becomes "cur".
+    actions:
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["writer", "answer"]
+        execution: direct
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("answer").indexOf("```lisp") >= 0'
+        execution: direct
+      - actor: this
+        method: countUp
+        arguments: ["n", "1000"]
+        execution: direct
+      - actor: this
+        method: writeFile
+        arguments: ['jexl:state.getString("work") + "." + state.getString("n") + ".answer.md"', "answer"]
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: cur, value: 'jexl:state.getString("answer").substring(state.getString("answer").indexOf("```lisp") + 7, state.getString("answer").lastIndexOf("```")).trim()'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: cur-path, value: 'jexl:state.getString("work") + "." + state.getString("n") + ".lisp"'}
+        execution: direct
+      - actor: this
+        method: writeFile
+        arguments: ['jexl:state.getString("cur-path")', "cur"]
+        execution: direct
+
+  - states: ["keep-work", "failed"]
+    label: no-rule-file-in-work-turn
+    actions: [{actor: this, method: doNothing, arguments: ["a work turn's answer had no ```lisp block"], execution: direct}]
+
+  - states: ["review", "keep-review"]
+    label: review-turn
+    note: |
+      Step 5 of RstAgentLoop_261012_oo01, in the next turn of the same conversation: only the rule the
+      writer has just written is reviewed.
+    actions:
+      - actor: this
+        method: askWorker
+        arguments:
+          - writer
+          - 'jexl:"前のターンで書いた規則（元は次の行でした）を見直してください。\n" + state.getString("line") + "\n\n規則ファイル: " + state.getString("cur-path") + "\n\n見直すのは、前のターンであなたが書いた規則だけです。ほかの規則は一字も変えません。\n\n~/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/ の下の文書を read で読み、書いた文が、そこで禁じられている手抜き（一般論の締め、比喩、実体を指さない名詞、ほかの段落の言い直し、目的を書かずに形式だけを書くことなど）をしていないかを確かめてください。あわせて、前のターンで説明した、この行とほかの行の関係に、書いた文が合っているかを確かめてください。\n\n返事は、直した点の箇条書きに続けて、規則ファイルの全文を ```lisp で始まるコードブロック 1 つで書いてください。直す所が無ければ、そう書いたうえで全文をそのまま返してください。"'
+        execution: direct
+
+  - states: ["review", "failed"]
+    label: review-turn-failed
+    actions: [{actor: this, method: doNothing, arguments: ["the writer gave no answer in a review turn"], execution: direct}]
+
+  - states: ["keep-review", "pick"]
+    label: keep-review-turn
+    actions:
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["writer", "answer"]
+        execution: direct
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("answer").indexOf("```lisp") >= 0'
+        execution: direct
+      - actor: this
+        method: countUp
+        arguments: ["n", "1000"]
+        execution: direct
+      - actor: this
+        method: writeFile
+        arguments: ['jexl:state.getString("work") + "." + state.getString("n") + ".answer.md"', "answer"]
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: cur, value: 'jexl:state.getString("answer").substring(state.getString("answer").indexOf("```lisp") + 7, state.getString("answer").lastIndexOf("```")).trim()'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: cur-path, value: 'jexl:state.getString("work") + "." + state.getString("n") + ".lisp"'}
+        execution: direct
+      - actor: this
+        method: writeFile
+        arguments: ['jexl:state.getString("cur-path")', "cur"]
+        execution: direct
+
+  - states: ["keep-review", "failed"]
+    label: no-rule-file-in-review-turn
+    actions: [{actor: this, method: doNothing, arguments: ["a review turn's answer had no ```lisp block"], execution: direct}]
+
+  - states: ["install", "end"]
+    label: install
+    note: |
+      The last rule file becomes the document's rule file, beside <name>.md. make-markdown (run by
+      html-saurus's Rebuild) writes the markdown from it, or reports the violations instead.
+    actions:
+      - actor: this
+        method: writeFile
+        arguments: ['jexl:state.getString("final")', "cur"]
+        execution: direct
+      - actor: this
+        method: finish
+        arguments: ["final"]
+        execution: direct
+
+  - states: ["failed", "end"]
+    label: report-failure
+    actions: [{actor: this, method: reportFailure, arguments: [], execution: direct}]

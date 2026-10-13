@@ -1,0 +1,251 @@
+name: book-terms
+description: |
+  Reads a textbook one part at a time and writes, for each part, the technical terms (noun phrases)
+  it defines and the relations between them, as rst-on-lisp rules. Two turns per part, in one
+  conversation that is emptied before the next part:
+  1. Terms turn: the part's text is in the prompt; the extractor lists the terms, each with the
+     sentence of the book that defines or explains it, quoted as written.
+  2. Relations turn: the extractor writes one rule pair per term,
+       (defrule term/<name> -> :nucleus term/<name>/text :<term-relation> term/<other> …)
+       (defrule term/<name>/text -> "<the quoted sentence>")
+     using only the relations of the shared grammar's term-relation, and only those the part states.
+  The rules of each part are kept as <out>/<nn>.lisp. The terms of the parts before are given to the
+  next part with their definitions left out, so the same term keeps the same name across parts.
+  Merging the parts into one term graph is done afterwards by rst-on-lisp's merge-terms.
+  A turn that ends without the answer's required form (the extractor says what it is about to do
+  and stops) is told to go on, up to maxNudges times per turn.
+params:
+  book:
+    label: "The book's directory"
+    description: "Absolute path (no ~) of the directory whose subdirectories hold one .md per part, e.g. /home/devteam/works/doc_Base011/docs/Books/CoreJava14th_Vol1/Chap04"
+    type: text
+    required: true
+  out:
+    label: "Where to write the rules"
+    description: "Absolute path of a directory under the write root; <out>/01.lisp, 02.lisp, … are written there"
+    type: text
+    required: true
+  subject:
+    description: "What the book is about, as the terms turn names it to the extractor"
+    default: "オブジェクト指向プログラミングと Java"
+  extractor:
+    description: "The conversation that extracts"
+    default: "project1/chat-02"
+  extractorModel:
+    description: "The model the extractor runs on; empty leaves the conversation as it is"
+    default: "qwen3.8-flash-next"
+  extractorNoThink:
+    description: "true asks the extractor's model to skip its thinking phase"
+    default: "false"
+  maxParts:
+    description: "How many parts one run reads at most, from the first"
+    type: int
+    default: 100
+  maxNudges:
+    description: "How many times one turn may be told to go on when the answer lacks its required form"
+    type: int
+    default: 3
+steps:
+  - states: ["0", "1"]
+    label: add-extractor
+    actions:
+      - actor: this
+        method: addWorker
+        arguments: ["extractor", 'jexl:state.getString("extractor")']
+        execution: direct
+      - actor: this
+        method: setChatModel
+        arguments: ['jexl:state.getString("extractor")', 'jexl:state.getString("extractorModel")']
+        execution: direct
+      - actor: this
+        method: setChatNoThink
+        arguments: ['jexl:state.getString("extractor")', 'jexl:state.getString("extractorNoThink")']
+        execution: direct
+
+  - states: ["1", "next"]
+    label: list-the-parts
+    note: One .md per part, one directory below the book's directory, in name order.
+    actions:
+      - actor: this
+        method: listFiles
+        arguments: ['jexl:state.getString("book")', ".md", "parts", "2"]
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: n, value: "0"}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: known, value: ""}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: end-mark, value: "以上"}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: relations-list, value: "is-a（この用語は相手の一種である）、instance-of（相手のインスタンスである）、part-of（相手の部分である）、member-of（相手の集まりの成員である）、attribute-of（相手が持つ属性である）、opposite-of（相手と反対の意味である）、same-as（相手と同じものの別の呼び名である）、causes（相手を引き起こす）、implements（相手を実装する）、associated-with（相手と関連する）、aggregates（相手を部品として保持する。相手は単独でも存在する）、composed-of（相手から成る。相手はこれの外では存在しない）、depends-on（相手に依存する）、references（相手を参照する）、calls（相手を呼び出す）、creates（相手を生成する）"}
+        execution: direct
+
+  - states: ["1", "failed"]
+    label: no-parts
+    actions: [{actor: this, method: doNothing, arguments: ["no .md under the book's directory"], execution: direct}]
+
+  - states: ["next", "terms"]
+    label: take-the-next-part
+    actions:
+      - actor: this
+        method: countUp
+        arguments: ["n", 'jexl:state.getString("maxParts")']
+        execution: direct
+      - actor: this
+        method: takeNext
+        arguments: ["parts", "part"]
+        execution: direct
+      - actor: this
+        method: readFile
+        arguments: ['jexl:state.getString("part")', "text"]
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: nudges-terms, value: "0"}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: nudges-relations, value: "0"}
+        execution: direct
+      - actor: this
+        method: clearWorker
+        arguments: ["extractor"]
+        execution: direct
+
+  - states: ["next", "end"]
+    label: no-part-left
+    note: Reached when every part has been read, or maxParts of them.
+    actions:
+      - actor: this
+        method: finish
+        arguments: ["known"]
+        execution: direct
+
+  - states: ["terms", "keep-terms"]
+    label: terms-turn
+    note: The part's whole text is in the prompt; the extractor reads nothing itself.
+    actions:
+      - actor: this
+        method: askWorker
+        arguments:
+          - extractor
+          - 'jexl:"次は、" + state.getString("subject") + "の教科書の一部です（ファイル: " + state.getString("part") + "）。\n\n----- ここから -----\n" + state.getString("text") + "\n----- ここまで -----\n\nこの部分から、" + state.getString("subject") + "の専門用語（名詞句）を抜き出してください。\n- この部分が定義しているか、意味を説明している用語だけを抜き出します。名前が出てくるだけの用語や、program、computer のような一般的な語は入れません。\n- 用語ごとに、この部分の中でその用語を定義または説明している文を、本文のとおり 1〜2 文引用します。訳したり言い換えたりしません。\n- 答えは「用語 | 引用」の形の行を、用語 1 つにつき 1 行並べます。\n- 答えの最後の行には「" + state.getString("end-mark") + "」とだけ書いてください。"'
+        execution: direct
+
+  - states: ["terms", "failed"]
+    label: terms-turn-failed
+    actions: [{actor: this, method: doNothing, arguments: ["the extractor gave no answer in a terms turn"], execution: direct}]
+
+  - states: ["keep-terms", "relations"]
+    label: keep-terms
+    actions:
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["extractor", "terms"]
+        execution: direct
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("terms").trim().endsWith(state.getString("end-mark"))'
+        execution: direct
+
+  - states: ["keep-terms", "keep-terms"]
+    label: nudge-terms
+    actions:
+      - actor: this
+        method: countUp
+        arguments: ["nudges-terms", 'jexl:state.getString("maxNudges")']
+        execution: direct
+      - actor: this
+        method: askWorker
+        arguments:
+          - extractor
+          - 'jexl:"作業を続けてください。用語を「用語 | 引用」の行で並べ、答えの最後の行には「" + state.getString("end-mark") + "」とだけ書いてください。"'
+        execution: direct
+
+  - states: ["keep-terms", "failed"]
+    label: terms-never-finished
+    actions: [{actor: this, method: doNothing, arguments: ["a terms turn ended without the end mark, also after being told to go on"], execution: direct}]
+
+  - states: ["relations", "keep-relations"]
+    label: relations-turn
+    note: |
+      The next turn of the same conversation, so the terms just listed are in front of the extractor.
+      The terms of the parts before come with their definitions left out: names and relations only.
+    actions:
+      - actor: this
+        method: askWorker
+        arguments:
+          - extractor
+          - 'jexl:"次に、抜き出した用語と、用語どうしの関係を、rst-on-lisp の規則で書いてください。\n\n書き方:\n- 用語 1 つを規則 2 つで書きます。\n  (defrule term/<名前> -> :nucleus term/<名前>/text <関係の対>…)\n  (defrule term/<名前>/text -> \"<前のターンで引用した文>\")\n- <名前> は用語の英語を小文字にし、語をハイフンでつなぎます（例: term/instance-field）。\n- 関係の対は :<関係名> term/<相手の名前> と書きます。向きは「この用語 <関係名> 相手」です。たとえば (defrule term/object -> :nucleus term/object/text :instance-of term/class) は「object は class のインスタンスである」と読みます。\n- 関係名は、次の一覧の中からだけ選びます。\n  " + state.getString("relations-list") + "\n- この部分の本文に書いてある関係だけを書きます。関係の無い用語は :nucleus の対だけにします。\n- 相手の用語は、この部分で抜き出した用語か、下の「前の部分の用語」のどれかです。前の部分の用語の規則は書き直しません。\n- 前の部分と同じ用語には、同じ名前を使います。\n- 引用の文は 1 行に書きます。文の中の \" は \\\" と書きます。\n\n前の部分の用語（定義の文は省いています）:\n" + (state.getString("known") == "" ? "なし" : state.getString("known")) + "\n\n返事は規則だけを、```lisp で始まるコードブロック 1 つで書いてください。"'
+        execution: direct
+
+  - states: ["relations", "failed"]
+    label: relations-turn-failed
+    actions: [{actor: this, method: doNothing, arguments: ["the extractor gave no answer in a relations turn"], execution: direct}]
+
+  - states: ["keep-relations", "next"]
+    label: keep-relations
+    note: |
+      The part's rules are kept as <out>/<n>.lisp. "known" grows by the part's rules with the /text
+      rules taken out, which leaves each term's name and relations.
+    actions:
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["extractor", "answer"]
+        execution: direct
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("answer").indexOf("```lisp") >= 0'
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: block, value: 'jexl:";;; " + state.getString("part") + "\n" + state.getString("answer").substring(state.getString("answer").indexOf("```lisp") + 7, state.getString("answer").indexOf("```", state.getString("answer").indexOf("```lisp") + 7)).trim() + "\n"'}
+        execution: direct
+      - actor: this
+        method: writeFile
+        arguments: ['jexl:state.getString("out") + "/" + (state.getString("n").length() == 1 ? "0" : "") + state.getString("n") + ".lisp"', "block"]
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: known, value: 'jexl:state.getString("known") + state.getString("block").replaceAll("(?m)^\\(defrule [^ ]+/text .*\\n?", "").replaceAll("(?m)^;;;.*\\n?", "")'}
+        execution: direct
+
+  - states: ["keep-relations", "keep-relations"]
+    label: nudge-relations
+    actions:
+      - actor: this
+        method: countUp
+        arguments: ["nudges-relations", 'jexl:state.getString("maxNudges")']
+        execution: direct
+      - actor: this
+        method: askWorker
+        arguments:
+          - extractor
+          - '作業を続けてください。規則だけを、```lisp で始まるコードブロック 1 つで返してください。'
+        execution: direct
+
+  - states: ["keep-relations", "failed"]
+    label: relations-never-finished
+    actions: [{actor: this, method: doNothing, arguments: ["a relations turn's answer had no ```lisp block, also after being told to go on"], execution: direct}]
+
+  - states: ["failed", "end"]
+    label: report-failure
+    note: |
+      The conversation is stopped first: a turn the plan stopped waiting for (askWorker gives up after
+      1800 s) goes on using the GPU otherwise, as a qwen write turn did after its job had ended.
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("extractor")']
+        execution: direct
+      - actor: this
+        method: reportFailure
+        arguments: []
+        execution: direct

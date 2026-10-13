@@ -1,0 +1,308 @@
+name: rst-agent-loop-front
+description: |
+  The front part of rst-agent-loop, to be grown one step at a time. Two turns in one conversation,
+  for the first rule in the start file that carries an :instruction.
+  1. Relations turn: the writer is told what rst-on-lisp is and to read its explanation, then parses
+     the start rule file: from that rule it follows the rules that hold it on their right-hand side up
+     to the section with a :heading, and says in sentences how each is connected (and, for each
+     :nucleus on the way, whether it has satellites). Kept as <dir>/.rst-on-lisp/<id>.1.relations.md.
+  2. Write turn: the writer fills that rule. When the rule names a frame with :frame (a rule file
+     written in rst-on-lisp: what an answer of that kind consists of, and one filled example), the
+     plan reads the frame and puts its whole text in the prompt, so the writer does not have to read
+     it. The answer is kept as <id>.1.answer.md; the rules it returns replace the rule in the start
+     file, kept as <id>.1.lisp.
+  A writer that ends a turn without the answer's required form (it says what it is about to do and
+  stops) is told to go on, in the same conversation, up to maxNudges times per turn. The relations
+  answer must end with a line holding only the end mark; the write answer must hold a ```lisp block.
+params:
+  dir:
+    label: "The document's directory"
+    description: "Absolute path (no ~) of the directory holding .rst-on-lisp/<id>.0.lisp"
+    type: text
+    required: true
+  name:
+    label: "The document's file name, without extension"
+    description: "e.g. 070_RstAgentLoop_261012_oo01; the id is the part after the first underscore"
+    type: text
+    required: true
+  writer:
+    description: "The conversation that answers"
+    default: "project1/chat-02"
+  writerModel:
+    description: "The model the writer runs on; empty leaves the conversation as it is"
+    default: ""
+  writerNoThink:
+    description: "true asks the writer's model to skip its thinking phase"
+    default: "true"
+  maxNudges:
+    description: "How many times one turn may be told to go on when the answer lacks its required form"
+    type: int
+    default: 3
+steps:
+  - states: ["0", "1"]
+    label: add-writer
+    actions:
+      - actor: this
+        method: addWorker
+        arguments: ["writer", 'jexl:state.getString("writer")']
+        execution: direct
+      - actor: this
+        method: setChatModel
+        arguments: ['jexl:state.getString("writer")', 'jexl:state.getString("writerModel")']
+        execution: direct
+      - actor: this
+        method: setChatNoThink
+        arguments: ['jexl:state.getString("writer")', 'jexl:state.getString("writerNoThink")']
+        execution: direct
+
+  - states: ["1", "pick"]
+    label: name-the-files
+    actions:
+      - actor: this
+        method: putJson
+        arguments: {path: id, value: 'jexl:state.getString("name").substring(state.getString("name").indexOf("_") + 1)'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: work, value: 'jexl:state.getString("dir") + "/.rst-on-lisp/" + state.getString("id")'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: cur-path, value: 'jexl:state.getString("work") + ".0.lisp"'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: marker, value: ':instruction "'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: frame-marker, value: ':frame "'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: dq, value: '"'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: end-mark, value: "以上"}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: nudges-relations, value: "0"}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: nudges-write, value: "0"}
+        execution: direct
+      - actor: this
+        method: readFile
+        arguments: ['jexl:state.getString("cur-path")', "cur"]
+        execution: direct
+
+  - states: ["1", "failed"]
+    label: no-start-file
+    actions: [{actor: this, method: doNothing, arguments: ["the start file could not be read"], execution: direct}]
+
+  - states: ["pick", "frame"]
+    label: pick-the-first-instruction
+    note: |
+      Takes the first rule in the file that carries an :instruction: "line" is the line of the file it
+      is on, "rule" the whole rule from that line up to the next line that starts a rule or a comment,
+      or a blank line (a rule may go on to a second line, e.g. for :frame). "frame-path" is the file
+      its :frame names, taken from the document's directory when it is not absolute; "" when the rule
+      names no frame.
+    actions:
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("cur").indexOf(state.getString("marker")) >= 0'
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: line, value: 'jexl:state.getString("cur").substring(state.getString("cur").lastIndexOf("\n", state.getString("cur").indexOf(state.getString("marker"))) + 1, state.getString("cur").indexOf("\n", state.getString("cur").indexOf(state.getString("marker"))) < 0 ? state.getString("cur").length() : state.getString("cur").indexOf("\n", state.getString("cur").indexOf(state.getString("marker"))))'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: rule, value: 'jexl:state.getString("cur").substring(state.getString("cur").lastIndexOf("\n", state.getString("cur").indexOf(state.getString("marker"))) + 1).split("\n(?=[(;\n])")[0].trim()'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: frame-raw, value: 'jexl:state.getString("rule").indexOf(state.getString("frame-marker")) < 0 ? "" : state.getString("rule").substring(state.getString("rule").indexOf(state.getString("frame-marker")) + 8, state.getString("rule").indexOf(state.getString("dq"), state.getString("rule").indexOf(state.getString("frame-marker")) + 8))'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: frame-path, value: 'jexl:state.getString("frame-raw") == "" ? "" : (state.getString("frame-raw").startsWith("/") ? state.getString("frame-raw") : state.getString("dir") + "/" + state.getString("frame-raw"))'}
+        execution: direct
+
+  - states: ["frame", "relations"]
+    label: read-the-frame
+    actions:
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("frame-path") != ""'
+        execution: direct
+      - actor: this
+        method: readFile
+        arguments: ['jexl:state.getString("frame-path")', "frame"]
+        execution: direct
+
+  - states: ["frame", "failed"]
+    label: frame-unreadable
+    actions:
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("frame-path") != ""'
+        execution: direct
+      - actor: this
+        method: doNothing
+        arguments: ["the frame named by :frame could not be read"]
+        execution: direct
+
+  - states: ["frame", "relations"]
+    label: no-frame
+    actions:
+      - actor: this
+        method: putJson
+        arguments: {path: frame, value: ""}
+        execution: direct
+
+  - states: ["pick", "failed"]
+    label: no-instruction
+    actions: [{actor: this, method: doNothing, arguments: ["the start file has no :instruction"], execution: direct}]
+
+  - states: ["relations", "keep-relations"]
+    label: relations-turn
+    note: |
+      The reading instruction is word for word the one of rst-agent-loop's work turn. The question
+      after it is the parse question: from the :instruction line up to the section with a :heading.
+    actions:
+      - actor: this
+        method: askWorker
+        arguments:
+          - writer
+          - 'jexl:"これから、rst-on-lisp という書き方で書かれた文書の規則ファイルを扱います。rst-on-lisp は、文書を Lisp の規則（defrule）の集まりとして書き、節の並びという形式的構造と、文と文の関係（RST の関係）という意味的構造を規則で表す書き方です。作業に入る前に、次の文書を必ず read で読んでください。\n   ~/works/doc_Base010/docs/rst-on-lisp/010_concepts/020_RstOnLispConcept_261005_oo01/020_RstOnLispConcept_261005_oo01.md （rst-on-lisp のコンセプト）\n   ~/works/doc_Base010/docs/rst-on-lisp/010_concepts/025_RstMeaningAndForm_261012_oo01/025_RstMeaningAndForm_261012_oo01.md （意味と形式）\n   ~/works/rst-on-lisp/grammar.lisp （共有文法）\n   ~/works/doc_Base010/docs/rst-on-lisp/010_concepts/060_ImprovingTextWithSemanticTags_261009_oo01/060_ImprovingTextWithSemanticTags_261009_oo01.md （:instruction の付いた規則の埋め方）\n   ~/works/doc_Base010/docs/rst-on-lisp/010_concepts/050_RstDtRelations_261008_oo01/050_RstDtRelations_261008_oo01.md （意味構造の関係タグの書き方）\n   ~/works/doc_Base010/docs/rst-on-lisp/010_concepts/100_ProgramExplanationVocabulary_261010_oo01/100_ProgramExplanationVocabulary_261010_oo01.md （プログラム説明の関係語彙）\n\n読み終えたら、次の規則ファイルを read で読み、構文解析してください。\n規則ファイル: " + state.getString("cur-path") + "\n\n次の :instruction がある行の規則から始めて、それを右辺に含む規則を順にたどり、最上位の小節（:heading を持つ規則）まで、どの規則と、どういう関係でつながっているかを説明してください。\n\n:instruction がある規則:\n" + state.getString("rule") + "\n\n答え方:\n- 箇条書きや表ではなく、自然な文で答えてください。たどった規則の 2 つごとに、何の関係でつながっているかを文で説明します。\n- たどる途中で :nucleus があれば、その核にサテライト（:関係名 で結ばれたもの）があるのか無いのかも答えてください。あれば、どの関係名で何が結ばれているかも答えてください。\n- 答えの最後の行には「" + state.getString("end-mark") + "」とだけ書いてください。"'
+        execution: direct
+
+  - states: ["relations", "failed"]
+    label: relations-turn-failed
+    actions: [{actor: this, method: doNothing, arguments: ["the writer gave no answer"], execution: direct}]
+
+  - states: ["keep-relations", "write"]
+    label: keep-relations
+    note: The answer counts only when its last line is the end mark; a turn that stopped half way has none.
+    actions:
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["writer", "relations"]
+        execution: direct
+      - actor: this
+        method: writeFile
+        arguments: ['jexl:state.getString("work") + ".1.relations.md"', "relations"]
+        execution: direct
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("relations").trim().endsWith(state.getString("end-mark"))'
+        execution: direct
+
+  - states: ["keep-relations", "keep-relations"]
+    label: nudge-relations
+    note: The writer stopped before answering. Told to go on in the same conversation; countUp bounds it.
+    actions:
+      - actor: this
+        method: countUp
+        arguments: ["nudges-relations", 'jexl:state.getString("maxNudges")']
+        execution: direct
+      - actor: this
+        method: askWorker
+        arguments:
+          - writer
+          - 'jexl:"作業を続けてください。必要な文書と規則ファイルを読み終えたら、問いに自然な文で答え、答えの最後の行には「" + state.getString("end-mark") + "」とだけ書いてください。"'
+        execution: direct
+
+  - states: ["keep-relations", "failed"]
+    label: relations-never-finished
+    actions: [{actor: this, method: doNothing, arguments: ["the relations turn ended without the end mark, also after being told to go on"], execution: direct}]
+
+  - states: ["write", "keep-write"]
+    label: write-turn
+    note: |
+      The next turn of the same conversation, so the relations just traced are still in front of the
+      writer. The rule becomes a group of rules (one section's worth), not one line; the frame, when
+      there is one, is in the prompt word for word.
+    actions:
+      - actor: this
+        method: askWorker
+        arguments:
+          - writer
+          - 'jexl:"次に、前のターンで構造を確かめた :instruction の規則を埋めてください。\n\n埋める規則:\n" + state.getString("rule") + "\n\n" + (state.getString("frame") == "" ? "" : "埋め方の手本として、この規則の :frame が指すフレームを渡します。フレームは rst-on-lisp で書いた文書です。Problem Definition に、この種類の説明が持つ部分と、それぞれの部分に書くことがあります。How to do it に、その部分を全部埋めた例があります。例の :file は、フレームと同じディレクトリにあるファイルを指します。\nフレーム: " + state.getString("frame-path") + "\n```lisp\n" + state.getString("frame") + "\n```\n\n") + "書き方:\n- この規則を、同じ名前の規則と、その右辺から指す新しい規則の組に置き換えます。1 文で済ませず、:instruction の指示と、フレームがあればフレームが求める部分を全部書きます。\n- 新しい規則の名前は、この規則の名前の後ろに / と語を付けて作ります。\n- 置き換えた規則には :instruction と :frame を書きません。ほかの規則は変えません。\n- 前のターンで確かめた、この規則とほかの規則のつながりに合うように書きます。\n- コードは文の中にバッククォートで書きます。:file は使いません。\n\n返事は、置き換える規則の組だけを、```lisp で始まるコードブロック 1 つで書いてください。"'
+        execution: direct
+
+  - states: ["write", "failed"]
+    label: write-turn-failed
+    actions: [{actor: this, method: doNothing, arguments: ["the writer gave no answer in the write turn"], execution: direct}]
+
+  - states: ["keep-write", "end"]
+    label: keep-write
+    note: The rules in the answer replace the rule's text in the start file; the result is <id>.1.lisp.
+    actions:
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["writer", "answer"]
+        execution: direct
+      - actor: this
+        method: writeFile
+        arguments: ['jexl:state.getString("work") + ".1.answer.md"', "answer"]
+        execution: direct
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("answer").indexOf("```lisp") >= 0'
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: block, value: 'jexl:state.getString("answer").substring(state.getString("answer").indexOf("```lisp") + 7, state.getString("answer").indexOf("```", state.getString("answer").indexOf("```lisp") + 7)).trim()'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: cur, value: 'jexl:state.getString("cur").replace(state.getString("rule"), state.getString("block"))'}
+        execution: direct
+      - actor: this
+        method: writeFile
+        arguments: ['jexl:state.getString("work") + ".1.lisp"', "cur"]
+        execution: direct
+      - actor: this
+        method: finish
+        arguments: ["answer"]
+        execution: direct
+
+  - states: ["keep-write", "keep-write"]
+    label: nudge-write
+    note: The writer stopped before giving the rules. Told to go on in the same conversation; countUp bounds it.
+    actions:
+      - actor: this
+        method: countUp
+        arguments: ["nudges-write", 'jexl:state.getString("maxNudges")']
+        execution: direct
+      - actor: this
+        method: askWorker
+        arguments:
+          - writer
+          - '作業を続けてください。調べ終えたら、置き換える規則の組だけを、```lisp で始まるコードブロック 1 つで返してください。'
+        execution: direct
+
+  - states: ["keep-write", "failed"]
+    label: no-rules-in-the-answer
+    actions: [{actor: this, method: doNothing, arguments: ["the write turn's answer had no ```lisp block, also after being told to go on"], execution: direct}]
+
+  - states: ["failed", "end"]
+    label: report-failure
+    note: |
+      The conversation is stopped first: a turn the plan stopped waiting for (askWorker gives up after
+      1800 s) goes on using the GPU otherwise, as a qwen write turn did after its job had ended.
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("writer")']
+        execution: direct
+      - actor: this
+        method: reportFailure
+        arguments: []
+        execution: direct
