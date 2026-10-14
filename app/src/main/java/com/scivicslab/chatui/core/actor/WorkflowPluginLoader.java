@@ -14,7 +14,7 @@ import java.util.Locale;
  * <p>Turing Workflow's own loader reads any jar a workflow names. Put in this program unchanged, it
  * would undo what {@code ProviderAndToolPlugins_260912_oo01} settled: what a process can do is
  * decided by the jars given at start-up, not by what something asks for later. A workflow is not
- * always written by a person — {@code run_plan} runs YAML an LLM wrote — so an unrestricted loader
+ * always written by a person — {@code set_workflow} installs YAML an LLM wrote — so an unrestricted loader
  * would let a conversation reach code the instance was deliberately started without.</p>
  *
  * <p>Only {@code loadJar} is restricted. {@code createChild}, {@code removeChild} and the rest run

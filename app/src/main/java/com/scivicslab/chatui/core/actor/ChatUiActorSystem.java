@@ -2,7 +2,6 @@ package com.scivicslab.chatui.core.actor;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.scivicslab.chatui.agent.FileAccessScope;
-import com.scivicslab.chatui.agent.RunPlanTool;
 import com.scivicslab.chatui.agent.ToolSet;
 import com.scivicslab.chatui.core.iolog.IoLogStore;
 import com.scivicslab.chatui.core.plugin.OpenAiCompatProviderFactory;
@@ -756,35 +755,6 @@ public class ChatUiActorSystem {
     }
 
     /**
-     * Starts a plan on a conversation without waiting for it — the entry point for a plan written
-     * outside this system and handed in over REST, rather than by a conversation's own LLM
-     * ({@code DirectPlanSubmission_260830_oo01}). The result is written to that conversation's log
-     * when it arrives, since nobody is blocked waiting for it.
-     *
-     * @param projectId owning project's id
-     * @param chatId    conversation id within that project
-     * @param yaml      the plan, as Turing-workflow YAML text
-     * @return {@code null} on success, or an {@code error: ...} string
-     */
-    public String submitPlan(String projectId, String chatId, String yaml) {
-        String chatName = chatActorName(projectId, chatId);
-        String logActor = chatName + ".log";
-        return RunPlanTool.submit(actorSystem, callWatchdogRef, chatName, yaml, result -> {
-            IIActorRef<?> log = actorSystem.getIIActor(logActor);
-            if (log == null) return;
-            try {
-                org.json.JSONObject args = new org.json.JSONObject();
-                args.put("source", "PlanRunner");
-                args.put("type", "INFO");
-                args.put("data", "plan finished: " + result);
-                log.callByActionName("add", args.toString());
-            } catch (Exception e) {
-                LOG.log(Level.WARNING, "Failed to log plan result for " + chatName, e);
-            }
-        });
-    }
-
-    /**
      * Asks a conversation to abandon the LLM call it is running, if any.
      *
      * <p>Sent with {@code tellNow} so it reaches {@link ChatSession#cancel()} without queueing
@@ -806,24 +776,6 @@ public class ChatUiActorSystem {
         ChatSessionIIAR chat = chatSessions.get(chatActorName(projectId, chatId));
         if (chat == null) return false;
         chat.tellNow(a -> ((ChatSession) a).cancel());
-        return true;
-    }
-
-    /**
-     * Asks a conversation's plan runner to stop, if it has one. Sent with {@code tellNow} so it
-     * reaches the runner's {@code stopRequested} flag without queueing behind the run it is meant
-     * to stop; the runner then notices between transitions, so a plan waiting on another
-     * conversation stops once that wait returns, not instantly
-     * ({@code PlanRunnerLifecycleManagement_260829_oo01}).
-     *
-     * @param projectId owning project's id
-     * @param chatId    conversation id within that project
-     * @return {@code true} if a plan runner was found and asked to stop
-     */
-    public boolean stopPlan(String projectId, String chatId) {
-        IIActorRef<?> plan = actorSystem.getIIActor(chatActorName(projectId, chatId) + ".plan");
-        if (!(plan instanceof PlanRunnerIIAR planIIAR)) return false;
-        planIIAR.tellNow(interp -> interp.requestStop());
         return true;
     }
 

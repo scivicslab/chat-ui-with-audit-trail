@@ -41,7 +41,7 @@
     }
 
     var chatArea, promptInput, sendBtn, connStatus, activityLabel, modelSelect, notificationBar;
-    var themeSelect, queueBtn, queueArea, queueResizeHandle, stopPlanBtn, cancelBtn;
+    var themeSelect, queueBtn, queueArea, queueResizeHandle, cancelBtn;
     var attachBtn, imageFileInput, imageAttachments;
     var pendingImages = []; // [{name, dataUrl}] attached via paste, drop, or the file picker
     var inputResizeHandle;
@@ -1141,20 +1141,6 @@
             .catch(function (e) { notify("cancel failed: " + e.message); });
     }
 
-    // Asks this conversation's plan runner to stop. The runner notices between transitions, so a
-    // plan waiting on another conversation stops once that wait returns, not instantly
-    // (PlanRunnerLifecycleManagement_260829_oo01).
-    function stopPlan() {
-        fetch(apiUrl(chatUrl("/plan/stop")), { method: "POST" })
-            .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
-            .then(function (res) {
-                notify(res.ok && res.body && res.body.type === "stopping"
-                        ? "Stop requested — the plan stops after its current step."
-                        : "No running plan on this conversation.");
-            })
-            .catch(function (e) { notify("stop_plan failed: " + e.message); });
-    }
-
     // ── Conversation tabs (switch which ConversationSquad this pane talks to) ────
     // Switching is triggered from the Actors tree in console.js (click a conversation actor's
     // name), not a bar in this pane — ActorTreeTabSwitcher_260826_oo01. switchChat is exposed on
@@ -1407,7 +1393,6 @@
         queueBtn = el("queue-btn");
         queueArea = el("queue-area");
         queueResizeHandle = el("queue-resize-handle");
-        stopPlanBtn = el("stop-plan-btn");
         cancelBtn = el("cancel-btn");
         attachBtn = el("attach-btn");
         imageFileInput = el("image-file-input");
@@ -1461,7 +1446,6 @@
                 else { queueArea.style.display = "none"; if (queueResizeHandle) queueResizeHandle.style.display = "none"; }
             });
         }
-        if (stopPlanBtn) stopPlanBtn.addEventListener("click", stopPlan);
         if (cancelBtn) cancelBtn.addEventListener("click", cancelPrompt);
         initTheme();
         initQueueResize();

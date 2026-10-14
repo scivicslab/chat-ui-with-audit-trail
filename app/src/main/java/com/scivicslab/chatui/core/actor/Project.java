@@ -1,6 +1,5 @@
 package com.scivicslab.chatui.core.actor;
 
-import com.scivicslab.chatui.agent.RunPlanTool;
 import com.scivicslab.chatui.logging.ForwardingAccumulator;
 import com.scivicslab.chatui.logging.RecentEntriesAccumulator;
 import com.scivicslab.pojoactor.core.ActorRef;
@@ -12,7 +11,9 @@ import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 
 import org.json.JSONObject;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -49,8 +50,7 @@ import java.util.logging.Logger;
  * {@code <projectId>/job-NN}; the jobs that exist are the project's job list. They are the
  * project's rather than a conversation's because a plan drives conversations — {@code addWorker}
  * hands slots to {@code chat-02}, {@code chat-03} — and a thing that spans conversations belongs
- * to what contains them. The conversation-scoped runner ({@code <chat>.plan}, {@link RunPlanTool})
- * stays as the entry point a conversation's own LLM uses.</p>
+ * to what contains them. Jobs are the only way a workflow of this kind is run.</p>
  *
  * <p>A plain object held by one actor: the job table is an ordinary map, changed only through
  * that actor's mailbox. A job's end arrives as a message ({@link #jobFinished}), and a
@@ -287,7 +287,7 @@ public class Project {
      *
      * <p>Creates the runner as this project's child, {@code <projectId>/job-NN}, gives it a log
      * actor of its own wired like a conversation's ({@code <job>.log}, forwarding to the
-     * system-wide log), and launches the run the way {@link RunPlanTool} does. The run's end
+     * system-wide log), and launches the run ({@link #run}). The run's end
      * comes back as a message to this actor ({@link #jobFinished}).</p>
      *
      * @param workflow the workflow's name, for the job list
@@ -354,7 +354,7 @@ public class Project {
         log(name, "INFO", "started workflow " + workflow + describe(parameters));
 
         ActorRef<Project> me = self;
-        CompletableFuture<String> done = RunPlanTool.start(runnerRef, name, yaml);
+        CompletableFuture<String> done = run(runnerRef, name, yaml);
         // `done` is completed from inside the last transition (finish), before that transition's
         // own log line is written. Queue an empty message behind the run on the runner's mailbox
         // and record the end only once that has been processed, so the job's log reads in order:
@@ -363,6 +363,46 @@ public class Project {
                 runnerRef.tell(interp -> { })
                          .whenComplete((v, ignored) -> me.tell(p -> p.jobFinished(jobId, result, error))));
         return view;
+    }
+
+    /**
+     * Resets the runner, loads {@code yaml} into it and runs it, all as one ordinary {@code tell}
+     * ({@code PlanRunnerLifecycleManagement_260829_oo01}).
+     *
+     * @return a future completed with the run's outcome
+     */
+    private static CompletableFuture<String> run(PlanRunnerIIAR runnerRef, String name, String yaml) {
+        CompletableFuture<String> done = new CompletableFuture<>();
+        runnerRef.tell(interp -> {
+            PlanRunner runner = (PlanRunner) interp;
+            runner.setDone(done);
+            try {
+                runner.clearStop();
+                runner.reset();
+                runner.readYaml(new ByteArrayInputStream(yaml.getBytes(StandardCharsets.UTF_8)));
+                var result = runner.runUntilEnd();
+                // Reaching "end" through finish/reportFailure already completed `done`; this covers
+                // a run that stopped some other way, so nobody is left waiting on a runner that is
+                // no longer running.
+                String outcome;
+                if (runner.isStopRequested()) {
+                    // runUntilEnd's loop condition includes !stopRequested, so a stop falls out of
+                    // the loop and returns "Maximum iterations exceeded" — the wrong thing to report.
+                    outcome = "(plan stopped by request after " + runner.getCurrentState() + ")";
+                } else if (result.isSuccess()) {
+                    outcome = runner.lastReply() != null ? runner.lastReply() : "(plan finished with no result)";
+                } else {
+                    outcome = "(plan did not finish: " + result.getResult() + ")";
+                }
+                runner.complete(outcome);
+            } catch (Throwable t) {
+                // The actor's message loop only catches Exception, so an Error thrown here would kill
+                // this runner's thread silently and the job would stay RUNNING until tick noticed.
+                LOG.log(Level.WARNING, "job " + name + " failed", t);
+                runner.complete("(plan failed: " + t + ")");
+            }
+        });
+        return done;
     }
 
     /**
@@ -431,7 +471,7 @@ public class Project {
         if (job == null || !RUNNING.equals(job.state())) return false;
         IIActorRef<?> ref = system.getIIActor(job.actorName());
         if (!(ref instanceof PlanRunnerIIAR runnerRef)) return false;
-        // tellNow, as ChatUiActorSystem.stopPlan does: the runner's thread is inside runUntilEnd,
+        // tellNow: the runner's thread is inside runUntilEnd,
         // so a queued message would arrive only after the run it was meant to stop.
         runnerRef.tellNow(interp -> interp.requestStop());
         log(job.actorName(), "INFO", "stop requested");
@@ -472,7 +512,7 @@ public class Project {
         return buffer == null ? null : buffer.recent();
     }
 
-    /** Writes one line to a job's log actor, through its mailbox, as ChatUiActorSystem.submitPlan does. */
+    /** Writes one line to a job's log actor, through its mailbox. */
     private void log(String jobActorName, String type, String data) {
         log(jobActorName, type, data, JOB_STEP_LABEL);
     }

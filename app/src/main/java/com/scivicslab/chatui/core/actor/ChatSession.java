@@ -8,7 +8,6 @@ import com.scivicslab.chatui.agent.FileReadTool;
 import com.scivicslab.chatui.agent.FileWriteTool;
 import com.scivicslab.chatui.agent.LoadSkillTool;
 import com.scivicslab.chatui.agent.ReferenceLinkTool;
-import com.scivicslab.chatui.agent.RunPlanTool;
 import com.scivicslab.chatui.agent.SetCollaboratorTool;
 import com.scivicslab.chatui.agent.SetWorkflowTool;
 import com.scivicslab.chatui.agent.TextToolCallParser;
@@ -259,16 +258,6 @@ public class ChatSession extends Interpreter {
               with the given Turing-workflow YAML text (not a file path). Requires TWO <parameter>
               tags: "chatId" and "yaml". Use this to author a workflow for another ConversationSquad to run,
               then use ask_chat to actually kick off a turn under it.
-            """);
-        m.put("run_plan", """
-            - run_plan(yaml, timeoutSeconds): run a plan you wrote — a Turing-workflow YAML whose
-              steps drive other conversations — and wait for its result. Requires a "yaml"
-              <parameter> tag; "timeoutSeconds" is optional. Each step is an action on "this" with
-              method askChat and two arguments, the target conversation's full name
-              ("project1/chat-02") and the prompt to send; end the plan with method finish, and give
-              every asking state a fallback transition to "end" with method reportFailure. The first
-              state must be named "0". Use this when a task needs several conversations driven in a
-              fixed order, rather than you asking each one yourself.
             """);
         m.put("load_skill", """
             - load_skill(name): read one of the skills listed after this tool list in full — its
@@ -2069,9 +2058,6 @@ public class ChatSession extends Interpreter {
                     parseIntOrNull(extractInput(args, "timeoutSeconds")));
             case "set_workflow" -> SetWorkflowTool.setWorkflow(system, projectId,
                     extractInput(args, "chatId"), extractInput(args, "yaml"));
-            case "run_plan" -> RunPlanTool.runPlan(system, watchdogRef, myChatName(),
-                    extractInput(args, "yaml"),
-                    parseIntOrNull(extractInput(args, "timeoutSeconds")));
             case "load_skill" -> LoadSkillTool.load(skillRegistryRef, extractInput(args, "name"));
             case "set_collaborator" -> SetCollaboratorTool.setCollaborator(collaborationGraphRef,
                     myChatName(), extractInput(args, "chatId"), extractInput(args, "role"),

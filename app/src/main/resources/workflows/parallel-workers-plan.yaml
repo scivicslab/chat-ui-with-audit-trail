@@ -8,8 +8,8 @@ description: |
   about as long as its slowest conversation rather than the sum. A slot whose conversation fails
   does not stop the others: apply reports the failures and carries on.
 
-  Submit this with POST /api/projects/{p}/chats/{c}/plan, editing the worker targets and the
-  question to suit. The first state must be named "0".
+  Run this as a project job (Run tab), editing the worker targets and the question to suit.
+  The first state must be named "0".
 
 steps:
   - states: ["0", "1"]
