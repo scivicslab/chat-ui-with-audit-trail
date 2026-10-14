@@ -595,6 +595,7 @@ public class ChatUiActorSystem {
         }
         for (Project.JobView job : askOrDefault(projectRef, Project::jobs, List.<Project.JobView>of())) {
             if (Project.RUNNING.equals(job.state())) running.add("job " + job.jobId() + " is running");
+            if (Project.QUEUED.equals(job.state())) running.add("job " + job.jobId() + " is waiting to run");
         }
         if (!running.isEmpty()) {
             return ProjectDeletion.refused(ProjectDeletion.Kind.BUSY, String.join("; ", running));

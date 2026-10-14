@@ -76,7 +76,7 @@ class ProjectJobParametersTest {
         try {
             ActorRef<Project> ref = boundProject(system);
 
-            ref.ask(p -> p.startJob("echoing", ECHOING, Map.of("who", "Ada"))).join();
+            ref.ask(p -> p.submitJob("echoing", ECHOING, Map.of("who", "Ada"))).join();
             Project.JobView ended = await(ref, "job-01", Project.FINISHED);
             assertEquals(Project.FINISHED, ended.state(), "result was: " + ended.result());
 
@@ -95,7 +95,7 @@ class ProjectJobParametersTest {
         try {
             ActorRef<Project> ref = boundProject(system);
 
-            ref.ask(p -> p.startJob("echoing", ECHOING, Map.of("who", "Ada"))).join();
+            ref.ask(p -> p.submitJob("echoing", ECHOING, Map.of("who", "Ada"))).join();
             await(ref, "job-01", Project.FINISHED);
 
             String text = logOf(ref, "job-01");
@@ -111,7 +111,7 @@ class ProjectJobParametersTest {
         try {
             ActorRef<Project> ref = boundProject(system);
 
-            ref.ask(p -> p.startJob("echoing", ECHOING)).join();
+            ref.ask(p -> p.submitJob("echoing", ECHOING)).join();
             await(ref, "job-01", Project.FINISHED);
 
             String text = logOf(ref, "job-01");

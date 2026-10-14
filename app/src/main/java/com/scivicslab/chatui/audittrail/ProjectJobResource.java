@@ -72,7 +72,7 @@ public class ProjectJobResource {
             return Response.status(400).entity(Map.of("error", missing)).build();
         }
         Map<String, String> values = withDefaults(doc.params(), given);
-        Project.JobView job = project.ask(p -> p.startJob(workflow, doc.yaml(), values)).join();
+        Project.JobView job = project.ask(p -> p.submitJob(workflow, doc.yaml(), values)).join();
         return Response.ok(job).build();
     }
 

@@ -33,11 +33,11 @@ class ReopenedProjectIsWiredTest {
         assertTrue(system.getProjectIds().contains("project7"),
                 "expected project7 to come back, got " + system.getProjectIds());
 
-        // Load-bearing: startJob is where an unbound project throws, before anything is run.
+        // Load-bearing: submitJob is where an unbound project throws, before anything is run.
         String failure = system.getProject("project7")
                 .ask(p -> {
                     try {
-                        p.startJob("no-such-workflow", "steps: []", java.util.Map.of());
+                        p.submitJob("no-such-workflow", "steps: []", java.util.Map.of());
                         return "";
                     } catch (IllegalStateException e) {
                         return e.getMessage();

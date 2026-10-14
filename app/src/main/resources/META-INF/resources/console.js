@@ -188,11 +188,21 @@
             .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; }); })
             .then(function (res) {
                 if (!res.ok) { setText("jobrun-status", (res.body && res.body.error) || ("HTTP " + res.status)); return; }
-                setText("jobrun-status", "started " + res.body.jobId);
+                // One job runs at a time per project; a later one waits its turn
+                // (ProjectJobQueue_261014_oo01).
+                setText("jobrun-status", res.body.state === "QUEUED"
+                        ? "queued " + res.body.jobId + " (" + ordinal(res.body.position) + " in line)"
+                        : "started " + res.body.jobId);
                 jobLogSelected = res.body.jobId;
                 jobsOnShow();
             })
             .catch(function (e) { setText("jobrun-status", "error: " + e.message); });
+    }
+
+    function ordinal(n) {
+        var tens = n % 100;
+        var suffix = (tens >= 11 && tens <= 13) ? "th" : ({ 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th");
+        return n + suffix;
     }
 
     function fmtInstant(s) {
@@ -210,9 +220,12 @@
         head.className = "job-head";
         var id = document.createElement("span"); id.className = "job-id"; id.textContent = j.jobId;
         var wf = document.createElement("span"); wf.className = "job-wf"; wf.textContent = j.workflow || "";
-        var st = document.createElement("span"); st.className = "job-state"; st.textContent = j.state || "";
+        var st = document.createElement("span"); st.className = "job-state";
+        st.textContent = (j.state || "") + (j.state === "QUEUED" && j.position ? " #" + j.position : "");
         var when = document.createElement("span"); when.className = "job-when";
-        when.textContent = fmtInstant(j.startedAt) + (j.finishedAt ? " → " + fmtInstant(j.finishedAt) : "");
+        when.textContent = j.startedAt
+                ? fmtInstant(j.startedAt) + (j.finishedAt ? " → " + fmtInstant(j.finishedAt) : "")
+                : "queued " + fmtInstant(j.queuedAt) + (j.finishedAt ? " → " + fmtInstant(j.finishedAt) : "");
         head.appendChild(id); head.appendChild(wf); head.appendChild(st); head.appendChild(when);
         var actions = document.createElement("span");
         actions.className = "job-actions";
@@ -225,9 +238,11 @@
             if (tab) tab.click();
         });
         actions.appendChild(logBtn);
-        if (j.state === "RUNNING") {
+        if (j.state === "RUNNING" || j.state === "QUEUED") {
             var stop = document.createElement("button");
-            stop.type = "button"; stop.textContent = "Stop"; stop.title = "Ask this job to stop between steps";
+            stop.type = "button"; stop.textContent = "Stop";
+            stop.title = j.state === "QUEUED" ? "Take this job out of the line; it will not run"
+                                              : "Ask this job to stop between steps";
             stop.addEventListener("click", function (e) {
                 e.stopPropagation();
                 fetch(projectJobsUrl("/" + encodeURIComponent(j.jobId) + "/stop"), { method: "POST" })
@@ -271,7 +286,9 @@
                     jobs.forEach(function (j) { list.appendChild(jobRowEl(j)); });
                 }
                 var running = (jobs || []).filter(function (j) { return j.state === "RUNNING"; }).length;
-                setText("jobs-status", (jobs || []).length + " job(s), " + running + " running");
+                var queued = (jobs || []).filter(function (j) { return j.state === "QUEUED"; }).length;
+                setText("jobs-status", (jobs || []).length + " job(s), " + running + " running"
+                        + (queued ? ", " + queued + " queued" : ""));
             })
             .catch(function (e) { setText("jobs-status", "error: " + e.message); })
             .finally(function () { jobsLoading = false; });

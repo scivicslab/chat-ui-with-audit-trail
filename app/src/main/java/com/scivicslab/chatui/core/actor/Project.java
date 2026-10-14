@@ -143,13 +143,15 @@ public class Project {
 
     private static final Logger LOG = Logger.getLogger(Project.class.getName());
 
+    /** A job's state: submitted, waiting in the project's job queue for the running job to end. */
+    public static final String QUEUED = "QUEUED";
     /** A job's state. */
     public static final String RUNNING = "RUNNING";
     /** A job's state: the workflow reached its end. */
     public static final String FINISHED = "FINISHED";
     /** A job's state: the workflow did not reach its end, or its runner died. */
     public static final String FAILED = "FAILED";
-    /** A job's state: stopped by request. */
+    /** A job's state: stopped by request, while running or while still waiting. */
     public static final String STOPPED = "STOPPED";
 
     /** How often {@link #tick} looks at the running jobs. Cheap: a lookup per job, no I/O. */
@@ -163,15 +165,28 @@ public class Project {
      * @param jobId      {@code job-NN}, unique within this project
      * @param actorName  the runner's actor name, {@code <projectId>/job-NN}
      * @param workflow   the workflow's name, as the catalog lists it
-     * @param state      one of {@link #RUNNING}, {@link #FINISHED}, {@link #FAILED}, {@link #STOPPED}
-     * @param startedAt  when it was started
-     * @param finishedAt when it ended, or {@code null} while running
-     * @param result     what the run reported, or {@code null} while running
+     * @param state      one of {@link #QUEUED}, {@link #RUNNING}, {@link #FINISHED}, {@link #FAILED},
+     *                   {@link #STOPPED}
+     * @param queuedAt   when it was submitted
+     * @param startedAt  when it began to run, or {@code null} while it waits (and for a job stopped
+     *                   before it began)
+     * @param finishedAt when it ended, or {@code null} while waiting or running
+     * @param result     what the run reported, or {@code null} while waiting or running
+     * @param position   its place in the line while {@link #QUEUED}, 1 for the next to run; 0 otherwise
      */
     public record JobView(String jobId, String actorName, String workflow, String state,
-                          Instant startedAt, Instant finishedAt, String result) {
+                          Instant queuedAt, Instant startedAt, Instant finishedAt, String result,
+                          int position) {
+        JobView started() {
+            return new JobView(jobId, actorName, workflow, RUNNING, queuedAt, Instant.now(), null, null, 0);
+        }
+
         JobView ended(String state, String result) {
-            return new JobView(jobId, actorName, workflow, state, startedAt, Instant.now(), result);
+            return new JobView(jobId, actorName, workflow, state, queuedAt, startedAt, Instant.now(), result, 0);
+        }
+
+        JobView at(int position) {
+            return new JobView(jobId, actorName, workflow, state, queuedAt, startedAt, finishedAt, result, position);
         }
     }
 
@@ -207,9 +222,14 @@ public class Project {
     private final Map<String, JobView> jobs = new LinkedHashMap<>();
     private final Map<String, RecentEntriesAccumulator> jobLogs = new HashMap<>();
     private int jobCounter;
+    /** The name of this project's {@link JobQueue} child, {@code <projectId>/job-queue}. */
+    private String jobQueueName;
+
+    /** What the job queue child is called, after the project's id. */
+    public static final String JOB_QUEUE_SUFFIX = "/job-queue";
 
     /**
-     * Binds what starting a job needs. Must run before {@link #startJob} and {@link #startWatching}.
+     * Binds what starting a job needs. Must run before {@link #submitJob} and {@link #startWatching}.
      *
      * @param projectId          this project's id, the prefix of its jobs' names
      * @param system             the actor system the runners are registered in
@@ -268,6 +288,16 @@ public class Project {
         this.self = self;
         this.watchdog = watchdog;
         this.systemLogActorName = systemLogActorName;
+        // The order of the jobs is kept by a child of its own (ProjectJobQueue_261014_oo01); this
+        // actor asks it which job runs next and starts that one.
+        this.jobQueueName = projectId + JOB_QUEUE_SUFFIX;
+        if (self != null && system.getActor(jobQueueName) == null) {
+            self.createChild(jobQueueName, new JobQueue());
+        }
+    }
+
+    private ActorRef<JobQueue> jobQueue() {
+        return system.getActor(jobQueueName);
     }
 
     /** Starts the periodic look at running jobs, scheduled against this actor's own mailbox. */
@@ -283,86 +313,116 @@ public class Project {
     }
 
     /**
-     * Starts a workflow as a new job of this project.
+     * Submits a workflow as a new job of this project, with no values for its <code>${key}</code>.
      *
-     * <p>Creates the runner as this project's child, {@code <projectId>/job-NN}, gives it a log
-     * actor of its own wired like a conversation's ({@code <job>.log}, forwarding to the
-     * system-wide log), and launches the run ({@link #run}). The run's end
-     * comes back as a message to this actor ({@link #jobFinished}).</p>
-     *
-     * @param workflow the workflow's name, for the job list
-     * @param yaml     the workflow text
-     * @return the new job, in state {@link #RUNNING}
-     * @throws IllegalStateException when {@link #bind} has not run
+     * @see #submitJob(String, String, Map)
      */
-    public JobView startJob(String workflow, String yaml) {
-        return startJob(workflow, yaml, Map.of());
+    public JobView submitJob(String workflow, String yaml) {
+        return submitJob(workflow, yaml, Map.of());
     }
 
     /**
-     * Starts one workflow as a job, with the values its <code>${key}</code> stand for.
+     * Submits one workflow as a job, with the values its <code>${key}</code> stand for
+     * ({@code ProjectJobQueue_261014_oo01}).
      *
-     * <p>The values are put into the runner's own JSON state before the run starts, which is where
-     * <code>${key}</code> is read from — the same thing {@code RunCLI} does with {@code -P}
-     * ({@code JobParameterForm_260913_oo01}). The workflow's text is left as written, so what runs
-     * is what the catalog shows and the log line below says what it ran with.</p>
+     * <p>The job gets its id now, in the order of submission, and is recorded as {@link #QUEUED}.
+     * The project's {@link JobQueue} child is asked to take it; when no job of this project is
+     * running, the queue hands it straight back and it starts ({@link #launch}). Otherwise it waits
+     * until the running job ends ({@link #jobFinished}).</p>
      *
      * @param workflow   the name the catalog lists it under
      * @param yaml       its text
      * @param parameters the values, keyed by the name the workflow refers to; may be empty
-     * @return the job, as it is at the moment it starts
+     * @return the job: {@link #RUNNING} when it started at once, {@link #QUEUED} when it waits
+     * @throws IllegalStateException when {@link #bind} has not run
      */
-    public JobView startJob(String workflow, String yaml, Map<String, String> parameters) {
+    public JobView submitJob(String workflow, String yaml, Map<String, String> parameters) {
         if (self == null || system == null) {
             throw new IllegalStateException("project " + projectId + " is not bound to an actor system");
         }
         String jobId = String.format("job-%02d", ++jobCounter);
         String name = projectId + "/" + jobId;
-
-        PlanRunner runner = new PlanRunner(name, system, watchdog);
-        runner.setFileScope(fileScope);
-        runner.setProviderChanger(providerChanger);
-        PlanRunnerIIAR runnerRef = new PlanRunnerIIAR(name, runner, system);
-        runnerRef.setParentName(projectId);
-        self.getNamesOfChildren().add(name);
-        system.addIIActor(runnerRef);
-
-        RecentEntriesAccumulator buffer = new RecentEntriesAccumulator(JOB_LOG_CAPACITY);
-        MultiplexerAccumulator mux = new MultiplexerAccumulator();
-        mux.addTarget(buffer);
-        if (systemLogActorName != null) {
-            mux.addTarget(new ForwardingAccumulator(system, systemLogActorName, name));
+        jobs.put(jobId, new JobView(jobId, name, workflow, QUEUED, Instant.now(), null, null, null, 0));
+        jobLogs.put(jobId, new RecentEntriesAccumulator(JOB_LOG_CAPACITY));
+        Map<String, String> values = parameters == null ? Map.of() : new LinkedHashMap<>(parameters);
+        JobQueue.Entry entry = new JobQueue.Entry(jobId, workflow, yaml, values);
+        jobQueue().ask(q -> q.offer(entry)).join().ifPresent(this::launch);
+        if (QUEUED.equals(jobs.get(jobId).state())) {
+            log(name, "INFO", "queued workflow " + workflow + describe(values));
         }
-        MultiplexerAccumulatorActor logActor = new MultiplexerAccumulatorActor(name + ".log", mux, system);
-        logActor.setParentName(name);
-        runnerRef.getNamesOfChildren().add(logActor.getName());
-        system.addIIActor(logActor);
-        jobLogs.put(jobId, buffer);
+        return job(jobId);
+    }
 
-        // Every transition the runner leaves is one line in the job's log. A line from the
-        // transition that records a disagreement carries its own label, so that a search over the
-        // log finds the criteria a run could not settle without reading every line of it
-        // (JobRunsInTheLog_260915_oo01).
-        runner.setStepListener(line -> log(name, "INFO", line,
-                line.contains("no-agreement") || line.contains("give-up")
-                        ? NO_AGREEMENT_LABEL : JOB_STEP_LABEL));
+    /**
+     * Starts a job the queue has handed out.
+     *
+     * <p>Creates the runner as this project's child, {@code <projectId>/job-NN}, gives it a log
+     * actor of its own wired like a conversation's ({@code <job>.log}, forwarding to the
+     * system-wide log), puts the run's values where <code>${key}</code> is read from — the
+     * runner's own JSON state, the same thing {@code RunCLI} does with {@code -P}
+     * ({@code JobParameterForm_260913_oo01}) — and launches the run ({@link #run}). The run's end
+     * comes back as a message to this actor ({@link #jobFinished}).</p>
+     *
+     * <p>A job that cannot even be started is recorded as {@link #FAILED}, and the next one is
+     * asked for, so a broken job does not hold up the line.</p>
+     */
+    private void launch(JobQueue.Entry entry) {
+        String jobId = entry.jobId();
+        JobView queued = jobs.get(jobId);
+        String name = queued.actorName();
+        try {
+            PlanRunner runner = new PlanRunner(name, system, watchdog);
+            runner.setFileScope(fileScope);
+            runner.setProviderChanger(providerChanger);
+            PlanRunnerIIAR runnerRef = new PlanRunnerIIAR(name, runner, system);
+            runnerRef.setParentName(projectId);
+            self.getNamesOfChildren().add(name);
+            system.addIIActor(runnerRef);
 
-        seedParameters(runnerRef, parameters);
+            RecentEntriesAccumulator buffer = jobLogs.get(jobId);
+            MultiplexerAccumulator mux = new MultiplexerAccumulator();
+            mux.addTarget(buffer);
+            if (systemLogActorName != null) {
+                mux.addTarget(new ForwardingAccumulator(system, systemLogActorName, name));
+            }
+            MultiplexerAccumulatorActor logActor = new MultiplexerAccumulatorActor(name + ".log", mux, system);
+            logActor.setParentName(name);
+            runnerRef.getNamesOfChildren().add(logActor.getName());
+            system.addIIActor(logActor);
 
-        JobView view = new JobView(jobId, name, workflow, RUNNING, Instant.now(), null, null);
-        jobs.put(jobId, view);
-        log(name, "INFO", "started workflow " + workflow + describe(parameters));
+            // Every transition the runner leaves is one line in the job's log. A line from the
+            // transition that records a disagreement carries its own label, so that a search over the
+            // log finds the criteria a run could not settle without reading every line of it
+            // (JobRunsInTheLog_260915_oo01).
+            runner.setStepListener(line -> log(name, "INFO", line,
+                    line.contains("no-agreement") || line.contains("give-up")
+                            ? NO_AGREEMENT_LABEL : JOB_STEP_LABEL));
 
-        ActorRef<Project> me = self;
-        CompletableFuture<String> done = run(runnerRef, name, yaml);
-        // `done` is completed from inside the last transition (finish), before that transition's
-        // own log line is written. Queue an empty message behind the run on the runner's mailbox
-        // and record the end only once that has been processed, so the job's log reads in order:
-        // start, every step, then the end.
-        done.whenComplete((result, error) ->
-                runnerRef.tell(interp -> { })
-                         .whenComplete((v, ignored) -> me.tell(p -> p.jobFinished(jobId, result, error))));
-        return view;
+            seedParameters(runnerRef, entry.parameters());
+
+            jobs.put(jobId, queued.started());
+            log(name, "INFO", "started workflow " + entry.workflow() + describe(entry.parameters()));
+
+            ActorRef<Project> me = self;
+            CompletableFuture<String> done = run(runnerRef, name, entry.yaml());
+            // `done` is completed from inside the last transition (finish), before that transition's
+            // own log line is written. Queue an empty message behind the run on the runner's mailbox
+            // and record the end only once that has been processed, so the job's log reads in order:
+            // start, every step, then the end.
+            done.whenComplete((result, error) ->
+                    runnerRef.tell(interp -> { })
+                             .whenComplete((v, ignored) -> me.tell(p -> p.jobFinished(jobId, result, error))));
+        } catch (RuntimeException e) {
+            LOG.log(Level.WARNING, "Could not start " + name, e);
+            jobs.put(jobId, queued.ended(FAILED, "(job could not start: " + e + ")"));
+            log(name, "WARNING", "failed: could not start: " + e);
+            startNext(jobId);
+        }
+    }
+
+    /** Tells the queue that {@code jobId} has ended and starts whichever job it hands out next. */
+    private void startNext(String jobId) {
+        jobQueue().ask(q -> q.finished(jobId)).join().ifPresent(this::launch);
     }
 
     /**
@@ -458,17 +518,27 @@ public class Project {
         }
         jobs.put(jobId, job.ended(state, outcome));
         log(job.actorName(), FAILED.equals(state) ? "WARNING" : "INFO", state.toLowerCase() + ": " + outcome);
+        startNext(jobId);
     }
 
     /**
-     * Asks a running job to stop between transitions.
+     * Stops a job. A running job is asked to stop between transitions; its end then arrives through
+     * {@link #jobFinished} like any other, and the next job starts. A waiting job is taken out of
+     * the line and recorded as {@link #STOPPED} without ever running.
      *
      * @param jobId the job
-     * @return whether there was such a job and it was running
+     * @return whether there was such a job and it was waiting or running
      */
     public boolean stopJob(String jobId) {
         JobView job = jobs.get(jobId);
-        if (job == null || !RUNNING.equals(job.state())) return false;
+        if (job == null) return false;
+        if (QUEUED.equals(job.state())) {
+            if (!jobQueue().ask(q -> q.cancel(jobId)).join()) return false;
+            jobs.put(jobId, job.ended(STOPPED, "(stopped before it started)"));
+            log(job.actorName(), "INFO", "stopped before it started");
+            return true;
+        }
+        if (!RUNNING.equals(job.state())) return false;
         IIActorRef<?> ref = system.getIIActor(job.actorName());
         if (!(ref instanceof PlanRunnerIIAR runnerRef)) return false;
         // tellNow: the runner's thread is inside runUntilEnd,
@@ -490,20 +560,34 @@ public class Project {
             if (ref == null || !ref.isAlive()) {
                 jobs.put(job.jobId(), job.ended(FAILED, "(runner is gone)"));
                 log(job.actorName(), "WARNING", "failed: runner is gone");
+                startNext(job.jobId());
             }
         }
     }
 
-    /** @return this project's jobs, newest first */
+    /** @return this project's jobs, newest first; a waiting job carries its place in the line */
     public List<JobView> jobs() {
-        List<JobView> out = new ArrayList<>(jobs.values());
+        List<String> waiting = waiting();
+        List<JobView> out = new ArrayList<>();
+        for (JobView j : jobs.values()) out.add(withPosition(j, waiting));
         Collections.reverse(out);
         return List.copyOf(out);
     }
 
-    /** @return one job, or {@code null} */
+    /** @return one job, with its place in the line while it waits, or {@code null} */
     public JobView job(String jobId) {
-        return jobs.get(jobId);
+        JobView j = jobs.get(jobId);
+        return j == null ? null : withPosition(j, waiting());
+    }
+
+    private List<String> waiting() {
+        if (jobQueueName == null) return List.of();
+        ActorRef<JobQueue> q = jobQueue();
+        return q == null ? List.of() : q.ask(JobQueue::waiting).join();
+    }
+
+    private static JobView withPosition(JobView j, List<String> waiting) {
+        return QUEUED.equals(j.state()) ? j.at(waiting.indexOf(j.jobId()) + 1) : j;
     }
 
     /** @return a job's log lines, oldest first, or {@code null} when there is no such job */

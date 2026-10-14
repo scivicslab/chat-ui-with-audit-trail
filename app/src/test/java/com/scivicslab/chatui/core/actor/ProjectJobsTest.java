@@ -57,7 +57,7 @@ class ProjectJobsTest {
         try {
             ActorRef<Project> ref = boundProject(system);
 
-            Project.JobView started = ref.ask(p -> p.startJob("finishing", FINISHING)).join();
+            Project.JobView started = ref.ask(p -> p.submitJob("finishing", FINISHING)).join();
 
             assertEquals("job-01", started.jobId());
             assertEquals("project1/job-01", started.actorName(), "named as the project's child");
@@ -87,7 +87,7 @@ class ProjectJobsTest {
         try {
             ActorRef<Project> ref = boundProject(system);
 
-            ref.ask(p -> p.startJob("broken", "steps: [\n  - oops")).join();
+            ref.ask(p -> p.submitJob("broken", "steps: [\n  - oops")).join();
             Project.JobView ended = await(ref, "job-01", Project.FAILED);
 
             assertEquals(Project.FAILED, ended.state(), "result was: " + ended.result());
@@ -102,8 +102,8 @@ class ProjectJobsTest {
         IIActorSystem system = new IIActorSystem("jobs-test");
         try {
             ActorRef<Project> ref = boundProject(system);
-            ref.ask(p -> p.startJob("finishing", FINISHING)).join();
-            ref.ask(p -> p.startJob("finishing", FINISHING)).join();
+            ref.ask(p -> p.submitJob("finishing", FINISHING)).join();
+            ref.ask(p -> p.submitJob("finishing", FINISHING)).join();
             await(ref, "job-02", Project.FINISHED);
 
             List<Project.JobView> jobs = ref.ask(Project::jobs).join();
