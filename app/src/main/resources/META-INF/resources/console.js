@@ -1088,6 +1088,64 @@
         });
     }
 
+    // ── Centre/right splitter (drag handle, persisted like the left dock) ────
+    // Sets the width of both centre panes, #main-panel and #project-panel, so switching perspective
+    // keeps the line where it was. Kept as a percentage of #console-root rather than pixels, so a
+    // narrower window still leaves the right pane its minimum width.
+    var CENTRE_WIDTH_KEY = "chat-ui-centre-width-pct";
+    var CENTRE_MIN_PX = 320;   // #main-panel's min-width
+    var RIGHT_MIN_PX = 280;    // #right-panel's min-width
+
+    function initSplitter() {
+        var root = document.getElementById("console-root");
+        var splitter = document.getElementById("splitter");
+        var panes = [document.getElementById("main-panel"), document.getElementById("project-panel")]
+            .filter(function (p) { return !!p; });
+        if (!root || !splitter || !panes.length) return;
+
+        function setPct(pct) {
+            panes.forEach(function (p) { p.style.width = pct + "%"; });
+        }
+
+        var saved = parseFloat(localStorage.getItem(CENTRE_WIDTH_KEY));
+        if (saved > 0 && saved < 100) setPct(saved);
+
+        var dragging = false;
+        var startX = 0;
+        var startWidth = 0;
+
+        function visiblePane() {
+            return panes.filter(function (p) { return p.offsetWidth > 0; })[0] || panes[0];
+        }
+
+        splitter.addEventListener("mousedown", function (e) {
+            e.preventDefault();
+            dragging = true;
+            startX = e.clientX;
+            startWidth = visiblePane().offsetWidth;
+            splitter.classList.add("dragging");
+            document.body.style.cursor = "col-resize";
+            document.body.style.userSelect = "none";
+        });
+
+        document.addEventListener("mousemove", function (e) {
+            if (!dragging) return;
+            var total = root.clientWidth;
+            var most = total - splitter.offsetWidth - RIGHT_MIN_PX;
+            var px = Math.max(CENTRE_MIN_PX, Math.min(startWidth + (e.clientX - startX), most));
+            setPct(px / total * 100);
+        });
+
+        document.addEventListener("mouseup", function () {
+            if (!dragging) return;
+            dragging = false;
+            splitter.classList.remove("dragging");
+            document.body.style.cursor = "";
+            document.body.style.userSelect = "";
+            localStorage.setItem(CENTRE_WIDTH_KEY, (visiblePane().offsetWidth / root.clientWidth * 100).toFixed(2));
+        });
+    }
+
     // ── Project pane: the line between the workflow catalog and the one being read ────
     // The catalog is as tall as its contents up to 40% until somebody drags the line; from then on
     // it keeps the height it was given, here and on the next visit.
@@ -2521,6 +2579,7 @@
         initActors();
         initDock();
         initLeftDockResize();
+        initSplitter();
         initProjectWorkflowsResize();
         initIo();
         initLogs();
