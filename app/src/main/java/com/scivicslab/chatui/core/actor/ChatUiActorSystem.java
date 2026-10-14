@@ -1044,6 +1044,12 @@ public class ChatUiActorSystem {
             chatSessionIIAR.tell(a -> ((ChatSession) a).resumeTurnNumbering(lastTurn));
         }
 
+        String recordedName = ioLogView.latestName(sessionId);
+        if (recordedName != null) {
+            ActorRef<ConversationSquad> squadRef = chats.get(conversationSquadName);
+            if (squadRef != null) squadRef.tell(c -> c.setName(recordedName));
+        }
+
         if (turns.isEmpty()) {
             LOG.info("I/O log session " + sessionId + " holds no restorable turn for " + conversationSquadName
                     + "; continuing it from turn " + (lastTurn + 1));
@@ -1182,6 +1188,56 @@ public class ChatUiActorSystem {
             return projectRef.ask(Project::getName).get(5, TimeUnit.SECONDS);
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Could not read the name of " + projectId, e);
+            return null;
+        }
+    }
+
+    /**
+     * Sets the name a person reads for one conversation, and records it in that conversation's
+     * I/O log session so that it comes back on restart, as a project's name does
+     * ({@link #setProjectName}).
+     *
+     * @param projectId owning project's id
+     * @param chatId    conversation id within that project
+     * @param name      the name, or null/blank to clear it
+     * @return {@code "ok: ..."}, or {@code "error: ..."} when there is no such conversation
+     */
+    public String setChatName(String projectId, String chatId, String name) {
+        String qualifiedName = chatActorName(projectId, chatId);
+        ActorRef<ConversationSquad> squadRef = chats.get(qualifiedName);
+        if (squadRef == null) return "error: unknown conversation: " + qualifiedName;
+        try {
+            squadRef.tell(c -> c.setName(name)).get(10, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Failed to set the name of " + qualifiedName, e);
+            return "error: " + e.getMessage();
+        }
+        String applied = getChatName(projectId, chatId);
+        if (ioLogStore != null) {
+            try {
+                long sessionId = ioLogStore.ensureSession(qualifiedName);
+                if (sessionId >= 0) {
+                    ioLogStore.record(sessionId, "agent", IoLogView.NAME_LABEL, applied == null ? "" : applied);
+                }
+            } catch (Exception e) {
+                LOG.log(Level.WARNING, "Could not record the name of " + qualifiedName, e);
+            }
+        }
+        return applied == null ? "ok: name cleared" : "ok: name set to " + applied;
+    }
+
+    /** @return the name a person reads for the conversation, or null when it has none */
+    public String getChatName(String projectId, String chatId) {
+        return nameOfChat(chatActorName(projectId, chatId));
+    }
+
+    private String nameOfChat(String qualifiedName) {
+        ActorRef<ConversationSquad> squadRef = chats.get(qualifiedName);
+        if (squadRef == null) return null;
+        try {
+            return squadRef.ask(ConversationSquad::getName).get(5, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not read the name of " + qualifiedName, e);
             return null;
         }
     }
@@ -1729,8 +1785,9 @@ public class ChatUiActorSystem {
             }
             children.add(buildActorNode(childName, childRef));
         }
-        // A project is the one actor a person names; every other node has none.
-        String displayName = projects.containsKey(name) ? getProjectName(name) : null;
+        // Projects and conversations are the actors a person names; every other node has none.
+        String displayName = projects.containsKey(name) ? getProjectName(name)
+                : chats.containsKey(name) ? nameOfChat(name) : null;
         return new ActorNode(name, type, ActorNotes.noteOf(name), displayName, ref.isAlive(), children);
     }
 }

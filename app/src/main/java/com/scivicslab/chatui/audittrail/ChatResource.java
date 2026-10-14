@@ -63,8 +63,9 @@ public class ChatResource {
      * ({@code ProjectProperty_260929_oo01}).
      *
      * @param projectId the project to describe
-     * @return {@code {"projectId":..., "name":..., "workingDir":...}}; {@code name} and
-     *         {@code workingDir} are null when unset
+     * @return {@code {"projectId":..., "name":..., "workingDir":..., "chatNames":{"02":...}}};
+     *         {@code name} and {@code workingDir} are null when unset, and {@code chatNames} holds
+     *         only the conversations that have a name
      */
     @GET
     @Path("/{projectId}")
@@ -86,6 +87,12 @@ public class ChatResource {
             // Left null: the tab shows an empty field rather than failing the whole request.
         }
         body.put("workingDir", dir == null ? null : dir.toString());
+        Map<String, String> chatNames = new java.util.TreeMap<>();
+        for (String chatId : chats(projectId)) {
+            String chatName = actorSystem.getChatName(projectId, chatId);
+            if (chatName != null) chatNames.put(chatId, chatName);
+        }
+        body.put("chatNames", chatNames);
         return Response.ok(body).build();
     }
 
@@ -165,6 +172,28 @@ public class ChatResource {
         String outcome = actorSystem.setProjectName(projectId, name == null ? null : name.strip());
         if (outcome.startsWith("error:")) {
             return Response.status(400).entity(Map.of("type", "error", "message", outcome)).build();
+        }
+        return Response.ok(Map.of("type", "ok", "message", outcome)).build();
+    }
+
+    /**
+     * Sets the name a person reads for one conversation, as {@link #setProjectName} does for a
+     * project. The id ({@code chat-02}) stays as it is.
+     *
+     * @param projectId owning project's id
+     * @param chatId    conversation id within that project
+     * @param name      the name; an empty body clears it
+     * @return {@code {"type":"ok","message":...}}, or 404 when there is no such conversation
+     */
+    @POST
+    @Path("/{projectId}/chats/{chatId}/name")
+    @Consumes(MediaType.TEXT_PLAIN)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response setChatName(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId,
+                                String name) {
+        String outcome = actorSystem.setChatName(projectId, chatId, name == null ? null : name.strip());
+        if (outcome.startsWith("error:")) {
+            return Response.status(404).entity(Map.of("type", "error", "message", outcome)).build();
         }
         return Response.ok(Map.of("type", "ok", "message", outcome)).build();
     }

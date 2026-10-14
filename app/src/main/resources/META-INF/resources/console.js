@@ -1303,22 +1303,44 @@
             .catch(function (err) { projectPropStatus("error: " + err.message); });
     }
 
-    // The project's conversations, each with a Delete button; project1's chat-01, which every start
-    // creates, has none (ConversationDeletion_261011_oo01).
+    // The project's conversations, each with its name, a Save button for the name, and a Delete
+    // button; project1's chat-01, which every start creates, has no Delete
+    // (ConversationDeletion_261011_oo01). The names come from GET api/projects/{p}.
     function projectPropListChats() {
         var list = document.getElementById("projectprop-chats");
         var projectId = perspectiveProjectId;
         if (!list || !projectId) return;
-        fetch("api/projects/" + encodeURIComponent(projectId) + "/chats")
-            .then(function (r) { return r.ok ? r.json() : []; })
-            .then(function (chatIds) {
+        var base = "api/projects/" + encodeURIComponent(projectId);
+        Promise.all([
+            fetch(base + "/chats").then(function (r) { return r.ok ? r.json() : []; }),
+            fetch(base).then(function (r) { return r.ok ? r.json() : {}; })
+        ])
+            .then(function (both) {
+                var chatIds = both[0];
+                var chatNames = (both[1] && both[1].chatNames) || {};
                 if (projectId !== perspectiveProjectId) return;   // another project was chosen meanwhile
                 list.textContent = "";
                 (chatIds || []).forEach(function (chatId) {
                     var li = document.createElement("li");
-                    var name = document.createElement("span");
-                    name.textContent = "chat-" + chatId;
-                    li.appendChild(name);
+                    var id = document.createElement("span");
+                    id.className = "projectprop-chat-id";
+                    id.textContent = "chat-" + chatId;
+                    li.appendChild(id);
+                    var nameInput = document.createElement("input");
+                    nameInput.type = "text";
+                    nameInput.value = chatNames[chatId] || "";
+                    nameInput.placeholder = "What this conversation is for";
+                    var save = document.createElement("button");
+                    save.type = "button";
+                    save.className = "projectprop-chat-save";
+                    save.textContent = "Save";
+                    save.title = "Save the name of chat-" + chatId;
+                    save.addEventListener("click", function () { projectPropSaveChatName(projectId, chatId, nameInput.value); });
+                    nameInput.addEventListener("keydown", function (e) {
+                        if (e.key === "Enter") { e.preventDefault(); projectPropSaveChatName(projectId, chatId, nameInput.value); }
+                    });
+                    li.appendChild(nameInput);
+                    li.appendChild(save);
                     if (!(projectId === DEFAULT_PROJECT_ID && chatId === "01")) {
                         var del = document.createElement("button");
                         del.type = "button";
@@ -1332,6 +1354,24 @@
                 });
             })
             .catch(function () { /* leave the list as it was */ });
+    }
+
+    function projectPropSaveChatName(projectId, chatId, name) {
+        var outcome = document.getElementById("projectprop-chats-outcome");
+        projectPropStatus("saving...");
+        fetch("api/projects/" + encodeURIComponent(projectId) + "/chats/" + encodeURIComponent(chatId) + "/name", {
+            method: "POST",
+            headers: { "Content-Type": "text/plain" },
+            body: name || ""
+        })
+            .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+            .then(function (res) {
+                projectPropStatus(res.ok ? "saved chat-" + chatId : "not saved");
+                if (outcome) outcome.textContent = res.ok ? "" : (res.body.message || "");
+                // The tree shows the name beside the id, so it has to be redrawn.
+                refreshActors();
+            })
+            .catch(function (err) { projectPropStatus("error: " + err.message); });
     }
 
     // Asks first. On success the list and the tree are redrawn, and the chat pane moves to the
@@ -1618,8 +1658,9 @@
             n = n.substring(parentName.length).replace(/^[./]+/, "");
         }
         n = n || node.name;
-        // A named project reads "the name (project1)": the id stays because the REST paths and
-        // every conversation's name are built from it (ProjectProperty_260929_oo01).
+        // A named project reads "the name (project1)", a named conversation "the name (chat-02)":
+        // the id stays because the REST paths and the actor names are built from it
+        // (ProjectProperty_260929_oo01).
         if (node.displayName) return node.displayName + " (" + n + ")";
         return n;
     }

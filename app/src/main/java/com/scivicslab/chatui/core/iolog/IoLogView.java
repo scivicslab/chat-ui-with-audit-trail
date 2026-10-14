@@ -187,6 +187,30 @@ public class IoLogView {
                 .orElse(null);
     }
 
+    /**
+     * Label of the entry that holds the name a person gave a conversation. Kept out of the
+     * {@link #SETTINGS_LABEL} record, whose every entry carries the whole provider state: a rename
+     * would otherwise have to restate the provider, and a provider change the name.
+     */
+    public static final String NAME_LABEL = "name";
+
+    /**
+     * The name a session's last {@link #NAME_LABEL} entry gives, or {@code null} when it has none or
+     * the last one cleared it (an empty message).
+     */
+    public String latestName(long sessionId) {
+        return latestNameOf(allLogs(sessionId));
+    }
+
+    static String latestNameOf(List<LogEntry> raw) {
+        return raw.stream()
+                .filter(e -> NAME_LABEL.equals(e.getLabel()))
+                .max(Comparator.comparingLong(LogEntry::getId))
+                .map(LogEntry::getMessage)
+                .filter(m -> m != null && !m.isBlank())
+                .orElse(null);
+    }
+
     /** One settings record with the time it was written, for the Sessions tab's settings history. */
     public record SettingsRecord(String time, String provider, String tools, String model,
                                 Double temperature) {}
