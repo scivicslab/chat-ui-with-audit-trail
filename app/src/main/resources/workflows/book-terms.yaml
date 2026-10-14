@@ -214,7 +214,7 @@ steps:
         execution: direct
       - actor: this
         method: putJson
-        arguments: {path: known, value: 'jexl:state.getString("known") + state.getString("block").replaceAll("(?m)^\\(defrule [^ ]+/text .*\\n?", "").replaceAll("(?m)^;;;.*\\n?", "")'}
+        arguments: {path: known, value: 'jexl:state.getString("known") + state.getString("block").replaceAll("(?s)\\(defrule [^ \n]+/text ->\\s*\"(?:[^\"\\\\]|\\\\.)*\"\\)\n?", "").replaceAll("(?m)^;;;.*\\n?", "")'}
         execution: direct
 
   - states: ["keep-relations", "keep-relations"]

@@ -1,0 +1,299 @@
+name: class-template
+description: |
+  Has an LLM make an rst-on-lisp template for explaining one kind of thing (by default, one Java
+  class) from how a textbook explains such a thing, then try the template and mend it. Three turns
+  in one conversation, the textbook's parts in the first prompt:
+  1. Template turn: the writer reads how the book explains its example (into which parts, in what
+     order) and writes the template: a rule file whose How to do it sections each hold rules with
+     :instruction saying what to write there, and :source naming the book's section it follows.
+  2. Fill turn: the writer explains the trial subject with that template, every :instruction
+     replaced by the text it asks for.
+  3. Review turn: the writer compares what it wrote with the book, lists the template's missing,
+     needless or misplaced parts, and writes the mended template.
+  Kept as <out>/template.1.lisp, filled.lisp and template.2.lisp, with each answer as .md.
+  A turn whose answer has no ```lisp block is told to go on, up to maxNudges times.
+params:
+  parts:
+    label: "The textbook's parts"
+    description: "Absolute paths of the .md files to read, one per line, in reading order"
+    type: text
+    required: true
+  out:
+    label: "Where to write"
+    description: "Absolute path of a directory under the write root"
+    type: text
+    required: true
+  subject:
+    description: "What the template explains, as the prompts name it"
+    default: "Java のクラス 1 つ"
+  trial:
+    description: "What the fill turn explains with the template"
+    default: "教科書の Listing 4.2 にある Employee クラス"
+  exampleFrame:
+    description: "A frame written in rst-on-lisp, shown as an example of the form a template and its filled text take"
+    default: "/home/devteam/works/doc_Base010/docs/rst-on-lisp/030_operation/050_FrameLineMeaning_261013_oo01/050_FrameLineMeaning_261013_oo01.lisp"
+  writer:
+    description: "The conversation that writes"
+    default: "project1/chat-02"
+  writerModel:
+    description: "The model the writer runs on; empty leaves the conversation as it is"
+    default: ""
+  writerNoThink:
+    description: "true asks the writer's model to skip its thinking phase"
+    default: "true"
+  maxNudges:
+    description: "How many times one turn may be told to go on when the answer has no ```lisp block"
+    type: int
+    default: 3
+steps:
+  - states: ["0", "1"]
+    label: add-writer
+    actions:
+      - actor: this
+        method: addWorker
+        arguments: ["writer", 'jexl:state.getString("writer")']
+        execution: direct
+      - actor: this
+        method: setChatModel
+        arguments: ['jexl:state.getString("writer")', 'jexl:state.getString("writerModel")']
+        execution: direct
+      - actor: this
+        method: setChatNoThink
+        arguments: ['jexl:state.getString("writer")', 'jexl:state.getString("writerNoThink")']
+        execution: direct
+
+  - states: ["1", "read"]
+    label: get-ready
+    actions:
+      - actor: this
+        method: copyState
+        arguments: ["parts", "left"]
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: material, value: ""}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: nudges, value: "0"}
+        execution: direct
+      - actor: this
+        method: readFile
+        arguments: ['jexl:state.getString("exampleFrame")', "frame"]
+        execution: direct
+      - actor: this
+        method: clearWorker
+        arguments: ["writer"]
+        execution: direct
+
+  - states: ["1", "failed"]
+    label: no-example-frame
+    actions: [{actor: this, method: doNothing, arguments: ["the example frame could not be read"], execution: direct}]
+
+  - states: ["read", "read"]
+    label: read-a-part
+    actions:
+      - actor: this
+        method: takeNext
+        arguments: ["left", "part"]
+        execution: direct
+      - actor: this
+        method: readFile
+        arguments: ['jexl:state.getString("part")', "text"]
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: material, value: 'jexl:state.getString("material") + "\n----- " + state.getString("part") + " -----\n" + state.getString("text") + "\n"'}
+        execution: direct
+
+  - states: ["read", "template"]
+    label: all-parts-read
+    actions: [{actor: this, method: doNothing, arguments: ["every part is in the material"], execution: direct}]
+
+  - states: ["template", "keep-template"]
+    label: template-turn
+    actions:
+      - actor: this
+        method: askWorker
+        arguments:
+          - writer
+          - 'jexl:"次は教科書の一部です。\n" + state.getString("material") + "\n----- ここまで -----\n\nこの部分で、教科書は" + state.getString("subject") + "を、どんな部分に分け、どの順で説明していますか。それを読み取り、" + state.getString("subject") + "を説明する文書のテンプレートを rst-on-lisp で書いてください。\n\nrst-on-lisp では、文書を (defrule 名前 -> 右辺 :key 値) の規則の集まりとして書きます。右辺に名前を並べた規則は節の並びを、:nucleus と関係名の対を並べた規則は段落の文どうしの関係を表します。右辺を書かずに :instruction \"指示\" だけを持つ規則は、後で LLM が埋める空欄です。テンプレートとは、空欄（:instruction の規則）を持つ文書です。\n\n形の例として、1 行の意味を説明するフレームを渡します。Problem Definition に説明が持つ部分を、How to do it にその部分を全部埋めた例を書いた文書です。\n```lisp\n" + state.getString("frame") + "\n```\n\n書き方:\n- 骨組みは次のとおりにします。\n  (in-package :rst)\n  (defdocument ClassTemplate_261013_oo01)\n  (defrule document -> title description problem-definition how-to-do-it under-the-hood related-docs)\n  (defrule title -> \"…\")\n  (defrule description -> \"…\")\n  (defrule problem-definition -> :nucleus pd/1)\n  (defrule pd/1 -> \"このテンプレートが何を説明するためのものかを書く\")\n  (defrule how-to-do-it -> :nucleus how/sections)\n  (defrule how/sections -> how/<部分1> how/<部分2> …)\n  (defrule under-the-hood ->)\n  (defrule related-docs ->)\n- How to do it の部分 1 つを、見出しを持つ規則 1 つにします。(defrule how/<部分> -> how/<部分>/1 :heading \"### <番号>. <部分の名前>\")\n- 中身は空欄にします。(defrule how/<部分>/1 -> :instruction \"<この部分に何を、どう書くか>\" :source \"<この書き方の元になった教科書の節番号と見出し>\")\n- :instruction には、教科書の説明の仕方を、別のクラスにも当てはまる言い方で書きます。Employee など教科書の例の名前を書きません。\n- 用語どうしの細かな関係は要りません。説明の部分と順序を決めることが目的です。\n\n返事は、テンプレートの全文を ```lisp で始まるコードブロック 1 つで書いてください。"'
+        execution: direct
+
+  - states: ["template", "failed"]
+    label: template-turn-failed
+    actions: [{actor: this, method: doNothing, arguments: ["the writer gave no answer in the template turn"], execution: direct}]
+
+  - states: ["keep-template", "fill"]
+    label: keep-template
+    actions:
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["writer", "answer"]
+        execution: direct
+      - actor: this
+        method: writeFile
+        arguments: ['jexl:state.getString("out") + "/template.1.answer.md"', "answer"]
+        execution: direct
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("answer").indexOf("```lisp") >= 0'
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: template, value: 'jexl:state.getString("answer").substring(state.getString("answer").indexOf("```lisp") + 7, state.getString("answer").indexOf("```", state.getString("answer").indexOf("```lisp") + 7)).trim() + "\n"'}
+        execution: direct
+      - actor: this
+        method: writeFile
+        arguments: ['jexl:state.getString("out") + "/template.1.lisp"', "template"]
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: nudges, value: "0"}
+        execution: direct
+
+  - states: ["keep-template", "keep-template"]
+    label: nudge-template
+    actions:
+      - actor: this
+        method: countUp
+        arguments: ["nudges", 'jexl:state.getString("maxNudges")']
+        execution: direct
+      - actor: this
+        method: askWorker
+        arguments: [writer, '作業を続けてください。テンプレートの全文を、```lisp で始まるコードブロック 1 つで返してください。']
+        execution: direct
+
+  - states: ["keep-template", "failed"]
+    label: no-template
+    actions: [{actor: this, method: doNothing, arguments: ["the template turn's answer had no ```lisp block, also after being told to go on"], execution: direct}]
+
+  - states: ["fill", "keep-fill"]
+    label: fill-turn
+    note: The next turn of the same conversation; the book's parts and the template are still in front of the writer.
+    actions:
+      - actor: this
+        method: askWorker
+        arguments:
+          - writer
+          - 'jexl:"次に、いま書いたテンプレートを使って、" + state.getString("trial") + "を説明する文書を書いてください。\n- テンプレートの :instruction の規則を、1 つずつ、指示どおりの本文の規則に置き換えます。1 つの空欄を、必要なら段落や箇条書きの規則の組にしてかまいません。\n- 置き換えた規則には :instruction と :source を書きません。\n- defdocument の id は ClassTemplateTrial_261013_oo01 にし、title と description と pd/1 は、この説明の文書のものに書き換えます。\n- 本文は日本語で書き、コードや識別子はバッククォートで囲みます。説明の内容は教科書に書いてあることに限ります。\n\n返事は、文書の全文を ```lisp で始まるコードブロック 1 つで書いてください。"'
+        execution: direct
+
+  - states: ["fill", "failed"]
+    label: fill-turn-failed
+    actions: [{actor: this, method: doNothing, arguments: ["the writer gave no answer in the fill turn"], execution: direct}]
+
+  - states: ["keep-fill", "review"]
+    label: keep-fill
+    actions:
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["writer", "answer"]
+        execution: direct
+      - actor: this
+        method: writeFile
+        arguments: ['jexl:state.getString("out") + "/filled.answer.md"', "answer"]
+        execution: direct
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("answer").indexOf("```lisp") >= 0'
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: filled, value: 'jexl:state.getString("answer").substring(state.getString("answer").indexOf("```lisp") + 7, state.getString("answer").indexOf("```", state.getString("answer").indexOf("```lisp") + 7)).trim() + "\n"'}
+        execution: direct
+      - actor: this
+        method: writeFile
+        arguments: ['jexl:state.getString("out") + "/filled.lisp"', "filled"]
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: nudges, value: "0"}
+        execution: direct
+
+  - states: ["keep-fill", "keep-fill"]
+    label: nudge-fill
+    actions:
+      - actor: this
+        method: countUp
+        arguments: ["nudges", 'jexl:state.getString("maxNudges")']
+        execution: direct
+      - actor: this
+        method: askWorker
+        arguments: [writer, '作業を続けてください。説明の文書の全文を、```lisp で始まるコードブロック 1 つで返してください。']
+        execution: direct
+
+  - states: ["keep-fill", "failed"]
+    label: no-filled-document
+    actions: [{actor: this, method: doNothing, arguments: ["the fill turn's answer had no ```lisp block, also after being told to go on"], execution: direct}]
+
+  - states: ["review", "keep-review"]
+    label: review-turn
+    actions:
+      - actor: this
+        method: askWorker
+        arguments:
+          - writer
+          - 'jexl:"最後に、書いた説明の文書を教科書と比べて、テンプレートを見直してください。\n- 教科書が説明しているのに、テンプレートに欄が無いために書けなかったことを挙げます。\n- 欄はあるのに、教科書に書くことが無かった欄、ほかの欄と同じことを書いた欄を挙げます。\n- 欄の順序が、教科書の説明の順序や、読者が知る必要のある順序と食い違うところを挙げます。\n\n返事は、見つけたことの箇条書きに続けて、直したテンプレートの全文を ```lisp で始まるコードブロック 1 つで書いてください。直したテンプレートの defdocument の id は ClassTemplate_261013_oo01 のままにします。"'
+        execution: direct
+
+  - states: ["review", "failed"]
+    label: review-turn-failed
+    actions: [{actor: this, method: doNothing, arguments: ["the writer gave no answer in the review turn"], execution: direct}]
+
+  - states: ["keep-review", "end"]
+    label: keep-review
+    actions:
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["writer", "answer"]
+        execution: direct
+      - actor: this
+        method: writeFile
+        arguments: ['jexl:state.getString("out") + "/template.2.answer.md"', "answer"]
+        execution: direct
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("answer").indexOf("```lisp") >= 0'
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: template2, value: 'jexl:state.getString("answer").substring(state.getString("answer").indexOf("```lisp") + 7, state.getString("answer").indexOf("```", state.getString("answer").indexOf("```lisp") + 7)).trim() + "\n"'}
+        execution: direct
+      - actor: this
+        method: writeFile
+        arguments: ['jexl:state.getString("out") + "/template.2.lisp"', "template2"]
+        execution: direct
+      - actor: this
+        method: finish
+        arguments: ["template2"]
+        execution: direct
+
+  - states: ["keep-review", "keep-review"]
+    label: nudge-review
+    actions:
+      - actor: this
+        method: countUp
+        arguments: ["nudges", 'jexl:state.getString("maxNudges")']
+        execution: direct
+      - actor: this
+        method: askWorker
+        arguments: [writer, '作業を続けてください。見つけたことの箇条書きに続けて、直したテンプレートの全文を、```lisp で始まるコードブロック 1 つで返してください。']
+        execution: direct
+
+  - states: ["keep-review", "failed"]
+    label: no-mended-template
+    actions: [{actor: this, method: doNothing, arguments: ["the review turn's answer had no ```lisp block, also after being told to go on"], execution: direct}]
+
+  - states: ["failed", "end"]
+    label: report-failure
+    note: The conversation is stopped first, so a turn the plan stopped waiting for does not go on using the GPU.
+    actions:
+      - actor: this
+        method: stopChat
+        arguments: ['jexl:state.getString("writer")']
+        execution: direct
+      - actor: this
+        method: reportFailure
+        arguments: []
+        execution: direct
