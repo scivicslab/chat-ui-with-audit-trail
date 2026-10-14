@@ -221,14 +221,36 @@ public class StreamEventParser {
         long durationMs = json.optLong("duration_ms", -1);
         boolean isError = json.optBoolean("is_error", false);
         if (isError) {
-            return new StreamEvent("error", json.optString("result", "Unknown error"),
-                    sessionId, costUsd, durationMs, true, rawJson);
+            return new StreamEvent("error", resultErrorText(json), sessionId, costUsd, durationMs, true, rawJson);
         }
         // Carry the final text so the dispatcher can fall back to it when the CLI emitted
         // no assistant event for this turn.
         String finalText = json.optString("result", "");
         return new StreamEvent("result", finalText.isEmpty() ? null : finalText,
                 sessionId, costUsd, durationMs, false, rawJson);
+    }
+
+    /**
+     * The message of a failed {@code result} line. The CLI puts it in {@code result} for a turn that
+     * ran and failed, and in the {@code errors} array, with {@code result} absent, for one that never
+     * started -- {@code --resume} naming a session it no longer has is one. Reading only
+     * {@code result} turned the latter into "Unknown error", which also hid it from the stale-session
+     * retry in {@link ClaudeCodeProvider}.
+     */
+    static String resultErrorText(JSONObject json) {
+        String result = json.optString("result", "");
+        if (!result.isBlank()) return result;
+        JSONArray errors = json.optJSONArray("errors");
+        if (errors != null && !errors.isEmpty()) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < errors.length(); i++) {
+                if (i > 0) sb.append('\n');
+                sb.append(String.valueOf(errors.opt(i)));
+            }
+            return sb.toString();
+        }
+        String subtype = json.optString("subtype", "");
+        return subtype.isBlank() ? "Unknown error" : "Unknown error (" + subtype + ")";
     }
 
     private StreamEvent parseError(JSONObject json, String rawJson) {

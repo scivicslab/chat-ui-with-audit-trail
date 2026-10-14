@@ -75,6 +75,23 @@ class StreamEventParserTest {
     }
 
     @Test
+    void parse_failedResultWithErrorsArray_carriesTheMessage() {
+        // What the CLI printed when --resume named a session it had already deleted.
+        String line = "{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"is_error\":true,"
+                + "\"session_id\":\"s1\",\"errors\":[\"No conversation found with session ID: s1\"]}";
+        List<StreamEvent> events = parser.parse(line);
+        assertEquals(1, events.size());
+        assertEquals("error", events.get(0).type());
+        assertEquals("No conversation found with session ID: s1", events.get(0).content());
+    }
+
+    @Test
+    void parse_failedResultWithNeitherField_namesTheSubtype() {
+        String line = "{\"type\":\"result\",\"subtype\":\"error_max_turns\",\"is_error\":true}";
+        assertEquals("Unknown error (error_max_turns)", parser.parse(line).get(0).content());
+    }
+
+    @Test
     void parse_blankOrInvalidLine_yieldsNothingOrError() {
         assertTrue(parser.parse("   ").isEmpty());
         assertNull(parser.parse("not json").get(0).sessionId());
