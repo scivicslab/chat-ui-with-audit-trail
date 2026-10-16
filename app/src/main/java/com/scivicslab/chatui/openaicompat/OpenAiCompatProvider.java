@@ -404,6 +404,54 @@ public class OpenAiCompatProvider implements LlmProvider {
      * @return the reply text, or {@code null} when the call failed
      */
     public String completeOutsideConversation(String prompt) {
+        OpenAiCompatClient client = clientForCompletionOutsideConversation();
+        if (client == null) {
+            return null;
+        }
+        OpenAiCompatClient.NonStreamingResponse response = client.sendNonStreaming(
+                currentModel, List.of(new ChatMessage.User(prompt)), true, 0, List.of());
+        String reason = response.finishReason();
+        if (reason != null && reason.startsWith("error")) {
+            return null;
+        }
+        return response.content();
+    }
+
+    /**
+     * One completion outside the conversation, like {@link #completeOutsideConversation}, with
+     * the reply handed over as it is generated. Used where a person waits for the whole text,
+     * such as a translation of a long message: the first words appear after a fraction of a
+     * second instead of after the last token.
+     *
+     * @param prompt  the whole instruction, standing on its own
+     * @param onDelta receives each piece of the reply, in order, on the calling thread
+     * @return the whole reply, or {@code null} when the call failed or the reply was empty
+     */
+    public String completeOutsideConversationStreaming(String prompt, Consumer<String> onDelta) {
+        OpenAiCompatClient client = clientForCompletionOutsideConversation();
+        if (client == null) {
+            return null;
+        }
+        try {
+            return client.sendPrompt(currentModel, List.of(new ChatMessage.User(prompt)), true, 0,
+                    new OpenAiCompatClient.StreamCallback() {
+                        @Override public void onDelta(String content) { onDelta.accept(content); }
+                        @Override public void onComplete(long durationMs, String finishReason) { }
+                        @Override public void onError(String message) {
+                            logger.warning("Completion outside the conversation failed: " + message);
+                        }
+                    });
+        } catch (ContextLengthExceededException e) {
+            logger.warning("Completion outside the conversation exceeded the context length");
+            return null;
+        }
+    }
+
+    /**
+     * The client that serves {@link #currentModel}, once the model is known; {@code null} when no
+     * model is known or no server offers it.
+     */
+    private OpenAiCompatClient clientForCompletionOutsideConversation() {
         // Resolve the model first, the way sendPrompt does. A caller that runs before any prompt
         // has been sent finds currentModel still unset, and selectClient then hands back whichever
         // client is first, which is asked for a model named "" and answers an error. Observed on
@@ -415,17 +463,7 @@ public class OpenAiCompatProvider implements LlmProvider {
         if (currentModel == null || currentModel.isBlank() || currentModel.equals("default")) {
             return null;
         }
-        OpenAiCompatClient client = selectClient(currentModel);
-        if (client == null) {
-            return null;
-        }
-        OpenAiCompatClient.NonStreamingResponse response = client.sendNonStreaming(
-                currentModel, List.of(new ChatMessage.User(prompt)), true, 0, List.of());
-        String reason = response.finishReason();
-        if (reason != null && reason.startsWith("error")) {
-            return null;
-        }
-        return response.content();
+        return selectClient(currentModel);
     }
 
     /**

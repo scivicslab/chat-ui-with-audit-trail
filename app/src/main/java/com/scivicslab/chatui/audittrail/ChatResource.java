@@ -157,6 +157,60 @@ public class ChatResource {
                 "model", t.model() == null ? "" : t.model())).build();
     }
 
+    private static final com.fasterxml.jackson.databind.ObjectMapper EVENT_JSON =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
+    private static String translationEvent(Map<String, Object> fields) {
+        try {
+            return EVENT_JSON.writeValueAsString(fields);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /**
+     * Translates one message as {@link #translate} does, sending the translation as the model
+     * writes it. Each element of the stream is a JSON object: {@code {"type":"delta","content"}}
+     * for a piece of the translation, then one {@code {"type":"done","translation","model"}} with
+     * the whole text, or one {@code {"type":"error","message"}}. A request that is refused for the
+     * reasons {@link #translate} gives a 400, 404 or 502 for ends in an error element, because the
+     * status line is sent before the translation starts.
+     *
+     * @param body {@code {"text": ..., "language": a code from GET /api/translation-languages}}
+     */
+    @POST
+    @Path("/{projectId}/chats/{chatId}/translate/stream")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.SERVER_SENT_EVENTS)
+    @RestSseElementType(MediaType.TEXT_PLAIN)
+    public Multi<String> translateStream(@PathParam("projectId") String projectId,
+                                         @PathParam("chatId") String chatId, Map<String, Object> body) {
+        Object textVal = body != null ? body.get("text") : null;
+        Object langVal = body != null ? body.get("language") : null;
+        String text = textVal == null ? "" : String.valueOf(textVal);
+        String language = langVal == null ? "" : String.valueOf(langVal);
+        if (text.isBlank()) {
+            return Multi.createFrom().item(translationEvent(Map.of("type", "error", "message", "text is required")));
+        }
+        return Multi.createFrom().<String>emitter(emitter -> Thread.ofVirtual().start(() -> {
+            try {
+                ChatUiActorSystem.Translation t = actorSystem.translate(projectId, chatId, text, language,
+                        piece -> emitter.emit(translationEvent(Map.of("type", "delta", "content", piece))));
+                if (t.kind() == ChatUiActorSystem.Translation.Kind.DONE) {
+                    emitter.emit(translationEvent(Map.of("type", "done", "translation", t.text(),
+                            "model", t.model() == null ? "" : t.model())));
+                } else {
+                    emitter.emit(translationEvent(Map.of("type", "error", "message", t.reason())));
+                }
+            } catch (RuntimeException e) {
+                LOG.warning("Streaming translation failed: " + e.getMessage());
+                emitter.emit(translationEvent(Map.of("type", "error", "message", String.valueOf(e.getMessage()))));
+            } finally {
+                emitter.complete();
+            }
+        }));
+    }
+
     /**
      * Sets the name a person reads for a project ({@code ProjectProperty_260929_oo01}).
      *

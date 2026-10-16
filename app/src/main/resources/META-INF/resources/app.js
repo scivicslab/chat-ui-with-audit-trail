@@ -312,9 +312,88 @@
         fillLanguages();
         select.addEventListener("focus", fillLanguages);
         select.addEventListener("mousedown", fillLanguages);
-        select.addEventListener("change", function () {
-            var code = select.value;
-            if (!code) return;
+        // The translation of this message in this conversation, kept outside the DOM: switching
+        // conversations empties the pane and draws it again from the history, and a translation
+        // held only by the box under the message went with it. A request still running when the
+        // pane is left finishes into the entry, and the message drawn on coming back shows it.
+        var entryKey = PROJECT_ID + "/" + CHAT_ID + "\n" + sourceText;
+
+        function drawTranslation(entry) {
+            var box = entry.box;
+            box.classList.remove("translated-error");
+            box.textContent = "";
+            if (entry.state === "pending") {
+                box.textContent = "Translating into " + entry.name + "…";
+            } else if (entry.state === "error") {
+                box.textContent = entry.name + ": " + entry.message;
+                box.classList.add("translated-error");
+            } else {
+                var label = document.createElement("div");
+                label.className = "translated-label";
+                label.textContent = entry.name + (entry.model ? " — " + entry.model : "")
+                    + (entry.state === "streaming" ? " …" : "");
+                box.appendChild(label);
+                var body = document.createElement("div");
+                // While the model is still writing, the text is shown as it is; the Markdown is
+                // drawn once, when the translation is whole, because a half-written code fence or
+                // list would be redrawn differently with every piece.
+                if (asMarkdown && entry.state === "done") {
+                    body.innerHTML = renderMarkdown(entry.text);
+                    decorateCodeBlocks(body);
+                }
+                else {
+                    body.textContent = entry.text;
+                    if (entry.state === "streaming") body.style.whiteSpace = "pre-wrap";
+                }
+                box.appendChild(body);
+            }
+            // The entry's list, not this call's: the one this closure was made for may be gone.
+            entry.select.disabled = entry.state === "pending" || entry.state === "streaming";
+        }
+
+        // Reads the stream of POST .../translate/stream into the entry, redrawing the message on
+        // screen after each piece. Each event is one "data:" line holding a JSON object.
+        function readTranslationStream(response, entry) {
+            var reader = response.body.getReader();
+            var decoder = new TextDecoder();
+            var buffer = "";
+            function handle(event) {
+                if (event.type === "delta") {
+                    entry.state = "streaming";
+                    entry.text = (entry.text || "") + event.content;
+                } else if (event.type === "done") {
+                    entry.state = "done";
+                    entry.text = event.translation;
+                    entry.model = event.model;
+                } else if (event.type === "error") {
+                    entry.state = "error";
+                    entry.message = event.message || "translation failed";
+                }
+                drawTranslation(entry);
+            }
+            function pump() {
+                return reader.read().then(function (chunk) {
+                    if (chunk.done) return;
+                    buffer += decoder.decode(chunk.value, { stream: true });
+                    var end;
+                    while ((end = buffer.search(/\r?\n\r?\n/)) >= 0) {
+                        var raw = buffer.slice(0, end);
+                        buffer = buffer.slice(end).replace(/^\r?\n\r?\n/, "");
+                        var data = raw.split(/\r?\n/)
+                            .filter(function (l) { return l.indexOf("data:") === 0; })
+                            .map(function (l) { return l.slice(5).replace(/^ /, ""); })
+                            .join("\n");
+                        if (data) handle(JSON.parse(data));
+                    }
+                    return pump();
+                });
+            }
+            return pump();
+        }
+
+        // Puts this message's box and list in the entry, which is how the answer to a request
+        // started from a message that has since been redrawn reaches the one on screen.
+        function showEntry(entry) {
             var box = div.querySelector(":scope > .translated");
             if (!box) {
                 box = document.createElement("div");
@@ -322,40 +401,48 @@
                 var footer = div.querySelector(":scope > .message-footer");
                 div.insertBefore(box, footer);
             }
+            entry.box = box;
+            entry.select = select;
+            drawTranslation(entry);
+        }
+
+        var known = translationEntries[entryKey];
+        if (known) showEntry(known);
+
+        select.addEventListener("change", function () {
+            var code = select.value;
+            if (!code) return;
             var name = select.options[select.selectedIndex].textContent;
-            box.textContent = "Translating into " + name + "…";
-            select.disabled = true;
-            fetch(apiUrl(chatUrl("/translate")), {
+            var entry = { name: name, state: "pending" };
+            translationEntries[entryKey] = entry;
+            showEntry(entry);
+            fetch(apiUrl(chatUrl("/translate/stream")), {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ text: sourceText, language: code })
             })
-                .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
-                .then(function (res) {
-                    if (!res.ok) {
-                        box.textContent = name + ": " + (res.body.message || "translation failed");
-                        box.classList.add("translated-error");
-                        return;
-                    }
-                    box.classList.remove("translated-error");
-                    box.textContent = "";
-                    var label = document.createElement("div");
-                    label.className = "translated-label";
-                    label.textContent = name + (res.body.model ? " — " + res.body.model : "");
-                    box.appendChild(label);
-                    var body = document.createElement("div");
-                    if (asMarkdown) {
-                        body.innerHTML = renderMarkdown(res.body.translation);
-                        decorateCodeBlocks(body);
-                    }
-                    else body.textContent = res.body.translation;
-                    box.appendChild(body);
+                .then(function (r) {
+                    if (!r.ok) throw new Error("HTTP " + r.status);
+                    return readTranslationStream(r, entry);
                 })
-                .catch(function (e) { box.textContent = name + ": " + e.message; })
-                .then(function () { select.disabled = false; select.value = ""; });
+                .then(function () {
+                    // A stream that ended without a "done" or an "error" element was cut short.
+                    if (entry.state === "pending" || entry.state === "streaming") {
+                        entry.state = "error";
+                        entry.message = "the translation stopped before it was complete";
+                    }
+                })
+                .catch(function (e) { entry.state = "error"; entry.message = e.message; })
+                .then(function () {
+                    drawTranslation(entry);
+                    entry.select.value = "";
+                });
         });
         return select;
     }
+
+    // Translations shown so far, by conversation and message text; see translateSelect.
+    var translationEntries = {};
 
     function newFooter(div) {
         var footer = document.createElement("div");

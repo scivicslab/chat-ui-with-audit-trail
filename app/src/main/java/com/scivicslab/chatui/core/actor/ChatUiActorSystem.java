@@ -658,6 +658,18 @@ public class ChatUiActorSystem {
      * @param languageCode a code from {@link TranslationLanguages#ALL}
      */
     public Translation translate(String projectId, String chatId, String text, String languageCode) {
+        return translate(projectId, chatId, text, languageCode, piece -> { });
+    }
+
+    /**
+     * Translates as {@link #translate(String, String, String, String)} does, handing over the
+     * translation piece by piece as the model writes it.
+     *
+     * @param onDelta receives each piece of the translation, in order, on the translator's own
+     *                thread; it must not block
+     */
+    public Translation translate(String projectId, String chatId, String text, String languageCode,
+                                 java.util.function.Consumer<String> onDelta) {
         var language = TranslationLanguages.find(languageCode);
         if (language.isEmpty()) {
             return Translation.refused(Translation.Kind.UNKNOWN_LANGUAGE, "unknown language: " + languageCode);
@@ -671,7 +683,8 @@ public class ChatUiActorSystem {
         try {
             answer = translator().ask(p -> {
                 OpenAiCompatProvider local = (OpenAiCompatProvider) p;
-                return new String[] { local.completeOutsideConversation(prompt), local.getCurrentModel() };
+                return new String[] { local.completeOutsideConversationStreaming(prompt, onDelta),
+                        local.getCurrentModel() };
             }).get(5, TimeUnit.MINUTES);
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Translation of a message in " + conversation + " failed", e);
