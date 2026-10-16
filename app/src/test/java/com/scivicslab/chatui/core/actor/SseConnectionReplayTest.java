@@ -49,16 +49,23 @@ class SseConnectionReplayTest {
     }
 
     @Test
-    void aFinishedTurnLeavesNothingToReplay() throws Exception {
+    void aResultAloneEndsTheTurn() throws Exception {
         SseConnection sse = new SseConnection(mapper);
         sse.emit(ChatEvent.thinking("working"));
-        sse.emit(ChatEvent.delta("the answer"));
-        sse.emit(ChatEvent.thinking("next turn"));
         sse.emit(ChatEvent.result("s", 0, 1));
 
         AssertSubscriber<String> sub = sse.openStream().subscribe().withSubscriber(AssertSubscriber.create(1));
-        sub.assertItems();
         assertTrue(sub.getItems().isEmpty(), "result ends the turn, so the stream opens empty");
+    }
+
+    @Test
+    void aDeltaAloneEndsTheActivity() throws Exception {
+        SseConnection sse = new SseConnection(mapper);
+        sse.emit(ChatEvent.thinking("working"));
+        sse.emit(ChatEvent.delta("the answer"));
+
+        AssertSubscriber<String> sub = sse.openStream().subscribe().withSubscriber(AssertSubscriber.create(1));
+        assertTrue(sub.getItems().isEmpty(), "the pane drops its activity text at the answer, so none is replayed");
     }
 
     @Test
