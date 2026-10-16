@@ -184,6 +184,18 @@ public record ChatEvent(
     }
 
     /**
+     * Creates an event carrying the whole of the current turn's activity text so far, sent when a
+     * browser opens the stream mid-turn. Unlike {@link #thinking}, which the pane appends, the pane
+     * replaces what it shows with this, so receiving it twice leaves the same text.
+     *
+     * @param content the activity text accumulated since the turn began
+     * @return a new thinking_snapshot event
+     */
+    public static ChatEvent thinkingSnapshot(String content) {
+        return new ChatEvent("thinking_snapshot", content, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+    }
+
+    /**
      * Creates a heartbeat event used to keep the SSE connection alive.
      *
      * @return a new heartbeat event

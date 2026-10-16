@@ -869,6 +869,13 @@
                 // same way.
                 appendMessage("info", event.content || "");
                 break;
+            case "thinking_snapshot":
+                // Sent when the stream is opened mid-turn (switching back to this conversation, or a
+                // reconnect): the whole of the turn's activity so far. It replaces rather than
+                // appends, so a reconnect that did not clear the pane does not show it twice.
+                clearThinking();
+                appendThinking(event.content || "");
+                break;
             case "heartbeat":
                 break;
             default:
