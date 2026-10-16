@@ -39,7 +39,7 @@ steps:
       - actor: this
         method: stepLimitReached
         arguments:
-          maxSteps: 30
+          maxSteps: 50
         execution: direct
       - actor: this
         method: finish
