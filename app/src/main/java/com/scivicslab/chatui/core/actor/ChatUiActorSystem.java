@@ -149,6 +149,23 @@ public class ChatUiActorSystem {
     private static final int SYSTEM_LOG_CAPACITY = 500;
     private static final int TAB_LOG_CAPACITY = 200;
 
+    /**
+     * Name of the log multiplexer actor for calls relayed through {@code POST /v1/chat/completions}
+     * ({@code ArtexProxyResource}) — one external OpenAI-compatible caller (ARTEX) driving its own
+     * agent loop, not a {@link ConversationSquad} of this application's own agent loop. Built once
+     * at start-up, under {@link #HOUSEKEEPER}, the same shape as {@link #SYSTEM_LOG_ACTOR}.
+     */
+    static final String EXTERNAL_PROXY_LOG_ACTOR = "externalProxy.log";
+    private static final int EXTERNAL_PROXY_LOG_CAPACITY = 500;
+    /**
+     * Prefix for an external caller's I/O log session name, distinguishing it from a
+     * {@link Project} batch job's own session — both use {@link IoLogStore#ensureJobSession}, so
+     * both carry its {@code chat-ui-job-} prefix, and without a further marker the two would be
+     * indistinguishable by {@code workflowName} alone (console.js filters on this exact prefix to
+     * find only the former).
+     */
+    public static final String EXTERNAL_PROXY_SESSION_PREFIX = "externalProxy:";
+
     /** Project id of the project created at startup ({@code Terminology_260829_oo01}). */
     public static final String DEFAULT_PROJECT_ID = "project1";
 
@@ -158,6 +175,11 @@ public class ChatUiActorSystem {
     private final Map<String, ChatSessionIIAR> chatSessions = new ConcurrentHashMap<>();
     private RecentEntriesAccumulator systemLogBuffer;
     private final Map<String, RecentEntriesAccumulator> chatLogBuffers = new ConcurrentHashMap<>();
+    private RecentEntriesAccumulator externalProxyLogBuffer;
+    /** Per-caller sequential turn number for {@link #recordExternalCall}, so each call gets its
+     *  own {@code turnN/step1/llm} label (one process's lifetime; restarts start over at 1). */
+    private final Map<String, java.util.concurrent.atomic.AtomicInteger> externalCallTurnCounters =
+            new ConcurrentHashMap<>();
 
     /** Name of the branch holding the actors that exist once regardless of the work. */
     public static final String HOUSEKEEPER = "housekeeper";
@@ -241,6 +263,18 @@ public class ChatUiActorSystem {
                 new MultiplexerAccumulatorActor(SYSTEM_LOG_ACTOR, systemMux, actorSystem);
         adopt(HOUSEKEEPER, systemLogActor);
         actorSystem.addIIActor(systemLogActor);
+
+        // External proxy log multiplexer: one caller (ARTEX) driving its own agent loop through
+        // POST /v1/chat/completions (ArtexProxyResource), relayed and recorded but never run as a
+        // ConversationSquad of this application's own agent loop (ArtexProxyLogging_261017_oo01).
+        externalProxyLogBuffer = new RecentEntriesAccumulator(EXTERNAL_PROXY_LOG_CAPACITY);
+        MultiplexerAccumulator externalProxyMux = new MultiplexerAccumulator();
+        externalProxyMux.addTarget(externalProxyLogBuffer);
+        MultiplexerAccumulatorActor externalProxyLogActor =
+                new MultiplexerAccumulatorActor(EXTERNAL_PROXY_LOG_ACTOR, externalProxyMux, actorSystem);
+        adopt(HOUSEKEEPER, externalProxyLogActor);
+        actorSystem.addIIActor(externalProxyLogActor);
+
         MultiplexerLogHandler logHandler = new MultiplexerLogHandler(actorSystem);
         logHandler.setLevel(Level.ALL);
         // Excludes loggers that already reach outputMultiplexer via an explicit path (ChatSession/
@@ -808,6 +842,59 @@ public class ChatUiActorSystem {
         return systemLogBuffer.recent();
     }
 
+    /** @return the external proxy log's recent entries (oldest first) — ARTEX's relayed calls */
+    public List<RecentEntriesAccumulator.Entry> getExternalProxyLogEntries() {
+        return externalProxyLogBuffer.recent();
+    }
+
+    /**
+     * Records one call relayed through {@code POST /v1/chat/completions}
+     * ({@code ArtexProxyResource}), both permanently (the I/O log, surviving a restart) and for the
+     * live view ({@link #getExternalProxyLogEntries()}).
+     *
+     * <p>Uses {@link IoLogStore#ensureJobSession}, not {@link IoLogStore#ensureSession}: the
+     * caller is not a {@link ConversationSquad} of this application's own agent loop (it drives its
+     * own, elsewhere), so its session must not carry the {@code chat-ui-conversation-} prefix that
+     * {@link IoLogStore#resumableConversationSquads()} rebuilds into a {@link ConversationSquad} —
+     * and a {@link ConversationSquad} with no {@link ChatSessionIIAR} behind it would be a
+     * conversation that cannot actually run (see the plan this implements,
+     * {@code tasks/artex-on-w206-261017/todo.md}).</p>
+     *
+     * <p>The label is {@code turn<N>/step1/llm}, {@code N} one call in, counting from the first
+     * call this process has relayed for {@code callerId} — not a turn of this application's own
+     * agent loop, but the same label shape, so the Sessions tab's trace viewer (which parses
+     * exactly {@code turn(\d+)/step(\d+)/(llm|tool)}, {@code IoLogView.TURN_LABEL}) renders this
+     * job session too: opening the Sessions tab with no conversation active lists every session,
+     * {@code chat-ui-job-<callerId>} among them ({@code ArtexProxyLogging_261017_oo01}).</p>
+     *
+     * @param callerId one external caller's name (e.g. {@code "artex"}); the I/O log session's
+     *                 name is {@value #EXTERNAL_PROXY_SESSION_PREFIX} followed by this, and this
+     *                 entry's {@code source} is this alone
+     * @param content  the full record: {@code REQUEST:}/{@code RESPONSE:}/… in
+     *                 {@link ChatSession}'s {@code recordStepIo} marker format, so
+     *                 {@code IoLogView}'s existing parser covers it too
+     */
+    public void recordExternalCall(String callerId, String content) {
+        if (ioLogStore != null) {
+            long sessionId = ioLogStore.ensureJobSession(EXTERNAL_PROXY_SESSION_PREFIX + callerId);
+            int turn = externalCallTurnCounters
+                    .computeIfAbsent(callerId, k -> new java.util.concurrent.atomic.AtomicInteger(0))
+                    .incrementAndGet();
+            ioLogStore.record(sessionId, callerId, "turn" + turn + "/step1/llm", content);
+        }
+        IIActorRef<?> logRef = actorSystem.getIIActor(EXTERNAL_PROXY_LOG_ACTOR);
+        if (logRef == null) return;
+        try {
+            org.json.JSONObject args = new org.json.JSONObject();
+            args.put("source", callerId);
+            args.put("type", "INFO");
+            args.put("data", content);
+            logRef.callByActionName("add", args.toString());
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not log external call for " + callerId, e);
+        }
+    }
+
     /**
      * Creates, or returns the existing, conversation {@code projectId/chat-<chatId>} as a child of
      * its owning project's {@link Project} actor (not ROOT directly), together with its {@link
@@ -1027,13 +1114,13 @@ public class ChatUiActorSystem {
         for (IoLogView.Turn t : turns) {
             chatSessionIIAR.tell(a -> {
                 ChatSession c = (ChatSession) a;
-                c.recordHistory("user", t.question());
+                c.restoreHistory("user", t.question());
                 if (t.error() != null) {
                     // A failed turn comes back as the failure it was, not as an empty answer
                     // (TurnErrorInConversation_260913_oo01).
-                    c.recordHistory("error", "Error: " + t.error());
+                    c.restoreHistory("error", "Error: " + t.error(), t.at(), null, null);
                 } else {
-                    c.recordHistory("assistant", t.answer());
+                    c.restoreHistory("assistant", t.answer(), t.at(), t.model(), t.durationMs());
                 }
             });
             // collapseTurn appends the pair and moves the collapsed/running boundary past it, which

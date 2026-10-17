@@ -459,7 +459,10 @@
     // The line under a finished answer, in the same order and format as quarkus-chat-ui's:
     // cost, duration, session, model, the copy button, then the time. Cost appears only when the
     // server reported one above zero — a local model bills nothing, and a zero is not shown.
-    function appendAnswerFooter(div, markdownText, event) {
+    // `at` is as for appendMessage: left out for an answer arriving live, the recorded time or null
+    // for one restored from history. A restored answer is not given the model chosen in the dropdown
+    // now, which may not be the one that wrote it.
+    function appendAnswerFooter(div, markdownText, event, at) {
         var footer = newFooter(div);
         if (event.costUsd != null && event.costUsd > 0) {
             footer.appendChild(textSpan("Cost: $" + event.costUsd.toFixed(4)));
@@ -473,11 +476,11 @@
         }
         // The model the server actually used. The dropdown is the fallback for a server that does
         // not report it with the result.
-        var modelName = event.model || (modelSelect && modelSelect.value) || "";
+        var modelName = event.model || (at === undefined && modelSelect && modelSelect.value) || "";
         if (modelName) footer.appendChild(textSpan(shorten(modelName, 30), modelName));
         footer.appendChild(copyButton(markdownText, "Copy MD"));
         footer.appendChild(translateSelect(div, markdownText, true));
-        footer.appendChild(textSpan(formatTime(new Date())));
+        if (at !== null) footer.appendChild(textSpan(formatTime(at === undefined ? new Date() : new Date(at))));
     }
 
     // Where a prompt came from, shown on the bubble itself: a person at this screen, a program
@@ -493,7 +496,11 @@
         return badge;
     }
 
-    function appendMessage(role, text, images, origin) {
+    // `at` is when the line was written, in milliseconds since the epoch. Left out, it is now, which
+    // is right for a line arriving live. A line restored from history passes the time the server
+    // recorded, or null when the server has none: a footer filled with the time of the reload would
+    // state something false.
+    function appendMessage(role, text, images, origin, at) {
         var div = document.createElement("div");
         div.className = "message " + role;
         if (role === "user" && origin && origin !== "screen") {
@@ -514,7 +521,7 @@
         if (role === "user") {
             var footer = newFooter(div);
             if (origin) footer.appendChild(originBadge(origin));
-            footer.appendChild(textSpan(formatTime(new Date())));
+            if (at !== null) footer.appendChild(textSpan(formatTime(at === undefined ? new Date() : new Date(at))));
             footer.appendChild(copyButton(text, "Copy"));
             footer.appendChild(translateSelect(div, text, false));
         }
@@ -1338,15 +1345,15 @@
             .then(function (turns) {
                 (turns || []).forEach(function (t) {
                     if (t.role === "assistant") {
-                        // A restored turn gets the copy button but no cost/duration/session/time:
-                        // GET /conversation returns the role and the text and nothing else, and a
-                        // footer filled with the time of the reload would state something false.
+                        // GET /conversation returns the time, model and duration the server recorded
+                        // for the line. A line brought back from the I/O log after a restart has no
+                        // time, and gets none: the time of the reload would state something false.
+                        // The session id is not kept, so it is not shown.
                         var div = appendMarkdownMessage(t.role, t.content);
-                        var footer = newFooter(div);
-                        footer.appendChild(copyButton(t.content, "Copy MD"));
-                        footer.appendChild(translateSelect(div, t.content, true));
+                        appendAnswerFooter(div, t.content, { durationMs: t.durationMs, model: t.model },
+                            t.at == null ? null : t.at);
                     } else {
-                        appendMessage(t.role, t.content, null, t.origin);
+                        appendMessage(t.role, t.content, null, t.origin, t.at == null ? null : t.at);
                     }
                 });
             })

@@ -1724,6 +1724,12 @@
     // The actor whose name the log search is reached by (ChatUiActorSystem.SYSTEM_LOG_ACTOR).
     var LOG_SEARCH_ACTOR = "outputMultiplexer";
 
+    // Calls relayed through POST /v1/chat/completions (ArtexProxyResource) land under this actor
+    // (ChatUiActorSystem.EXTERNAL_PROXY_LOG_ACTOR) rather than any ConversationSquad's own log, so
+    // clicking it opens Log Search the same way outputMultiplexer does — there is no live tab of
+    // its own yet (ArtexProxyLogging_261017_oo01).
+    var EXTERNAL_PROXY_LOG_ACTOR = "externalProxy.log";
+
     // Actor names are absolute ("project1/chat-01.chat.promptBuilder"), so every row would repeat
     // its ancestors. The tree's indentation already shows the hierarchy: strip the parent's name
     // from the front and show only what this node adds. The full name stays in the tooltip.
@@ -1818,6 +1824,19 @@
             name.addEventListener("click", function (e) {
                 e.stopPropagation(); // don't also trigger the fold/unfold toggle on the label
                 lsearchOpen();
+            });
+        }
+        // externalProxy.log holds ARTEX's (and any other external caller's) relayed calls. Each
+        // caller has its own I/O log session (chat-ui-job-externalProxy:<callerId>), recorded with
+        // the same turnN/step1/llm label shape a conversation uses, so the Sessions tab's existing
+        // trace viewer renders it — openExternalProxySessions() opens that tab and lists those
+        // sessions directly, bypassing the per-conversation filter (ArtexProxyLogging_261017_oo01).
+        if (node.name === EXTERNAL_PROXY_LOG_ACTOR) {
+            name.classList.add("tab-switchable");
+            name.title = "Show calls relayed through POST /v1/chat/completions";
+            name.addEventListener("click", function (e) {
+                e.stopPropagation();
+                openExternalProxySessions();
             });
         }
         var type = document.createElement("span");
@@ -1950,6 +1969,41 @@
                 ioSessionsLoaded = false; ioLoadSessions();
             })
             .catch(function (e) { ioSetStatus("error: " + e); });
+    }
+
+    // Opens the Sessions tab and lists every external caller's session (workflowName
+    // "chat-ui-job-externalProxy:<callerId>", ChatUiActorSystem.EXTERNAL_PROXY_SESSION_PREFIX),
+    // auto-expanded — a one-shot view from the Actors tab's externalProxy.log node, not a mode:
+    // switching tabs away and back runs the normal per-conversation load afterward, same as always
+    // (ArtexProxyLogging_261017_oo01).
+    var EXTERNAL_PROXY_WORKFLOW_PREFIX = "chat-ui-job-externalProxy:";
+    function openExternalProxySessions() {
+        var btn = document.querySelector('#right-tab-bar .rtab-btn[data-tab="logdb"]');
+        if (btn) btn.click();
+        var el = document.getElementById("io-sessions");
+        if (!el) return;
+        fetch("api/sessions")
+            .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+            .then(function (list) {
+                var matches = (list || []).filter(function (s) {
+                    return s.workflowName && s.workflowName.indexOf(EXTERNAL_PROXY_WORKFLOW_PREFIX) === 0;
+                });
+                el.textContent = "";
+                if (!matches.length) {
+                    var e = document.createElement("div"); e.className = "io-empty";
+                    e.textContent = "No calls relayed through POST /v1/chat/completions yet.";
+                    el.appendChild(e);
+                    ioSetStatus("0 external sessions");
+                    return;
+                }
+                matches.forEach(function (s) {
+                    var row = ioSessionEl(s);
+                    el.appendChild(row);
+                    row.open = true; // triggers its own trace fetch, same as re-opening on refresh
+                });
+                ioSetStatus(matches.length + " external session(s)");
+            })
+            .catch(function (err) { ioSetStatus("error: " + err.message); });
     }
 
     function ioLoadSessions() {

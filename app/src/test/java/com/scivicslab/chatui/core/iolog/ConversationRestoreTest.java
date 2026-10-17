@@ -157,4 +157,37 @@ class ConversationRestoreTest {
         assertEquals(null, turns.get(0).answer());
         assertEquals("Error (https://localhost:28005): Unrecognized SSL message", turns.get(0).error());
     }
+
+    @Test
+    void anAnswerComesBackWithTheTimeTheModelAndTheDurationItWasRecordedWith() {
+        LocalDateTime answeredAt = LocalDateTime.of(2026, 10, 17, 0, 6, 59);
+        LogEntry answer = new LogEntry(nextId++, 1L, answeredAt, "agent", "turn1/conversation", null,
+                LogLevel.INFO, "QUESTION:\nq\n\nANSWER:\na", null, null);
+        LogEntry meta = row("turn1/answer-meta", "MODEL: google/gemma-4-26B-A4B-it\nDURATION_MS: 947");
+
+        List<IoLogView.Turn> turns = IoLogView.conversationOf(List.of(answer, meta), 10);
+
+        assertEquals(1, turns.size());
+        assertEquals("a", turns.get(0).answer());
+        assertEquals(answeredAt.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli(),
+                turns.get(0).at());
+        assertEquals("google/gemma-4-26B-A4B-it", turns.get(0).model());
+        assertEquals(947L, turns.get(0).durationMs());
+    }
+
+    @Test
+    void aTurnRecordedBeforeTheMetaEntryExistedHasNoModelAndNoDuration() {
+        List<IoLogView.Turn> turns = IoLogView.conversationOf(List.of(conversationRow(1, "q", "a")), 10);
+
+        assertEquals(null, turns.get(0).model());
+        assertEquals(null, turns.get(0).durationMs());
+    }
+
+    @Test
+    void theMetaEntryIsNotMistakenForAConversationTurn() {
+        List<IoLogView.Turn> turns = IoLogView.conversationOf(List.of(
+                conversationRow(1, "q", "a"), row("turn1/answer-meta", "MODEL: m\nDURATION_MS: 5")), 10);
+
+        assertEquals(1, turns.size());
+    }
 }

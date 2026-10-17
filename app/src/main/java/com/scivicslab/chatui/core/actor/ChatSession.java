@@ -1486,13 +1486,18 @@ public class ChatSession extends Interpreter {
         }
     }
 
-    private void recordConversationIo(String askedQuestion, String givenAnswer) {
+    private void recordConversationIo(String askedQuestion, String givenAnswer, String model, long durationMs) {
         if (ioLog == null || ioSession < 0) return;
         if (askedQuestion == null || givenAnswer == null) return;
         try {
             ioLog.record(ioSession, "agent", "turn" + ioTurnNo + "/conversation",
                     CONVERSATION_QUESTION_MARKER + "\n" + askedQuestion
                             + "\n\n" + CONVERSATION_ANSWER_MARKER + "\n" + givenAnswer);
+            // A separate entry, so the question and answer entry keeps the shape every reader of
+            // it expects. What the pane prints under an answer is read from here when the
+            // conversation is restored after a restart.
+            ioLog.record(ioSession, "agent", "turn" + ioTurnNo + "/answer-meta",
+                    "MODEL: " + (model == null ? "" : model) + "\nDURATION_MS: " + durationMs);
         } catch (Exception e) {
             logger.log(Level.WARNING, "I/O log conversation record failed", e);
         }
@@ -1800,8 +1805,9 @@ public class ChatSession extends Interpreter {
         }
         if (!cancelled && finalAnswer != null) {
             String answer = finalAnswer;
-            recordHistory("assistant", answer);
-            recordConversationIo(question, answer);
+            long answeredIn = System.currentTimeMillis() - turnStartedAt;
+            recordHistory("assistant", answer, null, provider.getCurrentModel(), answeredIn);
+            recordConversationIo(question, answer, provider.getCurrentModel(), answeredIn);
             if (activeResultKey != null) {
                 storeCompletedResult(activeResultKey, answer);
             }
@@ -2229,8 +2235,36 @@ public class ChatSession extends Interpreter {
      * @param origin where a user line's prompt came from, or {@code null} for every other line
      */
     public void recordHistory(String role, String content, String origin) {
+        recordHistory(role, content, origin, null, null);
+    }
+
+    /**
+     * Appends a line brought back from the I/O log when the process starts. A line the log has no
+     * time, model or duration for gets none, and the pane shows none: the time of the restart
+     * would state something false.
+     */
+    public void restoreHistory(String role, String content) {
+        restoreHistory(role, content, null, null, null);
+    }
+
+    /**
+     * As {@link #restoreHistory(String, String)}, for a line whose time, model or duration the log
+     * does record. Each is {@code null} when it does not.
+     */
+    public void restoreHistory(String role, String content, Long at, String model, Long durationMs) {
         if (content == null || content.isBlank()) return;
-        conversationHistory.addLast(new HistoryEntry(role, content, origin));
+        conversationHistory.addLast(new HistoryEntry(role, content, null, at, model, durationMs));
+        while (conversationHistory.size() > MAX_HISTORY) conversationHistory.removeFirst();
+        historySnapshot.set(List.copyOf(conversationHistory));
+    }
+
+    /**
+     * @param model      the model that wrote an assistant line, or {@code null}
+     * @param durationMs how long the turn took, for an assistant line, or {@code null}
+     */
+    public void recordHistory(String role, String content, String origin, String model, Long durationMs) {
+        if (content == null || content.isBlank()) return;
+        conversationHistory.addLast(new HistoryEntry(role, content, origin, System.currentTimeMillis(), model, durationMs));
         while (conversationHistory.size() > MAX_HISTORY) conversationHistory.removeFirst();
         historySnapshot.set(List.copyOf(conversationHistory));
     }
@@ -2455,8 +2489,16 @@ public class ChatSession extends Interpreter {
      * @param content what was said
      * @param origin  for a user line, which of the four ways it arrived — see
      *                {@link #originOf(String)}; {@code null} on every other line
+     * @param at      when the line was recorded, in milliseconds since the epoch; {@code null} for a
+     *                line brought back from the I/O log, which does not keep the time
+     * @param model   for an assistant line, the model that wrote it; {@code null} when not known
+     * @param durationMs for an assistant line, how long the turn took; {@code null} when not known
      */
-    public record HistoryEntry(String role, String content, String origin) {
+    public record HistoryEntry(String role, String content, String origin, Long at, String model, Long durationMs) {
+        public HistoryEntry(String role, String content, String origin) {
+            this(role, content, origin, null, null, null);
+        }
+
         public HistoryEntry(String role, String content) {
             this(role, content, null);
         }

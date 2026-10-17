@@ -68,8 +68,14 @@ public class IoLogView {
     /**
      * One restorable turn. A failed turn (TurnErrorInConversation_260913_oo01) has {@code answer}
      * null and {@code error} set; an answered turn the reverse.
+     *
+     * <p>{@code at} is when the entry was written, which is when the turn ended, in milliseconds
+     * since the epoch; {@code model} and {@code durationMs} come from the turn's
+     * {@code answer-meta} entry and are {@code null} for a turn recorded before that entry
+     * existed.</p>
      */
-    public record Turn(String question, String answer, String error) {
+    public record Turn(String question, String answer, String error, Long at, String model, Long durationMs) {
+        public Turn(String question, String answer, String error) { this(question, answer, error, null, null, null); }
         public Turn(String question, String answer) { this(question, answer, null); }
     }
 
@@ -289,13 +295,49 @@ public class IoLogView {
      */
     static List<Turn> conversationOf(List<LogEntry> raw, int maxTurns) {
         if (maxTurns <= 0) return List.of();
+        Map<Integer, String> metaByTurn = new java.util.HashMap<>();
+        for (LogEntry e : raw) {
+            if (e.getLabel() == null) continue;
+            java.util.regex.Matcher m = ANSWER_META_LABEL.matcher(e.getLabel());
+            if (m.matches()) metaByTurn.put(Integer.parseInt(m.group(1)), e.getMessage());
+        }
         List<Turn> turns = raw.stream()
                 .filter(e -> e.getLabel() != null && CONVERSATION_LABEL.matcher(e.getLabel()).matches())
                 .sorted(Comparator.comparingInt(e -> turnNumberOf(e.getLabel())))
-                .map(e -> parseConversationEntry(e.getMessage()))
+                .map(e -> withRecordedFacts(parseConversationEntry(e.getMessage()), e,
+                        metaByTurn.get(turnNumberOf(e.getLabel()))))
                 .filter(t -> t != null)
                 .collect(Collectors.toList());
         return turns.size() <= maxTurns ? turns : turns.subList(turns.size() - maxTurns, turns.size());
+    }
+
+    /** The entry carrying the model and the duration of a turn's answer. */
+    private static final java.util.regex.Pattern ANSWER_META_LABEL =
+            java.util.regex.Pattern.compile("turn(\\d+)/answer-meta");
+
+    /**
+     * Adds to a parsed turn the time of its entry and the model and duration of its
+     * {@code answer-meta} entry, when there is one.
+     *
+     * @param meta the text of the turn's {@code answer-meta} entry ({@code MODEL: ...} and
+     *             {@code DURATION_MS: ...} lines), or {@code null}
+     */
+    private static Turn withRecordedFacts(Turn turn, LogEntry entry, String meta) {
+        if (turn == null) return null;
+        Long at = entry.getTimestamp() == null ? null
+                : entry.getTimestamp().atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
+        String model = null;
+        Long durationMs = null;
+        if (meta != null) {
+            for (String line : meta.split("\n")) {
+                if (line.startsWith("MODEL: ")) model = line.substring(7).strip();
+                else if (line.startsWith("DURATION_MS: ")) {
+                    try { durationMs = Long.parseLong(line.substring(13).strip()); }
+                    catch (NumberFormatException ignored) { }
+                }
+            }
+        }
+        return new Turn(turn.question(), turn.answer(), turn.error(), at, model, durationMs);
     }
 
     private static int turnNumberOf(String label) {
