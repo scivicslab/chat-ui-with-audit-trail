@@ -9,6 +9,11 @@ import com.scivicslab.chatui.agent.FileWriteTool;
 import com.scivicslab.chatui.agent.LoadSkillTool;
 import com.scivicslab.chatui.agent.ReferenceLinkTool;
 import com.scivicslab.chatui.agent.SetCollaboratorTool;
+import com.scivicslab.chatui.agent.ChatInspection;
+import com.scivicslab.chatui.agent.GetChatLogTool;
+import com.scivicslab.chatui.agent.GetChatStatusTool;
+import com.scivicslab.chatui.agent.ListChatModelsTool;
+import com.scivicslab.chatui.agent.SetChatModelTool;
 import com.scivicslab.chatui.agent.SetWorkflowTool;
 import com.scivicslab.chatui.agent.TextToolCallParser;
 import com.scivicslab.chatui.agent.ToolCall;
@@ -103,6 +108,7 @@ public class ChatSession extends Interpreter {
     /** The shared {@link CollaborationGraph}, consulted (and updated) by the {@code set_collaborator}
      *  tool and by babysitter-loop methods resolving a role (e.g. {@code "worker"}) to a chat id. */
     private ActorRef<CollaborationGraph> collaborationGraphRef;
+    private ConversationControls conversationControls;
     /** The shared {@link SkillRegistry}, backing the {@code load_skill} tool and the skill catalog
      *  carried in this session's system prompt ({@code SkillAndAgentsFile_260830_oo01}). */
     private ActorRef<SkillRegistry> skillRegistryRef;
@@ -136,6 +142,18 @@ public class ChatSession extends Interpreter {
             return size() > 50;
         }
     };
+    // How each stored result's turn ended, keyed like completedResults, for the line ask_chat adds
+    // to a reply. Same 50-entry bound.
+    private final Map<String, String> completedEndings = new LinkedHashMap<>() {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, String> eldest) {
+            return size() > 50;
+        }
+    };
+    /** Tools this turn has run, for the ending line. Reset in {@code start}. */
+    private int turnToolCalls;
+    /** Whether this turn stopped at the workflow's step limit. Reset in {@code start}. */
+    private boolean stepLimitHit;
     // UUIDs that have been registered (via submitPrompt) but not yet started processing
     private final Set<String> pendingResultKeys = new HashSet<>();
     // UUID of the prompt currently being processed, or null
@@ -252,6 +270,9 @@ public class ChatSession extends Interpreter {
               tags; "timeoutSeconds" is an optional third <parameter> tag (default 60) — pass a
               larger value if you expect the target to take a while, e.g. because it will itself
               call ask_chat on another ConversationSquad. Use this to direct or review another ConversationSquad's work.
+              The reply ends with one line, [ended: answered; model calls: N; tool calls: M], saying how
+              that conversation's turn ended: "answered", or "step-limit" when it ran out of steps
+              (then the reply is only a notice, not an answer).
             """);
         m.put("set_workflow", """
             - set_workflow(chatId, yaml): replace another ConversationSquad's agent-loop workflow
@@ -271,6 +292,30 @@ public class ChatSession extends Interpreter {
               <parameter> tags: "chatId", "role", "collaboratorChatId". A workflow installed via
               set_workflow can then resolve that role instead of a hardcoded chat id, and you can
               reassign it again later by calling this a second time.
+            """);
+        m.put("get_chat_status", """
+            - get_chat_status(chatId): report which model, provider and tool set another conversation
+              is on, and whether it is busy right now. Requires a "chatId" <parameter> tag (e.g.
+              "02", or "project2/02" for another project). It does not wait for the conversation's
+              turn, so it answers even while that conversation is running.
+            """);
+        m.put("list_chat_models", """
+            - list_chat_models(chatId): list the models another conversation's provider offers, one
+              per line as name (type, server). Use it to find the exact name to give set_chat_model.
+              Requires a "chatId" <parameter> tag.
+            """);
+        m.put("set_chat_model", """
+            - set_chat_model(chatId, model): put another conversation of this project on a different
+              model, for the jobs you hand it with ask_chat. Requires TWO <parameter> tags: "chatId"
+              and "model". The name must be one list_chat_models printed; any other is refused with the
+              list. The change takes effect after that conversation's current turn. A conversation of
+              another project is refused.
+            """);
+        m.put("get_chat_log", """
+            - get_chat_log(chatId, count): read the newest entries of another conversation's log
+              without sending it anything — to see what it is doing while an ask_chat to it waits, or
+              why a call to it failed. Requires a "chatId" <parameter> tag; "count" is optional
+              (default 20, at most 200).
             """);
         return Collections.unmodifiableMap(m);
     }
@@ -741,6 +786,11 @@ public class ChatSession extends Interpreter {
     /** @param watchdogRef the shared {@link CallWatchdog}, for the {@code ask_chat} tool */
     public void setWatchdogRef(ActorRef<CallWatchdog> watchdogRef) { this.watchdogRef = watchdogRef; }
 
+    /** @param conversationControls the settings and log window the conversation tools use */
+    public void setConversationControls(ConversationControls conversationControls) {
+        this.conversationControls = conversationControls;
+    }
+
     /** @param collaborationGraphRef the shared {@link CollaborationGraph} */
     public void setCollaborationGraphRef(ActorRef<CollaborationGraph> collaborationGraphRef) {
         this.collaborationGraphRef = collaborationGraphRef;
@@ -1161,6 +1211,8 @@ public class ChatSession extends Interpreter {
         this.finalAnswer = null;
         this.turnError = null;
         this.stepCount = 0;
+        this.turnToolCalls = 0;
+        this.stepLimitHit = false;
         this.cancelled = false;
         this.constructedPrompts.clear();
         this.lastWorkerReply = null;
@@ -1621,6 +1673,7 @@ public class ChatSession extends Interpreter {
     public ActionResult stepLimitReached(String limit) {
         int max = parsePositiveOr(limit, DEFAULT_STEP_LIMIT);
         boolean reached = stepCount >= max;
+        if (reached) stepLimitHit = true;
         if (reached && finalAnswer == null) {
             finalAnswer = "(step limit of " + max + " reached)";
         }
@@ -1810,6 +1863,9 @@ public class ChatSession extends Interpreter {
             recordConversationIo(question, answer, provider.getCurrentModel(), answeredIn);
             if (activeResultKey != null) {
                 storeCompletedResult(activeResultKey, answer);
+                completedEndings.put(activeResultKey, ChatInspection.endingLine(
+                        stepLimitHit ? ChatInspection.ENDED_STEP_LIMIT : ChatInspection.ENDED_ANSWERED,
+                        stepCount, turnToolCalls));
             }
             turnEmitter.accept(ChatEvent.delta(answer));
             // The browser puts what this event carries under the answer, as quarkus-chat-ui does.
@@ -2044,6 +2100,7 @@ public class ChatSession extends Interpreter {
         if (!toolSet.contains(tc.name())) {
             return "error: tool '" + tc.name() + "' is not available in this conversation";
         }
+        turnToolCalls++;
         return switch (tc.name()) {
             case "read" -> FileReadTool.read(fileScope, extractInput(args, "path"));
             case "write" -> FileWriteTool.write(fileScope,
@@ -2068,6 +2125,12 @@ public class ChatSession extends Interpreter {
             case "set_collaborator" -> SetCollaboratorTool.setCollaborator(collaborationGraphRef,
                     myChatName(), extractInput(args, "chatId"), extractInput(args, "role"),
                     extractInput(args, "collaboratorChatId"));
+            case "get_chat_status" -> GetChatStatusTool.get(system, projectId, extractInput(args, "chatId"));
+            case "list_chat_models" -> ListChatModelsTool.list(system, projectId, extractInput(args, "chatId"));
+            case "set_chat_model" -> SetChatModelTool.set(system, conversationControls, projectId,
+                    extractInput(args, "chatId"), extractInput(args, "model"));
+            case "get_chat_log" -> GetChatLogTool.get(conversationControls, projectId,
+                    extractInput(args, "chatId"), parseIntOrNull(extractInput(args, "count")));
             default -> {
                 // A plugin tool (ProviderAndToolPlugins_260912_oo01). With whole pages when the
                 // page-summarising transition asked for them: what reaches the model is decided
@@ -2474,6 +2537,16 @@ public class ChatSession extends Interpreter {
      */
     public String getCompletedResult(String key) {
         return completedResults.get(key);
+    }
+
+    /**
+     * Returns how the turn behind a stored result ended, as the one line {@code ask_chat} appends.
+     *
+     * @param key the result UUID
+     * @return the line, or {@code null} when the turn left none
+     */
+    public String getCompletedEnding(String key) {
+        return completedEndings.get(key);
     }
 
     /**

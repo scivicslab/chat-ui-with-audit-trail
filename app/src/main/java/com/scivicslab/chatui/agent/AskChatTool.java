@@ -68,7 +68,10 @@ public final class AskChatTool {
             // needs no gateway — crossing is still worth noting (ProjectNamespacePrefix_260829_oo01).
             LOG.info("ask_chat crosses projects: " + myName + " -> " + targetName);
         }
-        return askQualified(system, watchdog, myName, targetName, prompt, timeoutSeconds);
+        Outcome outcome = askWithEnding(system, watchdog, myName, targetName, prompt, timeoutSeconds);
+        // The tool tells its caller how the turn ended; the callers that hand the reply on to a
+        // model or a judge (askQualified) get the reply alone.
+        return outcome.ending() == null ? outcome.reply() : outcome.reply() + "\n\n" + outcome.ending();
     }
 
     /**
@@ -88,18 +91,36 @@ public final class AskChatTool {
     public static String askQualified(IIActorSystem system, ActorRef<CallWatchdog> watchdog,
                                        String myName, String targetName, String prompt,
                                        Integer timeoutSeconds) {
+        return askWithEnding(system, watchdog, myName, targetName, prompt, timeoutSeconds).reply();
+    }
+
+    /**
+     * A reply, and the line saying how its turn ended ({@link ChatInspection#endingLine}).
+     *
+     * @param reply  the target's reply text, or an {@code error: ...} string
+     * @param ending the ending line, or {@code null} when there was no turn to describe (an error,
+     *               or a turn that left none)
+     */
+    record Outcome(String reply, String ending) {
+        static Outcome of(String reply) { return new Outcome(reply, null); }
+    }
+
+    /** {@link #askQualified}, with the target turn's ending line alongside the reply. */
+    static Outcome askWithEnding(IIActorSystem system, ActorRef<CallWatchdog> watchdog,
+                                  String myName, String targetName, String prompt,
+                                  Integer timeoutSeconds) {
         int waitTimeoutSeconds = (timeoutSeconds != null && timeoutSeconds > 0)
                 ? timeoutSeconds : DEFAULT_WAIT_TIMEOUT_SECONDS;
         String target = targetName;
-        if (targetName.equals(myName)) return "error: cannot ask_chat yourself";
+        if (targetName.equals(myName)) return Outcome.of("error: cannot ask_chat yourself");
 
         IIActorRef<?> targetIIActor = system.getIIActor(targetName + ".chat");
         if (!(targetIIActor instanceof ChatSessionIIAR targetChatSessionIIAR)) {
-            return "error: chat not found: " + target;
+            return Outcome.of("error: chat not found: " + target);
         }
         ActorRef<PromptQueue> targetQueueRef = system.getActor(targetName + ".queue");
         if (targetQueueRef == null) {
-            return "error: chat not found: " + target;
+            return Outcome.of("error: chat not found: " + target);
         }
         // What the asked conversation says goes to whoever is watching that conversation, exactly
         // as it would if a person had typed the prompt. Nothing was passed here before, so a turn
@@ -116,10 +137,10 @@ public final class AskChatTool {
             allowed = watchdog.ask(w -> w.beginWait(myName, targetName)).get(5, TimeUnit.SECONDS);
         } catch (Exception e) {
             LOG.log(Level.WARNING, "ask_chat: watchdog check failed", e);
-            return "error: watchdog check failed: " + e.getMessage();
+            return Outcome.of("error: watchdog check failed: " + e.getMessage());
         }
         if (!allowed) {
-            return "error: refused — asking " + target + " would create a circular wait";
+            return Outcome.of("error: refused — asking " + target + " would create a circular wait");
         }
 
         try {
@@ -132,15 +153,19 @@ public final class AskChatTool {
             try {
                 done.get(waitTimeoutSeconds, TimeUnit.SECONDS);
             } catch (TimeoutException e) {
-                return "error: chat " + target + " did not respond within " + waitTimeoutSeconds + "s";
+                return Outcome.of("error: chat " + target + " did not respond within " + waitTimeoutSeconds + "s");
             }
             String reply = targetChatSessionIIAR
                     .ask(interp -> ((ChatSession) interp).getCompletedResult(resultKey))
                     .get(5, TimeUnit.SECONDS);
-            return reply != null ? reply : "error: no result from chat " + target;
+            if (reply == null) return Outcome.of("error: no result from chat " + target);
+            String ending = targetChatSessionIIAR
+                    .<String>ask(interp -> ((ChatSession) interp).getCompletedEnding(resultKey))
+                    .get(5, TimeUnit.SECONDS);
+            return new Outcome(reply, ending);
         } catch (Exception e) {
             LOG.log(Level.WARNING, "ask_chat: call to " + target + " failed", e);
-            return "error: ask_chat failed: " + e.getMessage();
+            return Outcome.of("error: ask_chat failed: " + e.getMessage());
         } finally {
             watchdog.tell(w -> w.endWait(myName));
         }

@@ -80,3 +80,29 @@ quarkus-chat-ui では workflow の実行器（harness）が会話の provider �
   `list`/`describe` は `origin` も受ける（名前が重複する quarkus-chat-ui と同じ形にするため）。
 - 使い捨てポート 28042 でヘッドレス確認: 19 行、`project1/chat-01` を選ぶと 46 action、`sendPrompt` を開くと
   step が出て戻れる、絞り込み・Clear・ドラッグが効く、ブラウザのエラー無し。
+
+---
+
+# 相手の会話を見る・モデルを替える道具と、ask_chat の終わり方の 1 行
+
+背景: project1/05（Gemma 4）に章の開始位置を訊いたとき、返ってきたのは道具呼び出しの文面だった。
+モデルを替えて試す手段も、相手の状態を読む手段も、エージェントの道具として無かった。
+
+- [x] `TextToolCallParser` が `<tool_call><function=…>` の形式を読む（テスト 6 件）
+- [x] `ConversationControls`（モデル切替・ログ取得の狭い窓口）を作り、`ChatUiActorSystem` が実装して `ChatSession` に渡す
+- [x] 道具 `get_chat_status` `list_chat_models` `set_chat_model` `get_chat_log` を作る
+  - 読む 3 つは別プロジェクトの会話も可。`set_chat_model` は `set_workflow` と同じく別プロジェクトを拒否
+  - `set_chat_model` は相手が選べるモデルの一覧に無い名前を拒否する（broker のモデル名が変わっていて 404 になった事故への手当て）
+- [x] `ChatSession` の道具説明と `executeTool` に 4 つを登録する
+- [x] `ask_chat` の結果の末尾に終わり方の 1 行を付ける（道具としての `ask_chat` だけ。`PlanRunner` などが使う `askQualified` の戻りは変えない）
+- [x] 単体テスト（`mvn test`、`-DskipTests` は使わない）
+- [ ] 稼働中の audit-trail への反映（ビルド・再起動）は別途確認
+
+## Review（相手の会話を見る・モデルを替える道具）
+
+- `app` モジュール全体 356 件が通る（新規 `TextToolCallParserTest` 6、`ChatInspectionTest` 11、`ConversationToolsTest` 9）
+- 道具の実行は、実際の会話 2 つ（chat-01 が呼び、chat-02 を見る）を 1 つのアクターシステムに置いて通した
+- `set_chat_model` は、相手が選べるモデルの一覧に無い名前を拒否し、一覧を答えに載せる
+- `ask_chat` の末尾の 1 行は、道具としての `ask_chat` だけ。`askQualified`（`PlanRunner` など）の戻りは変えていない
+- 稼働中の audit-trail（28014 など）には反映していない。ビルドして再起動するまで、この機能は使えない
+- 未コミット。別の作業の変更が同じ作業ツリーにある（`ArtexProxyResource.java`、`app.js`、`application.properties`、`KeybindResource*`）

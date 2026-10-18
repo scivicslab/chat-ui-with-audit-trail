@@ -1,0 +1,189 @@
+package com.scivicslab.chatui.core.actor;
+
+import com.scivicslab.chatui.agent.AskChatTool;
+import com.scivicslab.chatui.core.provider.LlmProvider;
+import com.scivicslab.chatui.core.provider.ProviderContext;
+import com.scivicslab.chatui.core.rest.ChatEvent;
+import com.scivicslab.chatui.logging.RecentEntriesAccumulator;
+import com.scivicslab.pojoactor.core.ActorRef;
+import com.scivicslab.turingworkflow.workflow.IIActorSystem;
+
+import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Consumer;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * The conversation tools ({@code get_chat_status}, {@code list_chat_models}, {@code set_chat_model},
+ * {@code get_chat_log}) and the ending line {@code ask_chat} adds, run through two real
+ * conversations in one actor system: {@code project1/chat-01} calls, {@code project1/chat-02} is
+ * looked at.
+ */
+class ConversationToolsTest {
+
+    /** Says one scripted thing per prompt; the first reply is the tool call under test. */
+    private static final class Scripted implements LlmProvider {
+        final List<String> prompts = new ArrayList<>();
+        final List<String> replies;
+        final List<ModelEntry> models;
+        String model = "gemma";
+        Scripted(List<String> replies, List<ModelEntry> models) { this.replies = replies; this.models = models; }
+        @Override public String id() { return "fake"; }
+        @Override public String displayName() { return "Fake"; }
+        @Override public List<ModelEntry> getAvailableModels() { return models; }
+        @Override public String getCurrentModel() { return model; }
+        @Override public void setModel(String m) { this.model = m; }
+        @Override public void cancel() {}
+        @Override
+        public void sendPrompt(String prompt, String m, Consumer<ChatEvent> emitter, ProviderContext ctx) {
+            prompts.add(prompt);
+            emitter.accept(ChatEvent.delta(replies.get(Math.min(prompts.size() - 1, replies.size() - 1))));
+            emitter.accept(ChatEvent.result(null, 0, 0));
+        }
+    }
+
+    /** Records what the tools asked of the actor system. */
+    private static final class FakeControls implements ConversationControls {
+        final List<String> setCalls = new ArrayList<>();
+        @Override public boolean setModel(String projectId, String chatId, String model) {
+            setCalls.add(projectId + "/" + chatId + "=" + model);
+            return true;
+        }
+        @Override public List<RecentEntriesAccumulator.Entry> getChatLogEntries(String projectId, String chatId) {
+            return chatId.equals("02")
+                    ? List.of(new RecentEntriesAccumulator.Entry(1_700_000_000_000L, "agent", "step", "hello from 02"))
+                    : null;
+        }
+    }
+
+    private static ChatSessionIIAR chat(IIActorSystem system, String chatId, Scripted provider, FakeControls controls) {
+        ChatSessionIIAR iiar = new ChatSessionIIAR("project1/chat-" + chatId + ".chat", provider,
+                Optional.empty(), null, system);
+        system.addIIActor(iiar);
+        ActorRef<LlmProvider> providerRef = iiar.<LlmProvider>createChild(iiar.getName() + ".provider", provider);
+        iiar.tellNow(a -> {
+            ChatSession c = (ChatSession) a;
+            c.setProviderName(providerRef.getName());
+            c.setChatIdentity("project1", chatId);
+            c.setConversationControls(controls);
+        }).join();
+        return iiar;
+    }
+
+    /** chat-01 makes {@code toolCall}; returns the prompt chat-01's model saw next (the tool result). */
+    private static String callFromChat01(String toolCall, List<LlmProvider.ModelEntry> modelsOf02, FakeControls controls) {
+        IIActorSystem system = new IIActorSystem("conversation-tools-" + Math.abs(toolCall.hashCode()));
+        Scripted caller = new Scripted(List.of(toolCall, "done"), List.of());
+        Scripted callee = new Scripted(List.of("unused"), modelsOf02);
+        ChatSessionIIAR one = chat(system, "01", caller, controls);
+        chat(system, "02", callee, controls);
+        ActorRef<ChatSession> ref = one.asChatSessionRef();
+        ref.tellNow(c -> {
+            c.start("go", null, e -> {}, ref, new CompletableFuture<>(), null, false);
+            c.runUntilEnd();
+        }).join();
+        assertEquals(2, caller.prompts.size(), "the tool ran and its result went back to the model");
+        return caller.prompts.get(1);
+    }
+
+    private static String invoke(String name, String... kv) {
+        StringBuilder sb = new StringBuilder("<invoke name=\"" + name + "\">\n");
+        for (int i = 0; i < kv.length; i += 2) {
+            sb.append("<parameter name=\"").append(kv[i]).append("\">").append(kv[i + 1]).append("</parameter>\n");
+        }
+        return sb.append("</invoke>").toString();
+    }
+
+    private static final List<LlmProvider.ModelEntry> MODELS = List.of(
+            new LlmProvider.ModelEntry("gemma", "chat", "broker"),
+            new LlmProvider.ModelEntry("qwen-tensorfold", "chat", "broker"));
+
+    @Test
+    void getChatStatusReportsTheOtherConversation() {
+        String result = callFromChat01(invoke("get_chat_status", "chatId", "02"), MODELS, new FakeControls());
+        assertTrue(result.startsWith("Tool result (get_chat_status):"), result);
+        assertTrue(result.contains("chat: project1/chat-02"), result);
+        assertTrue(result.contains("model: gemma"), result);
+        assertTrue(result.contains("busy: false"), result);
+    }
+
+    @Test
+    void listChatModelsListsTheOtherConversationsModels() {
+        String result = callFromChat01(invoke("list_chat_models", "chatId", "02"), MODELS, new FakeControls());
+        assertTrue(result.contains("gemma (chat, broker)"), result);
+        assertTrue(result.contains("qwen-tensorfold (chat, broker)"), result);
+    }
+
+    @Test
+    void setChatModelSetsAListedNameThroughTheControls() {
+        FakeControls controls = new FakeControls();
+        String result = callFromChat01(invoke("set_chat_model", "chatId", "02", "model", "qwen-tensorfold"),
+                MODELS, controls);
+        assertTrue(result.contains("ok: project1/chat-02 is set to qwen-tensorfold"), result);
+        assertEquals(List.of("project1/02=qwen-tensorfold"), controls.setCalls);
+    }
+
+    @Test
+    void setChatModelRefusesAnUnlistedNameAndChangesNothing() {
+        FakeControls controls = new FakeControls();
+        String result = callFromChat01(invoke("set_chat_model", "chatId", "02", "model", "qwen-old-name"),
+                MODELS, controls);
+        assertTrue(result.contains("error: 'qwen-old-name' is not one of this conversation's models"), result);
+        assertTrue(controls.setCalls.isEmpty(), "nothing was set");
+    }
+
+    @Test
+    void setChatModelRefusesAnotherProject() {
+        FakeControls controls = new FakeControls();
+        String result = callFromChat01(invoke("set_chat_model", "chatId", "project2/02", "model", "gemma"),
+                MODELS, controls);
+        assertTrue(result.contains("error: refused — project2/02 belongs to another project"), result);
+        assertTrue(controls.setCalls.isEmpty());
+    }
+
+    @Test
+    void getChatLogReadsTheOtherConversationsLog() {
+        String result = callFromChat01(invoke("get_chat_log", "chatId", "02"), MODELS, new FakeControls());
+        assertTrue(result.contains("agent step hello from 02"), result);
+    }
+
+    @Test
+    void getChatLogOfAConversationThatDoesNotExistSaysSo() {
+        String result = callFromChat01(invoke("get_chat_log", "chatId", "09"), MODELS, new FakeControls());
+        assertTrue(result.contains("error: chat not found: 09"), result);
+    }
+
+    @Test
+    void getChatStatusOfAConversationThatDoesNotExistSaysSo() {
+        String result = callFromChat01(invoke("get_chat_status", "chatId", "09"), MODELS, new FakeControls());
+        assertTrue(result.contains("error: chat not found: 09"), result);
+    }
+
+    /** {@code ask_chat} as a tool ends its reply with how the asked turn ended; the plan runners' call does not. */
+    @Test
+    void askChatAppendsTheEndingLineButAskQualifiedDoesNot() throws Exception {
+        IIActorSystem system = new IIActorSystem("conversation-tools-ask");
+        FakeControls controls = new FakeControls();
+        Scripted caller = new Scripted(List.of("unused"), List.of());
+        Scripted callee = new Scripted(List.of("the answer"), List.of());
+        chat(system, "01", caller, controls);
+        ChatSessionIIAR two = chat(system, "02", callee, controls);
+        ActorRef<PromptQueue> queue = two.createChild("project1/chat-02.queue", new PromptQueue());
+        queue.tellNow(q -> q.setSelf(queue)).join();
+        ActorRef<CallWatchdog> watchdog = two.createChild("watchdog-for-test", new CallWatchdog());
+
+        String viaTool = AskChatTool.ask(system, watchdog, "project1", "01", "02", "question", 30);
+        assertTrue(viaTool.startsWith("the answer"), viaTool);
+        assertTrue(viaTool.endsWith("[ended: answered; model calls: 1; tool calls: 0]"), viaTool);
+
+        String viaPlan = AskChatTool.askQualified(system, watchdog, "project1/chat-01", "project1/chat-02",
+                "question", 30);
+        assertEquals("the answer", viaPlan);
+    }
+}

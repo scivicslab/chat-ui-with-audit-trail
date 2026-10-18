@@ -62,7 +62,7 @@ import java.util.logging.Logger;
  */
 @Startup
 @ApplicationScoped
-public class ChatUiActorSystem {
+public class ChatUiActorSystem implements ConversationControls {
 
     private static final Logger LOG = Logger.getLogger(ChatUiActorSystem.class.getName());
 
@@ -832,6 +832,7 @@ public class ChatUiActorSystem {
      * @param chatId    conversation id within that project
      * @return that conversation's recent log entries (oldest first), or {@code null} if it does not exist
      */
+    @Override
     public List<RecentEntriesAccumulator.Entry> getChatLogEntries(String projectId, String chatId) {
         RecentEntriesAccumulator buf = chatLogBuffers.get(chatActorName(projectId, chatId));
         return buf == null ? null : buf.recent();
@@ -1011,6 +1012,7 @@ public class ChatUiActorSystem {
         chatSessionIIAR.tell(a -> ((ChatSession) a).setChatIdentity(projectId, chatId));
         chatSessionIIAR.tell(a -> ((ChatSession) a).setWatchdogRef(callWatchdogRef));
         chatSessionIIAR.tell(a -> ((ChatSession) a).setCollaborationGraphRef(collaborationGraphRef));
+        chatSessionIIAR.tell(a -> ((ChatSession) a).setConversationControls(this));
         chatSessionIIAR.tell(a -> ((ChatSession) a).setSkillRegistryRef(skillRegistryRef));
         chatSessionIIAR.tell(a -> ((ChatSession) a).setFileScope(fileScope));
         chatSessionIIAR.tell(a -> ((ChatSession) a).setMaxObservationChars(maxObservationChars));
@@ -1479,6 +1481,7 @@ public class ChatUiActorSystem {
      * @param model     the model name
      * @return {@code false} when the conversation has no provider
      */
+    @Override
     public boolean setModel(String projectId, String chatId, String model) {
         createChat(projectId, chatId);
         ActorRef<LlmProvider> providerRef = getProviderRef(projectId, chatId);
