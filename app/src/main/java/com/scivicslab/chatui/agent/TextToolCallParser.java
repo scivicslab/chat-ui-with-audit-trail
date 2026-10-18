@@ -20,7 +20,23 @@ import java.util.regex.Pattern;
  * </function_calls>
  * }</pre>
  *
- * <p>Ported verbatim (parsing logic unchanged) from {@code quarkus-chat-ui3}'s
+ * <p>A second spelling is accepted too, because some models write it whatever they are told
+ * (measured: Gemma 4 behind the GPU broker):</p>
+ *
+ * <pre>{@code
+ * <tool_call>
+ * <function=web_search>
+ * <parameter=query>
+ * tokyo weather
+ * </parameter>
+ * </function>
+ * </tool_call>
+ * }</pre>
+ *
+ * <p>Both spellings produce the same {@link ToolCall}. Without the second, that text matched no tool
+ * call, so the agent loop took it for the final answer and returned it, unexecuted, to the caller.</p>
+ *
+ * <p>The first spelling was ported verbatim (parsing logic unchanged) from {@code quarkus-chat-ui3}'s
  * {@code TextToolCallParser}, where this was a fallback for a model that fell out of the native
  * {@code tool_calls} channel. {@code chat-ui-with-audit-trail} does not use native {@code tool_calls}
  * at all, so this is the only path — see {@code ChatSessionAgentLoop_260823_oo01} "ツール呼び出し要求の
@@ -43,12 +59,23 @@ public final class TextToolCallParser {
     // A bare <reason>VALUE (with or without a closing tag) some outputs use instead of a parameter.
     private static final Pattern REASON = Pattern.compile(
             "<reason\\s*>(.*?)(?:</reason>|(?=</invoke>)|(?=<parameter)|$)", Pattern.DOTALL);
+    // The <function=TOOL> ... </function> spelling. The body ends at </function>, at the next
+    // <function=, or at the end of the text, so a missing close tag still yields the call.
+    private static final Pattern FUNCTION =
+            Pattern.compile("<function=([^>\\s]+)\\s*>(.*?)(?:</function>|(?=<function=)|$)", Pattern.DOTALL);
+    // A <parameter=KEY>VALUE</parameter> pair of that spelling; VALUE ends at </parameter>, the next
+    // <parameter=, </function> or </tool_call>, or the end of the text.
+    private static final Pattern FUNCTION_PARAM = Pattern.compile(
+            "<parameter=([^>\\s]+)\\s*>(.*?)(?:</parameter>|(?=<parameter=)|(?=</function>)|(?=</tool_call>)|$)",
+            Pattern.DOTALL);
     // Stray special tokens the model leaks into values, e.g. <|"|>.
     private static final Pattern JUNK_TOKEN = Pattern.compile("<\\|[^>]*\\|>");
 
-    /** True when {@code content} contains at least one textual {@code <invoke ...>} tool-call block. */
+    /** True when {@code content} contains at least one textual tool-call block, in either spelling. */
     public static boolean looksLikeTextToolCall(String content) {
-        return content != null && content.contains("<invoke ") && content.contains("name=");
+        if (content == null) return false;
+        return (content.contains("<invoke ") && content.contains("name="))
+                || FUNCTION.matcher(content).find();
     }
 
     /**
@@ -76,6 +103,17 @@ public final class TextToolCallParser {
             Matcher rm = REASON.matcher(body);
             if (rm.find() && !args.containsKey("reason")) {
                 args.put("reason", clean(rm.group(1)));
+            }
+            calls.add(new ToolCall("text-call-" + idx++, name, toJson(args)));
+        }
+
+        Matcher fn = FUNCTION.matcher(content);
+        while (fn.find()) {
+            String name = fn.group(1).trim();
+            Map<String, String> args = new LinkedHashMap<>();
+            Matcher pm = FUNCTION_PARAM.matcher(fn.group(2));
+            while (pm.find()) {
+                args.put(pm.group(1).trim(), clean(pm.group(2)));
             }
             calls.add(new ToolCall("text-call-" + idx++, name, toJson(args)));
         }
@@ -122,6 +160,9 @@ public final class TextToolCallParser {
         String out = content.replaceAll("(?s)<function_calls>.*?</function_calls>", "");
         // Some outputs omit the wrapper and emit a bare <invoke>…</invoke>; drop those too.
         out = out.replaceAll("(?s)<invoke\\s+name=\"[^\"]+\"\\s*>.*?</invoke>", "");
+        // The <tool_call><function=…> spelling, with or without the <tool_call> wrapper.
+        out = out.replaceAll("(?s)<tool_call>.*?</tool_call>", "");
+        out = out.replaceAll("(?s)<function=[^>\\s]+\\s*>.*?</function>", "");
         return JUNK_TOKEN.matcher(out).replaceAll("").trim();
     }
 }
