@@ -64,6 +64,42 @@ class TextToolCallParserTest {
         assertTrue(TextToolCallParser.parse("The answer is 42.").isEmpty());
     }
 
+    /**
+     * The measured failure: an answer that talked about the spelling was run as a call. A reply that
+     * quoted {@code <tool_call><function=read>} in backticks, and another that put it in a table row,
+     * made the conversation execute {@code read} and {@code web_search} with no arguments.
+     */
+    @Test
+    void proseQuotingTheSpellingIsNotACall() {
+        String inBackticks = "chat-05 returned `<tool_call><function=read>…` as its answer.";
+        String inTableRow = "| 3 | モデルの応答 | `<tool_call><function=web_search>…` の文面 |";
+        for (String prose : List.of(inBackticks, inTableRow, inBackticks + "\n" + inTableRow)) {
+            assertFalse(TextToolCallParser.looksLikeTextToolCall(prose), prose);
+            assertTrue(TextToolCallParser.parse(prose).isEmpty(), prose);
+        }
+    }
+
+    @Test
+    void aCallAfterProseOnItsOwnLineIsStillParsed() {
+        String text = "I will look it up.\n\n<tool_call>\n<function=web_search>\n<parameter=query>\nx\n</parameter>\n</function>\n</tool_call>";
+        assertEquals(1, TextToolCallParser.parse(text).size());
+        String indented = "  <function=read>\n  <parameter=path>\na\n</parameter>\n</function>";
+        assertEquals(1, TextToolCallParser.parse(indented).size());
+    }
+
+    @Test
+    void aCallInsideAFencedCodeBlockIsAnExampleNotACall() {
+        String text = "The format is:\n```\n<tool_call>\n<function=read>\n<parameter=path>\na\n</parameter>\n</function>\n</tool_call>\n```";
+        assertFalse(TextToolCallParser.looksLikeTextToolCall(text));
+        assertTrue(TextToolCallParser.parse(text).isEmpty());
+    }
+
+    @Test
+    void stripLeavesQuotedSpellingAlone() {
+        String prose = "It wrote `<tool_call><function=read>…</function></tool_call>` in the middle of a line.";
+        assertEquals(prose, TextToolCallParser.stripToolCallBlocks(prose));
+    }
+
     @Test
     void stripRemovesFunctionSpellingBlocksAndKeepsProse() {
         String text = "Let me check.\n<tool_call>\n<function=read>\n<parameter=path>\na\n</parameter>\n</function>\n</tool_call>";
