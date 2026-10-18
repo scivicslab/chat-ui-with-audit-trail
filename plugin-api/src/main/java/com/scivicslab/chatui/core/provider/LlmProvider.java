@@ -109,6 +109,24 @@ public interface LlmProvider {
     default void clearHistory() { }
 
     /**
+     * The {@code messages} array the next request is built from, as a JSON array text
+     * ({@code RequestMessagesControl_261018_oo01}).
+     *
+     * @return the array, or {@code null} for a provider that keeps no such history
+     */
+    default String requestMessagesJson() { return null; }
+
+    /**
+     * Replaces the whole array the next request is built from.
+     *
+     * @param json a JSON array of {@code {"role","content"}} messages
+     * @return {@code null} when replaced, otherwise why it was refused (nothing is changed then)
+     */
+    default String replaceRequestMessages(String json) {
+        return "this provider keeps no request history";
+    }
+
+    /**
      * Replaces the messages a just-finished turn added to this provider's conversation history
      * with the two that a later turn can still use: what was asked, and what was answered
      * ({@code TurnResourceLimits_260830_oo01}).

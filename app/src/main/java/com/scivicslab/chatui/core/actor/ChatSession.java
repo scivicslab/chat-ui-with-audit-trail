@@ -2431,6 +2431,27 @@ public class ChatSession extends Interpreter {
         ioTurn = 0;
     }
 
+    /** @return the array the next request is built from, as JSON, or {@code null} if the provider keeps none */
+    public String requestMessagesJson() {
+        return provider.requestMessagesJson();
+    }
+
+    /**
+     * Replaces the array the next request is built from; the screen's record and the settings are
+     * not touched, and one line on the screen says it happened
+     * ({@code RequestMessagesControl_261018_oo01}).
+     *
+     * @return {@code null} when replaced, otherwise why it was refused
+     */
+    public String replaceRequestMessages(String json) {
+        if (busy) return "busy: the conversation is answering; try again when it has finished";
+        String refused = provider.replaceRequestMessages(json);
+        if (refused == null) {
+            recordHistory("system", "The request history was replaced from outside.");
+        }
+        return refused;
+    }
+
     // ---- Log ring buffer ----
 
     /**

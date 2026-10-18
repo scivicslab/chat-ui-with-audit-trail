@@ -279,6 +279,37 @@ public class OpenAiCompatProvider implements LlmProvider {
         collapsedCount = 0;
     }
 
+    @Override
+    public String requestMessagesJson() {
+        return RequestMessagesJson.toJson(List.copyOf(history));
+    }
+
+    /**
+     * Replaces the history with the given array whole. A history over the budget is refused, not
+     * trimmed: trimming would make the array that is sent differ from the one that was given.
+     * The replaced array is treated as already collapsed, so a later {@link #collapseTurn} only
+     * replaces what the next turn adds.
+     */
+    @Override
+    public String replaceRequestMessages(String json) {
+        List<ChatMessage> messages;
+        try {
+            messages = RequestMessagesJson.parse(json);
+        } catch (IllegalArgumentException e) {
+            return e.getMessage();
+        }
+        int used = 0;
+        for (ChatMessage m : messages) used += ContextBudget.estimateMessageTokens(contentOf(m));
+        int budget = historyBudgetTokens();
+        if (used > budget) {
+            return "too long: about " + used + " tokens, the budget for this model is " + budget;
+        }
+        history.clear();
+        history.addAll(messages);
+        collapsedCount = history.size();
+        return null;
+    }
+
     /**
      * Signals that the current streaming request should be cancelled.
      */

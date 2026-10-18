@@ -16,6 +16,7 @@ import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
@@ -522,6 +523,65 @@ public class ChatResource {
             return Response.status(500).entity(Map.of("type", "error", "message", e.getMessage())).build();
         }
         return Response.ok(Map.of("type", "cleared")).build();
+    }
+
+    /**
+     * The {@code messages} array this conversation's next request is built from, as a JSON array
+     * ({@code RequestMessagesControl_261018_oo01}). Not the screen's record: that is
+     * {@code /conversation}.
+     */
+    @GET
+    @Path("/{projectId}/chats/{chatId}/request-messages")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response requestMessages(@PathParam("projectId") String projectId,
+                                    @PathParam("chatId") String chatId) {
+        actorSystem.createChat(projectId, chatId);
+        ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
+        if (chatSessionIIAR.isBusyDirect()) {
+            return Response.status(409).entity(Map.of("type", "error",
+                    "message", "busy: the conversation is answering; try again when it has finished")).build();
+        }
+        try {
+            String json = chatSessionIIAR.ask(a -> ((ChatSession) a).requestMessagesJson())
+                    .get(10, TimeUnit.SECONDS);
+            if (json == null) {
+                return Response.status(409).entity(Map.of("type", "error",
+                        "message", "this conversation's provider keeps no request history")).build();
+            }
+            return Response.ok(json).build();
+        } catch (Exception e) {
+            LOG.log(java.util.logging.Level.WARNING, "Could not read request messages of " + projectId + "/" + chatId, e);
+            return Response.status(500).entity(Map.of("type", "error", "message", String.valueOf(e.getMessage()))).build();
+        }
+    }
+
+    /**
+     * Replaces the whole array this conversation's next request is built from. The body is a JSON
+     * array of {@code {"role","content"}}. Refused with 409 while the conversation is answering,
+     * and with 400 when the array is malformed or over the history budget.
+     */
+    @PUT
+    @Path("/{projectId}/chats/{chatId}/request-messages")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response replaceRequestMessages(@PathParam("projectId") String projectId,
+                                           @PathParam("chatId") String chatId, String body) {
+        actorSystem.createChat(projectId, chatId);
+        ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
+        if (chatSessionIIAR.isBusyDirect()) {
+            return Response.status(409).entity(Map.of("type", "error",
+                    "message", "busy: the conversation is answering; try again when it has finished")).build();
+        }
+        try {
+            String refused = chatSessionIIAR.ask(a -> ((ChatSession) a).replaceRequestMessages(body))
+                    .get(10, TimeUnit.SECONDS);
+            if (refused == null) return Response.ok(Map.of("type", "replaced")).build();
+            int status = refused.startsWith("busy:") ? 409 : 400;
+            return Response.status(status).entity(Map.of("type", "error", "message", refused)).build();
+        } catch (Exception e) {
+            LOG.log(java.util.logging.Level.WARNING, "Could not replace request messages of " + projectId + "/" + chatId, e);
+            return Response.status(500).entity(Map.of("type", "error", "message", String.valueOf(e.getMessage()))).build();
+        }
     }
 
     /**
