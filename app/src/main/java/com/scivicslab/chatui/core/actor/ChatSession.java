@@ -11,6 +11,7 @@ import com.scivicslab.chatui.agent.ReferenceLinkTool;
 import com.scivicslab.chatui.agent.SetCollaboratorTool;
 import com.scivicslab.chatui.agent.ChatInspection;
 import com.scivicslab.chatui.agent.GetChatLogTool;
+import com.scivicslab.chatui.agent.RequestMessagesTools;
 import com.scivicslab.chatui.agent.GetChatStatusTool;
 import com.scivicslab.chatui.agent.ListChatModelsTool;
 import com.scivicslab.chatui.agent.SetChatModelTool;
@@ -316,6 +317,26 @@ public class ChatSession extends Interpreter {
               without sending it anything — to see what it is doing while an ask_chat to it waits, or
               why a call to it failed. Requires a "chatId" <parameter> tag; "count" is optional
               (default 20, at most 200).
+            """);
+        m.put("get_request_messages", """
+            - get_request_messages(chatId): read the messages array another conversation will send to
+              its model next, as a JSON array of {"role","content"}. This is what the model reads,
+              not the screen's record. Refused while that conversation is answering. Requires a
+              "chatId" <parameter> tag.
+            """);
+        m.put("set_request_messages", """
+            - set_request_messages(chatId, messages): replace the whole messages array another
+              conversation of this project will send next. "messages" is a JSON array of
+              {"role","content"} with roles system, user and assistant. An array that is malformed or
+              too long for the model is refused and nothing changes. To drop one message, read the
+              array, remove it, and set the result. Requires TWO <parameter> tags.
+            """);
+        m.put("complete_messages", """
+            - complete_messages(chatId, messages, model, noThink): call the model of another
+              conversation once with exactly the given messages and return its reply. Nothing is
+              added to that conversation's history, and it works while that conversation is
+              answering. "model" and "noThink" are optional <parameter> tags. Requires "chatId" and
+              "messages" <parameter> tags.
             """);
         return Collections.unmodifiableMap(m);
     }
@@ -2146,6 +2167,12 @@ public class ChatSession extends Interpreter {
                     extractInput(args, "chatId"), extractInput(args, "model"));
             case "get_chat_log" -> GetChatLogTool.get(conversationControls, projectId,
                     extractInput(args, "chatId"), parseIntOrNull(extractInput(args, "count")));
+            case "get_request_messages" -> RequestMessagesTools.get(system, projectId, extractInput(args, "chatId"));
+            case "set_request_messages" -> RequestMessagesTools.set(system, projectId,
+                    extractInput(args, "chatId"), extractInput(args, "messages"));
+            case "complete_messages" -> RequestMessagesTools.complete(system, projectId,
+                    extractInput(args, "chatId"), extractInput(args, "messages"),
+                    extractInput(args, "model"), extractInput(args, "noThink"));
             default -> {
                 // A plugin tool (ProviderAndToolPlugins_260912_oo01). With whole pages when the
                 // page-summarising transition asked for them: what reaches the model is decided

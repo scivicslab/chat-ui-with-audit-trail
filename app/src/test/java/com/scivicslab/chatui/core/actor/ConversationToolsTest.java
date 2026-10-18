@@ -2,6 +2,7 @@ package com.scivicslab.chatui.core.actor;
 
 import com.scivicslab.chatui.agent.AskChatTool;
 import com.scivicslab.chatui.core.provider.LlmProvider;
+import com.scivicslab.chatui.core.provider.OneShotReply;
 import com.scivicslab.chatui.core.provider.ProviderContext;
 import com.scivicslab.chatui.core.rest.ChatEvent;
 import com.scivicslab.chatui.logging.RecentEntriesAccumulator;
@@ -40,6 +41,16 @@ class ConversationToolsTest {
         @Override public String getCurrentModel() { return model; }
         @Override public void setModel(String m) { this.model = m; }
         @Override public void cancel() {}
+        String requestMessages = "[{\"role\":\"user\",\"content\":\"earlier\"}]";
+        @Override public String requestMessagesJson() { return requestMessages; }
+        @Override public String replaceRequestMessages(String json) {
+            if (json.contains("\"tool\"")) return "element 0: role must be system, user or assistant";
+            requestMessages = json;
+            return null;
+        }
+        @Override public OneShotReply completeFromMessages(String json, String m, Boolean noThink) {
+            return new OneShotReply("echo:" + json, json, null);
+        }
         @Override
         public void sendPrompt(String prompt, String m, Consumer<ChatEvent> emitter, ProviderContext ctx) {
             prompts.add(prompt);
@@ -162,6 +173,47 @@ class ConversationToolsTest {
     @Test
     void getChatStatusOfAConversationThatDoesNotExistSaysSo() {
         String result = callFromChat01(invoke("get_chat_status", "chatId", "09"), MODELS, new FakeControls());
+        assertTrue(result.contains("error: chat not found: 09"), result);
+    }
+
+
+    @Test
+    void getRequestMessagesReadsTheArrayTheOtherConversationWillSend() {
+        String result = callFromChat01(invoke("get_request_messages", "chatId", "02"), MODELS, new FakeControls());
+        assertTrue(result.contains("\"content\":\"earlier\""), result);
+    }
+
+    @Test
+    void setRequestMessagesReplacesTheArray() {
+        String result = callFromChat01(invoke("set_request_messages", "chatId", "02",
+                "messages", "[{\"role\":\"user\",\"content\":\"new\"}]"), MODELS, new FakeControls());
+        assertTrue(result.contains("ok: the request history of 02 was replaced"), result);
+    }
+
+    @Test
+    void setRequestMessagesRefusesAMalformedArrayAndSaysWhy() {
+        String result = callFromChat01(invoke("set_request_messages", "chatId", "02",
+                "messages", "[{\"role\":\"tool\",\"content\":\"x\"}]"), MODELS, new FakeControls());
+        assertTrue(result.contains("error: element 0"), result);
+    }
+
+    @Test
+    void setRequestMessagesRefusesAnotherProject() {
+        String result = callFromChat01(invoke("set_request_messages", "chatId", "project2/02",
+                "messages", "[]"), MODELS, new FakeControls());
+        assertTrue(result.contains("belongs to another project"), result);
+    }
+
+    @Test
+    void completeMessagesReturnsTheReplyOfTheOneShotCall() {
+        String result = callFromChat01(invoke("complete_messages", "chatId", "02",
+                "messages", "[{\"role\":\"user\",\"content\":\"ping\"}]"), MODELS, new FakeControls());
+        assertTrue(result.contains("echo:[{"), result);
+    }
+
+    @Test
+    void requestMessagesToolsOfAConversationThatDoesNotExistSaySo() {
+        String result = callFromChat01(invoke("get_request_messages", "chatId", "09"), MODELS, new FakeControls());
         assertTrue(result.contains("error: chat not found: 09"), result);
     }
 
