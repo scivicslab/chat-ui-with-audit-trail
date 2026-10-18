@@ -449,6 +449,40 @@ public class OpenAiCompatProvider implements LlmProvider {
     }
 
     /**
+     * One completion from exactly the given messages, outside the conversation. The history, the
+     * agent loop's instruction text and the tool list are not part of the request; only the
+     * messages, the model and the thinking switch are. Safe to call while a turn is running: it
+     * touches neither {@link #history} nor the provider's session.
+     */
+    @Override
+    public com.scivicslab.chatui.core.provider.OneShotReply completeFromMessages(
+            String messagesJson, String model, Boolean noThink) {
+        List<ChatMessage> messages;
+        try {
+            messages = RequestMessagesJson.parse(messagesJson);
+        } catch (IllegalArgumentException e) {
+            return com.scivicslab.chatui.core.provider.OneShotReply.refused(e.getMessage());
+        }
+        if (messages.isEmpty()) {
+            return com.scivicslab.chatui.core.provider.OneShotReply.refused("messages is empty");
+        }
+        boolean named = model != null && !model.isBlank();
+        OpenAiCompatClient client = named ? selectClient(model) : clientForCompletionOutsideConversation();
+        String useModel = named ? model : currentModel;
+        if (client == null || useModel == null || useModel.isBlank()) {
+            return com.scivicslab.chatui.core.provider.OneShotReply.refused("no server available for the model");
+        }
+        java.util.concurrent.atomic.AtomicReference<String> sent = new java.util.concurrent.atomic.AtomicReference<>();
+        OpenAiCompatClient.NonStreamingResponse response = client.sendNonStreaming(
+                useModel, messages, noThink == null || noThink, 0, List.of(), sent::set);
+        String reason = response.finishReason();
+        if (reason != null && reason.startsWith("error")) {
+            return new com.scivicslab.chatui.core.provider.OneShotReply(null, sent.get(), reason);
+        }
+        return new com.scivicslab.chatui.core.provider.OneShotReply(response.content(), sent.get(), null);
+    }
+
+    /**
      * One completion outside the conversation, like {@link #completeOutsideConversation}, with
      * the reply handed over as it is generated. Used where a person waits for the whole text,
      * such as a translation of a long message: the first words appear after a fraction of a

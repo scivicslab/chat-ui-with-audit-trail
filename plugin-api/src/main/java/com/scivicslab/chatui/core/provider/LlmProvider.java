@@ -127,6 +127,19 @@ public interface LlmProvider {
     }
 
     /**
+     * Calls the model once with exactly the given messages, outside the conversation: nothing is
+     * added to the history, no event is emitted, and the conversation's other settings are only
+     * the defaults for {@code model} and {@code noThink}.
+     *
+     * @param messagesJson a JSON array of {@code {"role","content"}} messages
+     * @param model        the model to call, or {@code null} for the conversation's model
+     * @param noThink      whether to disable thinking, or {@code null} for the default
+     */
+    default OneShotReply completeFromMessages(String messagesJson, String model, Boolean noThink) {
+        return OneShotReply.refused("this provider cannot complete from given messages");
+    }
+
+    /**
      * Replaces the messages a just-finished turn added to this provider's conversation history
      * with the two that a later turn can still use: what was asked, and what was answered
      * ({@code TurnResourceLimits_260830_oo01}).

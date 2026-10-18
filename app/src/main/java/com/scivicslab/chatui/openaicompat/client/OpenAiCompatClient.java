@@ -162,9 +162,18 @@ public class OpenAiCompatClient {
     public NonStreamingResponse sendNonStreaming(String model, List<ChatMessage> messages,
                                                  boolean noThink, int maxTokens,
                                                  List<ToolDefinition> tools) {
+        return sendNonStreaming(model, messages, noThink, maxTokens, tools, null);
+    }
+
+    /** As above; {@code requestBodyListener} (may be null) receives the body just before it is sent. */
+    public NonStreamingResponse sendNonStreaming(String model, List<ChatMessage> messages,
+                                                 boolean noThink, int maxTokens,
+                                                 List<ToolDefinition> tools,
+                                                 java.util.function.Consumer<String> requestBodyListener) {
         try {
             String requestBody = buildRequestBody(model, messages, noThink, maxTokens, false, tools,
                     temperature);
+            if (requestBodyListener != null) requestBodyListener.accept(requestBody);
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + "/v1/chat/completions"))
                     .header("Content-Type", "application/json")

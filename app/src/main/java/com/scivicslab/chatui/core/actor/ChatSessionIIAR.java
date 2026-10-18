@@ -95,6 +95,16 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     public boolean isBusyDirect() { return chatSession().isBusy(); }
 
     /**
+     * One completion from exactly the given messages, bypassing the actor's mailbox: it works while
+     * a turn is running, because it uses none of the conversation's state
+     * ({@code RequestMessagesControl_261018_oo01}).
+     */
+    public com.scivicslab.chatui.core.provider.OneShotReply completeOneShotDirect(
+            String messagesJson, String model, Boolean noThink) {
+        return chatSession().completeOneShot(messagesJson, model, noThink);
+    }
+
+    /**
      * Reads this ConversationSquad's conversation-history snapshot directly, bypassing the actor's mailbox — same
      * rationale as {@link #isBusyDirect()}.
      *

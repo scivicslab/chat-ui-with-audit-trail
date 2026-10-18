@@ -585,6 +585,44 @@ public class ChatResource {
     }
 
     /**
+     * Calls the model once with exactly the given messages, outside this conversation
+     * ({@code RequestMessagesControl_261018_oo01}). The body is
+     * {@code {"messages":[{"role","content"}...], "model":"...", "noThink":true}}; {@code model}
+     * and {@code noThink} are optional. The conversation's history, settings and screen are not
+     * touched, and it is accepted while the conversation is answering.
+     *
+     * @return {@code {"reply":"...","model":"..."}}, 400 for a refused array, 502 when the model
+     *         call failed
+     */
+    @POST
+    @Path("/{projectId}/chats/{chatId}/complete-messages")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response completeMessages(@PathParam("projectId") String projectId,
+                                     @PathParam("chatId") String chatId, String body) {
+        actorSystem.createChat(projectId, chatId);
+        ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
+        org.json.JSONObject in;
+        try {
+            in = new org.json.JSONObject(body);
+        } catch (Exception e) {
+            return Response.status(400).entity(Map.of("type", "error", "message", "body is not a JSON object")).build();
+        }
+        if (!(in.opt("messages") instanceof org.json.JSONArray messages)) {
+            return Response.status(400).entity(Map.of("type", "error", "message", "messages must be an array")).build();
+        }
+        String model = in.has("model") && !in.isNull("model") ? in.getString("model") : null;
+        Boolean noThink = in.has("noThink") && !in.isNull("noThink") ? in.getBoolean("noThink") : null;
+        var reply = chatSessionIIAR.completeOneShotDirect(messages.toString(), model, noThink);
+        if (reply.error() == null) {
+            return Response.ok(Map.of("reply", reply.reply() == null ? "" : reply.reply(),
+                    "model", model == null ? String.valueOf(chatSessionIIAR.getModelDirect()) : model)).build();
+        }
+        int status = reply.requestBody() == null ? 400 : 502;
+        return Response.status(status).entity(Map.of("type", "error", "message", reply.error())).build();
+    }
+
+    /**
      * Reports whether one ConversationSquad is currently busy processing a turn — read directly, so it works even
      * while the ConversationSquad is busy ({@code BusyStateReadableSnapshot_260828_oo01}).
      *

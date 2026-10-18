@@ -2452,6 +2452,32 @@ public class ChatSession extends Interpreter {
         return refused;
     }
 
+    /**
+     * Calls the model once with exactly the given messages, outside this conversation, and records
+     * the request body and the reply in the I/O log. Callable from any thread, also while a turn
+     * is running: it reads no conversation state and changes none
+     * ({@code RequestMessagesControl_261018_oo01}).
+     */
+    public com.scivicslab.chatui.core.provider.OneShotReply completeOneShot(
+            String messagesJson, String model, Boolean noThink) {
+        com.scivicslab.chatui.core.provider.OneShotReply reply =
+                provider.completeFromMessages(messagesJson, model, noThink);
+        if (ioLog != null && reply.requestBody() != null) {
+            try {
+                long session = ioLog.ensureSession(myChatName());
+                StringBuilder m = new StringBuilder("REQUEST:\n")
+                        .append(RequestBodyRecord.forLog(reply.requestBody()))
+                        .append("\n\nRESPONSE:\n").append(reply.reply() == null ? "" : reply.reply());
+                if (reply.error() != null) m.append("\n\nERROR:\n").append(reply.error());
+                m.append("\n\nUSAGE: promptTokens=0 completionTokens=0");
+                ioLog.record(session, "agent", "oneshot/" + System.currentTimeMillis(), m.toString());
+            } catch (Exception e) {
+                logger.log(Level.WARNING, "I/O log one-shot record failed", e);
+            }
+        }
+        return reply;
+    }
+
     // ---- Log ring buffer ----
 
     /**
