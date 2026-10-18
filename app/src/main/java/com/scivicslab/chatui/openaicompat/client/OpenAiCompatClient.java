@@ -198,10 +198,22 @@ public class OpenAiCompatClient {
      */
     public String sendPrompt(String model, List<ChatMessage> history, boolean noThink,
                              int maxTokens, StreamCallback callback) {
+        return sendPrompt(model, history, noThink, maxTokens, callback, null);
+    }
+
+    /**
+     * Same as {@link #sendPrompt(String, List, boolean, int, StreamCallback)}, and hands the request
+     * body to {@code requestBodyListener} (may be null) just before it is sent, so the caller can
+     * record the body that was actually sent.
+     */
+    public String sendPrompt(String model, List<ChatMessage> history, boolean noThink,
+                             int maxTokens, StreamCallback callback,
+                             java.util.function.Consumer<String> requestBodyListener) {
         long startTime = System.currentTimeMillis();
         try {
             String requestBody = buildRequestBody(model, history, noThink, maxTokens, true,
                     List.of(), temperature);
+            if (requestBodyListener != null) requestBodyListener.accept(requestBody);
             HttpResponse<Stream<String>> response = sendWithRetry(requestBody);
 
             if (response.statusCode() == 400) {

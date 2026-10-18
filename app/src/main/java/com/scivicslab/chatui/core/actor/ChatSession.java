@@ -1414,7 +1414,10 @@ public class ChatSession extends Interpreter {
      *                    a failed call ends the turn
      */
     private LlmStepOutcome callLlmStep(String promptToSend, List<String> stepImages) throws Exception {
-        ProviderContext ctx = new ProviderContext(apiKey, stepImages, turnNoThink, () -> {});
+        // The body the provider sends is kept so the I/O log can record it as it was sent
+        // (RequestMessagesControl_261018_oo01); a provider with no request body leaves it null.
+        java.util.concurrent.atomic.AtomicReference<String> sentBody = new java.util.concurrent.atomic.AtomicReference<>();
+        ProviderContext ctx = new ProviderContext(apiKey, stepImages, turnNoThink, () -> {}, sentBody::set);
         StringBuilder assistantBuf = new StringBuilder();
         // The reasoning is kept for the record, not for the answer: it goes to the I/O log's
         // REASONING: section and never into assistantBuf, which is what the next step parses for
@@ -1492,7 +1495,7 @@ public class ChatSession extends Interpreter {
 
         String text = assistantBuf.toString();
         List<ToolCall> calls = TextToolCallParser.parse(text);
-        recordStepIo(promptToSend, text, thinkingBuf.toString(), calls);
+        recordStepIo(promptToSend, sentBody.get(), text, thinkingBuf.toString(), calls);
         return new LlmStepOutcome(text, calls);
     }
 
@@ -1629,12 +1632,24 @@ public class ChatSession extends Interpreter {
      */
     private void recordStepIo(String promptSent, String responseText, String thinking,
                               List<ToolCall> calls) {
+        recordStepIo(promptSent, null, responseText, thinking, calls);
+    }
+
+    /**
+     * @param requestBody the body the provider sent, or null for a provider that builds none
+     *                    (a CLI harness), in which case the request is reconstructed from
+     *                    {@code promptSent} as a single user message
+     */
+    private void recordStepIo(String promptSent, String requestBody, String responseText, String thinking,
+                              List<ToolCall> calls) {
         if (ioLog == null || ioSession < 0) return;
         try {
-            String requestJson = new org.json.JSONObject()
-                    .put("messages", new org.json.JSONArray().put(
-                            new org.json.JSONObject().put("role", "user").put("content", promptSent)))
-                    .toString();
+            String requestJson = requestBody != null
+                    ? RequestBodyRecord.forLog(requestBody)
+                    : new org.json.JSONObject()
+                            .put("messages", new org.json.JSONArray().put(
+                                    new org.json.JSONObject().put("role", "user").put("content", promptSent)))
+                            .toString();
             StringBuilder m = new StringBuilder();
             m.append("REQUEST:\n").append(requestJson);
             m.append("\n\nRESPONSE:\n").append(responseText == null ? "" : responseText);
