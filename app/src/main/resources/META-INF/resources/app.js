@@ -272,6 +272,93 @@
         return span;
     }
 
+    // ── Keyboard mode of the prompt input box ─────────────────────────────────────────────────
+    // "default" leaves the browser's own key bindings. "emacs" binds Ctrl+a, e, f, b, n, p, d, h
+    // and k in the box to the Emacs cursor and deletion commands. The mode comes from the server
+    // setting chat-ui.keybind through GET /api/keybind.
+    var activeKeybind = "default";
+
+    function loadKeybind() {
+        fetch(apiUrl("api/keybind"))
+            .then(function (r) { return r.ok ? r.json() : {}; })
+            .then(function (cfg) { activeKeybind = cfg && cfg.keybind === "emacs" ? "emacs" : "default"; })
+            .catch(function () { activeKeybind = "default"; });
+    }
+
+    // Moves the cursor, or deletes, in the prompt input box. Returns true when the key was one of
+    // the bound ones and has been handled.
+    function emacsKey(e) {
+        if (!e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) return false;
+        var ta = e.target;
+        var start = ta.selectionStart;
+        var val = ta.value;
+        var pos;
+        switch (e.key) {
+            case "a":   // beginning of the line
+                pos = val.lastIndexOf("\n", start - 1) + 1;
+                ta.setSelectionRange(pos, pos);
+                return true;
+            case "e":   // end of the line
+                pos = val.indexOf("\n", start);
+                if (pos === -1) pos = val.length;
+                ta.setSelectionRange(pos, pos);
+                return true;
+            case "f":   // one character forward
+                if (start < val.length) ta.setSelectionRange(start + 1, start + 1);
+                return true;
+            case "b":   // one character back
+                if (start > 0) ta.setSelectionRange(start - 1, start - 1);
+                return true;
+            case "n": { // down one line, to the same column or the end of that line
+                var thisLineEnd = val.indexOf("\n", start);
+                if (thisLineEnd !== -1) {
+                    var column = start - (val.lastIndexOf("\n", start - 1) + 1);
+                    var nextLineEnd = val.indexOf("\n", thisLineEnd + 1);
+                    if (nextLineEnd === -1) nextLineEnd = val.length;
+                    pos = Math.min(thisLineEnd + 1 + column, nextLineEnd);
+                    ta.setSelectionRange(pos, pos);
+                }
+                return true;
+            }
+            case "p": { // up one line, to the same column or the end of that line
+                var thisLineStart = val.lastIndexOf("\n", start - 1) + 1;
+                if (thisLineStart > 0) {
+                    var col = start - thisLineStart;
+                    var prevLineStart = val.lastIndexOf("\n", thisLineStart - 2) + 1;
+                    pos = Math.min(prevLineStart + col, thisLineStart - 1);
+                    ta.setSelectionRange(pos, pos);
+                }
+                return true;
+            }
+            case "d":   // delete the character after the cursor
+                if (start < val.length) replaceRange(ta, start, start + 1);
+                return true;
+            case "h":   // delete the character before the cursor
+                if (start > 0) replaceRange(ta, start - 1, start);
+                return true;
+            case "k": { // delete to the end of the line, or the line break when already there
+                var killEnd = val.indexOf("\n", start);
+                if (killEnd === -1) killEnd = val.length;
+                if (killEnd === start && start < val.length) killEnd++;
+                if (killEnd > start) replaceRange(ta, start, killEnd);
+                return true;
+            }
+            default:
+                return false;
+        }
+    }
+
+    // Removes [from, to) from the box through the editing command, so the browser's undo still
+    // works and the box's own input handling (its height) runs.
+    function replaceRange(ta, from, to) {
+        ta.setSelectionRange(from, to);
+        if (!document.execCommand || !document.execCommand("delete")) {
+            ta.value = ta.value.substring(0, from) + ta.value.substring(to);
+            ta.setSelectionRange(from, from);
+            ta.dispatchEvent(new Event("input"));
+        }
+    }
+
     // ── Translate one message (MessageTranslation_261011_oo01) ───────────────────────────────
     // The languages come from the server once; every message's footer gets a list drawn from them.
     // Choosing a language asks the server for that message in it and shows the result inside the
@@ -1508,7 +1595,8 @@
         if (sendBtn) sendBtn.addEventListener("click", sendPrompt);
         if (promptInput) {
             promptInput.addEventListener("keydown", function (e) {
-                if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); sendPrompt(); }
+                if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); sendPrompt(); return; }
+                if (activeKeybind === "emacs" && emacsKey(e)) e.preventDefault();
             });
             promptInput.addEventListener("paste", function (e) {
                 var items = (e.clipboardData || {}).items || [];
@@ -1555,6 +1643,7 @@
         initTemperature();
         initThinkAndEffort();
         loadTranslationLanguages();
+        loadKeybind();
         loadModels();
         hydrateConversation();
         refreshQueue();
