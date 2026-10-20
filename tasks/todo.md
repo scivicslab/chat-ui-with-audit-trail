@@ -200,7 +200,8 @@ REST には作成 `POST /{projectId}/chats`（id は actor system が採番し `
 - 道具の実行の許可（`ToolSet`）はいまのまま、プロンプトとは別に残す。モデルが知らないツールを呼んでも、実行は断るだけ。
 
 作業:
-- [ ] 1. 前置きを部品に分け、PromptBuilder の操作として足す: ツール説明（会話の `ToolSet` の分だけ）、ツールの決まり、
+- [x] 1. 前置きを部品に分け、ワークフローの操作として足す（d9f2e2a。部品は `ChatSession` の操作 `toolInstructions`/`skillCatalog`/`projectInstructions`/`turnText`。
+      PromptBuilder 自身はツールを知らないため、操作は会話側に置いた。文章生成用 `prompt-construction-plain.yaml` を追加）。以下は元の記述:: ツール説明（会話の `ToolSet` の分だけ）、ツールの決まり、
       スキル一覧、プロジェクトの指示（`AGENTS.md`/`CLAUDE.md`）。`firstStepPrompt()` はこれらを積む既定の手順に置き換える（出力は変えない）
 - [ ] 2. ワークフローが `messages`（JSON）をそのまま渡せるようにする: `PromptBuilder.buildMessages(履歴)` の結果を会話が受け取り、
       提供元が文字列の代わりに配列を送れるようにする（`sendPrompt` に並ぶ入口）
