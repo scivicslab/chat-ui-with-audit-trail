@@ -2,8 +2,8 @@ name: prompt-construction-plain
 description: |
   Prompt-construction sub-workflow for a conversation that only writes prose
   (AgentLoopDecidesThePrompt_261020_oo01): sends this turn's own text and nothing else — no tool
-  instructions, no tool descriptions, no skill catalog, no project instructions. Select it with
-  ChatSession.setPromptWorkflowFile(...) (POST .../prompt-workflow).
+  instructions, no tool descriptions, no skill catalog, no project instructions. plain-text-loop.yaml
+  names it.
 
   The conversation still refuses a tool call it is not allowed to make (ToolSet); it is simply not
   told about any tools, so a model writing prose does not start writing tool calls.

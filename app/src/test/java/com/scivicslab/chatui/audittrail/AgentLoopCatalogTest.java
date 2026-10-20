@@ -34,6 +34,11 @@ class AgentLoopCatalogTest {
         assertEquals("prompt-construction-default.yaml", standard.promptWorkflow());
         assertFalse(standard.current());
 
+        AgentLoopCatalog.Loop docRetrieval = loops.stream()
+                .filter(l -> l.file().equals("doc-retrieval-prompt-loop.yaml")).findFirst().orElseThrow();
+        assertEquals("prompt-construction-doc-retrieval.yaml", docRetrieval.promptWorkflow(),
+                "型2 is chosen by choosing a loop, since there is no other way to choose a prompt construction");
+
         assertEquals(1, loops.stream().filter(AgentLoopCatalog.Loop::current).count());
         assertFalse(loops.stream().anyMatch(l -> l.file().equals("polish.yaml")), "a workflow without a think state is not a loop");
     }

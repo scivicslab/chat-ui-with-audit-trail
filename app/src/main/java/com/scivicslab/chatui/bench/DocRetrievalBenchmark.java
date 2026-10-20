@@ -101,8 +101,9 @@ public final class DocRetrievalBenchmark {
         String chatBase = CHAT_UI + "/api/projects/" + PROJECT_ID + "/chats/" + enc(chatId);
         post(chatBase, "");
         // 型2 (DocRetrievalAgentLoop_260830_oo01): same agent loop, different text at every step.
+        // The loop names the prompt construction (AgentLoopDecidesThePrompt_261020_oo01).
         if (variant.equals("prompt")) {
-            post(chatBase + "/prompt-workflow", "prompt-construction-doc-retrieval.yaml");
+            post(chatBase + "/agent-loop-workflow", "doc-retrieval-prompt-loop.yaml");
         }
         // 型3: the agent loop itself becomes the retrieval procedure.
         if (variant.equals("statemachine")) {

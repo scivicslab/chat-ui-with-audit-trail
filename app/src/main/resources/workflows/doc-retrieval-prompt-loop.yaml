@@ -1,0 +1,126 @@
+name: doc-retrieval-prompt-loop
+description: |
+  型2 (DocRetrievalAgentLoop_260830_oo01): the default agent loop, with the prompt construction that
+  states the constraints for finding and reading documents at every step.
+
+  ChatSession's own agent loop: (think -> act)* -> end, i.e. (stepExpectingAction -> runTool)*
+  -> finish. See ChatSessionAgentLoop_260823_oo01.
+
+  stepExpectingAction() no longer sends a directly-constructed prompt — it delegates that to a
+  swappable prompt-construction sub-workflow (ChatSessionPorting_260823_oo01 2-b-i,
+  prompt-construction-default.yaml by default), which can queue more than one prompt per turn.
+  think-continue (below) is what lets a turn keep sending queued prompts as separate LLM calls
+  even when none of them contained a tool call, instead of ending the turn after the first one.
+
+  start() is a plain Java method, called directly by whoever hands off a prompt (never
+  dispatched through this YAML) — it resets the per-turn fields and positions the state
+  machine at "think" via transitionTo("think"), not setCurrentState("think") (the latter
+  would not reposition the transition-scan cursor, so a second turn could resume mid-list
+  and skip straight to think-final without ever calling stepExpectingAction again).
+
+  Every action below sets execution: direct. The default (POOL) would run the action on
+  IIActorSystem's ManagedThreadPool, off ChatSession's own actor thread — ManagedThreadPool
+  does not serialize per actor name, so ChatSession's own fields (scratchpad, pendingCalls,
+  busy, ...) would then be mutated from a thread unrelated to the actor's message queue,
+  racing with ordinary tell()/ask() calls (e.g. the idle-monitor's pollAutonomousActivity).
+  execution: direct keeps every step on whichever thread called runUntilEnd() — which must
+  itself be invoked as a plain Java method from within an existing tell() closure (see
+  PromptQueuePorting_260823_oo01), so the whole turn stays on ChatSession's one actor thread.
+
+# Every step's text carries the document-retrieval constraints (AgentLoopDecidesThePrompt_261020_oo01).
+promptWorkflow: prompt-construction-doc-retrieval.yaml
+
+steps:
+  - states: ["think", "end"]
+    label: step-limit
+    note: |
+      How many LLM calls one turn may make is this workflow's to decide, not Java's
+      (TurnResourceLimits_260830_oo01) — so it is a transition here rather than a hidden check
+      inside stepExpectingAction. Placed first among "think"'s transitions so it is evaluated
+      before the LLM is called; stepLimitReached fails while steps remain, and the scan falls
+      through to think-action. Four steps is the minimum for one search and one read, so a turn
+      that searches, reads and only then answers needs many more than that; 6 was reached in
+      ordinary use and cut turns off before they could answer.
+    actions:
+      - actor: this
+        method: stepLimitReached
+        arguments:
+          maxSteps: 50
+        execution: direct
+      - actor: this
+        method: finish
+        execution: direct
+
+  - states: ["think", "act"]
+    label: think-action
+    note: |
+      ONE LLM call. stepExpectingAction() succeeds (-> act) when the response contains a
+      <invoke name="..."> tool-call block; fails (tries think-continue next, then think-final)
+      when it is a plain final answer, the step limit was reached, or the turn was cancelled.
+    actions:
+      - actor: this
+        method: stepExpectingAction
+        execution: direct
+
+  - states: ["think", "think"]
+    label: think-continue
+    note: |
+      No tool was called on the step that just ran, but the prompt-construction sub-workflow
+      queued more than one prompt and some remain (e.g. splitting one turn's input into several
+      prompts, ChatSessionPorting_260823_oo01 2-b-i-②) — loop back to think-action, which sends
+      the next queued prompt as its own LLM call. No LLM call here, just a queue check.
+    actions:
+      - actor: this
+        method: hasMoreConstructedPrompts
+        execution: direct
+
+  - states: ["think", "end"]
+    label: think-final
+    note: |
+      No tool was called and no more prompts are queued: emit the final answer already captured
+      in stepExpectingAction and end the turn. Reached only when think-action and think-continue
+      both just failed (tried third, same state).
+    actions:
+      - actor: this
+        method: finish
+        execution: direct
+
+  - states: ["act", "think"]
+    label: run-tool-summarizing-pages
+    note: |
+      web_search fetches a whole page per result, and keeping each page's opening characters left
+      the model answering from an article's first paragraphs believing it had the article. This
+      transition summarises each page instead — one completion per page, in parallel, outside the
+      conversation's own history — and the whole page still reaches the I/O log, since the log
+      records what the tool returned rather than what the model was shown.
+
+      Placed before run-tool so it is tried first. runToolSummarizingPages fails when this turn
+      called no web_search, or when the provider cannot complete outside the conversation, and the
+      scan falls through to run-tool unchanged. Every other tool therefore behaves exactly as
+      before.
+
+      Which policy fits an observation belongs to this workflow, the same way the number of
+      characters already does; think-action → think-continue → think-final chooses among
+      transitions the same way.
+    actions:
+      - actor: this
+        method: runToolSummarizingPages
+        arguments:
+          maxObservationChars: 20000
+        execution: direct
+
+  - states: ["act", "think"]
+    label: run-tool
+    note: |
+      A tool was called: execute it (read/calc/web_search/fetch/search_docs/write/load_skill),
+      append the observation to the scratchpad, then loop back to think for the next LLM call.
+      The argument is how many characters of each observation the model may see; the rest is
+      elided from its copy but kept whole in the I/O log (TurnResourceLimits_260830_oo01). A
+      workflow whose tools return long listings — document search returns twenty candidates —
+      should raise it; the session caps it at chat-ui.max-observation-chars either way.
+    actions:
+      - actor: this
+        method: runTool
+        arguments:
+          maxObservationChars: 20000
+        execution: direct
