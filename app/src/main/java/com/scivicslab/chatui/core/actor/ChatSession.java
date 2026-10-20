@@ -1315,14 +1315,46 @@ public class ChatSession extends Interpreter {
     }
 
     /**
-     * The turn's opening text: the fixed tool instructions, then the two things that vary between
+     * This turn's own text — what the person typed on the first step, the tool's observation on
+     * the later ones — with none of the opening text in front. A prompt-construction sub-workflow
+     * that wants to send the text alone (a conversation that only writes prose) starts from this.
+     *
+     * @return {@link ActionResult} carrying the text, always successful
+     */
+    public ActionResult turnText() {
+        return new ActionResult(true, pendingPrompt == null ? "" : pendingPrompt);
+    }
+
+    /** @return {@link ActionResult} carrying part 1 of the opening text, see {@link #toolInstructionsText()} */
+    public ActionResult toolInstructions() { return new ActionResult(true, toolInstructionsText()); }
+
+    /** @return {@link ActionResult} carrying part 2 of the opening text, see {@link #skillCatalogPart()} */
+    public ActionResult skillCatalog() { return new ActionResult(true, skillCatalogPart()); }
+
+    /** @return {@link ActionResult} carrying part 3 of the opening text, see {@link #projectInstructionsPart()} */
+    public ActionResult projectInstructions() { return new ActionResult(true, projectInstructionsPart()); }
+
+    /**
+     * The turn's opening text: the tool instructions, then the two things that vary between
      * conversations — the skill catalog and this project's instructions
-     * ({@code SkillAndAgentsFile_260830_oo01}). Both are assembled here rather than compiled into
-     * {@link #SYSTEM_PROMPT} because both are read from files that can change while the system runs.
+     * ({@code SkillAndAgentsFile_260830_oo01}). Each is its own part, so a prompt-construction
+     * sub-workflow can take some of them and leave the others out
+     * ({@code AgentLoopDecidesThePrompt_261020_oo01}); this joins all three, which is what the
+     * default sub-workflow sends.
      *
      * @return the text prefixed to this turn's first prompt
      */
     private String firstStepPrompt() {
+        return toolInstructionsText() + skillCatalogPart() + projectInstructionsPart();
+    }
+
+    /**
+     * Part 1 of the opening text: how to call a tool and what each tool this conversation's
+     * {@link ToolSet} contains does, then the rules for using them. Assembled here rather than
+     * compiled into {@link #SYSTEM_PROMPT} because the descriptions depend on the tool set and on
+     * the plugin tools registered.
+     */
+    String toolInstructionsText() {
         // What the provider needs said about itself comes first — a harness's own tools, how to
         // reach them (HarnessPrefaceAndToolSplit_260912_oo01); a plain model adds nothing.
         StringBuilder buf = new StringBuilder(provider.promptPreface());
@@ -1340,15 +1372,20 @@ public class ChatSession extends Interpreter {
                .append("\nA relative path is taken from the write directory. When a skill's text points"
                      + " at a file in its own directory, read it — that directory is readable.");
         }
-        String catalog = skillCatalogText();
-        if (!catalog.isEmpty()) {
-            buf.append("\n\n").append(catalog);
-        }
-        if (projectInstructions != null && !projectInstructions.isBlank()) {
-            buf.append("\n\nInstructions for this project, from its working directory. They govern"
-                    + " the work you do here:\n\n").append(projectInstructions);
-        }
         return buf.toString();
+    }
+
+    /** Part 2 of the opening text: the skill catalog with its leading blank line, or {@code ""} when there is none. */
+    String skillCatalogPart() {
+        String catalog = skillCatalogText();
+        return catalog.isEmpty() ? "" : "\n\n" + catalog;
+    }
+
+    /** Part 3 of the opening text: this project's instructions with their lead-in, or {@code ""} when there are none. */
+    String projectInstructionsPart() {
+        if (projectInstructions == null || projectInstructions.isBlank()) return "";
+        return "\n\nInstructions for this project, from its working directory. They govern"
+                + " the work you do here:\n\n" + projectInstructions;
     }
 
     /** @return the skill catalog, or {@code ""} when no registry is wired or none could be read */

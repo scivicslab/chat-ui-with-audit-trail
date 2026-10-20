@@ -313,6 +313,35 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     }
 
     /**
+     * This turn's own text with no opening text in front.
+     *
+     * @param arg unused
+     * @return the text
+     */
+    @Action("turnText")
+    public ActionResult turnTextAction(String arg) {
+        return chatSession().turnText();
+    }
+
+    /** @param arg unused @return part 1 of the opening text: tool instructions for this conversation's tool set */
+    @Action("toolInstructions")
+    public ActionResult toolInstructionsAction(String arg) {
+        return chatSession().toolInstructions();
+    }
+
+    /** @param arg unused @return part 2 of the opening text: the skill catalog, or empty */
+    @Action("skillCatalog")
+    public ActionResult skillCatalogAction(String arg) {
+        return chatSession().skillCatalog();
+    }
+
+    /** @param arg unused @return part 3 of the opening text: this project's instructions, or empty */
+    @Action("projectInstructions")
+    public ActionResult projectInstructionsAction(String arg) {
+        return chatSession().projectInstructions();
+    }
+
+    /**
      * The turn's own text, for a sub-workflow that wraps it in something else
      * ({@code DocRetrievalAgentLoop_260830_oo01}); it arrives in the workflow's {@code ${result}}.
      *

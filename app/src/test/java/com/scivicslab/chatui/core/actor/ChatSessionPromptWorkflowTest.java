@@ -84,4 +84,33 @@ class ChatSessionPromptWorkflowTest {
         assertEquals(List.of("first constructed prompt", "second constructed prompt"), provider.receivedPrompts,
                 "both prompts the sub-workflow queued should reach the provider, in order, as separate calls");
     }
+
+    @Test
+    void plainWorkflow_sendsTheTurnsOwnTextAndNothingElse() {
+        RecordingProvider provider = runTurn("prompt-construction-plain.yaml", "hello");
+
+        assertEquals(List.of("hello"), provider.receivedPrompts,
+                "no tool instructions, tool descriptions, skill catalog or project instructions in front");
+    }
+
+    @Test
+    void defaultWorkflow_sendsTheThreePartsOfTheOpeningTextThenTheTurnsText() {
+        RecordingProvider provider = new RecordingProvider();
+        IIActorSystem system = new IIActorSystem("chat-session-prompt-parts-test");
+        ChatSessionIIAR iiar = new ChatSessionIIAR("chat", provider, Optional.empty(), null, system);
+        system.addIIActor(iiar);
+        ActorRef<LlmProvider> providerRef =
+                iiar.<LlmProvider>createChild(iiar.getName() + ".provider", provider);
+        iiar.tellNow(a -> ((ChatSession) a).setProviderName(providerRef.getName())).join();
+        ActorRef<ChatSession> chatRef = iiar.asChatSessionRef();
+        chatRef.tellNow(c -> {
+            c.start("hello", null, event -> {}, chatRef, new CompletableFuture<>(), null, false);
+            c.runUntilEnd();
+        }).join();
+
+        String parts = chatRef.ask(c -> c.toolInstructionsText() + c.skillCatalogPart() + c.projectInstructionsPart()).join();
+
+        assertEquals(parts + "\n\nhello", provider.receivedPrompts.get(0));
+        assertTrue(parts.contains("Available tools:"), "the tool instructions are part 1");
+    }
 }
