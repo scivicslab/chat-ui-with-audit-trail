@@ -235,7 +235,7 @@ request messagesに送った文を残す会話を作る手段がない。
 - [x] D. ワークフローが組んだ `messages`（JSON）を会話が受け取り提供元が送る。方針は案1（ターンのために組んだ system メッセージはそのリクエストだけのもので残らず、残るのは質問と答えだけ）。過去のターンを載せない `plain-text-no-context-loop` と載せる版を用意した。`RequestMessagesPerTurnTest` で確認済み。ワークフローの `result` が JSON に見える文字列だと空になる欠陥が POJO-actor にあり、直した（POJO-actor b98bf13、4.5.0 以降で必要）
 - [x] E. （コード・テストは完了：`frame/`（`RuleFile`・`FrameFiller`）、`PlanRunner` の操作 `frameNext`/`framePrompt`/`frameFill`/`frameExpand`/`setChatAgentLoop`、`frame-fill-loop.yaml`、`FrameFillLoopTest`。残り：実機で Qwen により通しで動かし、`rst:verify` で検査する）本題: フレームから文章を生成する Turing Workflow（`rst-agent-loop.yaml` に `:frame`/`:sample` の扱いを足す）。 実機（28010、qwen3.8-flash-next-tensorfold、no-think、project1/chat-07）で通した: job-02 が 19 秒で 3 概念 × 4 空欄 + 1 を埋め、`rst:verify` は 0 violations。入力と結果は `~/works/tmp/frame-live-01/`。内容の誤り（Math.sqrt を二乗の手段に挙げる等）は残る
       ブランクごとに 1 回の呼び出し、request messagesつき、`plain-text-loop` 上で動かす
-- [ ] F. 文書: 設計文書 `AgentLoopDecidesThePrompt` を doc_SCIVICS003 に書く。リリース（plugins 4.4.2 など）の判断は別に仰ぐ
+- [x] F. 文書: 設計文書 `AgentLoopDecidesThePrompt_261020_oo01` を doc_SCIVICS003 の `040_design/030_...` に書いた
 
 # 用語（「履歴」は使わない）
 

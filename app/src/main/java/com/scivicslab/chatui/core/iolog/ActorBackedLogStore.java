@@ -21,8 +21,7 @@ import java.util.logging.Logger;
  * an actor in front of it, so that the actor's mailbox is the queue: a log line is {@code tell}'d
  * and the caller moves on; a read or a session start is {@code ask}'d and returns after every
  * write told before it, from any thread, in the order the actor received them. Nothing here
- * starts a thread of its own or keeps a queue of its own
- * ({@code AgentLoopDecidesThePrompt_261020_oo01} lists the hand-made versions this replaces).</p>
+ * starts a thread of its own or keeps a queue of its own.</p>
  *
  * <p>{@link #getConnection()} hands out the store's read connection as it is: a caller that reads
  * through it directly is not behind the mailbox, so it calls {@link #flushWrites()} first if it
