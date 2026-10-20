@@ -1,0 +1,207 @@
+name: frame-fill-loop
+description: |
+  Fills a frame with a writer conversation, one blank at a time (WorkflowFromFrame_261020_oo01).
+  The request is a rule file whose rules carry :instruction (what to write) and, where it helps,
+  :sample (a model sentence from another document). A rule that also carries :frame "file.lisp"
+  is a list: the writer names the items, each item gets a copy of that sub-frame's rules, and the
+  copies' blanks are filled in turn. Each blank is one question to the writer, which keeps the
+  history of the run, so a sentence can follow what was already said about the same item.
+  The writer is put on plain-text-loop.yaml, which sends the question and nothing else: no tool
+  instructions, no skill catalog. The finished rule file is written to `out`.
+params:
+  request:
+    label: "The request rule file"
+    description: "Absolute path of the rule file whose blanks are to be filled"
+    type: text
+    required: true
+  subject:
+    label: "The material to explain"
+    description: "Absolute path of the file the writer is shown with every question, e.g. the program being explained"
+    type: text
+    required: true
+  frameDir:
+    label: "The directory of the sub-frames"
+    description: "Absolute path of the directory holding the files a :frame names"
+    type: text
+    required: true
+  out:
+    label: "Where to write the filled rule file"
+    description: "Absolute path"
+    type: text
+    required: true
+  writer:
+    description: "The conversation that writes"
+    default: "project1/chat-02"
+  writerModel:
+    description: "The model the writer runs on; empty leaves the conversation as it is"
+    default: ""
+  writerNoThink:
+    description: "true asks the writer's model to skip its thinking phase"
+    default: "true"
+  language:
+    description: "The language the writer writes in"
+    default: "Japanese"
+  maxItems:
+    description: "How many items a list may have at most"
+    type: int
+    default: 5
+  maxBlanks:
+    description: "How many blanks one run fills at most; the run fails past it"
+    type: int
+    default: 80
+steps:
+  - states: ["0", "1"]
+    label: add-writer
+    note: The writer is a conversation with no history of its own from before, on the loop that sends only the question.
+    actions:
+      - actor: this
+        method: addWorker
+        arguments: ["writer", 'jexl:state.getString("writer")']
+        execution: direct
+      - actor: this
+        method: setChatAgentLoop
+        arguments: ['jexl:state.getString("writer")', "plain-text-loop.yaml"]
+        execution: direct
+      - actor: this
+        method: setChatModel
+        arguments: ['jexl:state.getString("writer")', 'jexl:state.getString("writerModel")']
+        execution: direct
+      - actor: this
+        method: setChatNoThink
+        arguments: ['jexl:state.getString("writer")', 'jexl:state.getString("writerNoThink")']
+        execution: direct
+      - actor: this
+        method: clearWorker
+        arguments: ["writer"]
+        execution: direct
+
+  - states: ["1", "pick"]
+    label: read-the-files
+    actions:
+      - actor: this
+        method: putJson
+        arguments: {path: done, value: "0"}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: names, value: ""}
+        execution: direct
+      - actor: this
+        method: readFile
+        arguments: ['jexl:state.getString("request")', "cur"]
+        execution: direct
+      - actor: this
+        method: readFile
+        arguments: ['jexl:state.getString("subject")', "subject"]
+        execution: direct
+
+  - states: ["1", "failed"]
+    label: no-input-file
+    actions: [{actor: this, method: doNothing, arguments: ["the request or the subject could not be read"], execution: direct}]
+
+  - states: ["pick", "install"]
+    label: no-blank-left
+    note: |
+      Reached only when no rule carries an :instruction any more. The file is searched for the
+      marker, the same way rst-agent-loop does, so a run that stopped for another reason is not
+      installed as if it were finished.
+    actions:
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("cur").indexOf(":instruction \"") < 0'
+        execution: direct
+
+  - states: ["pick", "ask"]
+    label: next-blank
+    note: Takes the next blank of the rule file as it stands. countUp bounds the run.
+    actions:
+      - actor: this
+        method: frameNext
+        arguments: ["cur", "blank"]
+        execution: direct
+      - actor: this
+        method: countUp
+        arguments: ["done", 'jexl:state.getString("maxBlanks")']
+        execution: direct
+      - actor: this
+        method: framePrompt
+        arguments: ["cur", "blank", "subject", "names", "prompt", 'jexl:state.getString("language")', 'jexl:state.getString("maxItems")']
+        execution: direct
+
+  - states: ["pick", "failed"]
+    label: could-not-take-the-next-blank
+    note: A blank is left but it could not be taken or asked about, or maxBlanks was passed.
+    actions: [{actor: this, method: doNothing, arguments: ["the next blank could not be taken, or maxBlanks was passed"], execution: direct}]
+
+  - states: ["ask", "keep"]
+    label: ask-the-writer
+    actions:
+      - actor: this
+        method: askWorker
+        arguments:
+          - writer
+          - 'jexl:state.getString("prompt")'
+        execution: direct
+
+  - states: ["ask", "failed"]
+    label: writer-gave-no-answer
+    actions: [{actor: this, method: doNothing, arguments: ["the writer gave no answer"], execution: direct}]
+
+  - states: ["keep", "pick"]
+    label: expand-the-list
+    note: A frame blank. The sub-frame's text is read from frameDir, and the rule file now holds one copy per item.
+    actions:
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("blank-kind") == "frame"'
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["writer", "reply"]
+        execution: direct
+      - actor: this
+        method: readFile
+        arguments: ['jexl:state.getString("frameDir") + "/" + state.getString("blank-frame")', "frame-text"]
+        execution: direct
+      - actor: this
+        method: frameExpand
+        arguments: ["cur", "blank", "frame-text", "reply", "names", 'jexl:state.getString("maxItems")']
+        execution: direct
+
+  - states: ["keep", "pick"]
+    label: write-the-sentence
+    note: A sentence blank. The guard keeps a list blank whose expansion failed from being filled with the list text.
+    actions:
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("blank-kind") == "sentence"'
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["writer", "reply"]
+        execution: direct
+      - actor: this
+        method: frameFill
+        arguments: ["cur", "blank", "reply"]
+        execution: direct
+
+  - states: ["keep", "failed"]
+    label: could-not-keep-the-reply
+    actions: [{actor: this, method: doNothing, arguments: ["the reply could not be written into the rule file"], execution: direct}]
+
+  - states: ["install", "end"]
+    label: install
+    note: The finished rule file is written where the request said. make-markdown (or html-saurus's Rebuild) writes the markdown from it, or reports the violations.
+    actions:
+      - actor: this
+        method: writeFile
+        arguments: ['jexl:state.getString("out")', "cur"]
+        execution: direct
+      - actor: this
+        method: finish
+        arguments: ["out"]
+        execution: direct
+
+  - states: ["failed", "end"]
+    label: report-failure
+    actions: [{actor: this, method: reportFailure, arguments: [], execution: direct}]

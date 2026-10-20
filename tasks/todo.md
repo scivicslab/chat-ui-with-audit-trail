@@ -232,7 +232,7 @@ REST には作成 `POST /{projectId}/chats`（id は actor system が採番し `
       `ChatUiActorSystem.hasChat` は、アプリ側の `chats` ではなく `ActorSystem` の登録簿に問い合わせる
 - [~] C. （plugins 7deb3fa：`H2LogStore` を素の同期 POJO にした。chat-ui：`ActorBackedLogStore` が `IoLogStore` の中で包む。残り：plugins のリリースと、chat-ui の依存の更新）`H2LogStore` を素の同期 POJO にし（plugins）、`chat-ui-with-audit-trail` の `IoLogStore` が `ActorRef` で包んで `ask(...).join()` で呼ぶ。
       手書きのスレッド・キュー・ラッチを無くす。`quarkus-chat-ui`・`quarkus-chat-ui3` は固定した版（4.2.0 系）のまま動き、版を上げたときに同期書き込みになる
-- [ ] D. ステップ 2: ワークフローが `messages`（JSON）を直接渡せるようにする（`PromptBuffer.buildMessages` の結果を会話が受け取り、提供元が配列を送る）
-- [ ] E. 本題: フレームから文章を生成する Turing Workflow（`rst-agent-loop.yaml` に `:frame`/`:sample` の扱いを足す）。
+- [ ] D. （取り決めが要るので保留：ワークフローが組む system メッセージを、そのターンだけのものにするか、履歴に残すか。毎ターン構築すると重複する）ステップ 2: ワークフローが `messages`（JSON）を直接渡せるようにする（`PromptBuffer.buildMessages` の結果を会話が受け取り、提供元が配列を送る）
+- [~] E. （コード・テストは完了：`frame/`（`RuleFile`・`FrameFiller`）、`PlanRunner` の操作 `frameNext`/`framePrompt`/`frameFill`/`frameExpand`/`setChatAgentLoop`、`frame-fill-loop.yaml`、`FrameFillLoopTest`。残り：実機で Qwen により通しで動かし、`rst:verify` で検査する）本題: フレームから文章を生成する Turing Workflow（`rst-agent-loop.yaml` に `:frame`/`:sample` の扱いを足す）。
       ブランクごとに 1 回の呼び出し、履歴つき、`plain-text-loop` 上で動かす
 - [ ] F. 文書: 設計文書 `AgentLoopDecidesThePrompt` を doc_SCIVICS003 に書く。リリース（plugins 4.4.2 など）の判断は別に仰ぐ

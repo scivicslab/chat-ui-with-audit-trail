@@ -259,6 +259,30 @@ public class PlanRunner extends Interpreter {
     }
 
     /**
+     * Plan step: puts a conversation on another agent loop, which also decides how each of its
+     * prompts is built ({@code AgentLoopDecidesThePrompt_261020_oo01}).
+     *
+     * @param chatName the conversation's qualified name
+     * @param loopFile an agent loop under {@code /workflows/}, e.g. {@code plain-text-loop.yaml}; blank leaves it as it is
+     * @return {@link ActionResult} with {@code success=true} iff the conversation is on that loop
+     */
+    public ActionResult setChatAgentLoop(String chatName, String loopFile) {
+        if (system == null) return new ActionResult(false, "plan runner is not wired to an actor system");
+        if (chatName == null || chatName.isBlank()) return new ActionResult(false, "chatName is required");
+        if (loopFile == null || loopFile.isBlank()) {
+            return new ActionResult(true, "no agent loop named; " + chatName + " stays as it was");
+        }
+        Object session = system.getIIActor(chatName + ".chat");
+        if (!(session instanceof ChatSessionIIAR chatSessionIIAR)) {
+            return new ActionResult(false, "chat not found: " + chatName);
+        }
+        String refused = chatSessionIIAR.setAgentLoopWorkflowFile(loopFile.strip());
+        return refused == null
+                ? new ActionResult(true, chatName + " runs " + loopFile.strip())
+                : new ActionResult(false, refused);
+    }
+
+    /**
      * Plan step: says whether one role's conversation asks its model to skip the thinking phase
      * ({@code ThinkingAndEffortAreConversationSettings_260917_oo01}).
      *
@@ -1028,6 +1052,138 @@ public class PlanRunner extends Interpreter {
             done.complete(result);
         } else if (done == null) {
             LOG.warning("PlanRunner " + myName + " completed with no waiter: " + result);
+        }
+    }
+
+    // ---- Frame steps (WorkflowFromFrame_261020_oo01): thin; FrameFiller does the work on text ----
+
+    private final com.scivicslab.chatui.frame.FrameFiller frameFiller = new com.scivicslab.chatui.frame.FrameFiller();
+
+    private String kept(String key) {
+        return selfActorRef == null ? null : selfActorRef.getJsonString(key);
+    }
+
+    /**
+     * Plan step: takes the next blank of the rule file kept under {@code fileKey} and puts what is
+     * known about it into this plan's state, as {@code <blankKey>-name}, {@code -instruction},
+     * {@code -sample}, {@code -frame} and {@code -kind} ({@code frame} or {@code sentence}).
+     *
+     * @return {@link ActionResult} with {@code success=true} iff a blank was left
+     */
+    public ActionResult frameNext(String fileKey, String blankKey) {
+        String file = kept(fileKey);
+        if (file == null) return new ActionResult(false, "nothing is kept as '" + fileKey + "'");
+        com.scivicslab.chatui.frame.FrameFiller.Blank b = frameFiller.next(file);
+        if (b == null) return new ActionResult(false, "no blank is left");
+        selfActorRef.putJson(blankKey + "-name", b.name());
+        selfActorRef.putJson(blankKey + "-instruction", b.instruction());
+        selfActorRef.putJson(blankKey + "-sample", b.sample());
+        selfActorRef.putJson(blankKey + "-frame", b.frame());
+        selfActorRef.putJson(blankKey + "-kind", b.isFrame() ? "frame" : "sentence");
+        return new ActionResult(true, "next blank: " + b.name());
+    }
+
+    private com.scivicslab.chatui.frame.FrameFiller.Blank blankKept(String blankKey) {
+        String name = kept(blankKey + "-name");
+        if (name == null) return null;
+        return new com.scivicslab.chatui.frame.FrameFiller.Blank(name,
+                orEmpty(kept(blankKey + "-instruction")), orEmpty(kept(blankKey + "-sample")),
+                orEmpty(kept(blankKey + "-frame")));
+    }
+
+    private static String orEmpty(String s) {
+        return s == null ? "" : s;
+    }
+
+    /**
+     * Plan step: builds what the writer is asked for the blank taken by {@code frameNext}, and puts
+     * it into this plan's state under {@code promptKey}. A frame blank is asked for the list of
+     * items; any other blank for one piece of text (about the item, when it is a leaf of a copy of
+     * a sub-frame).
+     *
+     * @param maxItems how many items a list may have at most
+     * @return {@link ActionResult} with {@code success=true} iff the prompt was built
+     */
+    public ActionResult framePrompt(String fileKey, String blankKey, String subjectKey, String namesKey,
+                                    String promptKey, String language, String maxItems) {
+        String file = kept(fileKey);
+        String subject = kept(subjectKey);
+        com.scivicslab.chatui.frame.FrameFiller.Blank blank = blankKept(blankKey);
+        if (file == null || subject == null || blank == null) {
+            return new ActionResult(false, "the rule file, the subject and the blank must all be kept first");
+        }
+        String lang = language == null || language.isBlank() ? "Japanese" : language.strip();
+        String prompt;
+        if (blank.isFrame()) {
+            int max;
+            try {
+                max = Integer.parseInt(maxItems == null || maxItems.isBlank() ? "5" : maxItems.strip());
+            } catch (NumberFormatException e) {
+                return new ActionResult(false, "maxItems is not a number: " + maxItems);
+            }
+            prompt = frameFiller.listPrompt(blank, subject, max, lang);
+        } else {
+            String names = kept(namesKey);
+            prompt = frameFiller.sentencePrompt(file, blank, subject,
+                    names == null || names.isBlank() ? List.of() : List.of(names.split("\\R")), lang);
+        }
+        selfActorRef.putJson(promptKey, prompt);
+        return new ActionResult(true, "built a prompt of " + prompt.length() + " chars");
+    }
+
+    /**
+     * Plan step: writes the reply into the blank taken by {@code frameNext}, in the rule file kept
+     * under {@code fileKey}, which is replaced by the result.
+     *
+     * @return {@link ActionResult} with {@code success=true} iff the blank was filled
+     */
+    public ActionResult frameFill(String fileKey, String blankKey, String replyKey) {
+        String file = kept(fileKey);
+        String reply = kept(replyKey);
+        String name = kept(blankKey + "-name");
+        if (file == null || reply == null || name == null || reply.isBlank()) {
+            return new ActionResult(false, "the rule file, a reply and a blank must all be kept first");
+        }
+        try {
+            selfActorRef.putJson(fileKey, frameFiller.fill(file, name, reply));
+            return new ActionResult(true, "filled " + name);
+        } catch (IllegalArgumentException e) {
+            return new ActionResult(false, e.getMessage());
+        }
+    }
+
+    /**
+     * Plan step: turns the frame blank taken by {@code frameNext} into one copy of its sub-frame per
+     * item in the reply, in the rule file kept under {@code fileKey}. The item names are kept under
+     * {@code namesKey}, one per line, for the prompts of the copies' blanks.
+     *
+     * @param frameTextKey where the sub-frame's text is kept
+     * @param maxItems     how many items at most
+     * @return {@link ActionResult} with {@code success=true} iff the blank was expanded
+     */
+    public ActionResult frameExpand(String fileKey, String blankKey, String frameTextKey, String replyKey,
+                                    String namesKey, String maxItems) {
+        String file = kept(fileKey);
+        String frameText = kept(frameTextKey);
+        String reply = kept(replyKey);
+        String name = kept(blankKey + "-name");
+        if (file == null || frameText == null || reply == null || name == null) {
+            return new ActionResult(false, "the rule file, the sub-frame, a reply and a blank must all be kept first");
+        }
+        int max;
+        try {
+            max = Integer.parseInt(maxItems == null || maxItems.isBlank() ? "5" : maxItems.strip());
+        } catch (NumberFormatException e) {
+            return new ActionResult(false, "maxItems is not a number: " + maxItems);
+        }
+        List<String> names = frameFiller.parseNames(reply, max);
+        if (names.isEmpty()) return new ActionResult(false, "the reply named no item");
+        try {
+            selfActorRef.putJson(fileKey, frameFiller.expand(file, name, frameText, names));
+            selfActorRef.putJson(namesKey, String.join("\n", names));
+            return new ActionResult(true, "expanded " + name + " into " + names.size() + " copies");
+        } catch (IllegalArgumentException e) {
+            return new ActionResult(false, e.getMessage());
         }
     }
 }

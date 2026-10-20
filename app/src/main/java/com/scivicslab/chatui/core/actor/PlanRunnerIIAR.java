@@ -114,6 +114,25 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
     }
 
     /**
+     * Puts a conversation on another agent loop. The loop decides how the conversation runs and how
+     * each prompt it sends is built, so this is how a plan gives its writer a loop that sends the
+     * turn's own text and nothing else.
+     * <p>Fails when the conversation does not exist or the loop file is not bundled; then the
+     * conversation keeps the loop it had. A blank loop leaves the conversation as it is.</p>
+     * <pre>{@code
+     * - actor: this
+     *   method: setChatAgentLoop
+     *   arguments: ["project1/chat-02", "plain-text-loop.yaml"]
+     * }</pre>
+     * @param args {@code [chatName, loopFile]}: the conversation's qualified name, then the agent loop's file
+     */
+    @Action("setChatAgentLoop")
+    public ActionResult setChatAgentLoop(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().setChatAgentLoop(at(a, 0), at(a, 1));
+    }
+
+    /**
      * Says whether one conversation asks its model to skip the thinking phase.
      *
      * <p>A blank value leaves the conversation as it was. Fails when there is no such conversation.</p>
@@ -554,6 +573,83 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
     }
 
     /** An action's {@code arguments} as a JSON array, empty if it has none. */
+    /**
+     * Takes the next blank (a rule that carries an {@code :instruction}) of a rule file kept in this
+     * plan's state, and keeps what is known about it: {@code <blank>-name}, {@code -instruction},
+     * {@code -sample}, {@code -frame} and {@code -kind} (<code>frame</code> or <code>sentence</code>).
+     * <p>Fails when no blank is left, which is how a loop over a frame ends.</p>
+     * <pre>{@code
+     * - actor: this
+     *   method: frameNext
+     *   arguments: ["cur", "blank"]
+     * }</pre>
+     * @param args {@code [fileKey, blankKey]}: where the rule file is kept, then the prefix to keep the blank under
+     */
+    @Action("frameNext")
+    public ActionResult frameNext(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().frameNext(at(a, 0), at(a, 1));
+    }
+
+    /**
+     * Builds what the writer is asked for the blank taken by {@code frameNext} and keeps it.
+     * <p>A frame blank is asked for the list of items to explain; any other blank for one piece of
+     * text, about the item when the blank is a leaf of a copy of a sub-frame. The prompt is in
+     * English and asks for the answer in the given language.</p>
+     * <pre>{@code
+     * - actor: this
+     *   method: framePrompt
+     *   arguments: ["cur", "blank", "subject", "names", "prompt", "Japanese", "5"]
+     * }</pre>
+     * @param args {@code [fileKey, blankKey, subjectKey, namesKey, promptKey, language, maxItems]}:
+     *             where the rule file, the blank and the material to explain are kept, where the item
+     *             names are kept, where to put the prompt, the language to write in, then how many
+     *             items a list may have
+     */
+    @Action("framePrompt")
+    public ActionResult framePrompt(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().framePrompt(at(a, 0), at(a, 1), at(a, 2), at(a, 3), at(a, 4), at(a, 5), at(a, 6));
+    }
+
+    /**
+     * Writes a reply into the blank taken by {@code frameNext}; the rule file kept in this plan's
+     * state becomes the file with that rule written. The rest of the file is untouched.
+     * <p>Fails when the reply is empty or the rule is not in the file.</p>
+     * <pre>{@code
+     * - actor: this
+     *   method: frameFill
+     *   arguments: ["cur", "blank", "reply"]
+     * }</pre>
+     * @param args {@code [fileKey, blankKey, replyKey]}: where the rule file, the blank and the reply are kept
+     */
+    @Action("frameFill")
+    public ActionResult frameFill(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().frameFill(at(a, 0), at(a, 1), at(a, 2));
+    }
+
+    /**
+     * Turns the frame blank taken by {@code frameNext} into one copy of its sub-frame per item the
+     * reply lists, in the rule file kept in this plan's state. The item names are kept, one per
+     * line, for the prompts of the copies' blanks.
+     * <p>The copies are named {@code <blank>/<n>} and {@code <blank>/<n>/<suffix>}, and keep their
+     * {@code :instruction} and {@code :sample}, so the loop fills them one by one.</p>
+     * <pre>{@code
+     * - actor: this
+     *   method: frameExpand
+     *   arguments: ["cur", "blank", "frame-text", "reply", "names", "5"]
+     * }</pre>
+     * @param args {@code [fileKey, blankKey, frameTextKey, replyKey, namesKey, maxItems]}: where the
+     *             rule file, the blank, the sub-frame's text and the reply are kept, where to keep the
+     *             item names, then how many items at most
+     */
+    @Action("frameExpand")
+    public ActionResult frameExpand(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().frameExpand(at(a, 0), at(a, 1), at(a, 2), at(a, 3), at(a, 4), at(a, 5));
+    }
+
     private static org.json.JSONArray arguments(String arg) {
         if (arg == null || arg.isBlank()) return new org.json.JSONArray();
         try {
