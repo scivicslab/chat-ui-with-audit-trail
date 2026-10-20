@@ -149,6 +149,23 @@ public final class ProjectWorkflowCatalog {
     }
 
     /**
+     * Lists the workflows a job can run: {@link #list} without the agent loops and the prompt
+     * constructions, which a conversation runs and which fail when run as a job
+     * ({@code WorkflowKinds_261021_oo01}).
+     *
+     * @param query as for {@link #list}
+     * @return the matching job workflows, in the order {@link #list} gives
+     */
+    public List<Entry> listJobs(String query) {
+        List<Entry> jobs = new ArrayList<>();
+        for (Entry entry : list(query)) {
+            Document doc = read(entry.name());
+            if (doc != null && WorkflowKind.of(doc.yaml()) == WorkflowKind.JOB) jobs.add(entry);
+        }
+        return List.copyOf(jobs);
+    }
+
+    /**
      * Reads one workflow, the project's own if it has one of that name, else the bundled one.
      *
      * @param name the basename without {@code .yaml}

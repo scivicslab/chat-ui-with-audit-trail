@@ -1,4 +1,4 @@
-name: frame-fill-loop
+name: fill-frame
 description: |
   Fills a frame with a writer conversation, one blank at a time (WorkflowFromFrame_261020_oo01).
   The request is a rule file whose rules carry :instruction (what to write) and, where it helps,

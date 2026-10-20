@@ -5,9 +5,7 @@ import com.scivicslab.chatui.core.actor.ChatSessionIIAR;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
-import org.yaml.snakeyaml.Yaml;
 
 /**
  * The agent loops a conversation can be put on: the bundled workflows whose first state is
@@ -54,22 +52,9 @@ public final class AgentLoopCatalog {
 
     /**
      * @param yaml a workflow's text
-     * @return whether one of its steps leaves the state {@code think}, which only an agent loop does
+     * @return whether it is an agent loop
      */
     static boolean isAgentLoop(String yaml) {
-        Object parsed;
-        try {
-            parsed = new Yaml().load(yaml);
-        } catch (RuntimeException e) {
-            return false;
-        }
-        if (!(parsed instanceof Map<?, ?> map) || !(map.get("steps") instanceof List<?> steps)) return false;
-        for (Object step : steps) {
-            if (step instanceof Map<?, ?> s && s.get("states") instanceof List<?> states
-                    && !states.isEmpty() && "think".equals(String.valueOf(states.get(0)))) {
-                return true;
-            }
-        }
-        return false;
+        return WorkflowKind.of(yaml) == WorkflowKind.AGENT_LOOP;
     }
 }

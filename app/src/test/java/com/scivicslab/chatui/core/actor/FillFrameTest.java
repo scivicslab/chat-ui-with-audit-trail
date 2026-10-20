@@ -32,11 +32,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * {@code frame-fill-loop.yaml} run end to end on a plan runner, with a writer conversation whose
+ * {@code fill-frame.yaml} run end to end on a plan runner, with a writer conversation whose
  * model is a fake that answers by what it is asked ({@code WorkflowFromFrame_261020_oo01}).
  */
-@DisplayName("frame-fill-loop: フレームを最後まで埋める")
-class FrameFillLoopTest {
+@DisplayName("fill-frame: フレームを最後まで埋める")
+class FillFrameTest {
 
     private static final String REQUEST = """
             (in-package :rst)
@@ -88,7 +88,7 @@ class FrameFillLoopTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        system = new IIActorSystem("frame-fill-loop-test");
+        system = new IIActorSystem("fill-frame-test");
         writer = new FakeWriter();
         writerChat = new ChatSessionIIAR("project1/chat-02.chat", writer, Optional.empty(), null, system);
         system.addIIActor(writerChat);
@@ -128,7 +128,7 @@ class FrameFillLoopTest {
             plan.callByActionName("putJson", "{\"path\":\"" + p[0] + "\",\"value\":\"" + p[1].replace("\\", "\\\\") + "\"}");
         }
         CompletableFuture<String> done = new CompletableFuture<>();
-        InputStream yaml = getClass().getResourceAsStream("/workflows/frame-fill-loop.yaml");
+        InputStream yaml = getClass().getResourceAsStream("/workflows/fill-frame.yaml");
         byte[] bytes = yaml.readAllBytes();
         plan.tellNow(interp -> {
             PlanRunner r = (PlanRunner) interp;

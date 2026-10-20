@@ -63,6 +63,12 @@ public class ProjectJobResource {
         if (doc == null) {
             return Response.status(404).entity(Map.of("error", "unknown workflow: " + workflow)).build();
         }
+        WorkflowKind kind = WorkflowKind.of(doc.yaml());
+        if (kind != WorkflowKind.JOB) {
+            return Response.status(400).entity(Map.of("error", workflow + " is "
+                    + (kind == WorkflowKind.AGENT_LOOP ? "an agent loop" : "a prompt construction")
+                    + ", which a conversation runs; it is not run as a job")).build();
+        }
         String why = ProjectWorkflowCatalog.validate(doc.yaml());
         if (why != null) return Response.status(400).entity(Map.of("error", why)).build();
 

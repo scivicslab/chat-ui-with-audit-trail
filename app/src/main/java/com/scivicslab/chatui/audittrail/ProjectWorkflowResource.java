@@ -35,7 +35,7 @@ public class ProjectWorkflowResource {
     ChatUiActorSystem actorSystem;
 
     /**
-     * Lists the project's workflows.
+     * Lists the workflows the project can run as a job ({@code WorkflowKinds_261021_oo01}).
      *
      * @param projectId the project
      * @param q         text to match, or absent for all — see {@link ProjectWorkflowCatalog#list}
@@ -45,7 +45,7 @@ public class ProjectWorkflowResource {
     public Response list(@PathParam("projectId") String projectId, @QueryParam("q") String q) {
         ProjectWorkflowCatalog catalog = catalogOf(projectId);
         if (catalog == null) return noSuchProject(projectId);
-        List<ProjectWorkflowCatalog.Entry> rows = catalog.list(q);
+        List<ProjectWorkflowCatalog.Entry> rows = catalog.listJobs(q);
         return Response.ok(rows).build();
     }
 
