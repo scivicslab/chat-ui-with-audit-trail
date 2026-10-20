@@ -1,0 +1,70 @@
+name: prompt-construction-no-context
+description: |
+  Prompt construction for a conversation whose every question stands alone
+  (AgentLoopDecidesThePrompt_261020_oo01): the request messages of the turn's first request are
+  the question and nothing else. What the conversation said before is not in the request, and it is
+  not changed: when the turn ends, only this question and its answer are added to it.
+
+  The messages are built with PromptBuilder (a child of this conversation), so constraints can be
+  added to the step below; they would go in the request as a system message for this turn only.
+  The later requests of a turn carry a tool's observation, and are sent as plain text in the
+  messages the first request left.
+
+steps:
+  - states: ["0", "1"]
+    label: first-step
+    note: Fails on the later steps of a turn, which fall through to later-step.
+    actions:
+      - actor: ..
+        method: isFirstStep
+        execution: direct
+      - actor: ../*promptBuilder
+        method: clear
+        execution: direct
+
+  - states: ["1", "2"]
+    label: take-turn-text
+    actions:
+      - actor: ..
+        method: turnText
+        execution: direct
+
+  - states: ["2", "3"]
+    label: set-message
+    actions:
+      - actor: ../*promptBuilder
+        method: addMessage
+        arguments: {text: "jexl: result"}
+        execution: direct
+
+  - states: ["3", "4"]
+    label: build-messages
+    note: No past turns are given to buildMessages, so the array is the question alone.
+    actions:
+      - actor: ../*promptBuilder
+        method: buildMessages
+        arguments: {text: "[]"}
+        execution: direct
+
+  - states: ["4", "end"]
+    label: queue-messages
+    actions:
+      - actor: ..
+        method: appendConstructedMessages
+        arguments: {messages: "jexl: result"}
+        execution: direct
+
+  - states: ["0", "5"]
+    label: later-step
+    actions:
+      - actor: ..
+        method: turnText
+        execution: direct
+
+  - states: ["5", "end"]
+    label: queue-text
+    actions:
+      - actor: ..
+        method: appendConstructedPrompt
+        arguments: {prompt: "jexl: result"}
+        execution: direct

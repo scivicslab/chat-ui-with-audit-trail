@@ -1,0 +1,87 @@
+name: prompt-construction-with-context
+description: |
+  Prompt construction that puts what the conversation said before in the request
+  (AgentLoopDecidesThePrompt_261020_oo01): the request messages of the turn's first request are the
+  past questions and answers (pastTurns, without any system message), then this question. It is the
+  same request a plain-text conversation sends, built through PromptBuilder so that constraints can
+  be added: they go in the request as a system message for this turn only, and when the turn ends
+  only this question and its answer are added to what the conversation said before.
+
+  The messages are built with PromptBuilder (a child of this conversation), so constraints can be
+  added to the step below; they would go in the request as a system message for this turn only.
+  The later requests of a turn carry a tool's observation, and are sent as plain text in the
+  messages the first request left.
+
+steps:
+  - states: ["0", "1"]
+    label: first-step
+    note: Fails on the later steps of a turn, which fall through to later-step.
+    actions:
+      - actor: ..
+        method: isFirstStep
+        execution: direct
+      - actor: ../*promptBuilder
+        method: clear
+        execution: direct
+
+  - states: ["1", "2"]
+    label: take-past-turns
+    actions:
+      - actor: ..
+        method: pastTurns
+        execution: direct
+
+  - states: ["2", "3"]
+    label: keep-past-turns
+    actions:
+      - actor: this
+        method: putJson
+        arguments: {path: past, value: "jexl: result"}
+        execution: direct
+
+  - states: ["3", "4"]
+    label: take-turn-text
+    actions:
+      - actor: ..
+        method: turnText
+        execution: direct
+
+  - states: ["4", "6"]
+    label: set-message
+    actions:
+      - actor: ../*promptBuilder
+        method: addMessage
+        arguments: {text: "jexl: result"}
+        execution: direct
+
+  - states: ["6", "7"]
+    label: build-messages
+    note: The past turns are given to buildMessages, so they come between the system message and the question.
+    actions:
+      - actor: ../*promptBuilder
+        method: buildMessages
+        arguments: {text: "jexl: state.select('past').toString()"}
+        execution: direct
+
+  - states: ["7", "end"]
+    label: queue-messages
+    actions:
+      - actor: ..
+        method: appendConstructedMessages
+        arguments: {messages: "jexl: result"}
+        execution: direct
+
+  - states: ["0", "5"]
+    label: later-step
+    actions:
+      - actor: ..
+        method: turnText
+        execution: direct
+
+  - states: ["5", "end"]
+    label: queue-text
+    actions:
+      - actor: ..
+        method: appendConstructedPrompt
+        arguments: {prompt: "jexl: result"}
+        execution: direct

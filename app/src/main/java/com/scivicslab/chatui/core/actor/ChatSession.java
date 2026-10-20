@@ -706,7 +706,24 @@ public class ChatSession extends Interpreter {
     // queue is drained one prompt per stepExpectingAction() call, so a sub-workflow that splits
     // one turn's input into N prompts (e.g. N checklist items) sends them as N separate LLM
     // turns instead of one combined call.
-    private final Deque<String> constructedPrompts = new ArrayDeque<>();
+    /**
+     * One thing a prompt-construction sub-workflow asked to send.
+     *
+     * @param prompt              the text of the user message
+     * @param requestMessagesJson the request messages to send it with, as a JSON array that does not
+     *                            include the user message; {@code null} when the provider's own are to be used
+     */
+    private record Constructed(String prompt, String requestMessagesJson) {}
+
+    private final Deque<Constructed> constructedPrompts = new ArrayDeque<>();
+
+    /**
+     * The provider's request messages as they were before this turn replaced them, or {@code null}
+     * when this turn replaced none. Put back when the turn ends, so what a turn built for its own
+     * requests (a {@code system} message, a chosen part of the past) is not kept for the next one
+     * ({@code AgentLoopDecidesThePrompt_261020_oo01}).
+     */
+    private String requestMessagesToRestore;
     /** Classpath workflow file used to build each step's prompt(s); swappable via the setter. */
     /** The prompt-construction sub-workflow a conversation uses when its agent loop names none. */
     public static final String DEFAULT_PROMPT_WORKFLOW = "prompt-construction-default.yaml";
@@ -1253,6 +1270,7 @@ public class ChatSession extends Interpreter {
         this.stepLimitHit = false;
         this.cancelled = false;
         this.constructedPrompts.clear();
+        this.requestMessagesToRestore = null;
         this.lastWorkerReply = null;
         this.lastJudgment = null;
         this.redoNote = null;
@@ -1275,7 +1293,87 @@ public class ChatSession extends Interpreter {
      * @param prompt the prompt text to send to {@code provider.sendPrompt(...)} on a future step
      */
     public void appendConstructedPrompt(String prompt) {
-        constructedPrompts.addLast(prompt);
+        constructedPrompts.addLast(new Constructed(prompt, null));
+    }
+
+    /**
+     * Pushes the whole request messages for this turn's request: a prompt-construction sub-workflow
+     * that built the array itself (with PromptBuilder's {@code buildMessages}) calls this instead of
+     * {@link #appendConstructedPrompt}. The last message is the user message; the ones before it
+     * are what the request carries besides it. They are used for this turn only: when the turn ends
+     * the provider's request messages are put back as they were, and only the question and the
+     * answer are added.
+     *
+     * @param messagesJson a JSON array of {@code {"role","content"}} whose last element has role {@code user}
+     * @return {@link ActionResult} with {@code success=true} iff the array was usable
+     */
+    public ActionResult appendConstructedMessages(String messagesJson) {
+        org.json.JSONArray all;
+        try {
+            all = new org.json.JSONArray(messagesJson);
+        } catch (org.json.JSONException e) {
+            return new ActionResult(false, "not a JSON array: " + e.getMessage());
+        }
+        if (all.isEmpty()) return new ActionResult(false, "the array is empty");
+        org.json.JSONObject last = all.optJSONObject(all.length() - 1);
+        if (last == null || !"user".equals(last.optString("role")) || !(last.opt("content") instanceof String)) {
+            return new ActionResult(false, "the last message must be a user message with text");
+        }
+        org.json.JSONArray before = new org.json.JSONArray();
+        for (int i = 0; i < all.length() - 1; i++) before.put(all.get(i));
+        constructedPrompts.addLast(new Constructed(last.getString("content"), before.toString()));
+        return new ActionResult(true, "queued " + all.length() + " messages");
+    }
+
+    /**
+     * What this conversation has said so far as questions and answers, for a prompt-construction
+     * sub-workflow to put in the request or leave out: the provider's request messages without any
+     * {@code system} message. {@code []} when the provider keeps none.
+     *
+     * @return {@link ActionResult} carrying the JSON array, always successful
+     */
+    public ActionResult pastTurns() {
+        String json;
+        try {
+            json = providerRef().ask(p -> p.requestMessagesJson()).get(10, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            return new ActionResult(false, "could not read the request messages: " + e.getMessage());
+        }
+        if (json == null) return new ActionResult(true, "[]");
+        org.json.JSONArray kept = new org.json.JSONArray();
+        org.json.JSONArray all = new org.json.JSONArray(json);
+        for (int i = 0; i < all.length(); i++) {
+            if (!"system".equals(all.getJSONObject(i).optString("role"))) kept.put(all.get(i));
+        }
+        return new ActionResult(true, kept.toString());
+    }
+
+    /**
+     * Whether this is the turn's first request. The later ones carry a tool's observation, which a
+     * sub-workflow sends as plain text, in the messages the first request left in the provider.
+     *
+     * @return {@link ActionResult} with {@code success=true} iff this is the first request of the turn
+     */
+    public ActionResult isFirstStep() {
+        return new ActionResult(stepCount == 1, stepCount == 1 ? "first step" : "step " + stepCount);
+    }
+
+    /**
+     * Puts the given request messages into the provider for this turn, remembering the ones it had.
+     *
+     * @return {@code null} when done, otherwise why not
+     */
+    private String useRequestMessagesForThisTurn(String json) {
+        try {
+            if (requestMessagesToRestore == null) {
+                String before = providerRef().ask(p -> p.requestMessagesJson()).get(10, TimeUnit.SECONDS);
+                if (before == null) return "this provider keeps no request messages";
+                requestMessagesToRestore = before;
+            }
+            return providerRef().ask(p -> p.replaceRequestMessages(json)).get(10, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            return "could not set the request messages: " + e.getMessage();
+        }
     }
 
     /**
@@ -1424,7 +1522,16 @@ public class ChatSession extends Interpreter {
                 return new ActionResult(false, "prompt construction error: " + built.getResult());
             }
         }
-        String promptToSend = constructedPrompts.pollFirst();
+        Constructed next = constructedPrompts.pollFirst();
+        String promptToSend = next.prompt();
+        if (next.requestMessagesJson() != null) {
+            String refused = useRequestMessagesForThisTurn(next.requestMessagesJson());
+            if (refused != null) {
+                finalAnswer = null;
+                turnEmitter.accept(ChatEvent.error("Request messages refused: " + refused));
+                return new ActionResult(false, "request messages refused: " + refused);
+            }
+        }
         // Attached images belong to the human's original message, sent once on this turn's first
         // LLM call. A later step's promptToSend is a tool observation, not that message, so it
         // carries no images of its own.
@@ -1969,6 +2076,9 @@ public class ChatSession extends Interpreter {
         // fixed-size history (TurnResourceLimits_260830_oo01). Replace them with what a later turn
         // actually needs: what was asked, and what was answered.
         try {
+            String restore = requestMessagesToRestore;
+            requestMessagesToRestore = null;
+            if (restore != null) providerRef().tell(p -> p.replaceRequestMessages(restore));
             providerRef().tell(p -> p.collapseTurn(question, finalAnswer));
         } catch (Exception e) {
             logger.log(Level.WARNING, "Could not collapse this turn's provider history", e);

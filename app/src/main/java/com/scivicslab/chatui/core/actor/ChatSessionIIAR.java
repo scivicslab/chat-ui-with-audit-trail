@@ -237,6 +237,9 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     /** @param prompt the text to queue as this turn's next prompt */
     public record AppendPromptArgs(@NotNull String prompt) {}
 
+    /** @param messages the whole request messages for this turn's request, a JSON array whose last message is the user's */
+    public record AppendMessagesArgs(@NotNull String messages) {}
+
     /** @param request what to ask the worker to do */
     public record RequestFromWorkerArgs(@NotNull String request) {}
 
@@ -382,6 +385,42 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     @Action("projectInstructions")
     public ActionResult projectInstructionsAction(String arg) {
         return chatSession().projectInstructions();
+    }
+
+    /**
+     * What the conversation has said so far as questions and answers, without any {@code system}
+     * message, for a prompt-construction sub-workflow to put in the request or leave out.
+     *
+     * @param arg unused
+     * @return a JSON array
+     */
+    @Action("pastTurns")
+    public ActionResult pastTurnsAction(String arg) {
+        return chatSession().pastTurns();
+    }
+
+    /**
+     * Succeeds only on the first request of a turn; the later ones carry a tool's observation, which
+     * a sub-workflow sends as plain text.
+     *
+     * @param arg unused
+     * @return success iff this is the turn's first request
+     */
+    @Action("isFirstStep")
+    public ActionResult isFirstStepAction(String arg) {
+        return chatSession().isFirstStep();
+    }
+
+    /**
+     * Queues the whole request messages for this turn's request, built by the sub-workflow with
+     * PromptBuilder's {@code buildMessages}. They are used for this turn only.
+     *
+     * @param args the array; its last message is the user's
+     * @return success iff the array was usable
+     */
+    @Action(value = "appendConstructedMessages", argsType = AppendMessagesArgs.class)
+    public ActionResult appendConstructedMessagesAction(AppendMessagesArgs args) {
+        return chatSession().appendConstructedMessages(args.messages());
     }
 
     /**

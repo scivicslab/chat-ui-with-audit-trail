@@ -1,0 +1,42 @@
+name: with-context-and-a-constraint
+description: |
+  A test prompt construction: what the conversation said before, a constraint as a system message,
+  then the question (AgentLoopDecidesThePrompt_261020_oo01).
+steps:
+  - states: ["0", "1"]
+    label: first-step
+    actions:
+      - actor: ..
+        method: isFirstStep
+        execution: direct
+      - actor: ../*promptBuilder
+        method: clear
+        execution: direct
+      - actor: ../*promptBuilder
+        method: addWarning
+        arguments: {text: "Obey the constraint."}
+        execution: direct
+  - states: ["1", "2"]
+    label: take-past-turns
+    actions: [{actor: .., method: pastTurns, execution: direct}]
+  - states: ["2", "3"]
+    label: keep-past-turns
+    actions: [{actor: this, method: putJson, arguments: {path: past, value: "jexl: result"}, execution: direct}]
+  - states: ["3", "4"]
+    label: take-turn-text
+    actions: [{actor: .., method: turnText, execution: direct}]
+  - states: ["4", "6"]
+    label: set-message
+    actions: [{actor: "../*promptBuilder", method: addMessage, arguments: {text: "jexl: result"}, execution: direct}]
+  - states: ["6", "7"]
+    label: build-messages
+    actions: [{actor: "../*promptBuilder", method: buildMessages, arguments: {text: "jexl: state.select('past').toString()"}, execution: direct}]
+  - states: ["7", "end"]
+    label: queue-messages
+    actions: [{actor: .., method: appendConstructedMessages, arguments: {messages: "jexl: result"}, execution: direct}]
+  - states: ["0", "5"]
+    label: later-step
+    actions: [{actor: .., method: turnText, execution: direct}]
+  - states: ["5", "end"]
+    label: queue-text
+    actions: [{actor: .., method: appendConstructedPrompt, arguments: {prompt: "jexl: result"}, execution: direct}]
