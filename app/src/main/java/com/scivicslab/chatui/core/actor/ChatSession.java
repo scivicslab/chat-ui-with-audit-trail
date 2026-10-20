@@ -708,7 +708,10 @@ public class ChatSession extends Interpreter {
     // turns instead of one combined call.
     private final Deque<String> constructedPrompts = new ArrayDeque<>();
     /** Classpath workflow file used to build each step's prompt(s); swappable via the setter. */
-    private String promptWorkflowFile = "prompt-construction-default.yaml";
+    /** The prompt-construction sub-workflow a conversation uses when its agent loop names none. */
+    public static final String DEFAULT_PROMPT_WORKFLOW = "prompt-construction-default.yaml";
+
+    private String promptWorkflowFile = DEFAULT_PROMPT_WORKFLOW;
 
     /** Lazily created on first {@code calc} tool call; kept for this session's lifetime. */
     private JShellCalculator calculator;

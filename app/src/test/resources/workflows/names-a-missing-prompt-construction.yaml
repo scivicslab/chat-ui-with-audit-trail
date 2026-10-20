@@ -1,0 +1,14 @@
+name: names-a-missing-prompt-construction
+description: |
+  A test loop that names a prompt construction which does not exist
+  (AgentLoopDecidesThePrompt_261020_oo01); loading it must be refused.
+
+promptWorkflow: no-such-prompt-construction.yaml
+
+steps:
+  - states: ["think", "end"]
+    label: finish
+    actions:
+      - actor: this
+        method: finish
+        execution: direct

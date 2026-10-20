@@ -48,16 +48,52 @@ public class ChatSessionIIAR extends InterpreterIIAR {
         loadAgentLoopWorkflow();
     }
 
+    /**
+     * Reads the agent-loop workflow and installs it, together with the prompt construction it names.
+     *
+     * <p>The agent loop decides how the conversation runs, and that includes how the prompt each
+     * step sends is built. A loop says so with a top-level {@code promptWorkflow: <file>}; a loop
+     * that says nothing gets {@link ChatSession#DEFAULT_PROMPT_WORKFLOW}, so switching from one loop
+     * to another never leaves the earlier loop's prompt construction behind
+     * ({@code AgentLoopDecidesThePrompt_261020_oo01}).</p>
+     */
     private void loadAgentLoopWorkflow() {
         String resource = "/workflows/" + agentLoopWorkflowFile;
-        try (InputStream yaml = getClass().getResourceAsStream(resource)) {
-            if (yaml == null) {
+        byte[] yaml;
+        try (InputStream in = getClass().getResourceAsStream(resource)) {
+            if (in == null) {
                 throw new IllegalStateException("Agent-loop workflow not found on classpath: " + resource);
             }
-            chatSession().readYaml(yaml);
+            yaml = in.readAllBytes();
         } catch (java.io.IOException e) {
             throw new IllegalStateException("Failed to load agent-loop workflow: " + resource, e);
         }
+        String promptWorkflow = promptWorkflowNamedBy(yaml, resource);
+        if (getClass().getResource("/workflows/" + promptWorkflow) == null) {
+            throw new IllegalStateException(resource + " names promptWorkflow " + promptWorkflow
+                    + ", which is not on the classpath under /workflows/");
+        }
+        chatSession().readYaml(new java.io.ByteArrayInputStream(yaml));
+        chatSession().setPromptWorkflowFile(promptWorkflow);
+    }
+
+    /**
+     * @param yaml     an agent-loop workflow's text
+     * @param resource its name, for the message when it cannot be read
+     * @return the file its top-level {@code promptWorkflow} names, or the default when it names none
+     */
+    static String promptWorkflowNamedBy(byte[] yaml, String resource) {
+        Object parsed;
+        try {
+            parsed = new org.yaml.snakeyaml.Yaml().load(new String(yaml, java.nio.charset.StandardCharsets.UTF_8));
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("Agent-loop workflow is not valid YAML: " + resource, e);
+        }
+        if (parsed instanceof java.util.Map<?, ?> map && map.get("promptWorkflow") instanceof String named
+                && !named.isBlank()) {
+            return named.strip();
+        }
+        return ChatSession.DEFAULT_PROMPT_WORKFLOW;
     }
 
     /** @return this ConversationSquad's agent-loop workflow file name (classpath-relative, under {@code /workflows/}) */
@@ -81,6 +117,13 @@ public class ChatSessionIIAR extends InterpreterIIAR {
             return null;
         } catch (RuntimeException e) {
             agentLoopWorkflowFile = previous;
+            // reset() above already emptied the conversation's loop; put the previous one back, so
+            // a refused loop leaves the conversation running as it was.
+            try {
+                loadAgentLoopWorkflow();
+            } catch (RuntimeException restoreFailed) {
+                e.addSuppressed(restoreFailed);
+            }
             return "error: " + e.getMessage();
         }
     }
