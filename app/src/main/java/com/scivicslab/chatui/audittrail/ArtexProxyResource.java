@@ -3,6 +3,7 @@ package com.scivicslab.chatui.audittrail;
 import com.scivicslab.chatui.core.actor.ChatUiActorSystem;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.GET;
 import jakarta.ws.rs.HeaderParam;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
@@ -24,7 +25,8 @@ import java.util.logging.Logger;
 import java.util.stream.Stream;
 
 /**
- * Relays an OpenAI-compatible {@code /v1/chat/completions} call from an external caller that
+ * Relays an OpenAI-compatible {@code /v1/chat/completions} call — and the {@code /v1/models}
+ * lookup a caller's UI makes before sending one — from an external caller that
  * drives its own agent loop (ARTEX's {@code planner}/{@code worker}/{@code mainagent}, built on
  * the {@code norma} SDK) to this application's configured upstream LLM server, and records the
  * full exchange ({@code ArtexProxyLogging_261017_oo01}).
@@ -40,7 +42,7 @@ import java.util.stream.Stream;
  * order received. This keeps the record faithful to what the upstream server actually said,
  * including fields (reasoning, tool calls, token usage) this resource does not itself parse.</p>
  */
-@Path("/v1/chat/completions")
+@Path("/v1")
 public class ArtexProxyResource {
 
     private static final Logger LOG = Logger.getLogger(ArtexProxyResource.class.getName());
@@ -73,6 +75,7 @@ public class ArtexProxyResource {
      *         JSON otherwise
      */
     @POST
+    @Path("/chat/completions")
     @Consumes(MediaType.APPLICATION_JSON)
     public Response relay(@HeaderParam("X-Caller-Id") String callerId, String requestBody) {
         String caller = (callerId == null || callerId.isBlank()) ? DEFAULT_CALLER_ID : callerId.strip();
@@ -98,6 +101,42 @@ public class ArtexProxyResource {
             LOG.log(Level.WARNING, "Relay to " + base + " failed for caller " + caller, e);
             actorSystem.recordExternalCall(caller,
                     "REQUEST:\n" + requestBody + "\n\nRESPONSE:\nERROR: " + e.getMessage());
+            return Response.status(Response.Status.BAD_GATEWAY)
+                    .entity("{\"error\":\"" + JSONObject.quote(String.valueOf(e.getMessage())) + "\"}")
+                    .build();
+        }
+    }
+
+    /**
+     * Relays {@code GET /v1/models} — what the caller's own "refresh model list" asks for before
+     * it ever sends a chat-completion request. Not recorded: it carries no conversation content,
+     * only the upstream server's model catalog.
+     *
+     * @return the upstream server's model list, forwarded as received
+     */
+    @GET
+    @Path("/models")
+    public Response models() {
+        String base = upstreamBaseUrl.map(String::strip).filter(s -> !s.isEmpty()).orElse(null);
+        if (base == null) {
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity("{\"error\":\"chat-ui.external-proxy.upstream-base-url is not configured\"}")
+                    .build();
+        }
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(base + "/v1/models"))
+                    .header("Accept", "application/json")
+                    .GET()
+                    .timeout(Duration.ofSeconds(10))
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            return Response.status(response.statusCode())
+                    .type(MediaType.APPLICATION_JSON)
+                    .entity(response.body())
+                    .build();
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Relay of /v1/models to " + base + " failed", e);
             return Response.status(Response.Status.BAD_GATEWAY)
                     .entity("{\"error\":\"" + JSONObject.quote(String.valueOf(e.getMessage())) + "\"}")
                     .build();
