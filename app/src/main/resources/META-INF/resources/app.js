@@ -13,9 +13,8 @@
     var LEGACY_TAB_ID_KEY = "chat-ui-last-tab";
     // Migrates what earlier versions stored under the single legacy key: first "alpha"/"beta"
     // (before ChatActorRename_260827_oo01), then bare "01"/"02" and the short-lived combined
-    // "project2-01" form. Without this a returning browser would resend a stale id, and the
-    // server would lazily create a brand-new empty conversation instead of reconnecting to the
-    // one the browser was actually using.
+    // "project2-01" form. Without this a returning browser would resend a stale id and the
+    // server would answer that no such conversation exists.
     var LEGACY_TAB_ID_MAP = { alpha: "01", beta: "02" };
     var PROJECT_ID = localStorage.getItem(PROJECT_ID_KEY);
     var CHAT_ID = localStorage.getItem(CHAT_ID_KEY);
@@ -39,6 +38,17 @@
         return "api/projects/" + encodeURIComponent(PROJECT_ID)
                 + "/chats/" + encodeURIComponent(CHAT_ID) + suffix;
     }
+
+    // The id kept from an earlier visit may name a conversation deleted since. The server answers
+    // 404 for it and does not make a new one, so go back to project1/chat-01, which always exists.
+    fetch(apiUrl(chatUrl("/status"))).then(function (r) {
+        if (r.status === 404 && !(PROJECT_ID === "project1" && CHAT_ID === "01")) {
+            localStorage.removeItem(PROJECT_ID_KEY);
+            localStorage.removeItem(CHAT_ID_KEY);
+            localStorage.removeItem(LEGACY_TAB_ID_KEY);
+            location.reload();
+        }
+    });
 
     var chatArea, promptInput, sendBtn, connStatus, activityLabel, modelSelect, notificationBar;
     var themeSelect, queueBtn, queueArea, queueResizeHandle, cancelBtn;

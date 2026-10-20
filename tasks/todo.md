@@ -106,3 +106,38 @@ quarkus-chat-ui では workflow の実行器（harness）が会話の provider �
 - `ask_chat` の末尾の 1 行は、道具としての `ask_chat` だけ。`askQualified`（`PlanRunner` など）の戻りは変えていない
 - 稼働中の audit-trail（28014 など）には反映していない。ビルドして再起動するまで、この機能は使えない
 - 未コミット。別の作業の変更が同じ作業ツリーにある（`ArtexProxyResource.java`、`app.js`、`application.properties`、`KeybindResource*`）
+
+# エージェントの道具で会話を作る・消す（`create_chat` `delete_chat`）
+
+背景: 実験用の会話（chat-06 など）を作る道具が、エージェントに無かった。REST の `GET .../status` を
+存在しない id に呼ぶと会話が副作用で作られるため、実験のたびにそれを使い、後で消していた。
+`get_chat_status` 道具は存在しない id に `error: chat not found` を返し、作らない。
+REST には作成 `POST /{projectId}/chats`（id は actor system が採番し `{"chatId":"06"}` を返す）と
+削除 `DELETE /{projectId}/chats/{chatId}` が既にある。足りないのは道具だけである。
+
+方針（未承認）:
+- [ ] `ConversationControls` に `String createChat(projectId)` と `ChatDeletion deleteChat(projectId, chatId)` を足す
+      （`ChatUiActorSystem` は既に両方を持つ。窓口に出すだけ）
+- [ ] `CreateChatTool`（`create_chat()`）: 呼んだ会話と同じプロジェクトに採番して作り、`ok: created project1/chat-06` を返す。
+      別プロジェクトには作れない（`set_chat_model` と同じ理由）
+- [ ] `DeleteChatTool`（`delete_chat(chatId)`）: `ChatUiActorSystem.deleteChat` の拒否理由
+      （chat-01、最後の1つ、実行中、キュー有り、子有り）をそのまま答えに載せる。自分自身の削除は拒否する
+- [ ] `ChatSession` の道具説明と `executeTool` に2つを登録する
+- [ ] `ConversationToolsTest` に、作成→採番→`get_chat_status` で見える／削除→見えない／拒否の各場合を足す（`mvn test`、`-DskipTests` は使わない）
+- [ ] 稼働中の audit-trail への反映（ビルド・再起動）は別途確認
+
+決めてほしいこと:
+- REST の `GET .../status` ほか約14個が `createChat` を呼ぶ「無ければ作る」は、画面（会話の切替時）が
+  依存しているため、今回は変えない。変えるなら別の計画にする。
+
+## 「無ければ作る」の廃止（追加・実装済み）
+
+会話は `POST /api/projects/{p}/chats`（採番）、`POST .../chats/{id}`（id指定）、道具 `create_chat` でだけ作る。
+名前を言及しただけの要求（`GET .../status` など12個のエンドポイント、`setModel`/`setNoThink`/`setEffort`/`setTemperature`/`setProvider`）は
+存在しない会話を作らず、REST は 404 `no such conversation: ...`、アクターシステムの設定変更は `false`／`IllegalArgumentException` を返す。
+- [x] `ChatUiActorSystem.hasChat` を足し、上の暗黙作成を外した（復元・`init`・採番作成は従来どおり）
+- [x] `ChatResource.requireChat`: 12個のエンドポイントと provider 切替の前で 404
+- [x] `app.js`: 保存済みの会話 id が 404 なら `project1/chat-01` に戻す（旧コメントが書いていた「古い id で空の会話が作られる」不具合の根本対処）
+- [x] `ChatIsMadeOnlyWhenAskedTest`（3件）。`setNoThink` に旧動作を戻すと落ちることを確認（赤→緑）
+- 全体 391 件。`ArtexProxyLoggingTest` は変更前の `HEAD` でも 3 回中 2 回落ちる既存の不安定なテスト（非同期のログ書き込みを5秒待つ）で、今回の変更とは無関係
+- [ ] 稼働中の audit-trail への反映（ビルド・再起動）は別途確認。反映までは旧動作のまま

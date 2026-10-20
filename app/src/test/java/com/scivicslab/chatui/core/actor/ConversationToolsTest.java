@@ -62,6 +62,22 @@ class ConversationToolsTest {
     /** Records what the tools asked of the actor system. */
     private static final class FakeControls implements ConversationControls {
         final List<String> setCalls = new ArrayList<>();
+        final List<String> created = new ArrayList<>();
+        final List<String> deleted = new ArrayList<>();
+        @Override public String createChat(String projectId) {
+            created.add(projectId);
+            return "06";
+        }
+        @Override public ChatUiActorSystem.ChatDeletion deleteChat(String projectId, String chatId) {
+            deleted.add(projectId + "/" + chatId);
+            return switch (chatId) {
+                case "02" -> new ChatUiActorSystem.ChatDeletion(ChatUiActorSystem.ChatDeletion.Kind.DELETED, "");
+                case "03" -> new ChatUiActorSystem.ChatDeletion(ChatUiActorSystem.ChatDeletion.Kind.BUSY,
+                        "project1/chat-03 is answering");
+                default -> new ChatUiActorSystem.ChatDeletion(ChatUiActorSystem.ChatDeletion.Kind.UNKNOWN,
+                        "no such conversation: project1/chat-" + chatId);
+            };
+        }
         @Override public boolean setModel(String projectId, String chatId, String model) {
             setCalls.add(projectId + "/" + chatId + "=" + model);
             return true;
@@ -156,6 +172,39 @@ class ConversationToolsTest {
                 MODELS, controls);
         assertTrue(result.contains("error: refused — project2/02 belongs to another project"), result);
         assertTrue(controls.setCalls.isEmpty());
+    }
+
+    @Test
+    void createChatAddsAConversationToTheCallersProjectAndNamesIt() {
+        FakeControls controls = new FakeControls();
+        String result = callFromChat01(invoke("create_chat"), MODELS, controls);
+        assertTrue(result.contains("ok: created project1/chat-06"), result);
+        assertEquals(List.of("project1"), controls.created);
+    }
+
+    @Test
+    void deleteChatDeletesAConversationOfTheCallersProject() {
+        FakeControls controls = new FakeControls();
+        String result = callFromChat01(invoke("delete_chat", "chatId", "02"), MODELS, controls);
+        assertTrue(result.contains("ok: deleted project1/chat-02"), result);
+        assertEquals(List.of("project1/02"), controls.deleted);
+    }
+
+    @Test
+    void deleteChatPassesOnTheReasonItWasRefused() {
+        FakeControls controls = new FakeControls();
+        String result = callFromChat01(invoke("delete_chat", "chatId", "03"), MODELS, controls);
+        assertTrue(result.contains("error: project1/chat-03 is answering"), result);
+    }
+
+    @Test
+    void deleteChatRefusesTheCallerItselfAndAnotherProjectWithoutAskingTheActorSystem() {
+        FakeControls controls = new FakeControls();
+        String self = callFromChat01(invoke("delete_chat", "chatId", "01"), MODELS, controls);
+        assertTrue(self.contains("error: refused — a conversation cannot delete itself"), self);
+        String other = callFromChat01(invoke("delete_chat", "chatId", "project2/02"), MODELS, controls);
+        assertTrue(other.contains("error: refused — project2/02 belongs to another project"), other);
+        assertTrue(controls.deleted.isEmpty(), "the actor system was not asked");
     }
 
     @Test

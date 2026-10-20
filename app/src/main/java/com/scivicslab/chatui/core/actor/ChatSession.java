@@ -12,6 +12,8 @@ import com.scivicslab.chatui.agent.SetCollaboratorTool;
 import com.scivicslab.chatui.agent.ChatInspection;
 import com.scivicslab.chatui.agent.GetChatLogTool;
 import com.scivicslab.chatui.agent.RequestMessagesTools;
+import com.scivicslab.chatui.agent.CreateChatTool;
+import com.scivicslab.chatui.agent.DeleteChatTool;
 import com.scivicslab.chatui.agent.GetChatStatusTool;
 import com.scivicslab.chatui.agent.ListChatModelsTool;
 import com.scivicslab.chatui.agent.SetChatModelTool;
@@ -311,6 +313,18 @@ public class ChatSession extends Interpreter {
               and "model". The name must be one list_chat_models printed; any other is refused with the
               list. The change takes effect after that conversation's current turn. A conversation of
               another project is refused.
+            """);
+        m.put("create_chat", """
+            - create_chat(): add a new, empty conversation to your own project and return its id (for
+              example "06"), which you can then pass as "chatId" to ask_chat, set_chat_model,
+              get_request_messages and the other conversation tools. Takes no parameters. Nothing else
+              creates a conversation: a "chatId" that does not exist is an error.
+            """);
+        m.put("delete_chat", """
+            - delete_chat(chatId): delete a conversation of your own project, for example one you made with
+              create_chat. Requires a "chatId" <parameter> tag. Refused, with the reason and nothing
+              changed, for project1's chat-01, the project's last conversation, one that is answering or has
+              queued prompts, one with conversations under it, and your own.
             """);
         m.put("get_chat_log", """
             - get_chat_log(chatId, count): read the newest entries of another conversation's log
@@ -2165,6 +2179,9 @@ public class ChatSession extends Interpreter {
             case "list_chat_models" -> ListChatModelsTool.list(system, projectId, extractInput(args, "chatId"));
             case "set_chat_model" -> SetChatModelTool.set(system, conversationControls, projectId,
                     extractInput(args, "chatId"), extractInput(args, "model"));
+            case "create_chat" -> CreateChatTool.create(conversationControls, projectId);
+            case "delete_chat" -> DeleteChatTool.delete(conversationControls, projectId, myChatName(),
+                    extractInput(args, "chatId"));
             case "get_chat_log" -> GetChatLogTool.get(conversationControls, projectId,
                     extractInput(args, "chatId"), parseIntOrNull(extractInput(args, "count")));
             case "get_request_messages" -> RequestMessagesTools.get(system, projectId, extractInput(args, "chatId"));

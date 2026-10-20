@@ -525,6 +525,7 @@ public class ChatUiActorSystem implements ConversationControls {
      * what that amounts to; a conversation answering or holding queued prompts; and one with a
      * conversation nested under it, whose own session would be left running.</p>
      */
+    @Override
     public synchronized ChatDeletion deleteChat(String projectId, String chatId) {
         if (DEFAULT_PROJECT_ID.equals(projectId) && "01".equals(chatId)) {
             return ChatDeletion.refused(ChatDeletion.Kind.DEFAULT_CHAT,
@@ -921,6 +922,7 @@ public class ChatUiActorSystem implements ConversationControls {
      * @param projectId the project to add a conversation to
      * @return the new conversation's id, e.g. {@code "02"}
      */
+    @Override
     public synchronized String createChat(String projectId) {
         if (!projects.containsKey(projectId)) {
             throw new IllegalArgumentException("Unknown project: " + projectId);
@@ -1443,7 +1445,9 @@ public class ChatUiActorSystem implements ConversationControls {
      *               recorded model (ConversationSettingsRecord_260913_oo01)
      */
     private synchronized void setProvider(String projectId, String chatId, String kind, ToolSet toolSet, boolean record) {
-        createChat(projectId, chatId);
+        if (!hasChat(projectId, chatId)) {
+            throw new IllegalArgumentException("no such conversation: " + chatActorName(projectId, chatId));
+        }
         String qualifiedName = chatActorName(projectId, chatId);
         ChatSessionIIAR chatSessionIIAR = chatSessions.get(qualifiedName);
         String providerName = chatSessionIIAR.getName() + PROVIDER_SUFFIX;
@@ -1483,7 +1487,6 @@ public class ChatUiActorSystem implements ConversationControls {
      */
     @Override
     public boolean setModel(String projectId, String chatId, String model) {
-        createChat(projectId, chatId);
         ActorRef<LlmProvider> providerRef = getProviderRef(projectId, chatId);
         if (providerRef == null) return false;
         providerRef.tell(p -> p.setModel(model));
@@ -1511,7 +1514,6 @@ public class ChatUiActorSystem implements ConversationControls {
      * @return {@code false} when there is no such conversation
      */
     public boolean setNoThink(String projectId, String chatId, boolean value) {
-        createChat(projectId, chatId);
         ChatSessionIIAR session = chatSessions.get(chatActorName(projectId, chatId));
         if (session == null) return false;
         session.tell(a -> ((ChatSession) a).setNoThink(value)).join();
@@ -1525,7 +1527,6 @@ public class ChatUiActorSystem implements ConversationControls {
      * @return {@code false} when there is no such conversation
      */
     public boolean setEffort(String projectId, String chatId, String effort) {
-        createChat(projectId, chatId);
         ActorRef<LlmProvider> providerRef = getProviderRef(projectId, chatId);
         if (providerRef == null) return false;
         providerRef.tell(p -> p.setEffort(effort)).join();
@@ -1533,7 +1534,6 @@ public class ChatUiActorSystem implements ConversationControls {
     }
 
     public boolean setTemperature(String projectId, String chatId, Double temperature) {
-        createChat(projectId, chatId);
         ActorRef<LlmProvider> providerRef = getProviderRef(projectId, chatId);
         if (providerRef == null) return false;
         providerRef.tell(p -> p.setTemperature(temperature)).join();
@@ -1723,6 +1723,18 @@ public class ChatUiActorSystem implements ConversationControls {
      */
     public ActorRef<SseConnection> getSseConnection(String projectId, String chatId) {
         return actorSystem.getActor(chatActorName(projectId, chatId) + ".sse");
+    }
+
+    /**
+     * Whether the conversation exists. A request for one that does not is an error, never a reason
+     * to create it: a conversation is made only by {@link #createChat(String)} or
+     * {@link #createChat(String, String, String)}, which a caller asks for by name.
+     *
+     * @param projectId owning project's id
+     * @param chatId    conversation id within that project
+     */
+    public boolean hasChat(String projectId, String chatId) {
+        return chats.containsKey(chatActorName(projectId, chatId));
     }
 
     /**

@@ -20,6 +20,7 @@ import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.resteasy.reactive.RestSseElementType;
@@ -384,7 +385,7 @@ public class ChatResource {
     @Produces(MediaType.SERVER_SENT_EVENTS)
     @RestSseElementType(MediaType.TEXT_PLAIN)
     public Multi<String> stream(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
-        actorSystem.createChat(projectId, chatId);
+        requireChat(projectId, chatId);
         ActorRef<SseConnection> sseRef = actorSystem.getSseConnection(projectId, chatId);
         try {
             return sseRef.ask(SseConnection::openStream).get(5, TimeUnit.SECONDS);
@@ -429,7 +430,7 @@ public class ChatResource {
             return Response.status(400).entity(Map.of("type", "error", "message", "text is required")).build();
         }
 
-        actorSystem.createChat(projectId, chatId);
+        requireChat(projectId, chatId);
         ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
         ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(projectId, chatId);
         ActorRef<SseConnection> sseRef = actorSystem.getSseConnection(projectId, chatId);
@@ -492,7 +493,7 @@ public class ChatResource {
     @Path("/{projectId}/chats/{chatId}/conversation")
     @Produces(MediaType.APPLICATION_JSON)
     public List<ChatSession.HistoryEntry> conversation(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
-        actorSystem.createChat(projectId, chatId);
+        requireChat(projectId, chatId);
         ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
         return chatSessionIIAR.getHistorySnapshotDirect();
     }
@@ -514,7 +515,7 @@ public class ChatResource {
     @Produces(MediaType.APPLICATION_JSON)
     public Response clearConversation(@PathParam("projectId") String projectId,
                                       @PathParam("chatId") String chatId) {
-        actorSystem.createChat(projectId, chatId);
+        requireChat(projectId, chatId);
         ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
         try {
             chatSessionIIAR.tell(a -> ((ChatSession) a).clearHistory()).get(10, TimeUnit.SECONDS);
@@ -535,7 +536,7 @@ public class ChatResource {
     @Produces(MediaType.APPLICATION_JSON)
     public Response requestMessages(@PathParam("projectId") String projectId,
                                     @PathParam("chatId") String chatId) {
-        actorSystem.createChat(projectId, chatId);
+        requireChat(projectId, chatId);
         ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
         if (chatSessionIIAR.isBusyDirect()) {
             return Response.status(409).entity(Map.of("type", "error",
@@ -566,7 +567,7 @@ public class ChatResource {
     @Produces(MediaType.APPLICATION_JSON)
     public Response replaceRequestMessages(@PathParam("projectId") String projectId,
                                            @PathParam("chatId") String chatId, String body) {
-        actorSystem.createChat(projectId, chatId);
+        requireChat(projectId, chatId);
         ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
         if (chatSessionIIAR.isBusyDirect()) {
             return Response.status(409).entity(Map.of("type", "error",
@@ -600,7 +601,7 @@ public class ChatResource {
     @Produces(MediaType.APPLICATION_JSON)
     public Response completeMessages(@PathParam("projectId") String projectId,
                                      @PathParam("chatId") String chatId, String body) {
-        actorSystem.createChat(projectId, chatId);
+        requireChat(projectId, chatId);
         ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
         org.json.JSONObject in;
         try {
@@ -638,7 +639,7 @@ public class ChatResource {
     @Path("/{projectId}/chats/{chatId}/status")
     @Produces(MediaType.APPLICATION_JSON)
     public Map<String, Object> status(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
-        actorSystem.createChat(projectId, chatId);
+        requireChat(projectId, chatId);
         ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
         String model = chatSessionIIAR.getModelDirect();
         Double temperature = actorSystem.getTemperature(projectId, chatId);
@@ -772,6 +773,7 @@ public class ChatResource {
             return Response.status(400)
                     .entity(Map.of("type", "error", "message", "provider is required")).build();
         }
+        requireChat(projectId, chatId);
         Object toolsVal = body.get("tools");
         // The kind's own default when none is named: the factory says which tool set its first
         // dropdown entry carries (HarnessPrefaceAndToolSplit_260912_oo01).
@@ -836,7 +838,7 @@ public class ChatResource {
     @Path("/{projectId}/chats/{chatId}/queue")
     @Produces(MediaType.APPLICATION_JSON)
     public Map<String, Object> queue(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
-        actorSystem.createChat(projectId, chatId);
+        requireChat(projectId, chatId);
         ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(projectId, chatId);
         try {
             List<PromptQueue.QueueEntry> items = promptQueueRef.ask(PromptQueue::snapshot).get(5, TimeUnit.SECONDS);
@@ -887,7 +889,7 @@ public class ChatResource {
     @Produces(MediaType.APPLICATION_JSON)
     public Response removeSentItem(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId,
                                    @PathParam("index") int index) {
-        actorSystem.createChat(projectId, chatId);
+        requireChat(projectId, chatId);
         ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(projectId, chatId);
         try {
             boolean removed = promptQueueRef.ask(q -> q.removeSentAt(index)).get(5, TimeUnit.SECONDS);
@@ -991,7 +993,7 @@ public class ChatResource {
     @Path("/{projectId}/chats/{chatId}/models")
     @Produces(MediaType.APPLICATION_JSON)
     public List<LlmProvider.ModelEntry> models(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
-        actorSystem.createChat(projectId, chatId);
+        requireChat(projectId, chatId);
         ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
         try {
             return chatSessionIIAR.ask(interp -> ((ChatSession) interp).getAvailableModels()).get(5, TimeUnit.SECONDS);
@@ -1019,7 +1021,7 @@ public class ChatResource {
     @Path("/{projectId}/chats/{chatId}/workflows")
     @Produces(MediaType.APPLICATION_JSON)
     public List<WorkflowInfo> workflows(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
-        actorSystem.createChat(projectId, chatId);
+        requireChat(projectId, chatId);
         ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
         String agentLoopFile = chatSessionIIAR.getAgentLoopWorkflowFile();
         String promptFile;
@@ -1115,9 +1117,24 @@ public class ChatResource {
     }
 
     /**
-     * Creates the conversation if it does not already exist. Sending a prompt also creates it
-     * lazily, so this exists only for the "+ New Chat" button, which needs the (initially empty)
-     * conversation to appear in the list before any prompt is sent.
+     * Ends a request for a conversation that does not exist with 404. A conversation is made only
+     * by {@code POST .../chats} and {@code POST .../chats/{chatId}}: a request that merely names one
+     * must not create it, or a stale id kept by a browser, a script or a typo makes a new empty
+     * conversation and the caller never learns the one it meant is gone.
+     */
+    private void requireChat(String projectId, String chatId) {
+        if (!actorSystem.hasChat(projectId, chatId)) {
+            throw new WebApplicationException(Response.status(404).type(MediaType.APPLICATION_JSON)
+                    .entity(Map.of("type", "error", "message", "no such conversation: "
+                            + ChatUiActorSystem.chatActorName(projectId, chatId)
+                            + " (create one with POST /api/projects/" + projectId + "/chats)"))
+                    .build());
+        }
+    }
+
+    /**
+     * Creates the conversation with the id the caller names, or leaves it as it is when it exists.
+     * For a caller that needs a particular id; {@code POST .../chats} allocates one.
      *
      * @param projectId owning project's id
      * @param chatId    conversation id within that project
