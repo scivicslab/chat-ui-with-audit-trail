@@ -630,6 +630,16 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
     }
 
     /**
+     * Writes the items in a reply, one per line, into a bulleted or numbered list blank taken by {@code frameNext}.
+     * @param args {@code [fileKey, blankKey, replyKey]}
+     */
+    @Action("frameFillItems")
+    public ActionResult frameFillItems(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().frameFillItems(at(a, 0), at(a, 1), at(a, 2));
+    }
+
+    /**
      * Opens one sub-section of a book, to be made into a sample.
      * <pre>{@code
      * - actor: this
@@ -645,23 +655,48 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
     }
 
     /**
-     * Keeps the open sub-section's next question, and whether none is left.
+     * Keeps the next question of the open sub-section or sample, and whether none is left.
      * @param args {@code [questionKey, doneKey]}
      */
-    @Action("bookNext")
-    public ActionResult bookNext(String args) {
+    @Action("questionNext")
+    public ActionResult questionNext(String args) {
         org.json.JSONArray a = arguments(args);
-        return runner().bookNext(at(a, 0), at(a, 1));
+        return runner().questionNext(at(a, 0), at(a, 1));
     }
 
     /**
-     * Hands the writer's reply to the open sub-section.
+     * Hands the writer's reply to the open sub-section or sample.
      * @param args {@code [replyKey]}
      */
-    @Action("bookAnswer")
-    public ActionResult bookAnswer(String args) {
+    @Action("questionAnswer")
+    public ActionResult questionAnswer(String args) {
         org.json.JSONArray a = arguments(args);
-        return runner().bookAnswer(at(a, 0));
+        return runner().questionAnswer(at(a, 0));
+    }
+
+    /**
+     * Opens one sample, with its code files, to be made into a frame.
+     * <pre>{@code
+     * - actor: this
+     *   method: sampleOpen
+     *   arguments: ["samples", "name"]
+     * }</pre>
+     * @param args {@code [samplesKey, nameKey]}
+     */
+    @Action("sampleOpen")
+    public ActionResult sampleOpen(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().sampleOpen(at(a, 0), at(a, 1));
+    }
+
+    /**
+     * Writes the frame made from the open sample into a directory, never over a file already there.
+     * @param args {@code [dirKey, writtenKey]}
+     */
+    @Action("frameWrite")
+    public ActionResult frameWrite(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().frameWrite(at(a, 0), at(a, 1));
     }
 
     /**

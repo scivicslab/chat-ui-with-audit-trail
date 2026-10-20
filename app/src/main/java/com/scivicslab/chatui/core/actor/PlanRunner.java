@@ -1093,6 +1093,7 @@ public class PlanRunner extends Interpreter {
                     java.nio.file.Files.readString(real), real.toString(), heading.strip(),
                     name == null || name.isBlank() ? null : name.strip(),
                     com.scivicslab.turingworkflow.plugins.rstframe.SampleCatalog.entries(known));
+            questioner = book;
             return new ActionResult(true, "opened \"" + heading.strip() + "\" of " + real + ", against " + known.size() + " sample(s)");
         } catch (Exception e) {
             return new ActionResult(false, "could not open the sub-section: " + e.getMessage());
@@ -1100,24 +1101,84 @@ public class PlanRunner extends Interpreter {
     }
 
     /**
-     * Plan step: keeps the next question for the writer under {@code questionKey}, and under
-     * {@code doneKey} {@code "true"} when there is none left and {@code "false"} otherwise.
+     * Plan step: keeps the next question of the open work ({@code bookOpen} or {@code sampleOpen})
+     * for the writer under {@code questionKey}, and under {@code doneKey} {@code "true"} when there is
+     * none left and {@code "false"} otherwise.
      */
-    public ActionResult bookNext(String questionKey, String doneKey) {
-        if (book == null) return new ActionResult(false, "no book is open");
-        String q = book.nextQuestion();
+    public ActionResult questionNext(String questionKey, String doneKey) {
+        if (questioner == null) return new ActionResult(false, "nothing is open");
+        String q = questioner.nextQuestion();
         selfActorRef.putJson(questionKey, q == null ? "" : q);
         selfActorRef.putJson(doneKey, q == null ? "true" : "false");
         return new ActionResult(true, q == null ? "no question is left" : "a question of " + q.length() + " chars");
     }
 
-    /** Plan step: hands the writer's reply kept under {@code replyKey} to the open book. */
-    public ActionResult bookAnswer(String replyKey) {
-        if (book == null) return new ActionResult(false, "no book is open");
+    /** Plan step: hands the writer's reply kept under {@code replyKey} to the open work. */
+    public ActionResult questionAnswer(String replyKey) {
+        if (questioner == null) return new ActionResult(false, "nothing is open");
         String reply = kept(replyKey);
         if (reply == null) return new ActionResult(false, "nothing is kept as '" + replyKey + "'");
-        book.answer(reply);
+        questioner.answer(reply);
         return new ActionResult(true, "answered");
+    }
+
+    /**
+     * Plan step: opens the sample named under {@code nameKey} in the directory kept under
+     * {@code samplesKey}, with its code files ({@code <name>.<block>.txt}), to be made into a frame
+     * ({@code FramesAndSamplesFromBooks_261021_oo01}).
+     *
+     * @return {@link ActionResult} with {@code success=true} iff the sample could be read
+     */
+    public ActionResult sampleOpen(String samplesKey, String nameKey) {
+        String samples = kept(samplesKey);
+        String name = kept(nameKey);
+        if (samples == null || samples.isBlank() || name == null || name.isBlank()) {
+            return new ActionResult(false, "the samples' directory and the sample's name must be kept first");
+        }
+        if (fileScope == null) return new ActionResult(false, "this job may not read files");
+        try {
+            java.nio.file.Path dir = java.nio.file.Path.of(samples.strip()).toAbsolutePath().toRealPath();
+            java.nio.file.Path f = dir.resolve(name.strip() + ".lisp");
+            if (!fileScope.canRead(f)) return new ActionResult(false, "outside the readable range: " + f);
+            java.util.Map<String, String> code = new java.util.TreeMap<>();
+            String prefix = name.strip() + ".";
+            try (var files = java.nio.file.Files.list(dir)) {
+                for (java.nio.file.Path c : files.toList()) {
+                    String n = c.getFileName().toString();
+                    if (n.startsWith(prefix) && n.endsWith(".txt")) code.put(n, java.nio.file.Files.readString(c));
+                }
+            }
+            frame = new com.scivicslab.turingworkflow.plugins.rstframe.SampleToFrame(java.nio.file.Files.readString(f), name.strip(), code);
+            questioner = frame;
+            return new ActionResult(true, "opened " + f + " with " + code.size() + " code file(s)");
+        } catch (Exception e) {
+            return new ActionResult(false, "could not open the sample: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Plan step: writes the frame made from the open sample as {@code <name>.lisp} in the directory
+     * kept under {@code dirKey}, never over a file already there; the file's path is kept under
+     * {@code writtenKey}.
+     */
+    public ActionResult frameWrite(String dirKey, String writtenKey) {
+        if (frame == null) return new ActionResult(false, "no sample is open");
+        String dir = kept(dirKey);
+        if (dir == null || dir.isBlank()) return new ActionResult(false, "the frames' directory must be kept first");
+        if (fileScope == null) return new ActionResult(false, "this job may not write files");
+        try {
+            java.nio.file.Path d = java.nio.file.Path.of(dir.strip()).toAbsolutePath().normalize();
+            java.nio.file.Path f = d.resolve(frame.name() + ".lisp");
+            if (!fileScope.canWrite(f)) return new ActionResult(false, "outside the writable range: " + f);
+            if (java.nio.file.Files.exists(f)) return new ActionResult(false, f + " already exists; a frame is not overwritten");
+            java.nio.file.Files.createDirectories(d);
+            String text = frame.frameFile();
+            java.nio.file.Files.writeString(f, text.endsWith("\n") ? text : text + "\n");
+            selfActorRef.putJson(writtenKey, f.toString());
+            return new ActionResult(true, "wrote " + f);
+        } catch (Exception e) {
+            return new ActionResult(false, "could not write the frame: " + e.getMessage());
+        }
     }
 
     /**
@@ -1174,6 +1235,12 @@ public class PlanRunner extends Interpreter {
     /** The sub-section being made into a sample by this job, or {@code null} when none is open. */
     private com.scivicslab.turingworkflow.plugins.rstframe.BookToRules book;
 
+    /** The sample being made into a frame by this job, or {@code null} when none is open. */
+    private com.scivicslab.turingworkflow.plugins.rstframe.SampleToFrame frame;
+
+    /** Whichever of {@link #book} and {@link #frame} was opened last: the one the questions come from. */
+    private com.scivicslab.turingworkflow.plugins.rstframe.Questioner questioner;
+
     private final com.scivicslab.turingworkflow.plugins.rstframe.FrameFiller frameFiller = new com.scivicslab.turingworkflow.plugins.rstframe.FrameFiller();
 
     private String kept(String key) {
@@ -1183,7 +1250,8 @@ public class PlanRunner extends Interpreter {
     /**
      * Plan step: takes the next blank of the rule file kept under {@code fileKey} and puts what is
      * known about it into this plan's state, as {@code <blankKey>-name}, {@code -instruction},
-     * {@code -sample}, {@code -frame} and {@code -kind} ({@code frame} or {@code sentence}).
+     * {@code -sample}, {@code -frame} and {@code -kind} ({@code frame}, {@code code}, {@code items} or
+     * {@code sentence}).
      *
      * @return {@link ActionResult} with {@code success=true} iff a blank was left
      */
@@ -1197,7 +1265,7 @@ public class PlanRunner extends Interpreter {
         selfActorRef.putJson(blankKey + "-sample", b.sample());
         selfActorRef.putJson(blankKey + "-frame", b.frame());
         selfActorRef.putJson(blankKey + "-code-kind", b.kind());
-        selfActorRef.putJson(blankKey + "-kind", b.isFrame() ? "frame" : b.isCode() ? "code" : "sentence");
+        selfActorRef.putJson(blankKey + "-kind", b.isFrame() ? "frame" : b.isCode() ? "code" : b.isList() ? "items" : "sentence");
         return new ActionResult(true, "next blank: " + b.name());
     }
 
@@ -1274,6 +1342,8 @@ public class PlanRunner extends Interpreter {
             prompt = frameFiller.listPrompt(blank, subject, max, lang);
         } else if (blank.isCode()) {
             prompt = frameFiller.codePrompt(file, blank, subject);
+        } else if (blank.isList()) {
+            prompt = frameFiller.itemsPrompt(file, blank, subject, lang);
         } else {
             String names = kept(namesKey);
             prompt = frameFiller.sentencePrompt(file, blank, subject,
@@ -1299,6 +1369,28 @@ public class PlanRunner extends Interpreter {
         try {
             selfActorRef.putJson(fileKey, frameFiller.fill(file, name, reply));
             return new ActionResult(true, "filled " + name);
+        } catch (IllegalArgumentException e) {
+            return new ActionResult(false, e.getMessage());
+        }
+    }
+
+    /**
+     * Plan step: writes the items in a reply, one per line, into the bulleted or numbered list blank
+     * taken by {@code frameNext}, in the rule file kept under {@code fileKey}, which is replaced by the result.
+     *
+     * @return {@link ActionResult} with {@code success=true} iff the reply held items and the blank was filled
+     */
+    public ActionResult frameFillItems(String fileKey, String blankKey, String replyKey) {
+        String file = kept(fileKey);
+        String reply = kept(replyKey);
+        String name = kept(blankKey + "-name");
+        if (file == null || reply == null || name == null) {
+            return new ActionResult(false, "the rule file, a reply and a blank must all be kept first");
+        }
+        List<String> items = frameFiller.parseItems(reply);
+        try {
+            selfActorRef.putJson(fileKey, frameFiller.fillList(file, name, items));
+            return new ActionResult(true, "filled " + name + " with " + items.size() + " item(s)");
         } catch (IllegalArgumentException e) {
             return new ActionResult(false, e.getMessage());
         }

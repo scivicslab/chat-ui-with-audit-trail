@@ -3,7 +3,8 @@ description: |
   Fills a frame with a writer conversation, one blank at a time (WorkflowFromFrame_261020_oo01).
   The request is a rule file whose rules carry :instruction (what to write) and, where it helps,
   :sample (a model sentence from another document). A blank that also carries :kind code-block is
-  answered with code alone, which is kept in a file beside `out` and shown as a code block. A rule
+  answered with code alone, which is kept in a file beside `out` and shown as a code block. A blank
+  that carries :kind bullet or :kind number is answered with the items, one per line. A rule
   that also carries :frame "file.lisp"
   is a list: the writer names the items, each item gets a copy of that sub-frame's rules, and the
   copies' blanks are filled in turn. Each blank is one question to the writer, and the question
@@ -190,6 +191,23 @@ steps:
       - actor: this
         method: writeFile
         arguments: ['jexl:state.getString("code-path")', "code-text"]
+        execution: direct
+
+  - states: ["keep", "pick"]
+    label: write-the-items
+    note: A bulleted or numbered list blank (:kind bullet or number). Each line of the reply becomes one item.
+    actions:
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("blank-kind") == "items"'
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["writer", "reply"]
+        execution: direct
+      - actor: this
+        method: frameFillItems
+        arguments: ["cur", "blank", "reply"]
         execution: direct
 
   - states: ["keep", "pick"]

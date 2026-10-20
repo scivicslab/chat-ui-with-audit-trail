@@ -44,7 +44,7 @@ class FillFrameTest {
             (defrule document -> title sections)
             (defrule title -> "Squares")
             (defrule sections -> s1)
-            (defrule s1 -> p-whole concepts p-run :heading "## A Simple Squares Program")
+            (defrule s1 -> p-whole concepts p-run rules :heading "## A Simple Squares Program")
             (defrule p-whole -> :nucleus p-whole/n :example p-whole/code)
             (defrule p-whole/n -> :instruction "Say in 1 or 2 sentences what the program does")
             (defrule p-whole/code -> :file "Squares.java" :kind code-block)
@@ -52,6 +52,7 @@ class FillFrameTest {
             (defrule p-run -> :nucleus p-run/n :example p-run/code)
             (defrule p-run/n -> :instruction "Introduce the command that runs the program")
             (defrule p-run/code -> :instruction "Show that command" :kind code-block)
+            (defrule rules -> :instruction "List the rules the program keeps" :sample "Declare main. / Use println" :kind bullet)
             """;
 
     private static final String FRAME = """
@@ -79,6 +80,7 @@ class FillFrameTest {
             questions.add(prompt);
             String reply = prompt.contains("List the items") ? listReply
                     : prompt.contains("only the code") ? "```\njava Squares.java\n```"
+                    : prompt.contains("only the list's items") ? "- Name the class after the file\n- Print each square"
                     : "Sentence number " + questions.size() + ".";
             emitter.accept(ChatEvent.delta(reply));
             emitter.accept(ChatEvent.result(null, 0, 0));
@@ -157,11 +159,13 @@ class FillFrameTest {
         assertFalse(filled.contains(":instruction"), filled);
         assertTrue(filled.contains("(defrule concepts -> concepts/1 concepts/2 :heading \"### Concepts\")"), filled);
 
-        // 1 whole-document sentence, 1 list, 2 items x 2 leaves, then the run paragraph's sentence and code
-        assertEquals(8, writer.questions.size(), writer.questions.toString());
+        // 1 whole-document sentence, 1 list, 2 items x 2 leaves, the run paragraph's sentence and code, then the bullets
+        assertEquals(9, writer.questions.size(), writer.questions.toString());
         assertTrue(writer.questions.get(7).contains("Sentence number 7."), "the code blank sees its paragraph: " + writer.questions.get(7));
         assertTrue(filled.contains("(defrule p-run/code -> :file \"p-run_code.txt\" :kind code-block)"), filled);
         assertEquals("java Squares.java\n", Files.readString(dir.resolve("p-run_code.txt")));
+        assertTrue(filled.contains("(defrule rules -> rules/1 rules/2 :kind bullet)"), filled);
+        assertTrue(filled.contains("(defrule rules/2 -> \"Print each square\")"), filled);
         assertTrue(writer.questions.get(0).startsWith("Below is the material that is about to be introduced"), writer.questions.get(0));
         assertTrue(writer.questions.get(1).contains("List the items"), writer.questions.get(1));
         assertTrue(writer.questions.get(2).contains("The item: \"ArrayList\""), writer.questions.get(2));

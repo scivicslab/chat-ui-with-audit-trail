@@ -1,0 +1,149 @@
+name: make-frame
+description: |
+  Makes a frame from one sample (FramesAndSamplesFromBooks_261021_oo01). For each block of the
+  sample the writer is asked one question: what each of its sentences does for the reader, as an
+  instruction that would hold for another subject. Each sentence of the sample becomes a blank with
+  that instruction and the sample sentence; a code block becomes a code blank with an instruction.
+  The frame is written as <frames>/<name>.lisp, never over a file already there. The writer is put
+  on plain-text-no-context-loop.yaml, so each question is sent alone.
+params:
+  name:
+    label: "The sample's name"
+    description: "The sample's file name without .lisp, e.g. dissect-code-syntax-mechanics"
+    type: text
+    required: true
+  samples:
+    description: "The directory the samples are kept in"
+    default: "/home/devteam/works/rst-on-lisp/samples"
+  frames:
+    description: "The directory the frames are kept in"
+    default: "/home/devteam/works/rst-on-lisp/frames"
+  writer:
+    description: "The conversation that answers the questions"
+    default: "project1/chat-02"
+  writerModel:
+    description: "The model the writer runs on; empty leaves the conversation as it is"
+    default: ""
+  writerNoThink:
+    description: "true asks the writer's model to skip its thinking phase"
+    default: "true"
+  maxQuestions:
+    description: "How many questions one run asks at most; the run fails past it"
+    type: int
+    default: 100
+steps:
+  - states: ["0", "1"]
+    label: add-writer
+    note: The writer is a conversation with no history of its own from before, on the loop that sends each question alone.
+    actions:
+      - actor: this
+        method: addWorker
+        arguments: ["writer", 'jexl:state.getString("writer")']
+        execution: direct
+      - actor: this
+        method: setChatAgentLoop
+        arguments: ['jexl:state.getString("writer")', "plain-text-no-context-loop.yaml"]
+        execution: direct
+      - actor: this
+        method: setChatModel
+        arguments: ['jexl:state.getString("writer")', 'jexl:state.getString("writerModel")']
+        execution: direct
+      - actor: this
+        method: setChatNoThink
+        arguments: ['jexl:state.getString("writer")', 'jexl:state.getString("writerNoThink")']
+        execution: direct
+      - actor: this
+        method: clearWorker
+        arguments: ["writer"]
+        execution: direct
+
+  - states: ["1", "next"]
+    label: open-the-sample
+    actions:
+      - actor: this
+        method: putJson
+        arguments: {path: asked, value: "0"}
+        execution: direct
+      - actor: this
+        method: sampleOpen
+        arguments: ["samples", "name"]
+        execution: direct
+
+  - states: ["1", "failed"]
+    label: no-such-sample
+    actions: [{actor: this, method: doNothing, arguments: ["the sample could not be read"], execution: direct}]
+
+  - states: ["next", "decide"]
+    label: take-the-next-question
+    actions:
+      - actor: this
+        method: questionNext
+        arguments: ["question", "done"]
+        execution: direct
+
+  - states: ["decide", "write"]
+    label: no-question-left
+    actions:
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("done") == "true"'
+        execution: direct
+
+  - states: ["decide", "ask"]
+    label: a-question-is-left
+    note: countUp bounds the run.
+    actions:
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("done") == "false"'
+        execution: direct
+      - actor: this
+        method: countUp
+        arguments: ["asked", 'jexl:state.getString("maxQuestions")']
+        execution: direct
+
+  - states: ["decide", "failed"]
+    label: too-many-questions
+    actions: [{actor: this, method: doNothing, arguments: ["maxQuestions was passed"], execution: direct}]
+
+  - states: ["ask", "next"]
+    label: ask-the-writer
+    actions:
+      - actor: this
+        method: askWorker
+        arguments:
+          - writer
+          - 'jexl:state.getString("question")'
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["writer", "reply"]
+        execution: direct
+      - actor: this
+        method: questionAnswer
+        arguments: ["reply"]
+        execution: direct
+
+  - states: ["ask", "failed"]
+    label: writer-gave-no-answer
+    actions: [{actor: this, method: doNothing, arguments: ["the writer gave no answer"], execution: direct}]
+
+  - states: ["write", "end"]
+    label: write-the-frame
+    actions:
+      - actor: this
+        method: frameWrite
+        arguments: ["frames", "written"]
+        execution: direct
+      - actor: this
+        method: finish
+        arguments: ["written"]
+        execution: direct
+
+  - states: ["write", "failed"]
+    label: could-not-write
+    actions: [{actor: this, method: doNothing, arguments: ["the frame could not be written, or one of that name is already there"], execution: direct}]
+
+  - states: ["failed", "end"]
+    label: report-failure
+    actions: [{actor: this, method: reportFailure, arguments: [], execution: direct}]

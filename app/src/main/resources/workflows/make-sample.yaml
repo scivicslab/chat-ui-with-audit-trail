@@ -86,7 +86,7 @@ steps:
     label: take-the-next-question
     actions:
       - actor: this
-        method: bookNext
+        method: questionNext
         arguments: ["question", "done"]
         execution: direct
 
@@ -129,7 +129,7 @@ steps:
         arguments: ["writer", "reply"]
         execution: direct
       - actor: this
-        method: bookAnswer
+        method: questionAnswer
         arguments: ["reply"]
         execution: direct
 
