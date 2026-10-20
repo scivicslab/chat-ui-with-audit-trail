@@ -33,7 +33,7 @@ class WorkflowKindTest {
                 "prompt-construction-doc-retrieval")) {
             assertEquals(WorkflowKind.PROMPT_CONSTRUCTION, kindOfBundled(construction), construction);
         }
-        for (String job : List.of("fill-frame", "polish", "rst-agent-loop", "research")) {
+        for (String job : List.of("fill-frame", "polish", "research")) {
             assertEquals(WorkflowKind.JOB, kindOfBundled(job), job);
         }
     }

@@ -18,7 +18,7 @@ import java.util.regex.Pattern;
  * blank</em> is filled with one piece of text.</p>
  *
  * <p>Every method takes and returns text; none keeps state, so the workflow that calls them
- * (through the plan runner) holds the rule file in its own state, as {@code rst-agent-loop} does.</p>
+ * (through the plan runner) holds the rule file in its own state.</p>
  */
 public final class FrameFiller {
 

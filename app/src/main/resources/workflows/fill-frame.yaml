@@ -103,8 +103,7 @@ steps:
     label: no-blank-left
     note: |
       Reached only when no rule carries an :instruction any more. The file is searched for the
-      marker, the same way rst-agent-loop does, so a run that stopped for another reason is not
-      installed as if it were finished.
+      marker, so a run that stopped for another reason is not installed as if it were finished.
     actions:
       - actor: this
         method: onlyIf
