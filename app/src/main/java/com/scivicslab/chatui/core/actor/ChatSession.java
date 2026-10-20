@@ -914,6 +914,23 @@ public class ChatSession extends Interpreter {
     }
 
     /** Looks up the {@code provider} child's ActorRef by name, on demand — not stored as a field. */
+    /**
+     * Runs {@code call} on the provider's own actor and waits for it. The request messages live in
+     * the provider, and the end of a turn changes them by messages told to that actor; reading or
+     * changing them from this actor's thread directly would race with those
+     * ({@code AgentLoopDecidesThePrompt_261020_oo01}). Without a provider actor (a provider used
+     * on its own), the provider is called directly.
+     */
+    private <R> R onProvider(java.util.function.Function<LlmProvider, R> call) {
+        ActorRef<LlmProvider> ref = system == null || providerName == null ? null : providerRef();
+        if (ref == null) return call.apply(provider);
+        try {
+            return ref.ask(call::apply).get(30, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            throw new IllegalStateException("the provider did not answer: " + e.getMessage(), e);
+        }
+    }
+
     private ActorRef<LlmProvider> providerRef() {
         return system.getActor(providerName);
     }
@@ -2619,7 +2636,7 @@ public class ChatSession extends Interpreter {
     public void clearHistory() {
         conversationHistory.clear();
         historySnapshot.set(List.of());
-        provider.clearHistory();
+        onProvider(p -> { p.clearHistory(); return null; });
         // New conversation: end the current I/O-log session and renumber turns from 1.
         if (ioLog != null) ioLog.resetSession(myChatName());
         ioTurn = 0;
@@ -2627,7 +2644,7 @@ public class ChatSession extends Interpreter {
 
     /** @return the array the next request is built from, as JSON, or {@code null} if the provider keeps none */
     public String requestMessagesJson() {
-        return provider.requestMessagesJson();
+        return onProvider(LlmProvider::requestMessagesJson);
     }
 
     /**
@@ -2639,7 +2656,7 @@ public class ChatSession extends Interpreter {
      */
     public String replaceRequestMessages(String json) {
         if (busy) return "busy: the conversation is answering; try again when it has finished";
-        String refused = provider.replaceRequestMessages(json);
+        String refused = onProvider(p -> p.replaceRequestMessages(json));
         if (refused == null) {
             recordHistory("system", "The request history was replaced from outside.");
         }
