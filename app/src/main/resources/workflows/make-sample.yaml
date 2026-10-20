@@ -1,12 +1,14 @@
 name: make-sample
 description: |
-  Makes one sample from one sub-section of a book (FramesAndSamplesFromBooks_261021_oo01): the
-  sub-section's sentences, with OCR misreadings corrected, as an rst-on-lisp rule file in which every
-  sentence is the nucleus of its paragraph or related to it by a named relation. The sample is
-  written as <samples>/<name>.lisp; a frame made from it later shares the name.
-  For each paragraph the writer is asked two questions: its OCR misreadings, then how its sentences
-  relate. Last it is asked in one sentence what the sub-section does for its reader. The writer is
-  put on plain-text-no-context-loop.yaml, so each question is sent alone.
+  Reads one sub-section of a book and keeps it only when its structure is new
+  (FramesAndSamplesFromBooks_261021_oo01). The sub-section's sentences, with OCR misreadings
+  corrected, become an rst-on-lisp rule file in which every sentence is the nucleus of its paragraph
+  or related to it by a named relation. For each paragraph the writer is asked two questions: its
+  OCR misreadings, then how its sentences relate. Then it is asked what the sub-section does for its
+  reader, and whether that structure is one of the samples already in `samples` (shown the nearest
+  in shape). A new reusable structure is written as <samples>/<name>.lisp; the same structure adds
+  one also-seen line to that sample; a one-off leaves nothing. The writer is put on
+  plain-text-no-context-loop.yaml, so each question is sent alone.
 params:
   book:
     label: "The book's markdown file"
@@ -20,9 +22,8 @@ params:
     required: true
   name:
     label: "The sample's name"
-    description: "What the sub-section does, lower-case words joined by '-', e.g. explain-program-by-whole-example"
-    type: text
-    required: true
+    description: "What the sub-section does, lower-case words joined by '-', e.g. explain-program-by-whole-example; empty lets the writer name a new structure"
+    default: ""
   samples:
     description: "The directory the samples are kept in"
     default: "/home/devteam/works/rst-on-lisp/samples"
@@ -74,7 +75,7 @@ steps:
         execution: direct
       - actor: this
         method: bookOpen
-        arguments: ["book", "heading", "name"]
+        arguments: ["book", "heading", "name", "samples"]
         execution: direct
 
   - states: ["1", "failed"]
@@ -137,16 +138,16 @@ steps:
     actions: [{actor: this, method: doNothing, arguments: ["the writer gave no answer"], execution: direct}]
 
   - states: ["write", "end"]
-    label: write-the-sample
-    note: Refused when a sample of that name is already there; the earlier one is not overwritten.
+    label: act-on-the-judgement
+    note: A new structure is written (never over a file already there), the same one gets an also-seen line, a one-off leaves nothing.
     actions:
       - actor: this
         method: bookWrite
-        arguments: ["samples", "name"]
+        arguments: ["samples", "outcome"]
         execution: direct
       - actor: this
         method: finish
-        arguments: ["name"]
+        arguments: ["outcome"]
         execution: direct
 
   - states: ["write", "failed"]

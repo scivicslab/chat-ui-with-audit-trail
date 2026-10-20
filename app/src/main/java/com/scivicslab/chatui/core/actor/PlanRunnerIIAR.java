@@ -634,14 +634,14 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
      * <pre>{@code
      * - actor: this
      *   method: bookOpen
-     *   arguments: ["book", "heading", "name"]
+     *   arguments: ["book", "heading", "name", "samples"]
      * }</pre>
-     * @param args {@code [fileKey, headingKey, nameKey]}
+     * @param args {@code [fileKey, headingKey, nameKey, samplesKey]}
      */
     @Action("bookOpen")
     public ActionResult bookOpen(String args) {
         org.json.JSONArray a = arguments(args);
-        return runner().bookOpen(at(a, 0), at(a, 1), at(a, 2));
+        return runner().bookOpen(at(a, 0), at(a, 1), at(a, 2), at(a, 3));
     }
 
     /**
@@ -665,8 +665,8 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
     }
 
     /**
-     * Writes the sample and its code blocks' files into the samples' directory.
-     * @param args {@code [dirKey, nameKey]}
+     * Acts on the judgement: writes a new sample, adds an also-seen line to the same one, or leaves nothing.
+     * @param args {@code [dirKey, outcomeKey]}
      */
     @Action("bookWrite")
     public ActionResult bookWrite(String args) {

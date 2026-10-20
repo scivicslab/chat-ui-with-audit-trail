@@ -1058,28 +1058,42 @@ public class PlanRunner extends Interpreter {
     // ---- Frame steps (WorkflowFromFrame_261020_oo01): thin; FrameFiller does the work on text ----
 
     /**
-     * Plan step: opens one sub-section of a book, to be made into the sample named {@code nameKey}'s
-     * value ({@code FramesAndSamplesFromBooks_261021_oo01}).
+     * Plan step: opens one sub-section of a book, to be judged against the samples in the directory
+     * kept under {@code samplesKey} and made into a new sample when its structure is new
+     * ({@code FramesAndSamplesFromBooks_261021_oo01}).
      *
      * @param fileKey    where the path of the book's markdown file is kept
      * @param headingKey where the sub-section's title is kept, as the file writes it
-     * @param nameKey    where the sample's name is kept, e.g. {@code explain-program-by-whole-example}
+     * @param nameKey    where the sample's name is kept; blank lets the writer name a new structure
+     * @param samplesKey where the samples' directory is kept
      * @return {@link ActionResult} with {@code success=true} iff the file could be read and has that heading
      */
-    public ActionResult bookOpen(String fileKey, String headingKey, String nameKey) {
+    public ActionResult bookOpen(String fileKey, String headingKey, String nameKey, String samplesKey) {
         String path = kept(fileKey);
         String heading = kept(headingKey);
         String name = kept(nameKey);
-        if (path == null || path.isBlank() || heading == null || heading.isBlank() || name == null || name.isBlank()) {
-            return new ActionResult(false, "the book's file, the sub-section's heading and the sample's name must be kept first");
+        String samples = kept(samplesKey);
+        if (path == null || path.isBlank() || heading == null || heading.isBlank() || samples == null || samples.isBlank()) {
+            return new ActionResult(false, "the book's file, the sub-section's heading and the samples' directory must be kept first");
         }
         if (fileScope == null) return new ActionResult(false, "this job may not read files");
         try {
             java.nio.file.Path real = java.nio.file.Path.of(path.strip()).toAbsolutePath().toRealPath();
             if (!fileScope.canRead(real)) return new ActionResult(false, "outside the readable range: " + real);
+            java.util.Map<String, String> known = new java.util.TreeMap<>();
+            java.nio.file.Path dir = java.nio.file.Path.of(samples.strip()).toAbsolutePath().normalize();
+            if (java.nio.file.Files.isDirectory(dir)) {
+                try (var files = java.nio.file.Files.list(dir)) {
+                    for (java.nio.file.Path f : files.filter(f -> f.toString().endsWith(".lisp")).toList()) {
+                        known.put(f.getFileName().toString().replaceFirst("\\.lisp$", ""), java.nio.file.Files.readString(f));
+                    }
+                }
+            }
             book = new com.scivicslab.turingworkflow.plugins.rstframe.BookToRules(
-                    java.nio.file.Files.readString(real), real.toString(), heading.strip(), name.strip());
-            return new ActionResult(true, "opened \"" + heading.strip() + "\" of " + real);
+                    java.nio.file.Files.readString(real), real.toString(), heading.strip(),
+                    name == null || name.isBlank() ? null : name.strip(),
+                    com.scivicslab.turingworkflow.plugins.rstframe.SampleCatalog.entries(known));
+            return new ActionResult(true, "opened \"" + heading.strip() + "\" of " + real + ", against " + known.size() + " sample(s)");
         } catch (Exception e) {
             return new ActionResult(false, "could not open the sub-section: " + e.getMessage());
         }
@@ -1107,32 +1121,51 @@ public class PlanRunner extends Interpreter {
     }
 
     /**
-     * Plan step: writes the sample as {@code <name>.lisp}, and its code blocks' files, into the
-     * directory kept under {@code dirKey}. A sample of that name already there is not overwritten.
+     * Plan step: acts on the judgement of the open sub-section, in the samples' directory kept under
+     * {@code dirKey}: a new structure is written as {@code <name>.lisp} with its code blocks' files
+     * (never over a file already there); the same structure as a sample adds one also-seen line to
+     * it; a structure not worth keeping leaves nothing. What was done is kept under
+     * {@code outcomeKey}, e.g. {@code new explain-term-from-code}.
      */
-    public ActionResult bookWrite(String dirKey, String nameKey) {
+    public ActionResult bookWrite(String dirKey, String outcomeKey) {
         if (book == null) return new ActionResult(false, "no book is open");
+        if (book.outcome() == null) return new ActionResult(false, "the sub-section has not been judged yet");
         String dir = kept(dirKey);
-        String name = kept(nameKey);
-        if (dir == null || dir.isBlank() || name == null || name.isBlank()) {
-            return new ActionResult(false, "the samples' directory and the sample's name must be kept first");
-        }
+        if (dir == null || dir.isBlank()) return new ActionResult(false, "the samples' directory must be kept first");
         if (fileScope == null) return new ActionResult(false, "this job may not write files");
         try {
             java.nio.file.Path d = java.nio.file.Path.of(dir.strip()).toAbsolutePath().normalize();
-            java.util.Map<java.nio.file.Path, String> out = new java.util.LinkedHashMap<>();
-            out.put(d.resolve(name.strip() + ".lisp"), book.sampleFile());
-            for (java.util.Map.Entry<String, String> e : book.codeFiles().entrySet()) out.put(d.resolve(e.getKey()), e.getValue());
-            for (java.nio.file.Path f : out.keySet()) {
-                if (!fileScope.canWrite(f)) return new ActionResult(false, "outside the writable range: " + f);
-                if (java.nio.file.Files.exists(f)) return new ActionResult(false, f + " already exists; a sample is not overwritten");
+            switch (book.outcome()) {
+                case SKIP -> {
+                    selfActorRef.putJson(outcomeKey, "skip: " + book.outcomeNote());
+                    return new ActionResult(true, "nothing written: " + book.outcomeNote());
+                }
+                case SAME -> {
+                    java.nio.file.Path f = d.resolve(book.outcomeName() + ".lisp");
+                    if (!fileScope.canWrite(f)) return new ActionResult(false, "outside the writable range: " + f);
+                    java.nio.file.Files.writeString(f, com.scivicslab.turingworkflow.plugins.rstframe.SampleCatalog
+                            .withAlsoSeen(java.nio.file.Files.readString(f), book.alsoSeen()));
+                    selfActorRef.putJson(outcomeKey, "same " + book.outcomeName());
+                    return new ActionResult(true, "added an also-seen line to " + f);
+                }
+                default -> {
+                    java.util.Map<java.nio.file.Path, String> out = new java.util.LinkedHashMap<>();
+                    out.put(d.resolve(book.outcomeName() + ".lisp"), book.sampleFile());
+                    for (java.util.Map.Entry<String, String> e : book.codeFiles().entrySet()) out.put(d.resolve(e.getKey()), e.getValue());
+                    for (java.nio.file.Path f : out.keySet()) {
+                        if (!fileScope.canWrite(f)) return new ActionResult(false, "outside the writable range: " + f);
+                        if (java.nio.file.Files.exists(f)) return new ActionResult(false, f + " already exists; a sample is not overwritten");
+                    }
+                    java.nio.file.Files.createDirectories(d);
+                    for (java.util.Map.Entry<java.nio.file.Path, String> e : out.entrySet()) {
+                        String text = e.getValue().endsWith("\n") ? e.getValue() : e.getValue() + "\n";
+                        java.nio.file.Files.writeString(e.getKey(), text);
+                    }
+                    selfActorRef.putJson(outcomeKey, "new " + book.outcomeName());
+                    return new ActionResult(true, "wrote " + d.resolve(book.outcomeName() + ".lisp") + " and "
+                            + book.codeFiles().size() + " code file(s)");
+                }
             }
-            java.nio.file.Files.createDirectories(d);
-            for (java.util.Map.Entry<java.nio.file.Path, String> e : out.entrySet()) {
-                String text = e.getValue().endsWith("\n") ? e.getValue() : e.getValue() + "\n";
-                java.nio.file.Files.writeString(e.getKey(), text);
-            }
-            return new ActionResult(true, "wrote " + d.resolve(name.strip() + ".lisp") + " and " + book.codeFiles().size() + " code file(s)");
         } catch (Exception e) {
             return new ActionResult(false, "could not write the sample: " + e.getMessage());
         }

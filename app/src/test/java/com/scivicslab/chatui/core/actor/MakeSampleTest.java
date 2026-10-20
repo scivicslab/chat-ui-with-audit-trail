@@ -58,6 +58,7 @@ class MakeSampleTest {
     /** Answers by what it is asked; remembers every question exactly as it arrived. */
     private static final class FakeWriter implements LlmProvider {
         final List<String> questions = new ArrayList<>();
+        String judgement = "new: explain-program-by-whole-example";
 
         @Override public String id() { return "fake"; }
         @Override public String displayName() { return "Fake"; }
@@ -70,7 +71,9 @@ class MakeSampleTest {
         public void sendPrompt(String prompt, String model, Consumer<ChatEvent> emitter, ProviderContext ctx) {
             questions.add(prompt);
             String reply;
-            if (prompt.contains("misread")) {
+            if (prompt.contains("same structure")) {
+                reply = judgement;
+            } else if (prompt.contains("misread")) {
                 reply = "The program declares a method called main. The term \"method\" is Java-speak for a function.";
             } else if (prompt.contains("In one sentence")) {
                 reply = "Shows a short program whole, then defines what it uses.";
@@ -145,7 +148,7 @@ class MakeSampleTest {
     void theSubsectionBecomesASampleFile() throws Exception {
         String outcome = run();
 
-        assertEquals("explain-program-by-whole-example", outcome, "questions so far: " + writer.questions);
+        assertEquals("new explain-program-by-whole-example", outcome, "questions so far: " + writer.questions);
         assertEquals(3, writer.questions.size(), writer.questions.toString());
         Path sample = dir.resolve("samples/explain-program-by-whole-example.lisp");
         String file = Files.readString(sample);
@@ -166,5 +169,21 @@ class MakeSampleTest {
 
         assertTrue(outcome.startsWith("(plan"), outcome);
         assertEquals("keep me\n", Files.readString(dir.resolve("samples/explain-program-by-whole-example.lisp")));
+    }
+
+    @Test
+    @DisplayName("既にあるお手本と同じ構造と判定されれば、お手本は書かず、そのお手本に also-seen を 1 行足す")
+    void theSameStructureAddsOneLine() throws Exception {
+        Files.createDirectories(dir.resolve("samples"));
+        String known = ";;; use: Shows a program whole, then defines.\n;;; source: /b/p001.md / 3.1\n;;; shape: nucleus+definition → code\n(in-package :rst)\n";
+        Files.writeString(dir.resolve("samples/explain-program-by-whole-example.lisp"), known);
+        writer.judgement = "same: explain-program-by-whole-example";
+
+        String outcome = run();
+
+        assertEquals("same explain-program-by-whole-example", outcome, writer.questions.toString());
+        String after = Files.readString(dir.resolve("samples/explain-program-by-whole-example.lisp"));
+        assertTrue(after.contains(";;; also-seen: " + dir.resolve("book.md").toRealPath() + " / 3.1. A Simple Java Program\n(in-package"), after);
+        assertFalse(Files.exists(dir.resolve("samples/explain-program-by-whole-example.b2.txt")));
     }
 }
