@@ -51,9 +51,16 @@ class ArtexProxyLoggingTest {
         system.ioLogStore.store().close();
     }
 
-    /** The log's writer runs on a thread of its own; waits for a write to land before reading. */
+    /**
+     * The log's writer runs on a thread of its own; waits for a write to land before reading.
+     *
+     * <p>A write is normally readable within tens of milliseconds (measured: 0 to 53 ms over four
+     * runs started right after a clean build). A run that fails has gone the whole wait without one,
+     * three tests in a row, so the wait must cover a stall of the machine, not the usual latency;
+     * a passing run returns as soon as the entry is there, so the longer limit costs nothing then.</p>
+     */
     private List<LogEntry> entriesOf(long sessionId, int expected) {
-        long until = System.currentTimeMillis() + 5_000;
+        long until = System.currentTimeMillis() + 30_000;
         List<LogEntry> entries = List.of();
         while (System.currentTimeMillis() < until) {
             entries = system.ioLogStore.store().getLogsByLevel(sessionId, LogLevel.DEBUG);
