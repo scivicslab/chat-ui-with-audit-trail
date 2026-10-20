@@ -228,7 +228,7 @@ REST には作成 `POST /{projectId}/chats`（id は actor system が採番し `
 - [x] A. 選べるエージェントループの一覧（`AgentLoopCatalog`、Agent Loop タブに「Agent loop:」の選択肢。ブラウザでの動作確認は w206-e2e-test のシナリオで別に足す）: `GET .../chats/{c}/agent-loops`（名前・題・説明・指定しているプロンプト構築・今のループか）。
       選ぶ操作は既存の `POST .../agent-loop-workflow` のまま（ベンチマークが使うため名前を変えない）。
       `.../workflows` は「この会話が今使っているワークフローを読む画面」専用で、名前はそのまま。画面（Agent Loop タブ）に選択肢を足す
-- [ ] B. 引く操作が作らない: `IoLogStore.ensureSession`/`ensureJobSession` を、引くもの（作らない）と作るものに分ける。
+- [x] B. 引く操作が作らない（`IoLogStore.sessionIdOf`/`jobSessionIdOf` を足し、引くだけのテストを替えた。`ensure*` は「開く」書き込みとして残す。`hasChat` は登録簿に問い合わせる）。元の記述: `IoLogStore.ensureSession`/`ensureJobSession` を、引くもの（作らない）と作るものに分ける。
       `ChatUiActorSystem.hasChat` は、アプリ側の `chats` ではなく `ActorSystem` の登録簿に問い合わせる
 - [ ] C. `H2LogStore` を素の同期 POJO にし（plugins）、`chat-ui-with-audit-trail` の `IoLogStore` が `ActorRef` で包んで `ask(...).join()` で呼ぶ。
       手書きのスレッド・キュー・ラッチを無くす。`quarkus-chat-ui`・`quarkus-chat-ui3` は固定した版（4.2.0 系）のまま動き、版を上げたときに同期書き込みになる

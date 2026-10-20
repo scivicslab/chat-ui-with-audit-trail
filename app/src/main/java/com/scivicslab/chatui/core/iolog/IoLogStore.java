@@ -116,6 +116,30 @@ public class IoLogStore {
     }
 
     /**
+     * The session this process has already opened for a conversation. Only looks: it never opens
+     * one, so a caller that wants to read what was written cannot create an empty session by
+     * asking, and a write that did not happen shows as {@code -1} instead of as an empty session
+     * ({@code LookupThatCreates_260914_oo01}). {@link #ensureSession} is the one that opens.
+     *
+     * @return the session id, or -1 when this process has opened none for that conversation
+     */
+    public synchronized long sessionIdOf(String conversationSquadId) {
+        Long id = sessionIds.get(conversationSquadId);
+        return id == null ? -1 : id;
+    }
+
+    /**
+     * The session this process has already opened for a job; like {@link #sessionIdOf}, it only
+     * looks. {@link #ensureJobSession} is the one that opens.
+     *
+     * @return the session id, or -1 when this process has opened none for that job
+     */
+    public synchronized long jobSessionIdOf(String jobActorName) {
+        Long id = jobSessionIds.get(jobActorName);
+        return id == null ? -1 : id;
+    }
+
+    /**
      * Returns the given ConversationSquad's session id, opening a session on first use; -1 if unavailable. Each ConversationSquad
      * gets its own session id (ConversationSquads never share one), tagged via {@code workflowName} so the Sessions
      * view can filter by ConversationSquad.

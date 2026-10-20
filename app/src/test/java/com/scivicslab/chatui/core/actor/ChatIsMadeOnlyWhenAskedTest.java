@@ -1,5 +1,6 @@
 package com.scivicslab.chatui.core.actor;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -57,5 +58,17 @@ class ChatIsMadeOnlyWhenAskedTest {
 
         assertTrue(system.hasChat("project1", chatId));
         assertTrue(system.setNoThink("project1", chatId, true));
+    }
+
+    @Test
+    @DisplayName("消した会話は、存在しないと答える（登録簿から消えている）")
+    void aDeletedConversation_isGone() {
+        ChatUiActorSystem system = started();
+        String chatId = system.createChat("project1");
+        assertTrue(system.hasChat("project1", chatId));
+
+        assertEquals(ChatUiActorSystem.ChatDeletion.Kind.DELETED, system.deleteChat("project1", chatId).kind());
+
+        assertFalse(system.hasChat("project1", chatId));
     }
 }

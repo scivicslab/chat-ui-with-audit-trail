@@ -1744,7 +1744,9 @@ public class ChatUiActorSystem implements ConversationControls {
      * @param chatId    conversation id within that project
      */
     public boolean hasChat(String projectId, String chatId) {
-        return chats.containsKey(chatActorName(projectId, chatId));
+        // The actor system's own registry is the one place that says what exists; the maps this
+        // class keeps beside it are for the things that hang off a conversation.
+        return actorSystem.getActor(chatActorName(projectId, chatId)) != null;
     }
 
     /**

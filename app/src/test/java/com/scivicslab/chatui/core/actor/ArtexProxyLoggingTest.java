@@ -67,7 +67,7 @@ class ArtexProxyLoggingTest {
         system.recordExternalCall("artex",
                 "REQUEST:\n{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}\n\nRESPONSE:\nhi");
 
-        long sessionId = system.ioLogStore.ensureJobSession(
+        long sessionId = system.ioLogStore.jobSessionIdOf(
                 ChatUiActorSystem.EXTERNAL_PROXY_SESSION_PREFIX + "artex");
         List<LogEntry> entries = entriesOf(sessionId);
         assertEquals(1, entries.size(), entries.toString());
@@ -79,7 +79,7 @@ class ArtexProxyLoggingTest {
         system.recordExternalCall("artex", "REQUEST:\nfirst\n\nRESPONSE:\nok");
         system.recordExternalCall("artex", "REQUEST:\nsecond\n\nRESPONSE:\nok");
 
-        long sessionId = system.ioLogStore.ensureJobSession(
+        long sessionId = system.ioLogStore.jobSessionIdOf(
                 ChatUiActorSystem.EXTERNAL_PROXY_SESSION_PREFIX + "artex");
         List<LogEntry> entries = entriesOf(sessionId);
         assertEquals(2, entries.size(), entries.toString());
@@ -93,9 +93,9 @@ class ArtexProxyLoggingTest {
         system.recordExternalCall("other-caller", "REQUEST:\nb\n\nRESPONSE:\nok");
         system.recordExternalCall("artex", "REQUEST:\nc\n\nRESPONSE:\nok");
 
-        long artexSession = system.ioLogStore.ensureJobSession(
+        long artexSession = system.ioLogStore.jobSessionIdOf(
                 ChatUiActorSystem.EXTERNAL_PROXY_SESSION_PREFIX + "artex");
-        long otherSession = system.ioLogStore.ensureJobSession(
+        long otherSession = system.ioLogStore.jobSessionIdOf(
                 ChatUiActorSystem.EXTERNAL_PROXY_SESSION_PREFIX + "other-caller");
 
         List<LogEntry> artexEntries = entriesOf(artexSession);
