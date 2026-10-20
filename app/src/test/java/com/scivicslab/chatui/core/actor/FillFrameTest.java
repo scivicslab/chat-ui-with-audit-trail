@@ -9,7 +9,7 @@ import com.scivicslab.chatui.agent.FileAccessScope;
 import com.scivicslab.chatui.core.provider.LlmProvider;
 import com.scivicslab.chatui.core.provider.ProviderContext;
 import com.scivicslab.chatui.core.rest.ChatEvent;
-import com.scivicslab.chatui.frame.FrameFiller;
+import com.scivicslab.turingworkflow.plugins.rstframe.FrameFiller;
 import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 

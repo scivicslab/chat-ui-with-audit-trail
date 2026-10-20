@@ -98,6 +98,13 @@
       <artifactId>plugin-prompt-builder</artifactId>
       <version>4.5.0</version>
     </dependency>
+    <!-- rst-on-lisp rule files and frames (FramesAndSamplesFromBooks_261021_oo01): the plan runner's
+         frame actions read and rewrite rule files through this plugin's classes. -->
+    <dependency>
+      <groupId>com.scivicslab.turingworkflow.plugins</groupId>
+      <artifactId>plugin-rst-frame</artifactId>
+      <version>4.6.0-SNAPSHOT</version>
+    </dependency>
     <!-- Agent-loop tools (read/write/web_search/fetch/search_docs): jsoup for HTML parsing
          (DuckDuckGo results, fetched pages). Same version as quarkus-chat-ui3, which these
          tools are ported from. -->

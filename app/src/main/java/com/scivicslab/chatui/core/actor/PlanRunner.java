@@ -1057,7 +1057,7 @@ public class PlanRunner extends Interpreter {
 
     // ---- Frame steps (WorkflowFromFrame_261020_oo01): thin; FrameFiller does the work on text ----
 
-    private final com.scivicslab.chatui.frame.FrameFiller frameFiller = new com.scivicslab.chatui.frame.FrameFiller();
+    private final com.scivicslab.turingworkflow.plugins.rstframe.FrameFiller frameFiller = new com.scivicslab.turingworkflow.plugins.rstframe.FrameFiller();
 
     private String kept(String key) {
         return selfActorRef == null ? null : selfActorRef.getJsonString(key);
@@ -1073,7 +1073,7 @@ public class PlanRunner extends Interpreter {
     public ActionResult frameNext(String fileKey, String blankKey) {
         String file = kept(fileKey);
         if (file == null) return new ActionResult(false, "nothing is kept as '" + fileKey + "'");
-        com.scivicslab.chatui.frame.FrameFiller.Blank b = frameFiller.next(file);
+        com.scivicslab.turingworkflow.plugins.rstframe.FrameFiller.Blank b = frameFiller.next(file);
         if (b == null) return new ActionResult(false, "no blank is left");
         selfActorRef.putJson(blankKey + "-name", b.name());
         selfActorRef.putJson(blankKey + "-instruction", b.instruction());
@@ -1084,10 +1084,10 @@ public class PlanRunner extends Interpreter {
         return new ActionResult(true, "next blank: " + b.name());
     }
 
-    private com.scivicslab.chatui.frame.FrameFiller.Blank blankKept(String blankKey) {
+    private com.scivicslab.turingworkflow.plugins.rstframe.FrameFiller.Blank blankKept(String blankKey) {
         String name = kept(blankKey + "-name");
         if (name == null) return null;
-        return new com.scivicslab.chatui.frame.FrameFiller.Blank(name,
+        return new com.scivicslab.turingworkflow.plugins.rstframe.FrameFiller.Blank(name,
                 orEmpty(kept(blankKey + "-instruction")), orEmpty(kept(blankKey + "-sample")),
                 orEmpty(kept(blankKey + "-frame")), orEmpty(kept(blankKey + "-code-kind")));
     }
@@ -1141,7 +1141,7 @@ public class PlanRunner extends Interpreter {
                                     String promptKey, String language, String maxItems) {
         String file = kept(fileKey);
         String subject = kept(subjectKey);
-        com.scivicslab.chatui.frame.FrameFiller.Blank blank = blankKept(blankKey);
+        com.scivicslab.turingworkflow.plugins.rstframe.FrameFiller.Blank blank = blankKept(blankKey);
         if (file == null || subject == null || blank == null) {
             return new ActionResult(false, "the rule file, the subject and the blank must all be kept first");
         }
