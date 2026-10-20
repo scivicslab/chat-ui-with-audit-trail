@@ -1041,6 +1041,23 @@ public class ChatResource {
     }
 
     /**
+     * Lists the agent loops this conversation can be put on, and says which it is on now. Choosing
+     * one is {@code POST .../agent-loop-workflow}. Each loop names the prompt construction it uses
+     * ({@code AgentLoopDecidesThePrompt_261020_oo01}).
+     *
+     * @param chatId ConversationSquad identifier
+     * @return the loops, by file name, with {@code current} set on the one in use
+     */
+    @GET
+    @Path("/{projectId}/chats/{chatId}/agent-loops")
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<AgentLoopCatalog.Loop> agentLoops(@PathParam("projectId") String projectId,
+                                                  @PathParam("chatId") String chatId) {
+        requireChat(projectId, chatId);
+        return AgentLoopCatalog.list(actorSystem.getChatSession(projectId, chatId).getAgentLoopWorkflowFile());
+    }
+
+    /**
      * Returns one workflow's read-only YAML, read fresh from the classpath (so it always reflects
      * the file actually bundled in this build — no per-ConversationSquad in-memory copy).
      *

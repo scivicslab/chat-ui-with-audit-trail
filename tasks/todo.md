@@ -225,7 +225,7 @@ REST には作成 `POST /{projectId}/chats`（id は actor system が採番し `
 
 順序は、小さくて土台になるものから。各項目をテストして、項目ごとにコミットする（push は区切りで確認）。
 
-- [ ] A. 選べるエージェントループの一覧: `GET .../chats/{c}/agent-loops`（名前・題・説明・指定しているプロンプト構築・今のループか）。
+- [x] A. 選べるエージェントループの一覧（`AgentLoopCatalog`、Agent Loop タブに「Agent loop:」の選択肢。ブラウザでの動作確認は w206-e2e-test のシナリオで別に足す）: `GET .../chats/{c}/agent-loops`（名前・題・説明・指定しているプロンプト構築・今のループか）。
       選ぶ操作は既存の `POST .../agent-loop-workflow` のまま（ベンチマークが使うため名前を変えない）。
       `.../workflows` は「この会話が今使っているワークフローを読む画面」専用で、名前はそのまま。画面（Agent Loop タブ）に選択肢を足す
 - [ ] B. 引く操作が作らない: `IoLogStore.ensureSession`/`ensureJobSession` を、引くもの（作らない）と作るものに分ける。

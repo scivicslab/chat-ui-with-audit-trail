@@ -614,17 +614,59 @@
             .catch(function (e) { wfStatus("error: " + e.message); });
     }
 
+    // The agent loops this conversation can be put on (GET .../agent-loops), with the one it is on
+    // selected. Choosing one is POST .../agent-loop-workflow; the loop also names the prompt
+    // construction, so the viewer below is refreshed after (AgentLoopDecidesThePrompt_261020_oo01).
+    function wfPopulateLoops() {
+        var sel = document.getElementById("wf-loop-select");
+        if (!sel) return;
+        var url = activeChatUrl("/agent-loops");
+        if (!url) return;
+        fetch(url)
+            .then(function (r) { return r.json(); })
+            .then(function (loops) {
+                sel.textContent = "";
+                (loops || []).forEach(function (l) {
+                    var o = document.createElement("option");
+                    o.value = l.file;
+                    o.textContent = l.file.replace(/\.yaml$/, "") + " (prompt: " + l.promptWorkflow.replace(/\.yaml$/, "") + ")";
+                    o.title = l.description || "";
+                    o.selected = !!l.current;
+                    sel.appendChild(o);
+                });
+            })
+            .catch(function (e) { wfStatus("error: " + e.message); });
+    }
+
+    function wfChooseLoop(file) {
+        var url = activeChatUrl("/agent-loop-workflow");
+        if (!url || !file) return;
+        wfStatus("switching…");
+        fetch(url, { method: "POST", headers: { "Content-Type": "text/plain" }, body: file })
+            .then(function (r) {
+                return r.json().then(function (d) {
+                    if (!r.ok) throw new Error(d && d.message ? d.message : "refused");
+                    return d;
+                });
+            })
+            .then(function () { wfOnShow(); })
+            .catch(function (e) { wfStatus("error: " + e.message); wfPopulateLoops(); });
+    }
+
     // Always re-populates the catalog (not just on first show) so switching conversation tabs
     // updates which workflow(s) are listed/selected — each tab can be configured with a different
     // agent-loop workflow file (AgentLoopTab_260827_oo01 — tab-sync has no exceptions here).
     function wfOnShow() {
         var sel = document.getElementById("wf-select");
+        wfPopulateLoops();
         wfPopulate(function () { if (sel) wfLoad(sel.value); });
     }
 
     function initWorkflow() {
         var sel = document.getElementById("wf-select");
         if (sel) sel.addEventListener("change", function () { wfLoad(sel.value); });
+        var loopSel = document.getElementById("wf-loop-select");
+        if (loopSel) loopSel.addEventListener("change", function () { wfChooseLoop(loopSel.value); });
         var btn = document.getElementById("wf-refresh");
         if (btn) btn.addEventListener("click", function () { wfLoad(sel ? sel.value : ""); });
     }

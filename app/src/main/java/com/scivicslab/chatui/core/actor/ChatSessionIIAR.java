@@ -82,7 +82,7 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      * @param resource its name, for the message when it cannot be read
      * @return the file its top-level {@code promptWorkflow} names, or the default when it names none
      */
-    static String promptWorkflowNamedBy(byte[] yaml, String resource) {
+    public static String promptWorkflowNamedBy(byte[] yaml, String resource) {
         Object parsed;
         try {
             parsed = new org.yaml.snakeyaml.Yaml().load(new String(yaml, java.nio.charset.StandardCharsets.UTF_8));
