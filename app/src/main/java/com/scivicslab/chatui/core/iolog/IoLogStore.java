@@ -106,7 +106,7 @@ public class IoLogStore {
             return;
         }
         try {
-            store = new H2LogStore(Path.of(dbPathForPort()), compress);
+            store = new ActorBackedLogStore(new H2LogStore(Path.of(dbPathForPort()), compress));
             LOG.info("I/O log DB opened: " + Path.of(dbPathForPort()).toAbsolutePath() + ".mv.db"
                     + " (compress=" + compress + ")");
         } catch (Exception e) {

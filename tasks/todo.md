@@ -230,7 +230,7 @@ REST には作成 `POST /{projectId}/chats`（id は actor system が採番し `
       `.../workflows` は「この会話が今使っているワークフローを読む画面」専用で、名前はそのまま。画面（Agent Loop タブ）に選択肢を足す
 - [x] B. 引く操作が作らない（`IoLogStore.sessionIdOf`/`jobSessionIdOf` を足し、引くだけのテストを替えた。`ensure*` は「開く」書き込みとして残す。`hasChat` は登録簿に問い合わせる）。元の記述: `IoLogStore.ensureSession`/`ensureJobSession` を、引くもの（作らない）と作るものに分ける。
       `ChatUiActorSystem.hasChat` は、アプリ側の `chats` ではなく `ActorSystem` の登録簿に問い合わせる
-- [ ] C. `H2LogStore` を素の同期 POJO にし（plugins）、`chat-ui-with-audit-trail` の `IoLogStore` が `ActorRef` で包んで `ask(...).join()` で呼ぶ。
+- [~] C. （plugins 7deb3fa：`H2LogStore` を素の同期 POJO にした。chat-ui：`ActorBackedLogStore` が `IoLogStore` の中で包む。残り：plugins のリリースと、chat-ui の依存の更新）`H2LogStore` を素の同期 POJO にし（plugins）、`chat-ui-with-audit-trail` の `IoLogStore` が `ActorRef` で包んで `ask(...).join()` で呼ぶ。
       手書きのスレッド・キュー・ラッチを無くす。`quarkus-chat-ui`・`quarkus-chat-ui3` は固定した版（4.2.0 系）のまま動き、版を上げたときに同期書き込みになる
 - [ ] D. ステップ 2: ワークフローが `messages`（JSON）を直接渡せるようにする（`PromptBuffer.buildMessages` の結果を会話が受け取り、提供元が配列を送る）
 - [ ] E. 本題: フレームから文章を生成する Turing Workflow（`rst-agent-loop.yaml` に `:frame`/`:sample` の扱いを足す）。
