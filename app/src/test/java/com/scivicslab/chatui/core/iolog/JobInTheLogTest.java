@@ -49,23 +49,13 @@ class JobInTheLogTest {
     }
 
     /**
-     * The log's writer runs on a thread of its own, so a read straight after a write may not see
-     * it yet. Waits for what was written rather than assuming the moment it lands.
+     * Reads a session's entries once everything written before has been committed. The log's writer
+     * runs on a thread of its own, so a write returns before it reaches the database;
+     * {@code flushWrites()} waits for exactly what was written.
      */
-    private List<LogEntry> entriesOf(long sessionId, int expected) {
-        long until = System.currentTimeMillis() + 5_000;
-        List<LogEntry> entries = List.of();
-        while (System.currentTimeMillis() < until) {
-            entries = ioLog.store().getLogsByLevel(sessionId, LogLevel.DEBUG);
-            if (entries.size() >= expected) return entries;
-            try {
-                Thread.sleep(50);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
-        }
-        return entries;
+    private List<LogEntry> entriesOf(long sessionId) {
+        ioLog.store().flushWrites();
+        return ioLog.store().getLogsByLevel(sessionId, LogLevel.DEBUG);
     }
 
     @Test
@@ -77,7 +67,7 @@ class JobInTheLogTest {
         ioLog.record(sessionId, "project1/job-01", Project.NO_AGREEMENT_LABEL,
                 "010.md | 観点5 oneaxis | REVISE: 軸が混ざっています");
 
-        List<LogEntry> entries = entriesOf(sessionId, 2);
+        List<LogEntry> entries = entriesOf(sessionId);
         assertEquals(2, entries.size(), entries.toString());
         assertTrue(entries.stream().anyMatch(e -> Project.NO_AGREEMENT_LABEL.equals(e.getLabel())),
                 "the ones worth looking up later carry their own label");

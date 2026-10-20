@@ -52,27 +52,14 @@ class ArtexProxyLoggingTest {
     }
 
     /**
-     * The log's writer runs on a thread of its own; waits for a write to land before reading.
-     *
-     * <p>A write is normally readable within tens of milliseconds (measured: 0 to 53 ms over four
-     * runs started right after a clean build). A run that fails has gone the whole wait without one,
-     * three tests in a row, so the wait must cover a stall of the machine, not the usual latency;
-     * a passing run returns as soon as the entry is there, so the longer limit costs nothing then.</p>
+     * Reads a session's entries once everything written before has been committed. The log's writer
+     * runs on a thread of its own, so a write returns before it reaches the database;
+     * {@code flushWrites()} is the store's own way to say "wait for what I wrote", and with it a
+     * read has nothing to poll for.
      */
-    private List<LogEntry> entriesOf(long sessionId, int expected) {
-        long until = System.currentTimeMillis() + 30_000;
-        List<LogEntry> entries = List.of();
-        while (System.currentTimeMillis() < until) {
-            entries = system.ioLogStore.store().getLogsByLevel(sessionId, LogLevel.DEBUG);
-            if (entries.size() >= expected) return entries;
-            try {
-                Thread.sleep(50);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
-        }
-        return entries;
+    private List<LogEntry> entriesOf(long sessionId) {
+        system.ioLogStore.store().flushWrites();
+        return system.ioLogStore.store().getLogsByLevel(sessionId, LogLevel.DEBUG);
     }
 
     @Test
@@ -82,7 +69,7 @@ class ArtexProxyLoggingTest {
 
         long sessionId = system.ioLogStore.ensureJobSession(
                 ChatUiActorSystem.EXTERNAL_PROXY_SESSION_PREFIX + "artex");
-        List<LogEntry> entries = entriesOf(sessionId, 1);
+        List<LogEntry> entries = entriesOf(sessionId);
         assertEquals(1, entries.size(), entries.toString());
         assertEquals("turn1/step1/llm", entries.get(0).getLabel());
     }
@@ -94,7 +81,7 @@ class ArtexProxyLoggingTest {
 
         long sessionId = system.ioLogStore.ensureJobSession(
                 ChatUiActorSystem.EXTERNAL_PROXY_SESSION_PREFIX + "artex");
-        List<LogEntry> entries = entriesOf(sessionId, 2);
+        List<LogEntry> entries = entriesOf(sessionId);
         assertEquals(2, entries.size(), entries.toString());
         assertTrue(entries.stream().anyMatch(e -> "turn1/step1/llm".equals(e.getLabel())));
         assertTrue(entries.stream().anyMatch(e -> "turn2/step1/llm".equals(e.getLabel())));
@@ -111,8 +98,8 @@ class ArtexProxyLoggingTest {
         long otherSession = system.ioLogStore.ensureJobSession(
                 ChatUiActorSystem.EXTERNAL_PROXY_SESSION_PREFIX + "other-caller");
 
-        List<LogEntry> artexEntries = entriesOf(artexSession, 2);
-        List<LogEntry> otherEntries = entriesOf(otherSession, 1);
+        List<LogEntry> artexEntries = entriesOf(artexSession);
+        List<LogEntry> otherEntries = entriesOf(otherSession);
         assertTrue(artexEntries.stream().anyMatch(e -> "turn1/step1/llm".equals(e.getLabel())));
         assertTrue(artexEntries.stream().anyMatch(e -> "turn2/step1/llm".equals(e.getLabel())));
         assertTrue(otherEntries.stream().anyMatch(e -> "turn1/step1/llm".equals(e.getLabel())),
@@ -141,18 +128,7 @@ class ArtexProxyLoggingTest {
     void theCallAlsoReachesTheLiveView() {
         system.recordExternalCall("artex", "REQUEST:\na\n\nRESPONSE:\nok");
 
-        long until = System.currentTimeMillis() + 2_000;
-        List<RecentEntriesAccumulator.Entry> live = List.of();
-        while (System.currentTimeMillis() < until) {
-            live = system.getExternalProxyLogEntries();
-            if (!live.isEmpty()) break;
-            try {
-                Thread.sleep(50);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
-        }
+        List<RecentEntriesAccumulator.Entry> live = system.getExternalProxyLogEntries();
         assertEquals(1, live.size(), live.toString());
         assertEquals("artex", live.get(0).source());
     }

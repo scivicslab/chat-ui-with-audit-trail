@@ -846,7 +846,17 @@ public class ChatUiActorSystem implements ConversationControls {
 
     /** @return the external proxy log's recent entries (oldest first) — ARTEX's relayed calls */
     public List<RecentEntriesAccumulator.Entry> getExternalProxyLogEntries() {
-        return externalProxyLogBuffer.recent();
+        // The buffer is filled by messages the log actor was told (recordExternalCall's "add" enqueues
+        // one). Reading it through the same actor puts the read behind every add already queued;
+        // reading the buffer from this thread would race the actor's own queue.
+        IIActorRef<?> logRef = actorSystem.getIIActor(EXTERNAL_PROXY_LOG_ACTOR);
+        if (logRef == null) return externalProxyLogBuffer.recent();
+        try {
+            return logRef.ask(mux -> externalProxyLogBuffer.recent()).get(5, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not read the external proxy log through its actor", e);
+            return externalProxyLogBuffer.recent();
+        }
     }
 
     /**
