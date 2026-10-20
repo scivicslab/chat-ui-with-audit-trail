@@ -1,0 +1,158 @@
+name: make-sample
+description: |
+  Makes one sample from one sub-section of a book (FramesAndSamplesFromBooks_261021_oo01): the
+  sub-section's sentences, with OCR misreadings corrected, as an rst-on-lisp rule file in which every
+  sentence is the nucleus of its paragraph or related to it by a named relation. The sample is
+  written as <samples>/<name>.lisp; a frame made from it later shares the name.
+  For each paragraph the writer is asked two questions: its OCR misreadings, then how its sentences
+  relate. Last it is asked in one sentence what the sub-section does for its reader. The writer is
+  put on plain-text-no-context-loop.yaml, so each question is sent alone.
+params:
+  book:
+    label: "The book's markdown file"
+    description: "Absolute path of one file of the book, e.g. under doc_Base011/docs/Books-Programming/"
+    type: text
+    required: true
+  heading:
+    label: "The sub-section's heading"
+    description: "As the file writes it, without # or **, e.g. 3.1. A Simple Java Program"
+    type: text
+    required: true
+  name:
+    label: "The sample's name"
+    description: "What the sub-section does, lower-case words joined by '-', e.g. explain-program-by-whole-example"
+    type: text
+    required: true
+  samples:
+    description: "The directory the samples are kept in"
+    default: "/home/devteam/works/rst-on-lisp/samples"
+  writer:
+    description: "The conversation that answers the questions"
+    default: "project1/chat-02"
+  writerModel:
+    description: "The model the writer runs on; empty leaves the conversation as it is"
+    default: ""
+  writerNoThink:
+    description: "true asks the writer's model to skip its thinking phase"
+    default: "true"
+  maxQuestions:
+    description: "How many questions one run asks at most; the run fails past it"
+    type: int
+    default: 200
+steps:
+  - states: ["0", "1"]
+    label: add-writer
+    note: The writer is a conversation with no history of its own from before, on the loop that sends each question alone.
+    actions:
+      - actor: this
+        method: addWorker
+        arguments: ["writer", 'jexl:state.getString("writer")']
+        execution: direct
+      - actor: this
+        method: setChatAgentLoop
+        arguments: ['jexl:state.getString("writer")', "plain-text-no-context-loop.yaml"]
+        execution: direct
+      - actor: this
+        method: setChatModel
+        arguments: ['jexl:state.getString("writer")', 'jexl:state.getString("writerModel")']
+        execution: direct
+      - actor: this
+        method: setChatNoThink
+        arguments: ['jexl:state.getString("writer")', 'jexl:state.getString("writerNoThink")']
+        execution: direct
+      - actor: this
+        method: clearWorker
+        arguments: ["writer"]
+        execution: direct
+
+  - states: ["1", "next"]
+    label: open-the-sub-section
+    actions:
+      - actor: this
+        method: putJson
+        arguments: {path: asked, value: "0"}
+        execution: direct
+      - actor: this
+        method: bookOpen
+        arguments: ["book", "heading", "name"]
+        execution: direct
+
+  - states: ["1", "failed"]
+    label: no-such-sub-section
+    actions: [{actor: this, method: doNothing, arguments: ["the book's file could not be read, or has no such heading"], execution: direct}]
+
+  - states: ["next", "decide"]
+    label: take-the-next-question
+    actions:
+      - actor: this
+        method: bookNext
+        arguments: ["question", "done"]
+        execution: direct
+
+  - states: ["decide", "write"]
+    label: no-question-left
+    actions:
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("done") == "true"'
+        execution: direct
+
+  - states: ["decide", "ask"]
+    label: a-question-is-left
+    note: countUp bounds the run.
+    actions:
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("done") == "false"'
+        execution: direct
+      - actor: this
+        method: countUp
+        arguments: ["asked", 'jexl:state.getString("maxQuestions")']
+        execution: direct
+
+  - states: ["decide", "failed"]
+    label: too-many-questions
+    actions: [{actor: this, method: doNothing, arguments: ["maxQuestions was passed"], execution: direct}]
+
+  - states: ["ask", "next"]
+    label: ask-the-writer
+    actions:
+      - actor: this
+        method: askWorker
+        arguments:
+          - writer
+          - 'jexl:state.getString("question")'
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["writer", "reply"]
+        execution: direct
+      - actor: this
+        method: bookAnswer
+        arguments: ["reply"]
+        execution: direct
+
+  - states: ["ask", "failed"]
+    label: writer-gave-no-answer
+    actions: [{actor: this, method: doNothing, arguments: ["the writer gave no answer"], execution: direct}]
+
+  - states: ["write", "end"]
+    label: write-the-sample
+    note: Refused when a sample of that name is already there; the earlier one is not overwritten.
+    actions:
+      - actor: this
+        method: bookWrite
+        arguments: ["samples", "name"]
+        execution: direct
+      - actor: this
+        method: finish
+        arguments: ["name"]
+        execution: direct
+
+  - states: ["write", "failed"]
+    label: could-not-write
+    actions: [{actor: this, method: doNothing, arguments: ["the sample could not be written, or one of that name is already there"], execution: direct}]
+
+  - states: ["failed", "end"]
+    label: report-failure
+    actions: [{actor: this, method: reportFailure, arguments: [], execution: direct}]

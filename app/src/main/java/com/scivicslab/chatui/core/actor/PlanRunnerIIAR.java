@@ -630,6 +630,51 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
     }
 
     /**
+     * Opens one sub-section of a book, to be made into a sample.
+     * <pre>{@code
+     * - actor: this
+     *   method: bookOpen
+     *   arguments: ["book", "heading", "name"]
+     * }</pre>
+     * @param args {@code [fileKey, headingKey, nameKey]}
+     */
+    @Action("bookOpen")
+    public ActionResult bookOpen(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().bookOpen(at(a, 0), at(a, 1), at(a, 2));
+    }
+
+    /**
+     * Keeps the open sub-section's next question, and whether none is left.
+     * @param args {@code [questionKey, doneKey]}
+     */
+    @Action("bookNext")
+    public ActionResult bookNext(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().bookNext(at(a, 0), at(a, 1));
+    }
+
+    /**
+     * Hands the writer's reply to the open sub-section.
+     * @param args {@code [replyKey]}
+     */
+    @Action("bookAnswer")
+    public ActionResult bookAnswer(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().bookAnswer(at(a, 0));
+    }
+
+    /**
+     * Writes the sample and its code blocks' files into the samples' directory.
+     * @param args {@code [dirKey, nameKey]}
+     */
+    @Action("bookWrite")
+    public ActionResult bookWrite(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().bookWrite(at(a, 0), at(a, 1));
+    }
+
+    /**
      * Writes the code in a reply into the code blank taken by {@code frameNext}: the rule becomes
      * {@code :file "<name>.txt" :kind code-block}, and the code and the path to write it to are kept
      * for {@code writeFile}.
