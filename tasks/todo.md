@@ -142,29 +142,29 @@ REST には作成 `POST /{projectId}/chats`（id は actor system が採番し `
 - 全体 391 件。`ArtexProxyLoggingTest` は変更前の `HEAD` でも 3 回中 2 回落ちる既存の不安定なテスト（非同期のログ書き込みを5秒待つ）で、今回の変更とは無関係
 - [ ] 稼働中の audit-trail への反映（ビルド・再起動）は別途確認。反映までは旧動作のまま
 
-# 履歴に送ったプロンプトを省略せず残す（取り下げ：下の「エージェントループがプロンプトを決める」に取り込む）
+# request messagesに送ったプロンプトを省略せず残す（取り下げ：下の「エージェントループがプロンプトを決める」に取り込む）
 
 現状: 1 ターンの間、`OpenAiCompatProvider.history` にはそのターンで送った全メッセージ
 （先頭は `ChatSession.firstStepPrompt()` の前置き約 1.4 万字 + 利用者の文、続いて各ステップの
 モデル応答とツール結果の観察）が積まれる。ターンが終わると `collapseTurn(question, answer)` が
 それらを捨て、利用者の文だけ（前置きなし）と最終回答の 2 件に置き換える
 （`TurnResourceLimits_260830_oo01`：ステップの観察が前のターンを押し出すため）。
-そのため `get_request_messages` / `GET .../request-messages` が見せる履歴は、実際に送った文と一致しない。
+そのため `get_request_messages` / `GET .../request-messages` が見せるrequest messagesは、実際に送った文と一致しない。
 
-要求: 履歴には、やり取りしたプロンプトを省略せずに残す。
+要求: request messagesには、やり取りしたプロンプトを省略せずに残す。
 
 方針（案）:
 - [ ] `ChatSession` のターン終了時の `collapseTurn` 呼び出しをやめ、ターン中に積んだメッセージ（前置きつきの先頭プロンプト、
-      モデルの各応答、ツール結果）をそのまま履歴に残す
+      モデルの各応答、ツール結果）をそのままrequest messagesに残す
 - [ ] 予算を超えたら古いメッセージから落とす既存の `fitHistoryToBudget` はそのまま。落とすのは 1 メッセージずつではなく
-      ターン単位にするか（途中から始まる履歴は user/assistant の対応が崩れる）を決める
+      ターン単位にするか（途中から始まるrequest messagesは user/assistant の対応が崩れる）を決める
 - [ ] 再起動後の復元（`ChatUiActorSystem` の `collapseTurn(t.question(), t.answer())`）は、I/O ログの `userPrompt`
       （前置きつきの全文）から作り直す。ステップごとの observation はログにあるので同じ形に戻せるか確かめる
-- [ ] テスト: 2 ターン送ったあとの履歴が、実際に送った messages と一致する（前置き含む）／予算超過時の落とし方／復元
+- [ ] テスト: 2 ターン送ったあとのrequest messagesが、実際に送った messages と一致する（前置き含む）／予算超過時の落とし方／復元
 - [ ] `RequestMessagesControl_261018_oo01` の説明（「次に送る配列」）と合うか確認
 
 決めてほしいこと:
-- 前置き 1.4 万字がターンごとに履歴へ入る（10 ターンで約 14 万字）。そのまま残すのが要求どおりだが、
+- 前置き 1.4 万字がターンごとにrequest messagesへ入る（10 ターンで約 14 万字）。そのまま残すのが要求どおりだが、
   前置きを会話の先頭に 1 回だけ置く形（別の変更）にしてよいか。
 
 # ツールなしの会話（`ToolSet.NONE`）（取り下げ：下の「エージェントループがプロンプトを決める」に取り込む）
@@ -191,11 +191,11 @@ REST には作成 `POST /{projectId}/chats`（id は actor system が採番し `
 
 背景: 会話に送ると、利用者の文の前に約 1.4 万字の固定の文（ツール説明など）が毎回付く。ワークフローを選んでも、
 `ChatSession.firstStepPrompt()`（Java）が付けるので消せない。ワークフローが組み立てるのは文字列で、
-モデルへ渡す `messages`（JSON）や履歴は、ワークフローから決められない。ツールなしの会話や、
-履歴に送った文を残す会話を作る手段がない。
+モデルへ渡す `messages`（JSON）やrequest messagesは、ワークフローから決められない。ツールなしの会話や、
+request messagesに送った文を残す会話を作る手段がない。
 
 方針（承認済み）:
-- エージェントループのワークフロー（YAML）が、プロンプトの組み立て・履歴に残す内容を含めて、会話の動かし方をすべて決める。
+- エージェントループのワークフロー（YAML）が、プロンプトの組み立て・request messagesに残す内容を含めて、会話の動かし方をすべて決める。
   用途ごとにループを用意し、呼び出すときにどれを選ぶかで動作を選ぶ。
 - 道具の実行の許可（`ToolSet`）はいまのまま、プロンプトとは別に残す。モデルが知らないツールを呼んでも、実行は断るだけ。
 
@@ -203,18 +203,18 @@ REST には作成 `POST /{projectId}/chats`（id は actor system が採番し `
 - [x] 1. 前置きを部品に分け、ワークフローの操作として足す（d9f2e2a。部品は `ChatSession` の操作 `toolInstructions`/`skillCatalog`/`projectInstructions`/`turnText`。
       PromptBuilder 自身はツールを知らないため、操作は会話側に置いた。文章生成用 `prompt-construction-plain.yaml` を追加）。以下は元の記述:: ツール説明（会話の `ToolSet` の分だけ）、ツールの決まり、
       スキル一覧、プロジェクトの指示（`AGENTS.md`/`CLAUDE.md`）。`firstStepPrompt()` はこれらを積む既定の手順に置き換える（出力は変えない）
-- [ ] 2. ワークフローが `messages`（JSON）をそのまま渡せるようにする: `PromptBuilder.buildMessages(履歴)` の結果を会話が受け取り、
+- [ ] 2. ワークフローが `messages`（JSON）をそのまま渡せるようにする: `PromptBuilder.buildMessages(request messages)` の結果を会話が受け取り、
       提供元が文字列の代わりに配列を送れるようにする（`sendPrompt` に並ぶ入口）
 - [x] 3. エージェントループの YAML が、使うプロンプト構築のサブワークフローを自分で指定する（最上位の `promptWorkflow: <file>`。
       ループを読み込むときに設定し、書かないループは既定に戻す。存在しないファイルを書いたループは断り、前のループに戻す。
       `plain-text-loop.yaml` を追加。`doc-retrieval-loop.yaml` には書かない：ベンチマークの型 3 はループだけを替えて測るため）。以下は元の記述:（`constructPrompt(ファイル名)` のような操作）。
       別に選ぶ `POST .../prompt-workflow` は、ループの指定が無いときの既定として残す
-- [ ] 4. 履歴に残す内容もループが決める: 既定は今のまま（ターン終了時に利用者の文と最終回答だけにする）。
+- [ ] 4. request messagesに残す内容もループが決める: 既定は今のまま（ターン終了時に利用者の文と最終回答だけにする）。
       送った文をそのまま残すループを作れるようにする
 - [ ] 5. 用途別のループを作る: ① 既定（いまと同じ）② 文章生成用（利用者の文だけ、ツール説明なし）
       ③ 文書検索（`doc-retrieval-loop`）④ `rst-agent-loop` などの既存ループは、プロンプト構築の指定を明記する
 - [ ] 6. テスト: 既定のループが送る文が変更前と一致する／文章生成用ループが送る messages が利用者の文だけである／
-      ループが履歴を残す内容を変えられる／`ToolSet` の拒否が効く。`mvn test` を回す
+      ループがrequest messagesを残す内容を変えられる／`ToolSet` の拒否が効く。`mvn test` を回す
 - [x] 7. 実機: 28010 に反映して `chat-06` で確かめた。既定は前置き 13,966 字（変更前と同じ）、plain は 32 字（利用者の文だけ）、plain の会話の概念リストは 5 個（以前は 1 個）。
       `ONLY` に「各文は句点（。）で終える」を足すと、22 件すべてが句点で終わる（足す前は 1/22）。概念リストにも句点が付くので、リストの質問は別の指示にする
 - [ ] 8. 設計文書を doc_SCIVICS003 に書く（`ProjectProperty`・`RequestMessagesControl` と同じ置き場）
@@ -232,7 +232,14 @@ REST には作成 `POST /{projectId}/chats`（id は actor system が採番し `
       `ChatUiActorSystem.hasChat` は、アプリ側の `chats` ではなく `ActorSystem` の登録簿に問い合わせる
 - [~] C. （plugins 7deb3fa：`H2LogStore` を素の同期 POJO にした。chat-ui：`ActorBackedLogStore` が `IoLogStore` の中で包む。残り：plugins のリリースと、chat-ui の依存の更新）`H2LogStore` を素の同期 POJO にし（plugins）、`chat-ui-with-audit-trail` の `IoLogStore` が `ActorRef` で包んで `ask(...).join()` で呼ぶ。
       手書きのスレッド・キュー・ラッチを無くす。`quarkus-chat-ui`・`quarkus-chat-ui3` は固定した版（4.2.0 系）のまま動き、版を上げたときに同期書き込みになる
-- [ ] D. （取り決めが要るので保留：ワークフローが組む system メッセージを、そのターンだけのものにするか、履歴に残すか。毎ターン構築すると重複する）ステップ 2: ワークフローが `messages`（JSON）を直接渡せるようにする（`PromptBuffer.buildMessages` の結果を会話が受け取り、提供元が配列を送る）
+- [ ] D. （取り決めが要るので保留：ワークフローが組む system メッセージを、そのターンだけのものにするか、request messagesに残すか。毎ターン構築すると重複する）ステップ 2: ワークフローが `messages`（JSON）を直接渡せるようにする（`PromptBuffer.buildMessages` の結果を会話が受け取り、提供元が配列を送る）
 - [~] E. （コード・テストは完了：`frame/`（`RuleFile`・`FrameFiller`）、`PlanRunner` の操作 `frameNext`/`framePrompt`/`frameFill`/`frameExpand`/`setChatAgentLoop`、`frame-fill-loop.yaml`、`FrameFillLoopTest`。残り：実機で Qwen により通しで動かし、`rst:verify` で検査する）本題: フレームから文章を生成する Turing Workflow（`rst-agent-loop.yaml` に `:frame`/`:sample` の扱いを足す）。
-      ブランクごとに 1 回の呼び出し、履歴つき、`plain-text-loop` 上で動かす
+      ブランクごとに 1 回の呼び出し、request messagesつき、`plain-text-loop` 上で動かす
 - [ ] F. 文書: 設計文書 `AgentLoopDecidesThePrompt` を doc_SCIVICS003 に書く。リリース（plugins 4.4.2 など）の判断は別に仰ぐ
+
+# 用語（「履歴」は使わない）
+
+- **request messages**: 次にモデルへ送る `system` / `user` / `assistant` の発言の並び。提供元の `history` で、`get_request_messages` が読み、`set_request_messages` が書く。
+- **画面の会話記録**: 画面に出す発言の一覧（`ChatSession.conversationHistory`）。モデルへは送らない。
+- **入出力ログ**: `IoLogStore` が H2 に書く記録。ターンごと・ステップごとに、送った文と受けた文が入る。モデルへは送らない。
+以下の「request messages」は、1 つ目のことである。
