@@ -243,3 +243,20 @@ request messagesに送った文を残す会話を作る手段がない。
 - **画面の会話記録**: 画面に出す発言の一覧（`ChatSession.conversationHistory`）。モデルへは送らない。
 - **入出力ログ**: `IoLogStore` が H2 に書く記録。ターンごと・ステップごとに、送った文と受けた文が入る。モデルへは送らない。
 以下の「request messages」は、1 つ目のことである。
+
+# 本からサンプル集とフレームを作る（FramesAndSamplesFromBooks_261021_oo01）
+
+順序: 規則ファイルを扱う処理をプラグインに移す → 本の規則ファイル化 → お手本の引き方 → フレーム作成。各段でテストしてコミットする。
+
+- [ ] G1. `plugin-rst-frame` を Turing-workflow-plugins に作る（4.6.0-SNAPSHOT）。`RuleFile`・`FrameFiller` とそのテストを chat-ui から移し、
+      規則ファイルを読み書きする操作をこのプラグインのアクターの操作にする。会話に質問を送る操作（`askWorker` など）は chat-ui の `PlanRunner` に残す。
+      `fill-frame.yaml` は、このアクターを作って使う形に書き換え、`FillFrameTest` が通ることで確かめる
+- [ ] G2. 本を読む部分（素の POJO）: ページ番号と柱を除く、行末で切れた文をつなぐ、ファイルの境目で切れた段落をつなぐ、見出しを節にする、
+      コード・数式のまとまりを分ける。Core Java 3 章 p001-010 とアルゴリズムとデータ構造 p101-110 を入力にしたテストで確かめる
+- [ ] G3. 読み違いの直しの採否（文字の単位で比べ、変わった割合で決める）と、関係の答え（文の番号と関係の名前）から規則を作る部分。テストで確かめる
+- [ ] G4. `rules-from-book.yaml`（ジョブのワークフロー）。偽の書き手で最後まで通るテスト
+- [ ] G5. 実機: Core Java の 3.1 節を `rst-on-lisp/samples/language-feature.lisp` にし、手で作った `example.lisp` と関係の付け方を比べる
+- [ ] G6. お手本の引き方（`:sample-role`、パラメータ `samples`）を `fill-frame.yaml` に足す
+- [ ] G7. `frame-from-rules.yaml`
+
+確かめること（G1 の前）: Build Snapshot が plugin-rst-frame の SNAPSHOT を取れるか（取れなければ 4.6.0 のリリースが要る）
