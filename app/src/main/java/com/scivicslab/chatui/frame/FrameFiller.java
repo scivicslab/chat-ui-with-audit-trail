@@ -29,11 +29,17 @@ public final class FrameFiller {
      * @param instruction what to write, as the frame says it
      * @param sample      a model sentence from another document, or {@code ""}
      * @param frame       the sub-frame's file name for a frame blank, else {@code ""}
+     * @param kind        the blank's {@code :kind}, e.g. {@code code-block}, or {@code ""}
      */
-    public record Blank(String name, String instruction, String sample, String frame) {
+    public record Blank(String name, String instruction, String sample, String frame, String kind) {
         /** @return whether this blank is a list of items, each explained with the sub-frame */
         public boolean isFrame() {
             return !frame.isBlank();
+        }
+
+        /** @return whether this blank is filled with code, kept in a file of its own and shown as a code block */
+        public boolean isCode() {
+            return "code-block".equals(kind);
         }
     }
 
@@ -47,7 +53,9 @@ public final class FrameFiller {
             if (instruction == null) continue;
             String sample = r.attr(":sample");
             String frame = r.attr(":frame");
-            return new Blank(r.name(), instruction, sample == null ? "" : sample, frame == null ? "" : frame);
+            String kind = r.symbolAfter(":kind");
+            return new Blank(r.name(), instruction, sample == null ? "" : sample, frame == null ? "" : frame,
+                    kind == null ? "" : kind);
         }
         return null;
     }
@@ -97,8 +105,52 @@ public final class FrameFiller {
         RuleFile file = RuleFile.parse(fileText);
         RuleFile.Rule rule = file.rule(blankName);
         if (rule == null) throw new IllegalArgumentException("no rule named " + blankName);
-        String body = "\"" + RuleFile.escape(oneLine(sentence)) + "\"" + restOf(rule.items());
+        String body = "\"" + RuleFile.escape(withFullStop(oneLine(sentence))) + "\"" + restOf(rule.items());
         return file.replace(blankName, form(blankName, body)).text();
+    }
+
+    /**
+     * Writes a code blank as a rule that names the file its code is kept in, in place of its
+     * {@code :instruction} and {@code :sample}. Its {@code :kind code-block} stays.
+     *
+     * @throws IllegalArgumentException when there is no such rule
+     */
+    public String fillWithFile(String fileText, String blankName, String fileName) {
+        RuleFile file = RuleFile.parse(fileText);
+        RuleFile.Rule rule = file.rule(blankName);
+        if (rule == null) throw new IllegalArgumentException("no rule named " + blankName);
+        String body = ":file \"" + RuleFile.escape(fileName) + "\"" + restOf(rule.items());
+        return file.replace(blankName, form(blankName, body)).text();
+    }
+
+    /** @return the name of the file a code blank's code is kept in, beside the rule file: {@code p-run/code} is {@code p-run_code.txt} */
+    public String codeFileName(String blankName) {
+        return blankName.replaceAll("[^A-Za-z0-9._-]", "_") + ".txt";
+    }
+
+    /** @return the code in a reply, without the {@code ```} lines a model may put around it */
+    public String codeOf(String reply) {
+        List<String> lines = new ArrayList<>(List.of(reply.strip().split("\\R", -1)));
+        if (!lines.isEmpty() && lines.get(0).strip().startsWith("```")) lines.remove(0);
+        if (!lines.isEmpty() && lines.get(lines.size() - 1).strip().equals("```")) lines.remove(lines.size() - 1);
+        return String.join("\n", lines).strip();
+    }
+
+    /**
+     * What the writer is asked for a code blank: the code or command alone.
+     *
+     * @param fileText the rule file as it stands, for the sentences already written in the blank's paragraph
+     */
+    public String codePrompt(String fileText, Blank blank, String subject) {
+        StringBuilder sb = new StringBuilder("Below is the material that is being explained to a reader.\n\n")
+                .append(fenced(subject)).append("\n");
+        String paragraph = writtenInParagraph(fileText, blank.name());
+        if (!paragraph.isEmpty()) {
+            sb.append("\nSentences already written in this paragraph, in order:\n").append(paragraph);
+        }
+        sb.append("\nInstruction: ").append(blank.instruction()).append("\n");
+        sb.append("\nWrite only the code or command itself: no ``` fence, no explanation, no sentence before or after it.");
+        return sb.toString();
     }
 
     /**
@@ -255,6 +307,14 @@ public final class FrameFiller {
             sb.append(l);
         }
         return sb.toString();
+    }
+
+    /** @return the sentence ending with a full stop: {@code 。} after a Japanese character, {@code .} otherwise, unless it already ends with one */
+    private static String withFullStop(String sentence) {
+        if (sentence.isEmpty()) return sentence;
+        char last = sentence.charAt(sentence.length() - 1);
+        if ("。．.！？!?」』）)".indexOf(last) >= 0) return sentence;
+        return sentence + (isCjk(last) ? "。" : ".");
     }
 
     private static boolean isCjk(char c) {

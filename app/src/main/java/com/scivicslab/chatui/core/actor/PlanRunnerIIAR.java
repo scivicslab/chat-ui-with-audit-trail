@@ -630,6 +630,23 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
     }
 
     /**
+     * Writes the code in a reply into the code blank taken by {@code frameNext}: the rule becomes
+     * {@code :file "<name>.txt" :kind code-block}, and the code and the path to write it to are kept
+     * for {@code writeFile}.
+     * <pre>{@code
+     * - actor: this
+     *   method: frameFillCode
+     *   arguments: ["cur", "blank", "reply", "out", "code-text", "code-path"]
+     * }</pre>
+     * @param args {@code [fileKey, blankKey, replyKey, outKey, codeKey, pathKey]}
+     */
+    @Action("frameFillCode")
+    public ActionResult frameFillCode(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().frameFillCode(at(a, 0), at(a, 1), at(a, 2), at(a, 3), at(a, 4), at(a, 5));
+    }
+
+    /**
      * Turns the frame blank taken by {@code frameNext} into one copy of its sub-frame per item the
      * reply lists, in the rule file kept in this plan's state. The item names are kept, one per
      * line, for the prompts of the copies' blanks.

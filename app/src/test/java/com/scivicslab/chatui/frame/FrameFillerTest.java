@@ -199,4 +199,42 @@ class FrameFillerTest {
         assertFalse(prompt.contains("The program prints five squares."), "another paragraph's sentence: " + prompt);
         assertTrue(prompt.contains("Say what the program displays"), prompt);
     }
+
+    private static final String CODE_BLANK = """
+            (defrule p-run -> :nucleus p-run/n :example p-run/code)
+            (defrule p-run/n -> "You run the program with this command:")
+            (defrule p-run/code -> :instruction "Show the command" :kind code-block)
+            """;
+
+    @Test
+    @DisplayName(":kind code-block を持つ空欄はコードの空欄で、依頼はコードだけを求め、同じ段落の文を見せる")
+    void aCodeBlankAsksForTheCodeAlone() {
+        FrameFiller.Blank b = filler.next(CODE_BLANK);
+        assertTrue(b.isCode(), b.toString());
+        String prompt = filler.codePrompt(CODE_BLANK, b, "class Squares {}");
+        assertTrue(prompt.contains("Show the command"), prompt);
+        assertTrue(prompt.contains("You run the program with this command:"), prompt);
+        assertTrue(prompt.contains("only the code"), prompt);
+    }
+
+    @Test
+    @DisplayName("コードの空欄は、答えを入れたファイルを指す規則になり、囲みの ``` は外される")
+    void aCodeBlankBecomesARuleThatNamesAFile() {
+        assertEquals("p-run_code.txt", filler.codeFileName("p-run/code"));
+        assertEquals("java Squares.java", filler.codeOf("```bash\njava Squares.java\n```"));
+        assertEquals("java Squares.java", filler.codeOf("java Squares.java\n"));
+        String filled = filler.fillWithFile(CODE_BLANK, "p-run/code", "p-run_code.txt");
+        assertTrue(filled.contains("(defrule p-run/code -> :file \"p-run_code.txt\" :kind code-block)"), filled);
+        assertFalse(filled.contains(":instruction"), filled);
+    }
+
+    @Test
+    @DisplayName("句点で終わらない文には、その言語の句点を足し、終わっている文はそのまま入れる")
+    void aSentenceWithoutAFullStopGetsOne() {
+        String text = "(defrule a -> :instruction \"x\")\n";
+        assertTrue(filler.fill(text, "a", "変数squaresが宣言されています").contains("\"変数squaresが宣言されています。\""));
+        assertTrue(filler.fill(text, "a", "宣言されています。").contains("\"宣言されています。\""));
+        assertTrue(filler.fill(text, "a", "It prints squares").contains("\"It prints squares.\""));
+        assertTrue(filler.fill(text, "a", "Is it run?").contains("\"Is it run?\""));
+    }
 }

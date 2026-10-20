@@ -1079,7 +1079,8 @@ public class PlanRunner extends Interpreter {
         selfActorRef.putJson(blankKey + "-instruction", b.instruction());
         selfActorRef.putJson(blankKey + "-sample", b.sample());
         selfActorRef.putJson(blankKey + "-frame", b.frame());
-        selfActorRef.putJson(blankKey + "-kind", b.isFrame() ? "frame" : "sentence");
+        selfActorRef.putJson(blankKey + "-code-kind", b.kind());
+        selfActorRef.putJson(blankKey + "-kind", b.isFrame() ? "frame" : b.isCode() ? "code" : "sentence");
         return new ActionResult(true, "next blank: " + b.name());
     }
 
@@ -1088,11 +1089,43 @@ public class PlanRunner extends Interpreter {
         if (name == null) return null;
         return new com.scivicslab.chatui.frame.FrameFiller.Blank(name,
                 orEmpty(kept(blankKey + "-instruction")), orEmpty(kept(blankKey + "-sample")),
-                orEmpty(kept(blankKey + "-frame")));
+                orEmpty(kept(blankKey + "-frame")), orEmpty(kept(blankKey + "-code-kind")));
     }
 
     private static String orEmpty(String s) {
         return s == null ? "" : s;
+    }
+
+    /**
+     * Plan step: writes the code in a reply into the code blank taken by {@code frameNext}. The rule
+     * file kept under {@code fileKey} gets a rule that names a file beside {@code out}; the code and
+     * that file's path are kept under {@code codeKey} and {@code pathKey}, for {@code writeFile} to
+     * write next ({@code WorkflowFromFrame_261020_oo01}).
+     *
+     * @param outKey where the path of the finished rule file is kept; the code's file goes in the same directory
+     * @return {@link ActionResult} with {@code success=true} iff the reply held code and the rule was written
+     */
+    public ActionResult frameFillCode(String fileKey, String blankKey, String replyKey, String outKey,
+                                      String codeKey, String pathKey) {
+        String file = kept(fileKey);
+        String reply = kept(replyKey);
+        String name = kept(blankKey + "-name");
+        String out = kept(outKey);
+        if (file == null || reply == null || name == null || out == null) {
+            return new ActionResult(false, "the rule file, a reply, a blank and the output path must all be kept first");
+        }
+        String code = frameFiller.codeOf(reply);
+        if (code.isBlank()) return new ActionResult(false, "the reply held no code");
+        String fileName = frameFiller.codeFileName(name);
+        java.nio.file.Path dir = java.nio.file.Path.of(out.strip()).toAbsolutePath().getParent();
+        try {
+            selfActorRef.putJson(fileKey, frameFiller.fillWithFile(file, name, fileName));
+        } catch (IllegalArgumentException e) {
+            return new ActionResult(false, e.getMessage());
+        }
+        selfActorRef.putJson(codeKey, code);
+        selfActorRef.putJson(pathKey, (dir == null ? java.nio.file.Path.of(fileName) : dir.resolve(fileName)).toString());
+        return new ActionResult(true, "filled " + name + " with " + fileName);
     }
 
     /**
@@ -1122,6 +1155,8 @@ public class PlanRunner extends Interpreter {
                 return new ActionResult(false, "maxItems is not a number: " + maxItems);
             }
             prompt = frameFiller.listPrompt(blank, subject, max, lang);
+        } else if (blank.isCode()) {
+            prompt = frameFiller.codePrompt(file, blank, subject);
         } else {
             String names = kept(namesKey);
             prompt = frameFiller.sentencePrompt(file, blank, subject,

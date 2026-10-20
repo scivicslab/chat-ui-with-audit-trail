@@ -47,6 +47,18 @@ public final class RuleFile {
             return null;
         }
 
+        /** @return the symbol that follows {@code key} (as {@code code-block} follows {@code :kind}), or {@code null} */
+        public String symbolAfter(String key) {
+            for (int i = 0; i + 1 < items.size(); i++) {
+                Token t = items.get(i);
+                if (t.kind() == Token.Kind.KEYWORD && t.raw().equals(key)
+                        && items.get(i + 1).kind() == Token.Kind.SYMBOL) {
+                    return items.get(i + 1).raw();
+                }
+            }
+            return null;
+        }
+
         /** @return whether the rule's body is one string and nothing else, i.e. it has been written */
         public boolean isSentence() {
             return items.size() == 1 && items.get(0).kind() == Token.Kind.STRING;

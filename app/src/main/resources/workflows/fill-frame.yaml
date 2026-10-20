@@ -2,7 +2,9 @@ name: fill-frame
 description: |
   Fills a frame with a writer conversation, one blank at a time (WorkflowFromFrame_261020_oo01).
   The request is a rule file whose rules carry :instruction (what to write) and, where it helps,
-  :sample (a model sentence from another document). A rule that also carries :frame "file.lisp"
+  :sample (a model sentence from another document). A blank that also carries :kind code-block is
+  answered with code alone, which is kept in a file beside `out` and shown as a code block. A rule
+  that also carries :frame "file.lisp"
   is a list: the writer names the items, each item gets a copy of that sub-frame's rules, and the
   copies' blanks are filled in turn. Each blank is one question to the writer, and the question
   carries what it follows on from: the sentences already written for the same item, or in the same
@@ -167,6 +169,27 @@ steps:
       - actor: this
         method: frameExpand
         arguments: ["cur", "blank", "frame-text", "reply", "names", 'jexl:state.getString("maxItems")']
+        execution: direct
+
+  - states: ["keep", "pick"]
+    label: write-the-code
+    note: A code blank (:kind code-block). The code goes into a file beside `out`, and the rule names that file.
+    actions:
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("blank-kind") == "code"'
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["writer", "reply"]
+        execution: direct
+      - actor: this
+        method: frameFillCode
+        arguments: ["cur", "blank", "reply", "out", "code-text", "code-path"]
+        execution: direct
+      - actor: this
+        method: writeFile
+        arguments: ['jexl:state.getString("code-path")', "code-text"]
         execution: direct
 
   - states: ["keep", "pick"]
