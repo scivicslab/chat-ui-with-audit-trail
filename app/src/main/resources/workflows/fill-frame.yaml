@@ -4,10 +4,12 @@ description: |
   The request is a rule file whose rules carry :instruction (what to write) and, where it helps,
   :sample (a model sentence from another document). A rule that also carries :frame "file.lisp"
   is a list: the writer names the items, each item gets a copy of that sub-frame's rules, and the
-  copies' blanks are filled in turn. Each blank is one question to the writer, which keeps the
-  history of the run, so a sentence can follow what was already said about the same item.
-  The writer is put on plain-text-loop.yaml, which sends the question and nothing else: no tool
-  instructions, no skill catalog. The finished rule file is written to `out`.
+  copies' blanks are filled in turn. Each blank is one question to the writer, and the question
+  carries what it follows on from: the sentences already written for the same item, or in the same
+  paragraph. The writer is put on plain-text-no-context-loop.yaml, which sends that question and
+  nothing else: no tool instructions, no skill catalog, none of the run's earlier questions and
+  answers (with them, the model wrote broken text such as "<integer> </integer>"). The finished
+  rule file is written to `out`.
 params:
   request:
     label: "The request rule file"
@@ -60,7 +62,7 @@ steps:
         execution: direct
       - actor: this
         method: setChatAgentLoop
-        arguments: ['jexl:state.getString("writer")', "plain-text-loop.yaml"]
+        arguments: ['jexl:state.getString("writer")', "plain-text-no-context-loop.yaml"]
         execution: direct
       - actor: this
         method: setChatModel

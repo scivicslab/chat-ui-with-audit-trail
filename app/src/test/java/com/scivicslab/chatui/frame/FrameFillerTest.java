@@ -180,4 +180,23 @@ class FrameFillerTest {
         assertTrue(prompt.contains("List the concepts"), prompt);
         assertTrue(prompt.contains("No numbering"), prompt);
     }
+
+    @Test
+    @DisplayName("段落の空欄の依頼には、同じ段落ですでに書いた文が入り、ほかの段落の文は入らない")
+    void aParagraphBlankIsShownWhatItsParagraphAlreadySays() {
+        String text = """
+            (defrule s1 -> p-whole p-run)
+            (defrule p-whole -> :nucleus p-whole/n)
+            (defrule p-whole/n -> "The program prints five squares.")
+            (defrule p-run -> :nucleus p-run/n :example p-run/code :result p-run/shows)
+            (defrule p-run/n -> "You run the program with this command:")
+            (defrule p-run/code -> "java Squares.java")
+            (defrule p-run/shows -> :instruction "Say what the program displays")
+            """;
+        String prompt = filler.sentencePrompt(text, filler.next(text), "class Squares {}", List.of(), "Japanese");
+        assertTrue(prompt.contains("You run the program with this command:"), prompt);
+        assertTrue(prompt.contains("java Squares.java"), prompt);
+        assertFalse(prompt.contains("The program prints five squares."), "another paragraph's sentence: " + prompt);
+        assertTrue(prompt.contains("Say what the program displays"), prompt);
+    }
 }

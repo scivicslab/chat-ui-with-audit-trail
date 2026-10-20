@@ -136,6 +136,10 @@ public final class FrameFiller {
         } else {
             sb.append("Below is the material that is about to be introduced to a reader.\n\n")
               .append(fenced(subject)).append("\n");
+            String paragraph = writtenInParagraph(fileText, blank.name());
+            if (!paragraph.isEmpty()) {
+                sb.append("\nSentences already written in this paragraph, in order:\n").append(paragraph);
+            }
         }
         sb.append("\nInstruction: ").append(blank.instruction()).append("\n");
         if (!blank.sample().isBlank()) {
@@ -156,6 +160,30 @@ public final class FrameFiller {
             if (names.size() == maxItems) break;
         }
         return names;
+    }
+
+    /**
+     * @return the sentences already written under the rule that holds {@code blankName} on its right-hand
+     *         side, one line each in that rule's order, or {@code ""} when there are none — what the
+     *         blank's own sentence follows on from ("that command", "after compiling")
+     */
+    private String writtenInParagraph(String fileText, String blankName) {
+        RuleFile file = RuleFile.parse(fileText);
+        for (RuleFile.Rule parent : file.rules()) {
+            boolean holds = parent.items().stream()
+                    .anyMatch(t -> t.kind() == RuleFile.Token.Kind.SYMBOL && t.raw().equals(blankName));
+            if (!holds) continue;
+            StringBuilder sb = new StringBuilder();
+            for (RuleFile.Token t : parent.items()) {
+                if (t.kind() != RuleFile.Token.Kind.SYMBOL || t.raw().equals(blankName)) continue;
+                RuleFile.Rule sibling = file.rule(t.raw());
+                if (sibling != null && sibling.isSentence()) {
+                    sb.append("- ").append(sibling.items().get(0).value()).append('\n');
+                }
+            }
+            return sb.toString();
+        }
+        return "";
     }
 
     private String written(String fileText, String prefix) {
