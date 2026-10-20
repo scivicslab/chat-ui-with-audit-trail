@@ -220,3 +220,19 @@ REST には作成 `POST /{projectId}/chats`（id は actor system が採番し `
 - [ ] 8. 設計文書を doc_SCIVICS003 に書く（`ProjectProperty`・`RequestMessagesControl` と同じ置き場）
 
 順序: 1 → 2 → 3 の順に、各段階でテストを通し、段階ごとにコミットする（push は毎回確認）。
+
+# 残りの作業（全部やる。2026-10-20 承認）
+
+順序は、小さくて土台になるものから。各項目をテストして、項目ごとにコミットする（push は区切りで確認）。
+
+- [ ] A. 選べるエージェントループの一覧: `GET .../chats/{c}/agent-loops`（名前・題・説明・指定しているプロンプト構築・今のループか）。
+      選ぶ操作は既存の `POST .../agent-loop-workflow` のまま（ベンチマークが使うため名前を変えない）。
+      `.../workflows` は「この会話が今使っているワークフローを読む画面」専用で、名前はそのまま。画面（Agent Loop タブ）に選択肢を足す
+- [ ] B. 引く操作が作らない: `IoLogStore.ensureSession`/`ensureJobSession` を、引くもの（作らない）と作るものに分ける。
+      `ChatUiActorSystem.hasChat` は、アプリ側の `chats` ではなく `ActorSystem` の登録簿に問い合わせる
+- [ ] C. `H2LogStore` を素の同期 POJO にし（plugins）、`chat-ui-with-audit-trail` の `IoLogStore` が `ActorRef` で包んで `ask(...).join()` で呼ぶ。
+      手書きのスレッド・キュー・ラッチを無くす。`quarkus-chat-ui`・`quarkus-chat-ui3` は固定した版（4.2.0 系）のまま動き、版を上げたときに同期書き込みになる
+- [ ] D. ステップ 2: ワークフローが `messages`（JSON）を直接渡せるようにする（`PromptBuffer.buildMessages` の結果を会話が受け取り、提供元が配列を送る）
+- [ ] E. 本題: フレームから文章を生成する Turing Workflow（`rst-agent-loop.yaml` に `:frame`/`:sample` の扱いを足す）。
+      ブランクごとに 1 回の呼び出し、履歴つき、`plain-text-loop` 上で動かす
+- [ ] F. 文書: 設計文書 `AgentLoopDecidesThePrompt` を doc_SCIVICS003 に書く。リリース（plugins 4.4.2 など）の判断は別に仰ぐ
