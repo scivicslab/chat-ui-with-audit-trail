@@ -254,9 +254,11 @@ request messagesに送った文を残す会話を作る手段がない。
 - [x] G2. 本を読む部分（素の POJO）: ページ番号と柱を除く、行末で切れた文をつなぐ、ファイルの境目で切れた段落をつなぐ、見出しを節にする、
       コード・数式のまとまりを分ける。Core Java 3 章 p001-010 とアルゴリズムとデータ構造 p101-110 を入力にしたテストで確かめる
 - [x] G3. 読み違いの直しの採否（文字の単位で比べ、変わった割合で決める）と、関係の答え（文の番号と関係の名前）から規則を作る部分。テストで確かめる
-- [ ] G4. `rules-from-book.yaml`（ジョブのワークフロー）。偽の書き手で最後まで通るテスト
-- [ ] G5. 実機: Core Java の 3.1 節を `rst-on-lisp/samples/language-feature.lisp` にし、手で作った `example.lisp` と関係の付け方を比べる
+- [x] G4. `make-sample.yaml`（ジョブのワークフロー、名前は小節 1 つ単位に改めた）。`bookOpen`/`bookNext`/`bookAnswer`/`bookWrite`。偽の書き手で 3 通り（新しい構造・上書きの拒否・同じ構造）を確かめた
+- [x] G4b. 既にある構造との照合（`SampleCatalog`、判定の質問 same/new/skip、`also-seen` の 1 行）。お手本 1 本 = 構造 1 種類、先頭に use/source/shape。一覧は `rst-on-lisp/bin/catalog`
+- [~] G5. 実機（28010 の complete-messages で qwen3.8-flash-next、質問は 1 つずつ単独）: Core Java 3.1・3.2・3.3.1・3.3.2、アルゴリズムとデータ構造 (c) 計算量 を `~/works/tmp/samples-trial/` に作った。3.1 は `example.lisp` と比べて核とサテライトの区別 29/36、関係名 16/36 が一致。5 つとも「新しい構造」と判定された。
+      課題: shape（段落ごとの文の関係の並び）では、長さの違う同種の小節（3.3.1 と 3.3.2）が似て見えない。段落の役割の並びで比べる案を相談する。本来の置き場 `rst-on-lisp/samples/` へはまだ移していない
 - [ ] G6. お手本の引き方（`:sample-role`、パラメータ `samples`）を `fill-frame.yaml` に足す
-- [ ] G7. `frame-from-rules.yaml`
+- [~] G7. `SampleToFrame`（プラグイン、テスト済み）。ジョブのワークフロー `make-frame.yaml` はまだ。同じ形の段落の並びのサブフレーム化もまだ
 
 確かめること（G1 の前）: Build Snapshot が plugin-rst-frame の SNAPSHOT を取れるか（取れなければ 4.6.0 のリリースが要る）
