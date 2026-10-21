@@ -1250,8 +1250,8 @@ public class PlanRunner extends Interpreter {
     /**
      * Plan step: takes the next blank of the rule file kept under {@code fileKey} and puts what is
      * known about it into this plan's state, as {@code <blankKey>-name}, {@code -instruction},
-     * {@code -sample}, {@code -frame} and {@code -kind} ({@code frame}, {@code code}, {@code items} or
-     * {@code sentence}).
+     * {@code -sample}, {@code -frame}, {@code -include} and {@code -kind} ({@code include}, {@code frame},
+     * {@code code}, {@code items} or {@code sentence}).
      *
      * @return {@link ActionResult} with {@code success=true} iff a blank was left
      */
@@ -1265,7 +1265,8 @@ public class PlanRunner extends Interpreter {
         selfActorRef.putJson(blankKey + "-sample", b.sample());
         selfActorRef.putJson(blankKey + "-frame", b.frame());
         selfActorRef.putJson(blankKey + "-code-kind", b.kind());
-        selfActorRef.putJson(blankKey + "-kind", b.isFrame() ? "frame" : b.isCode() ? "code" : b.isList() ? "items" : "sentence");
+        selfActorRef.putJson(blankKey + "-include", b.include());
+        selfActorRef.putJson(blankKey + "-kind", b.isInclude() ? "include" : b.isFrame() ? "frame" : b.isCode() ? "code" : b.isList() ? "items" : "sentence");
         return new ActionResult(true, "next blank: " + b.name());
     }
 
@@ -1274,7 +1275,7 @@ public class PlanRunner extends Interpreter {
         if (name == null) return null;
         return new com.scivicslab.turingworkflow.plugins.rstframe.FrameFiller.Blank(name,
                 orEmpty(kept(blankKey + "-instruction")), orEmpty(kept(blankKey + "-sample")),
-                orEmpty(kept(blankKey + "-frame")), orEmpty(kept(blankKey + "-code-kind")));
+                orEmpty(kept(blankKey + "-frame")), orEmpty(kept(blankKey + "-code-kind")), orEmpty(kept(blankKey + "-include")));
     }
 
     private static String orEmpty(String s) {
@@ -1369,6 +1370,27 @@ public class PlanRunner extends Interpreter {
         try {
             selfActorRef.putJson(fileKey, frameFiller.fill(file, name, reply));
             return new ActionResult(true, "filled " + name);
+        } catch (IllegalArgumentException e) {
+            return new ActionResult(false, e.getMessage());
+        }
+    }
+
+    /**
+     * Plan step: replaces the include blank taken by {@code frameNext} with one copy of the child frame
+     * kept under {@code frameTextKey}, in the rule file kept under {@code fileKey}. Nothing is asked.
+     *
+     * @return {@link ActionResult} with {@code success=true} iff the blank was replaced
+     */
+    public ActionResult frameInclude(String fileKey, String blankKey, String frameTextKey) {
+        String file = kept(fileKey);
+        String frameText = kept(frameTextKey);
+        String name = kept(blankKey + "-name");
+        if (file == null || frameText == null || name == null) {
+            return new ActionResult(false, "the rule file, the child frame and a blank must all be kept first");
+        }
+        try {
+            selfActorRef.putJson(fileKey, frameFiller.include(file, name, frameText));
+            return new ActionResult(true, "included the child frame at " + name);
         } catch (IllegalArgumentException e) {
             return new ActionResult(false, e.getMessage());
         }

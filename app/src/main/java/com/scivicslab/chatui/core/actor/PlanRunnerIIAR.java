@@ -630,6 +630,16 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
     }
 
     /**
+     * Replaces an include blank taken by {@code frameNext} with one copy of the child frame. Nothing is asked.
+     * @param args {@code [fileKey, blankKey, frameTextKey]}
+     */
+    @Action("frameInclude")
+    public ActionResult frameInclude(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().frameInclude(at(a, 0), at(a, 1), at(a, 2));
+    }
+
+    /**
      * Writes the items in a reply, one per line, into a bulleted or numbered list blank taken by {@code frameNext}.
      * @param args {@code [fileKey, blankKey, replyKey]}
      */

@@ -4,7 +4,8 @@ description: |
   The request is a rule file whose rules carry :instruction (what to write) and, where it helps,
   :sample (a model sentence from another document). A blank that also carries :kind code-block is
   answered with code alone, which is kept in a file beside `out` and shown as a code block. A blank
-  that carries :kind bullet or :kind number is answered with the items, one per line. A rule
+  that carries :kind bullet or :kind number is answered with the items, one per line. A blank that
+  carries :include "file.lisp" is replaced, without a question, by one copy of that child frame. A rule
   that also carries :frame "file.lisp"
   is a list: the writer names the items, each item gets a copy of that sub-frame's rules, and the
   copies' blanks are filled in turn. Each blank is one question to the writer, and the question
@@ -113,6 +114,27 @@ steps:
       - actor: this
         method: onlyIf
         arguments: 'jexl:state.getString("cur").indexOf(":instruction \"") < 0'
+        execution: direct
+
+  - states: ["pick", "pick"]
+    label: include-a-child-frame
+    note: A blank with :include is one child frame, put in once as it is from frameDir; nothing is asked, and its own blanks come next.
+    actions:
+      - actor: this
+        method: frameNext
+        arguments: ["cur", "blank"]
+        execution: direct
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("blank-kind") == "include"'
+        execution: direct
+      - actor: this
+        method: readFile
+        arguments: ['jexl:state.getString("frameDir") + "/" + state.getString("blank-include")', "frame-text"]
+        execution: direct
+      - actor: this
+        method: frameInclude
+        arguments: ["cur", "blank", "frame-text"]
         execution: direct
 
   - states: ["pick", "ask"]
