@@ -105,26 +105,22 @@ class ConversationDeletionTest {
 
     @Test
     @DisplayName("消した会話は再起動しても戻らず、セッションは残り、番号は使い回さない")
-    void deletedConversation_staysGone_andItsNumberIsNotReused(@TempDir Path dir) {
-        IoLogStore log = new IoLogStore();
-        log.useDatabaseAt(dir.resolve("chat-delete-test").toString());
+    void deletedConversation_staysGone_andItsNumberIsNotReused(@TempDir Path dir) throws Exception {
+        try (SystemsOnOneLog systems = new SystemsOnOneLog(dir.resolve("chat-delete-test"))) {
+            IoLogStore log = systems.log;
+            ChatUiActorSystem first = systems.start();
+            String projectId = first.createProject();
+            log.ensureSession(ChatUiActorSystem.chatActorName(projectId, "01"));
+            assertEquals("02", first.createChat(projectId));
+            long session = log.ensureSession(ChatUiActorSystem.chatActorName(projectId, "02"));
 
-        ChatUiActorSystem first = new ChatUiActorSystem();
-        first.ioLogStore = log;
-        first.init();
-        String projectId = first.createProject();
-        log.ensureSession(ChatUiActorSystem.chatActorName(projectId, "01"));
-        assertEquals("02", first.createChat(projectId));
-        long session = log.ensureSession(ChatUiActorSystem.chatActorName(projectId, "02"));
+            assertEquals(ChatUiActorSystem.ChatDeletion.Kind.DELETED, first.deleteChat(projectId, "02").kind());
+            assertNotEquals("02", first.createChat(projectId), "the number of a recorded conversation is not handed out again");
 
-        assertEquals(ChatUiActorSystem.ChatDeletion.Kind.DELETED, first.deleteChat(projectId, "02").kind());
-        assertNotEquals("02", first.createChat(projectId), "the number of a recorded conversation is not handed out again");
-
-        ChatUiActorSystem restarted = new ChatUiActorSystem();
-        restarted.ioLogStore = log;
-        restarted.init();
-        assertNull(restarted.getChatSession(projectId, "02"), "the deleted conversation came back");
-        assertTrue(log.store().listSessions(50).stream().anyMatch(s -> s.getSessionId() == session),
-                "the deleted conversation's session must stay in the log");
+            ChatUiActorSystem restarted = systems.start();
+            assertNull(restarted.getChatSession(projectId, "02"), "the deleted conversation came back");
+            assertTrue(log.store().listSessions(50).stream().anyMatch(s -> s.getSessionId() == session),
+                    "the deleted conversation's session must stay in the log");
+        }
     }
 }

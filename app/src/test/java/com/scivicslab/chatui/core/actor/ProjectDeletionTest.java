@@ -104,47 +104,39 @@ class ProjectDeletionTest {
 
     @Test
     @DisplayName("消した project は再起動しても戻らず、セッションは残る")
-    void deleteProject_doesNotComeBackOnRestart_andKeepsItsSessions(@TempDir Path dir) {
-        IoLogStore log = new IoLogStore();
-        log.useDatabaseAt(dir.resolve("delete-test").toString());
+    void deleteProject_doesNotComeBackOnRestart_andKeepsItsSessions(@TempDir Path dir) throws Exception {
+        try (SystemsOnOneLog systems = new SystemsOnOneLog(dir.resolve("delete-test"))) {
+            IoLogStore log = systems.log;
+            ChatUiActorSystem first = systems.start();
+            String projectId = first.createProject();
+            long session = log.ensureSession(ChatUiActorSystem.chatActorName(projectId, "01"));
+            assertTrue(session >= 0, "the conversation has to be recorded for the test to mean anything");
+            assertTrue(log.resumableConversationSquads().contains(ChatUiActorSystem.chatActorName(projectId, "01")));
 
-        ChatUiActorSystem first = new ChatUiActorSystem();
-        first.ioLogStore = log;
-        first.init();
-        String projectId = first.createProject();
-        long session = log.ensureSession(ChatUiActorSystem.chatActorName(projectId, "01"));
-        assertTrue(session >= 0, "the conversation has to be recorded for the test to mean anything");
-        assertTrue(log.resumableConversationSquads().contains(ChatUiActorSystem.chatActorName(projectId, "01")));
+            assertEquals(ChatUiActorSystem.ProjectDeletion.Kind.DELETED, first.deleteProject(projectId).kind());
 
-        assertEquals(ChatUiActorSystem.ProjectDeletion.Kind.DELETED, first.deleteProject(projectId).kind());
-
-        ChatUiActorSystem restarted = new ChatUiActorSystem();
-        restarted.ioLogStore = log;
-        restarted.init();
-        assertFalse(restarted.getProjectIds().contains(projectId),
-                "deleted project came back: " + restarted.getProjectIds());
-        assertTrue(log.store().listSessions(50).stream().anyMatch(s -> s.getSessionId() == session),
-                "the deleted project's session must stay in the log");
+            ChatUiActorSystem restarted = systems.start();
+            assertFalse(restarted.getProjectIds().contains(projectId),
+                    "deleted project came back: " + restarted.getProjectIds());
+            assertTrue(log.store().listSessions(50).stream().anyMatch(s -> s.getSessionId() == session),
+                    "the deleted project's session must stay in the log");
+        }
     }
 
     @Test
     @DisplayName("再起動の後に作る project も、消した番号を使わない")
-    void createProject_afterDeletionAndRestart_doesNotReuseTheNumber(@TempDir Path dir) {
-        IoLogStore log = new IoLogStore();
-        log.useDatabaseAt(dir.resolve("number-test").toString());
-        ChatUiActorSystem first = new ChatUiActorSystem();
-        first.ioLogStore = log;
-        first.init();
-        String deleted = first.createProject();
-        log.ensureSession(ChatUiActorSystem.chatActorName(deleted, "01"));
-        first.deleteProject(deleted);
+    void createProject_afterDeletionAndRestart_doesNotReuseTheNumber(@TempDir Path dir) throws Exception {
+        try (SystemsOnOneLog systems = new SystemsOnOneLog(dir.resolve("number-test"))) {
+            ChatUiActorSystem first = systems.start();
+            String deleted = first.createProject();
+            systems.log.ensureSession(ChatUiActorSystem.chatActorName(deleted, "01"));
+            first.deleteProject(deleted);
 
-        ChatUiActorSystem restarted = new ChatUiActorSystem();
-        restarted.ioLogStore = log;
-        restarted.init();
+            ChatUiActorSystem restarted = systems.start();
 
-        assertNotEquals(deleted, restarted.createProject(),
-                "a new project must not take the name a deleted one's sessions are recorded under");
+            assertNotEquals(deleted, restarted.createProject(),
+                    "a new project must not take the name a deleted one's sessions are recorded under");
+        }
     }
 
     @Test

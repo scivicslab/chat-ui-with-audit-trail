@@ -5,8 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
 
-import com.scivicslab.chatui.core.iolog.IoLogStore;
-
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -19,31 +17,29 @@ import org.junit.jupiter.api.io.TempDir;
 class ReopenedProjectIsWiredTest {
 
     @Test
-    void aProjectBroughtBackFromTheLog_canStartAJob(@TempDir Path dir) {
-        // A previous run of this program: one conversation of its own, recorded and still open.
-        IoLogStore log = new IoLogStore();
-        log.useDatabaseAt(dir.resolve("reopen-test").toString());
-        assertTrue(log.ensureSession("project7/chat-02") >= 0,
-                "the conversation has to be recorded for the project to come back");
+    void aProjectBroughtBackFromTheLog_canStartAJob(@TempDir Path dir) throws Exception {
+        try (SystemsOnOneLog systems = new SystemsOnOneLog(dir.resolve("reopen-test"))) {
+            // A previous run of this program: one conversation of its own, recorded and still open.
+            assertTrue(systems.log.ensureSession("project7/chat-02") >= 0,
+                    "the conversation has to be recorded for the project to come back");
 
-        ChatUiActorSystem system = new ChatUiActorSystem();
-        system.ioLogStore = log;
-        system.init();
+            ChatUiActorSystem system = systems.start();
 
-        assertTrue(system.getProjectIds().contains("project7"),
-                "expected project7 to come back, got " + system.getProjectIds());
+            assertTrue(system.getProjectIds().contains("project7"),
+                    "expected project7 to come back, got " + system.getProjectIds());
 
-        // Load-bearing: submitJob is where an unbound project throws, before anything is run.
-        String failure = system.getProject("project7")
-                .ask(p -> {
-                    try {
-                        p.submitJob("no-such-workflow", "steps: []", java.util.Map.of());
-                        return "";
-                    } catch (IllegalStateException e) {
-                        return e.getMessage();
-                    }
-                }).join();
+            // Load-bearing: submitJob is where an unbound project throws, before anything is run.
+            String failure = system.getProject("project7")
+                    .ask(p -> {
+                        try {
+                            p.submitJob("no-such-workflow", "steps: []", java.util.Map.of());
+                            return "";
+                        } catch (IllegalStateException e) {
+                            return e.getMessage();
+                        }
+                    }).join();
 
-        assertEquals("", failure, "a reopened project must be bound to the actor system");
+            assertEquals("", failure, "a reopened project must be bound to the actor system");
+        }
     }
 }
