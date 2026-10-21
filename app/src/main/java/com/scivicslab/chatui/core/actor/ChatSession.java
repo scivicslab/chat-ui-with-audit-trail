@@ -267,15 +267,17 @@ public class ChatSession extends Interpreter {
               trash is a person's job — do not try to.
             """);
         m.put("ask_chat", """
-            - ask_chat(chatId, prompt, timeoutSeconds): send an instruction to another conversation
-              (e.g. "02" for one in your own project, or "project2/02" to reach one in another
-              project) and wait for its reply. Requires "chatId" and "prompt" <parameter>
-              tags; "timeoutSeconds" is an optional third <parameter> tag (default 60) — pass a
-              larger value if you expect the target to take a while, e.g. because it will itself
-              call ask_chat on another ConversationSquad. Use this to direct or review another ConversationSquad's work.
-              The reply ends with one line, [ended: answered; model calls: N; tool calls: M], saying how
-              that conversation's turn ended: "answered", or "step-limit" when it ran out of steps
-              (then the reply is only a notice, not an answer).
+            - ask_chat(chatId, prompt): send an instruction to another conversation (e.g. "02" for
+              one in your own project, or "project2/02" to reach one in another project). Requires
+              "chatId" and "prompt" <parameter> tags. It does NOT wait: the result only says the
+              instruction was sent, and you can end your turn. When that conversation's turn ends,
+              its reply comes to you as a new message starting with
+              "[reply from <chat> to your ask_chat]", followed by one line,
+              [ended: answered; model calls: N; tool calls: M], saying how its turn ended:
+              "answered", or "step-limit" when it ran out of steps (then the reply is only a notice,
+              not an answer). If its turn left no reply, the message says so and why. Use this to
+              direct or review another ConversationSquad's work; get_chat_log shows what it is doing
+              meanwhile.
             """);
         m.put("set_workflow", """
             - set_workflow(chatId, yaml): replace another ConversationSquad's agent-loop workflow
@@ -2333,9 +2335,8 @@ public class ChatSession extends Interpreter {
             case "search_docs" -> DocSearchTool.search(extractInput(args, "query"), 0);
             case "list_references" -> ReferenceLinkTool.list(extractInput(args, "id"),
                     extractInput(args, "direction"), extractInput(args, "relation"));
-            case "ask_chat" -> AskChatTool.ask(system, watchdogRef, projectId, chatId,
-                    extractInput(args, "chatId"), extractInput(args, "prompt"),
-                    parseIntOrNull(extractInput(args, "timeoutSeconds")));
+            case "ask_chat" -> AskChatTool.send(system, projectId, chatId,
+                    extractInput(args, "chatId"), extractInput(args, "prompt"));
             case "set_workflow" -> SetWorkflowTool.setWorkflow(system, projectId,
                     extractInput(args, "chatId"), extractInput(args, "yaml"));
             case "load_skill" -> LoadSkillTool.load(skillRegistryRef, extractInput(args, "name"));
@@ -2867,6 +2868,9 @@ public class ChatSession extends Interpreter {
         if (source == null || source.isBlank() || "human".equals(source)) return "api";
         if ("screen".equals(source)) return "screen";
         if ("agent:workflow".equals(source)) return "workflow";
+        if (source.startsWith(ASK_CHAT_REPLY_SOURCE_PREFIX)) {
+            return "reply from chat " + source.substring(ASK_CHAT_REPLY_SOURCE_PREFIX.length());
+        }
         if (source.startsWith(ASK_CHAT_SOURCE_PREFIX)) {
             String asker = source.substring(ASK_CHAT_SOURCE_PREFIX.length());
             // A conversation's actor name is "<project>/chat-<id>"; anything else asking through
@@ -2878,4 +2882,10 @@ public class ChatSession extends Interpreter {
 
     /** What {@code AskChatTool} puts in front of the name of whoever asked. */
     public static final String ASK_CHAT_SOURCE_PREFIX = "agent:ask_chat:";
+
+    /**
+     * The source a reply to a model's {@code ask_chat} is queued under, followed by the conversation
+     * that replied ({@code AskChatWithoutWaiting_261022_oo01}).
+     */
+    public static final String ASK_CHAT_REPLY_SOURCE_PREFIX = "agent:reply:";
 }

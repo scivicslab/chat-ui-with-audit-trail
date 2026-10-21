@@ -36,6 +36,12 @@ class PromptOriginTest {
         assertEquals("chat project1/chat-01", ChatSession.originOf("agent:ask_chat:project1/chat-01"));
     }
 
+    /** The reply to a model's ask_chat comes back as a message from the conversation that answered. */
+    @Test
+    void aReplyToAskChat() {
+        assertEquals("reply from chat project1/chat-02", ChatSession.originOf("agent:reply:project1/chat-02"));
+    }
+
     /** A plan asks through the same ask_chat path; its name is a job's, not a conversation's. */
     @Test
     void aWorkflow() {

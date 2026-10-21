@@ -266,25 +266,48 @@ class ConversationToolsTest {
         assertTrue(result.contains("error: chat not found: 09"), result);
     }
 
-    /** {@code ask_chat} as a tool ends its reply with how the asked turn ended; the plan runners' call does not. */
+    /**
+     * {@code ask_chat} as a tool returns as soon as the prompt is queued; the target's reply, with the
+     * line saying how its turn ended, then comes to the caller as a new message in its own queue
+     * ({@code AskChatWithoutWaiting_261022_oo01}). The plan runners' call still waits and gets the
+     * reply alone.
+     */
     @Test
-    void askChatAppendsTheEndingLineButAskQualifiedDoesNot() throws Exception {
+    void askChatSendsWithoutWaitingAndTheReplyArrivesInTheCallersQueue() throws Exception {
         IIActorSystem system = new IIActorSystem("conversation-tools-ask");
         FakeControls controls = new FakeControls();
-        Scripted caller = new Scripted(List.of("unused"), List.of());
+        Scripted caller = new Scripted(List.of("thanks"), List.of());
         Scripted callee = new Scripted(List.of("the answer"), List.of());
-        chat(system, "01", caller, controls);
+        ChatSessionIIAR one = chat(system, "01", caller, controls);
         ChatSessionIIAR two = chat(system, "02", callee, controls);
-        ActorRef<PromptQueue> queue = two.createChild("project1/chat-02.queue", new PromptQueue());
-        queue.tellNow(q -> q.setSelf(queue)).join();
+        ActorRef<PromptQueue> queue1 = one.createChild("project1/chat-01.queue", new PromptQueue());
+        queue1.tellNow(q -> q.setSelf(queue1)).join();
+        ActorRef<PromptQueue> queue2 = two.createChild("project1/chat-02.queue", new PromptQueue());
+        queue2.tellNow(q -> q.setSelf(queue2)).join();
+
+        String sent = AskChatTool.send(system, "project1", "01", "02", "question");
+        assertTrue(sent.startsWith("sent to project1/chat-02"), sent);
+
+        long deadline = System.currentTimeMillis() + 20_000;
+        while (caller.prompts.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(50);
+        assertEquals(1, callee.prompts.size(), "the target got the prompt");
+        assertTrue(callee.prompts.get(0).endsWith("question"), callee.prompts.get(0));
+        assertEquals(1, caller.prompts.size(), "the reply came to the caller as a new message");
+        String reply = caller.prompts.get(0);
+        assertTrue(reply.contains("[reply from project1/chat-02 to your ask_chat]\nthe answer"), reply);
+        assertTrue(reply.endsWith("[ended: answered; model calls: 1; tool calls: 0]"), reply);
+
         ActorRef<CallWatchdog> watchdog = two.createChild("watchdog-for-test", new CallWatchdog());
-
-        String viaTool = AskChatTool.ask(system, watchdog, "project1", "01", "02", "question", 30);
-        assertTrue(viaTool.startsWith("the answer"), viaTool);
-        assertTrue(viaTool.endsWith("[ended: answered; model calls: 1; tool calls: 0]"), viaTool);
-
         String viaPlan = AskChatTool.askQualified(system, watchdog, "project1/chat-01", "project1/chat-02",
                 "question", 30);
         assertEquals("the answer", viaPlan);
+    }
+
+    @Test
+    void askChatToAConversationThatDoesNotExistIsRefusedAtOnce() {
+        IIActorSystem system = new IIActorSystem("conversation-tools-ask-missing");
+        chat(system, "01", new Scripted(List.of("unused"), List.of()), new FakeControls());
+        assertEquals("error: chat not found: 09", AskChatTool.send(system, "project1", "01", "09", "question"));
+        assertEquals("error: cannot ask_chat yourself", AskChatTool.send(system, "project1", "01", "01", "question"));
     }
 }

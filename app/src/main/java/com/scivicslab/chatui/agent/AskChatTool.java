@@ -20,9 +20,11 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * The {@code ask_chat} tool: sends a prompt to another ConversationSquad's agent loop and waits for
- * its reply, so one ConversationSquad's agent can direct or review another's work (graph-engineering scenarios —
- * see {@code AskChatToolAndWatchdog_260827_oo01}).
+ * Sending a prompt to another ConversationSquad's agent loop. A model's {@code ask_chat} tool call
+ * ({@link #send}) does not wait: the reply comes back as a new message in the caller's queue
+ * ({@code AskChatWithoutWaiting_261022_oo01}). Workflow steps that need the reply before their next
+ * step ({@link #askQualified}) wait for it (graph-engineering scenarios — see
+ * {@code AskChatToolAndWatchdog_260827_oo01}).
  *
  * <p>Waits on {@link ChatSession}'s own turn-completion signal (the {@code CompletableFuture<Void>
  * done} that {@code PromptQueue.enqueue}/{@code ChatSession.start} already thread through and
@@ -40,38 +42,99 @@ public final class AskChatTool {
     private static final int DEFAULT_WAIT_TIMEOUT_SECONDS = 60;
 
     /**
-     * @param system      this ConversationSquad's actor system, used to resolve the target ConversationSquad's actors
-     * @param watchdog    the shared {@link CallWatchdog}
+     * The {@code ask_chat} tool as a model calls it: puts the prompt in the target conversation's
+     * queue and returns at once, without waiting for the target's turn. When that turn ends, its
+     * reply and the line saying how it ended are put in the calling conversation's own queue as a new
+     * message, sent as {@code agent:reply:<target>} ({@code AskChatWithoutWaiting_261022_oo01}).
+     * A turn that leaves no reply is reported the same way, with what went wrong.
+     *
+     * <p>Nobody waits, so two conversations asking each other cannot block each other, and the
+     * {@link CallWatchdog} is not consulted here.</p>
+     *
+     * @param system      the actor system both conversations live in
      * @param myProjectId the calling conversation's project id
      * @param myChatId    the calling conversation's own id within that project
      * @param target      the target as written by the caller — a bare id ({@code "02"}) for this
      *                    project, or a qualified one ({@code "project2/02"}) to cross into another
      * @param prompt      the instruction to send
-     * @param timeoutSeconds how long to wait for the target's reply, or {@code null}/non-positive to
-     *                       use {@link #DEFAULT_WAIT_TIMEOUT_SECONDS} — callers directing a target
-     *                       through a multi-hop chain (e.g. it will itself call {@code ask_chat})
-     *                       should pass a longer budget ({@code AskChatNestedTimeout_260828_oo01})
-     * @return the target ConversationSquad's reply text, or an {@code error: ...} string
+     * @return a line saying the prompt was sent, or an {@code error: ...} string
      */
-    public static String ask(IIActorSystem system, ActorRef<CallWatchdog> watchdog,
-                              String myProjectId, String myChatId, String target,
-                              String prompt, Integer timeoutSeconds) {
-        int waitTimeoutSeconds = (timeoutSeconds != null && timeoutSeconds > 0)
-                ? timeoutSeconds : DEFAULT_WAIT_TIMEOUT_SECONDS;
+    public static String send(IIActorSystem system, String myProjectId, String myChatId,
+                              String target, String prompt) {
         if (target == null || target.isBlank()) return "error: chatId is required";
         if (prompt == null || prompt.isBlank()) return "error: prompt is required";
 
         String myName = ChatUiActorSystem.chatActorName(myProjectId, myChatId);
         String targetName = ChatUiActorSystem.resolveChatName(myProjectId, target);
+        if (targetName.equals(myName)) return "error: cannot ask_chat yourself";
         if (!targetName.startsWith(myProjectId + "/")) {
-            // Allowed, but recorded: ask_chat only puts a message in the target's mailbox, so it
-            // needs no gateway — crossing is still worth noting (ProjectNamespacePrefix_260829_oo01).
             LOG.info("ask_chat crosses projects: " + myName + " -> " + targetName);
         }
-        Outcome outcome = askWithEnding(system, watchdog, myName, targetName, prompt, timeoutSeconds);
-        // The tool tells its caller how the turn ended; the callers that hand the reply on to a
-        // model or a judge (askQualified) get the reply alone.
-        return outcome.ending() == null ? outcome.reply() : outcome.reply() + "\n\n" + outcome.ending();
+        IIActorRef<?> targetActor = system.getIIActor(targetName + ".chat");
+        if (!(targetActor instanceof ChatSessionIIAR targetChat)) {
+            return "error: chat not found: " + target;
+        }
+        ActorRef<PromptQueue> targetQueue = system.getActor(targetName + ".queue");
+        if (targetQueue == null) return "error: chat not found: " + target;
+        IIActorRef<?> myActor = system.getIIActor(myName + ".chat");
+        if (!(myActor instanceof ChatSessionIIAR myChat)) {
+            return "error: the calling conversation " + myName + " is not registered";
+        }
+        ActorRef<PromptQueue> myQueue = system.getActor(myName + ".queue");
+        if (myQueue == null) return "error: the calling conversation " + myName + " has no queue";
+
+        String resultKey = UUID.randomUUID().toString();
+        CompletableFuture<Void> done = new CompletableFuture<>();
+        // done completes inside the target's actor; reading its result from that same thread would
+        // wait on the actor that is running it, so the reply is fetched and delivered elsewhere.
+        done.whenCompleteAsync((ignored, failure) ->
+                deliverReply(system, myName, myChat, myQueue, targetName, targetChat, resultKey, failure));
+        Consumer<ChatEvent> targetWatchers = watchersOf(system, targetName);
+        targetQueue.tell(q -> q.enqueue(prompt, null, "queue", targetWatchers,
+                targetChat.asChatSessionRef(), ChatSession.ASK_CHAT_SOURCE_PREFIX + myName, resultKey, done));
+        return "sent to " + targetName + "; its reply will arrive in this conversation as a new message "
+                + "when its turn ends";
+    }
+
+    /** Puts the target turn's reply, or the reason there is none, in the calling conversation's queue. */
+    private static void deliverReply(IIActorSystem system, String myName, ChatSessionIIAR myChat,
+                                     ActorRef<PromptQueue> myQueue, String targetName,
+                                     ChatSessionIIAR targetChat, String resultKey, Throwable failure) {
+        String message;
+        if (failure != null) {
+            message = noReply(targetName, failure);
+        } else {
+            try {
+                String reply = targetChat.ask(interp -> ((ChatSession) interp).getCompletedResult(resultKey))
+                        .get(30, TimeUnit.SECONDS);
+                String ending = targetChat.<String>ask(interp -> ((ChatSession) interp).getCompletedEnding(resultKey))
+                        .get(30, TimeUnit.SECONDS);
+                message = reply == null
+                        ? "[ask_chat to " + targetName + " ended without a reply: its turn left no result]"
+                        : "[reply from " + targetName + " to your ask_chat]\n" + reply
+                          + (ending == null ? "" : "\n\n" + ending);
+            } catch (Exception e) {
+                message = noReply(targetName, e);
+            }
+        }
+        String text = message;
+        Consumer<ChatEvent> myWatchers = watchersOf(system, myName);
+        myQueue.tell(q -> q.enqueue(text, null, "queue", myWatchers, myChat.asChatSessionRef(),
+                ChatSession.ASK_CHAT_REPLY_SOURCE_PREFIX + targetName, null, new CompletableFuture<>()));
+    }
+
+    private static String noReply(String targetName, Throwable failure) {
+        Throwable cause = failure instanceof java.util.concurrent.CompletionException && failure.getCause() != null
+                ? failure.getCause() : failure;
+        LOG.log(Level.WARNING, "ask_chat to " + targetName + " ended without a reply", cause);
+        return "[ask_chat to " + targetName + " ended without a reply: " + cause.getClass().getSimpleName()
+                + ": " + cause.getMessage() + "]";
+    }
+
+    /** What a conversation says goes to whoever is watching it; nothing when no SSE actor is registered (unit tests). */
+    private static Consumer<ChatEvent> watchersOf(IIActorSystem system, String chatName) {
+        ActorRef<SseConnection> sse = system.getActor(chatName + ".sse");
+        return sse == null ? event -> { } : event -> sse.tell(c -> c.emit(event));
     }
 
     /**
@@ -148,7 +211,7 @@ public final class AskChatTool {
             String resultKey = UUID.randomUUID().toString();
             targetQueueRef.tell(q -> q.enqueue(prompt, null, "queue",
                     toWatchers,
-                    targetChatSessionIIAR.asChatSessionRef(), "agent:ask_chat:" + myName, resultKey,
+                    targetChatSessionIIAR.asChatSessionRef(), ChatSession.ASK_CHAT_SOURCE_PREFIX + myName, resultKey,
                     done));
             try {
                 done.get(waitTimeoutSeconds, TimeUnit.SECONDS);
@@ -165,7 +228,7 @@ public final class AskChatTool {
             return new Outcome(reply, ending);
         } catch (Exception e) {
             LOG.log(Level.WARNING, "ask_chat: call to " + target + " failed", e);
-            return Outcome.of("error: ask_chat failed: " + e.getMessage());
+            return Outcome.of("error: ask_chat failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
         } finally {
             watchdog.tell(w -> w.endWait(myName));
         }
