@@ -1,0 +1,161 @@
+name: concept-tree
+description: |
+  Builds the concept tree of one book from the body of its rule files (FrameMakingWorkflow_261022_oo01,
+  step 2), for a text whose table of contents is not its concept tree. The rule files are walked from
+  the top; for each paragraph the writer is shown the paragraph's nucleus sentence, the heading it is
+  under, what its satellites add, and the concepts found so far, and is asked which concept the
+  paragraph is about: one of the list, or a new one. For a new concept the writer is asked once how it
+  relates to one of the others: a kind of it, a part of it, a setting of it, or none. Every judgement of
+  meaning is the writer's; nothing is chosen by spelling or by where it stands. With a file of given
+  concepts (a textbook's headings) no new concept is accepted. The tree is written as a subjects file
+  (rst-on-lisp/subjects/), each node listing the paragraphs placed under it. The writer is put on
+  plain-text-no-context-loop.yaml, so each question is sent alone.
+params:
+  book:
+    label: "The book's directory"
+    description: "Absolute path; every .lisp under it with its .md beside it is read, e.g. .../Papers-AgentHarness/claude-agent-loop"
+    type: text
+    required: true
+  name:
+    label: "The book's name"
+    description: "The root of the tree, lower-case words joined by '-', e.g. claude-agent-loop"
+    type: text
+    required: true
+  out:
+    label: "Where to write the tree"
+    description: "Absolute path of the subjects file; an existing file is not overwritten"
+    type: text
+    required: true
+  given:
+    description: "A file of given concepts, one per line (a textbook's headings); empty lets the writer name new concepts"
+    default: ""
+  writer:
+    description: "The conversation that answers the questions"
+    default: "project1/chat-02"
+  writerModel:
+    description: "The model the writer runs on; empty leaves the conversation as it is"
+    default: ""
+  writerNoThink:
+    description: "true asks the writer's model to skip its thinking phase"
+    default: "true"
+  maxQuestions:
+    description: "How many questions one run asks at most; the run fails past it"
+    type: int
+    default: 600
+steps:
+  - states: ["0", "1"]
+    label: add-writer
+    note: The writer is a conversation with no history of its own from before, on the loop that sends each question alone.
+    actions:
+      - actor: this
+        method: addWorker
+        arguments: ["writer", 'jexl:state.getString("writer")']
+        execution: direct
+      - actor: this
+        method: setChatAgentLoop
+        arguments: ['jexl:state.getString("writer")', "plain-text-no-context-loop.yaml"]
+        execution: direct
+      - actor: this
+        method: setChatModel
+        arguments: ['jexl:state.getString("writer")', 'jexl:state.getString("writerModel")']
+        execution: direct
+      - actor: this
+        method: setChatNoThink
+        arguments: ['jexl:state.getString("writer")', 'jexl:state.getString("writerNoThink")']
+        execution: direct
+      - actor: this
+        method: clearWorker
+        arguments: ["writer"]
+        execution: direct
+
+  - states: ["1", "next"]
+    label: open-the-book
+    actions:
+      - actor: this
+        method: putJson
+        arguments: {path: asked, value: "0"}
+        execution: direct
+      - actor: this
+        method: conceptOpen
+        arguments: ["book", "name", "given"]
+        execution: direct
+
+  - states: ["1", "failed"]
+    label: no-rule-file
+    actions: [{actor: this, method: doNothing, arguments: ["the book's directory could not be read, or holds no rule file with its markdown beside it"], execution: direct}]
+
+  - states: ["next", "decide"]
+    label: take-the-next-question
+    actions:
+      - actor: this
+        method: questionNext
+        arguments: ["question", "done"]
+        execution: direct
+
+  - states: ["decide", "write"]
+    label: no-question-left
+    actions:
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("done") == "true"'
+        execution: direct
+
+  - states: ["decide", "ask"]
+    label: a-question-is-left
+    note: countUp bounds the run.
+    actions:
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("done") == "false"'
+        execution: direct
+      - actor: this
+        method: countUp
+        arguments: ["asked", 'jexl:state.getString("maxQuestions")']
+        execution: direct
+
+  - states: ["decide", "failed"]
+    label: too-many-questions
+    actions: [{actor: this, method: doNothing, arguments: ["maxQuestions was passed"], execution: direct}]
+
+  - states: ["ask", "next"]
+    label: ask-the-writer
+    actions:
+      - actor: this
+        method: askWorker
+        arguments:
+          - writer
+          - 'jexl:state.getString("question")'
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["writer", "reply"]
+        execution: direct
+      - actor: this
+        method: questionAnswer
+        arguments: ["reply"]
+        execution: direct
+
+  - states: ["ask", "failed"]
+    label: writer-gave-no-answer
+    actions: [{actor: this, method: doNothing, arguments: ["the writer gave no answer"], execution: direct}]
+
+  - states: ["write", "end"]
+    label: write-the-tree
+    note: The tree is written as a subjects file, never over a file already there.
+    actions:
+      - actor: this
+        method: conceptWrite
+        arguments: ["out", "book"]
+        execution: direct
+      - actor: this
+        method: finish
+        arguments: ["outcome"]
+        execution: direct
+
+  - states: ["write", "failed"]
+    label: could-not-write
+    actions: [{actor: this, method: doNothing, arguments: ["the concept tree could not be written, or the file is already there"], execution: direct}]
+
+  - states: ["failed", "end"]
+    label: report-failure
+    actions: [{actor: this, method: reportFailure, arguments: [], execution: direct}]

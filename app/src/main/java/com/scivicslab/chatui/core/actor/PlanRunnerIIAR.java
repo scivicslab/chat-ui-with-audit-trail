@@ -606,6 +606,26 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
      *             names are kept, where to put the prompt, the language to write in, how many
      *             items a list may have, then where {@code frameExamples} kept the examples (optional)
      */
+    /**
+     * Opens a book for {@code concept-tree.yaml}.
+     * @param args {@code [bookKey, nameKey, givenKey]}
+     */
+    @Action("conceptOpen")
+    public ActionResult conceptOpen(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().conceptOpen(at(a, 0), at(a, 1), at(a, 2));
+    }
+
+    /**
+     * Writes the concept tree built by {@code concept-tree.yaml}.
+     * @param args {@code [outKey, bookKey]}
+     */
+    @Action("conceptWrite")
+    public ActionResult conceptWrite(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().conceptWrite(at(a, 0), at(a, 1));
+    }
+
     @Action("framePrompt")
     public ActionResult framePrompt(String args) {
         org.json.JSONArray a = arguments(args);

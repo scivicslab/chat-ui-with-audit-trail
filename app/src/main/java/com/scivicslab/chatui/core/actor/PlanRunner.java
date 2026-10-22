@@ -1105,6 +1105,73 @@ public class PlanRunner extends Interpreter {
      * for the writer under {@code questionKey}, and under {@code doneKey} {@code "true"} when there is
      * none left and {@code "false"} otherwise.
      */
+    /** The concept tree being built, while a concept-tree job runs ({@code FrameMakingWorkflow_261022_oo01}, step 2). */
+    private com.scivicslab.turingworkflow.plugins.rstframe.ConceptTree conceptTree;
+
+    /**
+     * Opens a book for {@code concept-tree.yaml}: every rule file under the book's directory that has its markdown beside
+     * it, in path order, becomes the material the questions walk.
+     *
+     * @param bookKey  where the book's directory is kept (an absolute path)
+     * @param nameKey  where the book's name is kept, the root of the tree
+     * @param givenKey where a file of given concepts is kept, one per line (a textbook's headings); empty for none,
+     *                 and with given concepts no new concept is accepted
+     */
+    public ActionResult conceptOpen(String bookKey, String nameKey, String givenKey) {
+        String dir = kept(bookKey);
+        String name = kept(nameKey);
+        String given = kept(givenKey);
+        if (dir == null || dir.isBlank() || name == null || name.isBlank()) {
+            return new ActionResult(false, "the book's directory and its name must be kept first");
+        }
+        if (fileScope == null) return new ActionResult(false, "this job may not read files");
+        try {
+            java.nio.file.Path root = java.nio.file.Path.of(dir.strip()).toAbsolutePath().toRealPath();
+            if (!fileScope.canRead(root)) return new ActionResult(false, "outside the readable range: " + root);
+            java.util.Map<String, String> files = new java.util.LinkedHashMap<>();
+            try (var walk = java.nio.file.Files.walk(root)) {
+                for (java.nio.file.Path p : walk.filter(p -> p.toString().endsWith(".lisp")).sorted().toList()) {
+                    java.nio.file.Path md = p.resolveSibling(p.getFileName().toString().replaceFirst("\\.lisp$", ".md"));
+                    if (java.nio.file.Files.isRegularFile(md)) files.put(p.toString(), java.nio.file.Files.readString(p));
+                }
+            }
+            if (files.isEmpty()) return new ActionResult(false, "no rule file with its markdown beside it under " + root);
+            List<String> concepts = new java.util.ArrayList<>();
+            if (given != null && !given.isBlank()) {
+                java.nio.file.Path g = java.nio.file.Path.of(given.strip()).toAbsolutePath().normalize();
+                if (!fileScope.canRead(g)) return new ActionResult(false, "outside the readable range: " + g);
+                for (String l : java.nio.file.Files.readAllLines(g)) if (!l.isBlank()) concepts.add(l.strip());
+            }
+            conceptTree = new com.scivicslab.turingworkflow.plugins.rstframe.ConceptTree(name.strip(), files, concepts, concepts.isEmpty());
+            questioner = conceptTree;
+            return new ActionResult(true, "opened " + files.size() + " rule file(s), " + conceptTree.units().size()
+                    + " paragraph(s), " + concepts.size() + " given concept(s)");
+        } catch (Exception e) {
+            return new ActionResult(false, "could not open the book: " + e.getMessage());
+        }
+    }
+
+    /** Writes the concept tree built so far to the file kept under {@code outKey}; an existing file is not overwritten. */
+    public ActionResult conceptWrite(String outKey, String bookKey) {
+        if (conceptTree == null) return new ActionResult(false, "no concept tree is being built");
+        String out = kept(outKey);
+        if (out == null || out.isBlank()) return new ActionResult(false, "the output file must be kept first");
+        if (fileScope == null) return new ActionResult(false, "this job may not write files");
+        try {
+            java.nio.file.Path f = java.nio.file.Path.of(out.strip()).toAbsolutePath().normalize();
+            if (!fileScope.canWrite(f)) return new ActionResult(false, "outside the writable range: " + f);
+            if (java.nio.file.Files.exists(f)) return new ActionResult(false, f + " already exists; a concept tree is not overwritten");
+            if (f.getParent() != null) java.nio.file.Files.createDirectories(f.getParent());
+            String book = kept(bookKey);
+            java.nio.file.Files.writeString(f, conceptTree.subjectsFile("the body of the rule files under " + (book == null ? "?" : book.strip())));
+            selfActorRef.putJson("outcome", f.toString());
+            return new ActionResult(true, "wrote " + conceptTree.concepts().size() + " concept(s) to " + f
+                    + (conceptTree.notes().isEmpty() ? "" : ", " + conceptTree.notes().size() + " note(s)"));
+        } catch (Exception e) {
+            return new ActionResult(false, "could not write the concept tree: " + e.getMessage());
+        }
+    }
+
     public ActionResult questionNext(String questionKey, String doneKey) {
         if (questioner == null) return new ActionResult(false, "nothing is open");
         String q = questioner.nextQuestion();
