@@ -185,6 +185,7 @@ public class ChatUiActorSystem implements ConversationControls {
     public static final String HOUSEKEEPER = "housekeeper";
 
     private ActorRef<Housekeeper> housekeeperRef;
+    private ActorRef<AutonomousTurnWatcher> autonomousTurnWatcherRef;
     private ActorRef<CallWatchdog> callWatchdogRef;
     private ActorRef<CollaborationGraph> collaborationGraphRef;
     private ActorRef<SkillRegistry> skillRegistryRef;
@@ -363,6 +364,7 @@ public class ChatUiActorSystem implements ConversationControls {
                 + chats.size() + " conversation(s)");
 
         startActivityWatcher();
+        startAutonomousTurnWatcher();
     }
 
     /**
@@ -382,6 +384,25 @@ public class ChatUiActorSystem implements ConversationControls {
     /** @return the actor holding what this instance is doing, for {@code ActivityResource} */
     public ActorRef<com.scivicslab.chatui.audittrail.ActivityWatcher> getActivityWatcher() {
         return activityWatcherRef;
+    }
+
+    /**
+     * Starts asking every conversation, every few seconds, to surface a turn its provider produced with no prompt
+     * (a background job the model started finishing). Under the housekeeper, like the activity watcher.
+     */
+    private void startAutonomousTurnWatcher() {
+        autonomousTurnWatcherRef = housekeeperRef.createChild("autonomous-turns",
+                new AutonomousTurnWatcher(chatSessions::values));
+        autonomousTurnWatcherRef.tell(w -> w.bind(autonomousTurnWatcherRef));
+        autonomousTurnWatcherRef.tell(AutonomousTurnWatcher::startWatching);
+    }
+
+    /** Stops the autonomous-turn schedule before the actor system goes away. */
+    @PreDestroy
+    void stopAutonomousTurnWatcher() {
+        if (autonomousTurnWatcherRef != null) {
+            autonomousTurnWatcherRef.tell(AutonomousTurnWatcher::stopWatching).join();
+        }
     }
 
     /** Stops the activity schedule before the actor system goes away. */
