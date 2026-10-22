@@ -129,9 +129,14 @@ class FillFrameTest {
     }
 
     private String run() throws Exception {
+        return run(dir.resolve("request.lisp"), dir, "");
+    }
+
+    private String run(Path request, Path frameDir, String works) throws Exception {
         for (String[] p : new String[][] {
-                {"request", dir.resolve("request.lisp").toString()}, {"subject", dir.resolve("Squares.java").toString()},
-                {"frameDir", dir.toString()}, {"out", dir.resolve("filled.lisp").toString()},
+                {"request", request.toString()}, {"subject", dir.resolve("Squares.java").toString()},
+                {"frameDir", frameDir.toString()}, {"out", dir.resolve("filled.lisp").toString()},
+                {"framesRoot", ""}, {"works", works}, {"maxExamples", "3"},
                 {"writer", "project1/chat-02"}, {"writerModel", ""}, {"writerNoThink", "true"},
                 {"language", "Japanese"}, {"maxItems", "5"}, {"maxBlanks", "80"}}) {
             plan.callByActionName("putJson", "{\"path\":\"" + p[0] + "\",\"value\":\"" + p[1].replace("\\", "\\\\") + "\"}");
@@ -180,6 +185,41 @@ class FillFrameTest {
         for (String q : writer.questions) {
             assertFalse(q.contains("Available tools"), "no tool instructions in front of a question");
         }
+    }
+
+    @Test
+    @DisplayName("汎化フレームの空欄は、roles の表と made-from がたどる元の本の段落を、お手本として質問に添えて聞かれる")
+    void aBlankOfAnIntegratedFrameIsAskedWithTheBooksParagraphsOfItsPart() throws Exception {
+        Path frames = dir.resolve("rst-on-lisp/frames");
+        Files.createDirectories(frames.resolve("explanation"));
+        Files.createDirectories(frames.resolve("subject/a"));
+        Files.writeString(frames.resolve("subject/a/design.lisp"), """
+                ;;; made-from: doc_X/docs/A/a1 / ch23
+                (defrule design -> p-what)
+                (defrule p-what -> :instruction "say what the system is")
+                """);
+        Path request = frames.resolve("explanation/explain.lisp");
+        Files.writeString(request, """
+                ;;; integrates: subject/a/design.lisp (A, 23 Design)
+                ;;; roles (role: design):
+                ;;;   p-what:  p-system-what
+                (defrule document -> p-what p-other)
+                (defrule p-what -> :nucleus p-what/n)
+                (defrule p-what/n -> :instruction "Say what the program is" :sample "Squares prints squares.")
+                (defrule p-other -> :instruction "Say anything else")
+                """);
+        Path book = dir.resolve("doc_X/docs/A/a1/a1.lisp");
+        Files.createDirectories(book.getParent());
+        Files.writeString(book, "(defrule ch23 -> p-system-what)\n(defrule p-system-what -> \"FileBuy is a file-buying system.\")\n");
+
+        String outcome = run(request, frames.resolve("explanation"), dir.toString());
+
+        assertEquals(dir.resolve("filled.lisp").toString(), outcome, "questions so far: " + writer.questions);
+        assertEquals(2, writer.questions.size(), writer.questions.toString());
+        assertTrue(writer.questions.get(0).contains("- [a1.lisp / p-system-what] FileBuy is a file-buying system."), writer.questions.get(0));
+        assertTrue(writer.questions.get(0).contains("Model sentence (from a different document; do not copy it, write this item's own content in the same role): Squares prints squares."),
+                "the :sample stays: " + writer.questions.get(0));
+        assertFalse(writer.questions.get(1).contains("Paragraphs of other books"), "a blank with no part gets none: " + writer.questions.get(1));
     }
 
     @Test

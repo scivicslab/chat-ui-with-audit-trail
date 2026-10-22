@@ -599,17 +599,33 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
      * <pre>{@code
      * - actor: this
      *   method: framePrompt
-     *   arguments: ["cur", "blank", "subject", "names", "prompt", "Japanese", "5"]
+     *   arguments: ["cur", "blank", "subject", "names", "prompt", "Japanese", "5", "examples"]
      * }</pre>
-     * @param args {@code [fileKey, blankKey, subjectKey, namesKey, promptKey, language, maxItems]}:
+     * @param args {@code [fileKey, blankKey, subjectKey, namesKey, promptKey, language, maxItems, examplesKey]}:
      *             where the rule file, the blank and the material to explain are kept, where the item
-     *             names are kept, where to put the prompt, the language to write in, then how many
-     *             items a list may have
+     *             names are kept, where to put the prompt, the language to write in, how many
+     *             items a list may have, then where {@code frameExamples} kept the examples (optional)
      */
     @Action("framePrompt")
     public ActionResult framePrompt(String args) {
         org.json.JSONArray a = arguments(args);
-        return runner().framePrompt(at(a, 0), at(a, 1), at(a, 2), at(a, 3), at(a, 4), at(a, 5), at(a, 6));
+        return runner().framePrompt(at(a, 0), at(a, 1), at(a, 2), at(a, 3), at(a, 4), at(a, 5), at(a, 6), at(a, 7));
+    }
+
+    /**
+     * Keeps the paragraphs of the source books that play the same part as the blank taken by {@code frameNext}.
+     * <pre>{@code
+     * - actor: this
+     *   method: frameExamples
+     *   arguments: ['jexl:state.getString("request")', "", 'jexl:state.getString("frameDir")', "", "blank", "examples", "3"]
+     * }</pre>
+     * @param args {@code [requestPath, framesRoot, frameDir, worksDir, blankKey, examplesKey, max]}; an empty
+     *             {@code framesRoot} is the parent of {@code frameDir} when it is named {@code frames}, an empty {@code worksDir} is {@code ~/works}
+     */
+    @Action("frameExamples")
+    public ActionResult frameExamples(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().frameExamples(at(a, 0), at(a, 1), at(a, 2), at(a, 3), at(a, 4), at(a, 5), at(a, 6));
     }
 
     /**

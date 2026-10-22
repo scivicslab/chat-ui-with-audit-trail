@@ -10,7 +10,9 @@ description: |
   is a list: the writer names the items, each item gets a copy of that sub-frame's rules, and the
   copies' blanks are filled in turn. Each blank is one question to the writer, and the question
   carries what it follows on from: the sentences already written for the same item, or in the same
-  paragraph. The writer is put on plain-text-no-context-loop.yaml, which sends that question and
+  paragraph. A sentence blank is also shown, besides its :sample, up to maxExamples paragraphs of the
+  source books that play the same part, found through the frame library's roles tables and made-from
+  lines (FramesAndSamplesFromBooks_261021_oo01). The writer is put on plain-text-no-context-loop.yaml, which sends that question and
   nothing else: no tool instructions, no skill catalog, none of the run's earlier questions and
   answers (with them, the model wrote broken text such as "<integer> </integer>"). The finished
   rule file is written to `out`.
@@ -51,6 +53,16 @@ params:
     description: "How many items a list may have at most"
     type: int
     default: 5
+  framesRoot:
+    description: "The frame library's frames/ directory, read for the roles tables and made-from lines that give each blank its examples; empty takes the parent of frameDir when it is named frames"
+    default: ""
+  works:
+    description: "The directory the books' paths are under; empty takes ~/works"
+    default: ""
+  maxExamples:
+    description: "How many paragraphs of the source books a sentence blank is shown at most, besides its :sample"
+    type: int
+    default: 3
   maxBlanks:
     description: "How many blanks one run fills at most; the run fails past it"
     type: int
@@ -150,8 +162,12 @@ steps:
         arguments: ["done", 'jexl:state.getString("maxBlanks")']
         execution: direct
       - actor: this
+        method: frameExamples
+        arguments: ['jexl:state.getString("request")', 'jexl:state.getString("framesRoot")', 'jexl:state.getString("frameDir")', 'jexl:state.getString("works")', "blank", "examples", 'jexl:state.getString("maxExamples")']
+        execution: direct
+      - actor: this
         method: framePrompt
-        arguments: ["cur", "blank", "subject", "names", "prompt", 'jexl:state.getString("language")', 'jexl:state.getString("maxItems")']
+        arguments: ["cur", "blank", "subject", "names", "prompt", 'jexl:state.getString("language")', 'jexl:state.getString("maxItems")', "examples"]
         execution: direct
 
   - states: ["pick", "failed"]

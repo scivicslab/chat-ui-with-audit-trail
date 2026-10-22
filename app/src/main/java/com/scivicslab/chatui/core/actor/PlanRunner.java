@@ -1255,6 +1255,85 @@ public class PlanRunner extends Interpreter {
      *
      * @return {@link ActionResult} with {@code success=true} iff a blank was left
      */
+    /** The frame library, read once per frames directory: every rule file under it, by its path under it. */
+    private com.scivicslab.turingworkflow.plugins.rstframe.FrameExamples frameExamples;
+    private java.nio.file.Path frameExamplesRoot;
+
+    /**
+     * Keeps, for the blank taken by {@code frameNext}, the paragraphs of the source books that play the same part
+     * ({@code FrameExamples}): one line each, its source, a tab, its text. None is kept when the frame is not found
+     * in the library or names no such part; the step still succeeds, and the blank is asked with its sample alone.
+     *
+     * @param requestPath the frame being filled, as an absolute path
+     * @param framesRoot  the library's {@code frames/} directory; empty takes the parent of {@code frameDir} when that
+     *                    directory is named {@code frames} ({@code rst-on-lisp/frames/explanation}), and else none
+     * @param frameDir    the directory of the sub-frames
+     * @param worksDir    the directory the books' paths are under; empty takes {@code ~/works}
+     * @param max         how many examples at most
+     */
+    public ActionResult frameExamples(String requestPath, String framesRoot, String frameDir, String worksDir,
+                                      String blankKey, String examplesKey, String max) {
+        selfActorRef.putJson(examplesKey, "");
+        String blankName = kept(blankKey + "-name");
+        if (blankName == null || blankName.isBlank()) return new ActionResult(false, "no blank is kept as '" + blankKey + "'");
+        java.nio.file.Path root;
+        if (framesRoot != null && !framesRoot.isBlank()) root = java.nio.file.Path.of(framesRoot);
+        else if (frameDir != null && !frameDir.isBlank() && java.nio.file.Path.of(frameDir).getParent() != null
+                && "frames".equals(String.valueOf(java.nio.file.Path.of(frameDir).getParent().getFileName())))
+            root = java.nio.file.Path.of(frameDir).getParent();
+        else return new ActionResult(true, "no frame library to take examples from");
+        root = root.toAbsolutePath().normalize();
+        java.nio.file.Path works = (worksDir == null || worksDir.isBlank()
+                ? java.nio.file.Path.of(System.getProperty("user.home"), "works") : java.nio.file.Path.of(worksDir)).toAbsolutePath().normalize();
+        java.util.Map<String, String> frames = new java.util.LinkedHashMap<>();
+        if (frameExamples == null || !root.equals(frameExamplesRoot)) {
+            if (!java.nio.file.Files.isDirectory(root)) return new ActionResult(true, "no frame library at " + root);
+            try (java.util.stream.Stream<java.nio.file.Path> walk = java.nio.file.Files.walk(root)) {
+                for (java.nio.file.Path p : walk.filter(p -> p.toString().endsWith(".lisp")).sorted().toList()) {
+                    frames.put(root.relativize(p).toString().replace('\\', '/'), java.nio.file.Files.readString(p));
+                }
+            } catch (java.io.IOException e) {
+                return new ActionResult(false, "could not read the frame library: " + e.getMessage());
+            }
+            final java.nio.file.Path base = works;
+            frameExamples = new com.scivicslab.turingworkflow.plugins.rstframe.FrameExamples(frames, rel -> {
+                java.nio.file.Path p = base.resolve(rel).normalize();
+                try {
+                    return p.startsWith(base) && java.nio.file.Files.isRegularFile(p) ? java.nio.file.Files.readString(p) : null;
+                } catch (java.io.IOException e) {
+                    return null;
+                }
+            });
+            frameExamplesRoot = root;
+        }
+        java.nio.file.Path request = java.nio.file.Path.of(requestPath).toAbsolutePath().normalize();
+        String frame = request.startsWith(root) ? root.relativize(request).toString().replace('\\', '/') : request.getFileName().toString();
+        int n;
+        try {
+            n = Integer.parseInt(max == null || max.isBlank() ? "3" : max.strip());
+        } catch (NumberFormatException e) {
+            return new ActionResult(false, "max is not a number: " + max);
+        }
+        StringBuilder sb = new StringBuilder();
+        List<com.scivicslab.turingworkflow.plugins.rstframe.FrameExamples.Example> found = frameExamples.forBlank(frame, blankName, n);
+        for (var e : found) {
+            sb.append(e.source().replaceAll("[\\t\\r\\n]+", " ")).append('\t').append(e.text().replaceAll("[\\t\\r\\n]+", " ")).append('\n');
+        }
+        selfActorRef.putJson(examplesKey, sb.toString());
+        return new ActionResult(true, found.size() + " example(s) for " + blankName);
+    }
+
+    private List<com.scivicslab.turingworkflow.plugins.rstframe.FrameExamples.Example> examplesKept(String key) {
+        String text = key == null || key.isBlank() ? null : kept(key);
+        List<com.scivicslab.turingworkflow.plugins.rstframe.FrameExamples.Example> out = new java.util.ArrayList<>();
+        if (text == null) return out;
+        for (String line : text.split("\n")) {
+            int tab = line.indexOf('\t');
+            if (tab > 0) out.add(new com.scivicslab.turingworkflow.plugins.rstframe.FrameExamples.Example(line.substring(0, tab), line.substring(tab + 1)));
+        }
+        return out;
+    }
+
     public ActionResult frameNext(String fileKey, String blankKey) {
         String file = kept(fileKey);
         if (file == null) return new ActionResult(false, "nothing is kept as '" + fileKey + "'");
@@ -1325,6 +1404,15 @@ public class PlanRunner extends Interpreter {
      */
     public ActionResult framePrompt(String fileKey, String blankKey, String subjectKey, String namesKey,
                                     String promptKey, String language, String maxItems) {
+        return framePrompt(fileKey, blankKey, subjectKey, namesKey, promptKey, language, maxItems, "");
+    }
+
+    /**
+     * As {@link #framePrompt(String, String, String, String, String, String, String)}, with the examples
+     * {@link #frameExamples} kept under {@code examplesKey} shown to a sentence blank; an empty key shows none.
+     */
+    public ActionResult framePrompt(String fileKey, String blankKey, String subjectKey, String namesKey,
+                                    String promptKey, String language, String maxItems, String examplesKey) {
         String file = kept(fileKey);
         String subject = kept(subjectKey);
         com.scivicslab.turingworkflow.plugins.rstframe.FrameFiller.Blank blank = blankKept(blankKey);
@@ -1348,7 +1436,8 @@ public class PlanRunner extends Interpreter {
         } else {
             String names = kept(namesKey);
             prompt = frameFiller.sentencePrompt(file, blank, subject,
-                    names == null || names.isBlank() ? List.of() : List.of(names.split("\\R")), lang);
+                    names == null || names.isBlank() ? List.of() : List.of(names.split("\\R")), lang,
+                    examplesKept(examplesKey));
         }
         selfActorRef.putJson(promptKey, prompt);
         return new ActionResult(true, "built a prompt of " + prompt.length() + " chars");
