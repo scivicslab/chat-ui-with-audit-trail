@@ -7,7 +7,8 @@ description: |
   the next node's heading, with the files it was read from. A heading a page file repeats continues its
   node; a heading deeper than a subsection stays in its subsection; text before any node of a top-level
   directory (preface, cover) belongs to none and is counted. The sections are stored in the H2 database
-  (table section_text). No LLM is used.
+  (table section_text). The work is done by the books actor of plugin-rst-frame (BookStructureIIAR),
+  created at the start and removed at the end. No LLM is used.
 params:
   name:
     label: "The book's name"
@@ -21,21 +22,35 @@ params:
     default: "/home/devteam/works/rst-on-lisp/db/books"
 steps:
   - states: ["0", "1"]
+    label: build-actor-tree
+    note: The books actor (plugin-rst-frame) does the work; it is created here and removed at the end.
+    actions:
+      - actor: loader
+        method: createChild
+        arguments: ["ROOT", "books", "com.scivicslab.turingworkflow.plugins.rstframe.BookStructureIIAR"]
+
+  - states: ["1", "2"]
     label: cut-into-sections
     note: The book's directory and its table of contents are read from the database, as book-toc.yaml stored them.
     actions:
+      - actor: books
+        method: sections
+        arguments: {db: 'jexl:state.getString("db")', name: 'jexl:state.getString("name")'}
       - actor: this
-        method: bookSections
-        arguments: ["db", "name"]
+        method: putJson
+        arguments: {path: outcome, value: "jexl:result"}
         execution: direct
 
-  - states: ["0", "failed"]
+  - states: ["1", "failed"]
     label: could-not-cut
     actions: [{actor: this, method: doNothing, arguments: ["the book is not in the database, or its files could not be read"], execution: direct}]
 
-  - states: ["1", "end"]
-    label: done
+  - states: ["2", "end"]
+    label: tear-down-actor-tree
     actions:
+      - actor: loader
+        method: removeChild
+        arguments: "books"
       - actor: this
         method: finish
         arguments: ["outcome"]
@@ -43,4 +58,11 @@ steps:
 
   - states: ["failed", "end"]
     label: report-failure
-    actions: [{actor: this, method: reportFailure, arguments: [], execution: direct}]
+    actions:
+      - actor: loader
+        method: removeChild
+        arguments: "books"
+      - actor: this
+        method: reportFailure
+        arguments: []
+        execution: direct

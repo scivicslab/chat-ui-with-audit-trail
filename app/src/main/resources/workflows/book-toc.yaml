@@ -7,7 +7,8 @@ description: |
   subsection. OCR writes every heading at the same depth, so the depth is read from the heading's number
   ("Chapter 4 ▪ ..." a chapter, "4.1." a section, "4.1.1." a subsection); a numbered heading counts only
   when its number lies in the current chapter. The table is stored in the H2 database of the
-  intermediate data (table toc_node), replacing what the book had there. No LLM is used.
+  intermediate data (table toc_node), replacing what the book had there. The work is done by the books
+  actor of plugin-rst-frame (BookStructureIIAR), created at the start and removed at the end. No LLM is used.
 params:
   book:
     label: "The book's directory"
@@ -26,21 +27,35 @@ params:
     default: "/home/devteam/works/rst-on-lisp/db/books"
 steps:
   - states: ["0", "1"]
+    label: build-actor-tree
+    note: The books actor (plugin-rst-frame) does the work; it is created here and removed at the end.
+    actions:
+      - actor: loader
+        method: createChild
+        arguments: ["ROOT", "books", "com.scivicslab.turingworkflow.plugins.rstframe.BookStructureIIAR"]
+
+  - states: ["1", "2"]
     label: read-the-table-of-contents
     note: Every markdown file under the book's directory is read; the table replaces what the book had in the database.
     actions:
+      - actor: books
+        method: toc
+        arguments: {db: 'jexl:state.getString("db")', name: 'jexl:state.getString("name")', book: 'jexl:state.getString("book")'}
       - actor: this
-        method: bookToc
-        arguments: ["db", "name", "book"]
+        method: putJson
+        arguments: {path: outcome, value: "jexl:result"}
         execution: direct
 
-  - states: ["0", "failed"]
+  - states: ["1", "failed"]
     label: could-not-read
     actions: [{actor: this, method: doNothing, arguments: ["the book could not be read, or the database could not be written"], execution: direct}]
 
-  - states: ["1", "end"]
-    label: done
+  - states: ["2", "end"]
+    label: tear-down-actor-tree
     actions:
+      - actor: loader
+        method: removeChild
+        arguments: "books"
       - actor: this
         method: finish
         arguments: ["outcome"]
@@ -48,4 +63,11 @@ steps:
 
   - states: ["failed", "end"]
     label: report-failure
-    actions: [{actor: this, method: reportFailure, arguments: [], execution: direct}]
+    actions:
+      - actor: loader
+        method: removeChild
+        arguments: "books"
+      - actor: this
+        method: reportFailure
+        arguments: []
+        execution: direct
