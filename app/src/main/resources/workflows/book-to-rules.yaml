@@ -31,6 +31,9 @@ steps:
     label: add-writer
     note: The writer is a conversation with no history of its own from before, on the loop that sends each question alone.
     actions:
+      - actor: loader
+        method: createChild
+        arguments: ["ROOT", "bookFiles", "com.scivicslab.turingworkflow.plugins.rstframe.BookFileJobIIAR"]
       - actor: this
         method: addWorker
         arguments: ["writer", 'jexl:state.getString("writer")']
@@ -59,9 +62,13 @@ steps:
   - states: ["1", "pick"]
     label: find-the-next-file
     actions:
+      - actor: bookFiles
+        method: next
+        arguments: {dir: 'jexl:state.getString("book")'}
+        execution: direct
       - actor: this
-        method: bookFileNext
-        arguments: ["book", "file", "allDone"]
+        method: putJson
+        arguments: {path: pick, value: "jexl:result"}
         execution: direct
 
   - states: ["1", "failed"]
@@ -73,8 +80,11 @@ steps:
     actions:
       - actor: this
         method: onlyIf
-        arguments: 'jexl:state.getString("allDone") == "true"'
+        arguments: 'jexl:state.getString("pick.done") == "true"'
         execution: direct
+      - actor: loader
+        method: removeChild
+        arguments: "bookFiles"
       - actor: this
         method: finish
         arguments: ["outcome"]
@@ -85,11 +95,11 @@ steps:
     actions:
       - actor: this
         method: onlyIf
-        arguments: 'jexl:state.getString("allDone") == "false"'
+        arguments: 'jexl:state.getString("pick.done") == "false"'
         execution: direct
-      - actor: this
-        method: bookFileOpen
-        arguments: ["file"]
+      - actor: bookFiles
+        method: open
+        arguments: {file: 'jexl:state.getString("pick.file")'}
         execution: direct
 
   - states: ["pick", "failed"]
@@ -99,9 +109,12 @@ steps:
   - states: ["next", "decide"]
     label: take-the-next-question
     actions:
+      - actor: bookFiles
+        method: question
+        execution: direct
       - actor: this
-        method: questionNext
-        arguments: ["question", "done"]
+        method: putJson
+        arguments: {path: q, value: "jexl:result"}
         execution: direct
 
   - states: ["decide", "write"]
@@ -109,7 +122,7 @@ steps:
     actions:
       - actor: this
         method: onlyIf
-        arguments: 'jexl:state.getString("done") == "true"'
+        arguments: 'jexl:state.getString("q.done") == "true"'
         execution: direct
 
   - states: ["decide", "ask"]
@@ -118,7 +131,7 @@ steps:
     actions:
       - actor: this
         method: onlyIf
-        arguments: 'jexl:state.getString("done") == "false"'
+        arguments: 'jexl:state.getString("q.done") == "false"'
         execution: direct
       - actor: this
         method: countUp
@@ -136,15 +149,15 @@ steps:
         method: askWorker
         arguments:
           - writer
-          - 'jexl:state.getString("question")'
+          - 'jexl:state.getString("q.question")'
         execution: direct
       - actor: this
         method: keepWorkerReply
         arguments: ["writer", "reply"]
         execution: direct
-      - actor: this
-        method: questionAnswer
-        arguments: ["reply"]
+      - actor: bookFiles
+        method: answer
+        arguments: {reply: 'jexl:state.getString("reply")'}
         execution: direct
 
   - states: ["ask", "failed"]
@@ -155,9 +168,12 @@ steps:
     label: write-the-rule-file
     note: The rule file is written beside the markdown file, never over a file already there; then the next file.
     actions:
+      - actor: bookFiles
+        method: write
+        execution: direct
       - actor: this
-        method: bookFileWrite
-        arguments: []
+        method: putJson
+        arguments: {path: outcome, value: "jexl:result"}
         execution: direct
 
   - states: ["write", "failed"]
@@ -166,4 +182,11 @@ steps:
 
   - states: ["failed", "end"]
     label: report-failure
-    actions: [{actor: this, method: reportFailure, arguments: [], execution: direct}]
+    actions:
+      - actor: loader
+        method: removeChild
+        arguments: "bookFiles"
+      - actor: this
+        method: reportFailure
+        arguments: []
+        execution: direct

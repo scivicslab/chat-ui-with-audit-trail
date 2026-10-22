@@ -36,6 +36,9 @@ steps:
     label: add-writer
     note: The writer is a conversation with no history of its own from before, on the loop that sends each question alone.
     actions:
+      - actor: loader
+        method: createChild
+        arguments: ["ROOT", "frame", "com.scivicslab.turingworkflow.plugins.rstframe.FrameJobIIAR"]
       - actor: this
         method: addWorker
         arguments: ["writer", 'jexl:state.getString("writer")']
@@ -64,9 +67,9 @@ steps:
         method: putJson
         arguments: {path: asked, value: "0"}
         execution: direct
-      - actor: this
-        method: sampleOpen
-        arguments: ["samples", "name"]
+      - actor: frame
+        method: open
+        arguments: {samples: 'jexl:state.getString("samples")', name: 'jexl:state.getString("name")'}
         execution: direct
 
   - states: ["1", "failed"]
@@ -76,9 +79,12 @@ steps:
   - states: ["next", "decide"]
     label: take-the-next-question
     actions:
+      - actor: frame
+        method: question
+        execution: direct
       - actor: this
-        method: questionNext
-        arguments: ["question", "done"]
+        method: putJson
+        arguments: {path: q, value: "jexl:result"}
         execution: direct
 
   - states: ["decide", "write"]
@@ -86,7 +92,7 @@ steps:
     actions:
       - actor: this
         method: onlyIf
-        arguments: 'jexl:state.getString("done") == "true"'
+        arguments: 'jexl:state.getString("q.done") == "true"'
         execution: direct
 
   - states: ["decide", "ask"]
@@ -95,7 +101,7 @@ steps:
     actions:
       - actor: this
         method: onlyIf
-        arguments: 'jexl:state.getString("done") == "false"'
+        arguments: 'jexl:state.getString("q.done") == "false"'
         execution: direct
       - actor: this
         method: countUp
@@ -113,15 +119,15 @@ steps:
         method: askWorker
         arguments:
           - writer
-          - 'jexl:state.getString("question")'
+          - 'jexl:state.getString("q.question")'
         execution: direct
       - actor: this
         method: keepWorkerReply
         arguments: ["writer", "reply"]
         execution: direct
-      - actor: this
-        method: questionAnswer
-        arguments: ["reply"]
+      - actor: frame
+        method: answer
+        arguments: {reply: 'jexl:state.getString("reply")'}
         execution: direct
 
   - states: ["ask", "failed"]
@@ -131,10 +137,17 @@ steps:
   - states: ["write", "end"]
     label: write-the-frame
     actions:
-      - actor: this
-        method: frameWrite
-        arguments: ["frames", "written"]
+      - actor: frame
+        method: write
+        arguments: {dir: 'jexl:state.getString("frames")'}
         execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: written, value: "jexl:result"}
+        execution: direct
+      - actor: loader
+        method: removeChild
+        arguments: "frame"
       - actor: this
         method: finish
         arguments: ["written"]
@@ -146,4 +159,11 @@ steps:
 
   - states: ["failed", "end"]
     label: report-failure
-    actions: [{actor: this, method: reportFailure, arguments: [], execution: direct}]
+    actions:
+      - actor: loader
+        method: removeChild
+        arguments: "frame"
+      - actor: this
+        method: reportFailure
+        arguments: []
+        execution: direct

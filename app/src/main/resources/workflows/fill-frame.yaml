@@ -72,6 +72,9 @@ steps:
     label: add-writer
     note: The writer is a conversation with no history of its own from before, on the loop that sends only the question.
     actions:
+      - actor: loader
+        method: createChild
+        arguments: ["ROOT", "filler", "com.scivicslab.turingworkflow.plugins.rstframe.FrameFillingIIAR"]
       - actor: this
         method: addWorker
         arguments: ["writer", 'jexl:state.getString("writer")']
@@ -140,46 +143,62 @@ steps:
     label: include-a-child-frame
     note: A blank with :include is one child frame, put in once as it is from frameDir; nothing is asked, and its own blanks come next.
     actions:
+      - actor: filler
+        method: next
+        arguments: {file: 'jexl:state.getString("cur")'}
+        execution: direct
       - actor: this
-        method: frameNext
-        arguments: ["cur", "blank"]
+        method: putJson
+        arguments: {path: blank, value: "jexl:result"}
         execution: direct
       - actor: this
         method: onlyIf
-        arguments: 'jexl:state.getString("blank-kind") == "include"'
+        arguments: 'jexl:state.getString("blank.kind") == "include"'
         execution: direct
       - actor: files
         method: read
-        arguments: {path: 'jexl:state.getString("frameDir") + "/" + state.getString("blank-include")'}
+        arguments: {path: 'jexl:state.getString("frameDir") + "/" + state.getString("blank.include")'}
         execution: direct
       - actor: this
         method: putJson
         arguments: {path: "frame-text", value: "jexl:result"}
         execution: direct
+      - actor: filler
+        method: include
+        arguments: {file: 'jexl:state.getString("cur")', frameText: 'jexl:state.getString("frame-text")'}
+        execution: direct
       - actor: this
-        method: frameInclude
-        arguments: ["cur", "blank", "frame-text"]
+        method: putJson
+        arguments: {path: cur, value: "jexl:result"}
         execution: direct
 
   - states: ["pick", "ask"]
     label: next-blank
     note: Takes the next blank of the rule file as it stands. countUp bounds the run.
     actions:
+      - actor: filler
+        method: next
+        arguments: {file: 'jexl:state.getString("cur")'}
+        execution: direct
       - actor: this
-        method: frameNext
-        arguments: ["cur", "blank"]
+        method: putJson
+        arguments: {path: blank, value: "jexl:result"}
         execution: direct
       - actor: this
         method: countUp
         arguments: ["done", 'jexl:state.getString("maxBlanks")']
         execution: direct
-      - actor: this
-        method: frameExamples
-        arguments: ['jexl:state.getString("request")', 'jexl:state.getString("framesRoot")', 'jexl:state.getString("frameDir")', 'jexl:state.getString("works")', "blank", "examples", 'jexl:state.getString("maxExamples")']
+      - actor: filler
+        method: examples
+        arguments: {request: 'jexl:state.getString("request")', framesRoot: 'jexl:state.getString("framesRoot")', frameDir: 'jexl:state.getString("frameDir")', works: 'jexl:state.getString("works")', max: 'jexl:state.getString("maxExamples")'}
+        execution: direct
+      - actor: filler
+        method: prompt
+        arguments: {file: 'jexl:state.getString("cur")', subject: 'jexl:state.getString("subject")', names: 'jexl:state.getString("names")', language: 'jexl:state.getString("language")', maxItems: 'jexl:state.getString("maxItems")'}
         execution: direct
       - actor: this
-        method: framePrompt
-        arguments: ["cur", "blank", "subject", "names", "prompt", 'jexl:state.getString("language")', 'jexl:state.getString("maxItems")', "examples"]
+        method: putJson
+        arguments: {path: prompt, value: "jexl:result"}
         execution: direct
 
   - states: ["pick", "failed"]
@@ -207,7 +226,7 @@ steps:
     actions:
       - actor: this
         method: onlyIf
-        arguments: 'jexl:state.getString("blank-kind") == "frame"'
+        arguments: 'jexl:state.getString("blank.kind") == "frame"'
         execution: direct
       - actor: this
         method: keepWorkerReply
@@ -215,15 +234,27 @@ steps:
         execution: direct
       - actor: files
         method: read
-        arguments: {path: 'jexl:state.getString("frameDir") + "/" + state.getString("blank-frame")'}
+        arguments: {path: 'jexl:state.getString("frameDir") + "/" + state.getString("blank.frame")'}
         execution: direct
       - actor: this
         method: putJson
         arguments: {path: "frame-text", value: "jexl:result"}
         execution: direct
+      - actor: filler
+        method: expand
+        arguments: {file: 'jexl:state.getString("cur")', frameText: 'jexl:state.getString("frame-text")', reply: 'jexl:state.getString("reply")', maxItems: 'jexl:state.getString("maxItems")'}
+        execution: direct
       - actor: this
-        method: frameExpand
-        arguments: ["cur", "blank", "frame-text", "reply", "names", 'jexl:state.getString("maxItems")']
+        method: putJson
+        arguments: {path: expanded, value: "jexl:result"}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: cur, value: 'jexl:state.getString("expanded.file")'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: names, value: 'jexl:state.getString("expanded.names")'}
         execution: direct
 
   - states: ["keep", "pick"]
@@ -232,19 +263,27 @@ steps:
     actions:
       - actor: this
         method: onlyIf
-        arguments: 'jexl:state.getString("blank-kind") == "code"'
+        arguments: 'jexl:state.getString("blank.kind") == "code"'
         execution: direct
       - actor: this
         method: keepWorkerReply
         arguments: ["writer", "reply"]
         execution: direct
+      - actor: filler
+        method: fillCode
+        arguments: {file: 'jexl:state.getString("cur")', reply: 'jexl:state.getString("reply")', out: 'jexl:state.getString("out")'}
+        execution: direct
       - actor: this
-        method: frameFillCode
-        arguments: ["cur", "blank", "reply", "out", "code-text", "code-path"]
+        method: putJson
+        arguments: {path: coded, value: "jexl:result"}
         execution: direct
       - actor: files
         method: write
-        arguments: {path: 'jexl:state.getString("code-path")', text: 'jexl:state.getString("code-text")'}
+        arguments: {path: 'jexl:state.getString("coded.path")', text: 'jexl:state.getString("coded.code")'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: cur, value: 'jexl:state.getString("coded.file")'}
         execution: direct
 
   - states: ["keep", "pick"]
@@ -253,15 +292,19 @@ steps:
     actions:
       - actor: this
         method: onlyIf
-        arguments: 'jexl:state.getString("blank-kind") == "items"'
+        arguments: 'jexl:state.getString("blank.kind") == "items"'
         execution: direct
       - actor: this
         method: keepWorkerReply
         arguments: ["writer", "reply"]
         execution: direct
+      - actor: filler
+        method: fillItems
+        arguments: {file: 'jexl:state.getString("cur")', reply: 'jexl:state.getString("reply")'}
+        execution: direct
       - actor: this
-        method: frameFillItems
-        arguments: ["cur", "blank", "reply"]
+        method: putJson
+        arguments: {path: cur, value: "jexl:result"}
         execution: direct
 
   - states: ["keep", "pick"]
@@ -270,15 +313,19 @@ steps:
     actions:
       - actor: this
         method: onlyIf
-        arguments: 'jexl:state.getString("blank-kind") == "sentence"'
+        arguments: 'jexl:state.getString("blank.kind") == "sentence"'
         execution: direct
       - actor: this
         method: keepWorkerReply
         arguments: ["writer", "reply"]
         execution: direct
+      - actor: filler
+        method: fill
+        arguments: {file: 'jexl:state.getString("cur")', reply: 'jexl:state.getString("reply")'}
+        execution: direct
       - actor: this
-        method: frameFill
-        arguments: ["cur", "blank", "reply"]
+        method: putJson
+        arguments: {path: cur, value: "jexl:result"}
         execution: direct
 
   - states: ["keep", "failed"]
@@ -293,6 +340,9 @@ steps:
         method: write
         arguments: {path: 'jexl:state.getString("out")', text: 'jexl:state.getString("cur")'}
         execution: direct
+      - actor: loader
+        method: removeChild
+        arguments: "filler"
       - actor: this
         method: finish
         arguments: ["out"]
@@ -300,4 +350,12 @@ steps:
 
   - states: ["failed", "end"]
     label: report-failure
-    actions: [{actor: this, method: reportFailure, arguments: [], execution: direct}]
+    actions:
+      - actor: loader
+        method: removeChild
+        arguments: "filler"
+      - actor: this
+        method: reportFailure
+        arguments: []
+        execution: direct
+

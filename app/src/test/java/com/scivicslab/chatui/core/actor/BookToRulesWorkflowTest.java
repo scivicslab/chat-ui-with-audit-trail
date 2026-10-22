@@ -103,7 +103,7 @@ class BookToRulesWorkflowTest {
         plan = new PlanRunnerIIAR("plan", runner, system);
         system.addIIActor(plan);
         runner.setSelfActorRef(plan);
-        runner.setFileScope(new FileAccessScope(dir, List.of(dir)));
+        system.addIIActor(new WorkflowPluginLoader("loader", system, List.of()));
         system.addIIActor(new ScopedFilesIIAR("files", new ScopedFiles(new FileAccessScope(dir, List.of(dir))), system));
 
         Path book = dir.resolve("book");
@@ -146,6 +146,7 @@ class BookToRulesWorkflowTest {
     @DisplayName("規則ファイルの無い markdown を順に 1 本ずつ変換し、あるものは飛ばす")
     void everyFileWithoutARuleFileGetsOne() throws Exception {
         String outcome = run();
+        org.junit.jupiter.api.Assertions.assertNull(system.getIIActor("bookFiles"), "the workflow removes the actor it made");
 
         assertEquals(4, writer.questions.size(), "2 files x 1 paragraph x (misreadings, relations): " + writer.questions);
         String p1 = Files.readString(dir.resolve("book/p001/p001.lisp"));

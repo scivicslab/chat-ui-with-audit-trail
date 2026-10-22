@@ -45,6 +45,9 @@ steps:
     label: add-writer
     note: The writer is a conversation with no history of its own from before, on the loop that sends each question alone.
     actions:
+      - actor: loader
+        method: createChild
+        arguments: ["ROOT", "sample", "com.scivicslab.turingworkflow.plugins.rstframe.SampleJobIIAR"]
       - actor: this
         method: addWorker
         arguments: ["writer", 'jexl:state.getString("writer")']
@@ -73,9 +76,9 @@ steps:
         method: putJson
         arguments: {path: asked, value: "0"}
         execution: direct
-      - actor: this
-        method: bookOpen
-        arguments: ["book", "heading", "name", "samples"]
+      - actor: sample
+        method: open
+        arguments: {book: 'jexl:state.getString("book")', heading: 'jexl:state.getString("heading")', name: 'jexl:state.getString("name")', samples: 'jexl:state.getString("samples")'}
         execution: direct
 
   - states: ["1", "failed"]
@@ -85,9 +88,12 @@ steps:
   - states: ["next", "decide"]
     label: take-the-next-question
     actions:
+      - actor: sample
+        method: question
+        execution: direct
       - actor: this
-        method: questionNext
-        arguments: ["question", "done"]
+        method: putJson
+        arguments: {path: q, value: "jexl:result"}
         execution: direct
 
   - states: ["decide", "write"]
@@ -95,7 +101,7 @@ steps:
     actions:
       - actor: this
         method: onlyIf
-        arguments: 'jexl:state.getString("done") == "true"'
+        arguments: 'jexl:state.getString("q.done") == "true"'
         execution: direct
 
   - states: ["decide", "ask"]
@@ -104,7 +110,7 @@ steps:
     actions:
       - actor: this
         method: onlyIf
-        arguments: 'jexl:state.getString("done") == "false"'
+        arguments: 'jexl:state.getString("q.done") == "false"'
         execution: direct
       - actor: this
         method: countUp
@@ -122,15 +128,15 @@ steps:
         method: askWorker
         arguments:
           - writer
-          - 'jexl:state.getString("question")'
+          - 'jexl:state.getString("q.question")'
         execution: direct
       - actor: this
         method: keepWorkerReply
         arguments: ["writer", "reply"]
         execution: direct
-      - actor: this
-        method: questionAnswer
-        arguments: ["reply"]
+      - actor: sample
+        method: answer
+        arguments: {reply: 'jexl:state.getString("reply")'}
         execution: direct
 
   - states: ["ask", "failed"]
@@ -141,10 +147,17 @@ steps:
     label: act-on-the-judgement
     note: A new structure is written (never over a file already there), the same one gets an also-seen line, a one-off leaves nothing.
     actions:
-      - actor: this
-        method: bookWrite
-        arguments: ["samples", "outcome"]
+      - actor: sample
+        method: write
+        arguments: {samples: 'jexl:state.getString("samples")'}
         execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: outcome, value: "jexl:result"}
+        execution: direct
+      - actor: loader
+        method: removeChild
+        arguments: "sample"
       - actor: this
         method: finish
         arguments: ["outcome"]
@@ -156,4 +169,11 @@ steps:
 
   - states: ["failed", "end"]
     label: report-failure
-    actions: [{actor: this, method: reportFailure, arguments: [], execution: direct}]
+    actions:
+      - actor: loader
+        method: removeChild
+        arguments: "sample"
+      - actor: this
+        method: reportFailure
+        arguments: []
+        execution: direct

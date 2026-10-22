@@ -53,6 +53,9 @@ steps:
     label: add-writer
     note: The writer is a conversation with no history of its own from before, on the loop that sends each question alone.
     actions:
+      - actor: loader
+        method: createChild
+        arguments: ["ROOT", "slots", "com.scivicslab.turingworkflow.plugins.rstframe.SlotsJobIIAR"]
       - actor: this
         method: addWorker
         arguments: ["writer", 'jexl:state.getString("writer")']
@@ -81,9 +84,9 @@ steps:
         method: putJson
         arguments: {path: asked, value: "0"}
         execution: direct
-      - actor: this
-        method: slotsOpen
-        arguments: ["book", "name", "tree", "classes"]
+      - actor: slots
+        method: open
+        arguments: {book: 'jexl:state.getString("book")', name: 'jexl:state.getString("name")', tree: 'jexl:state.getString("tree")', classes: 'jexl:state.getString("classes")'}
         execution: direct
 
   - states: ["1", "failed"]
@@ -93,9 +96,12 @@ steps:
   - states: ["next", "decide"]
     label: take-the-next-question
     actions:
+      - actor: slots
+        method: question
+        execution: direct
       - actor: this
-        method: questionNext
-        arguments: ["question", "done"]
+        method: putJson
+        arguments: {path: q, value: "jexl:result"}
         execution: direct
 
   - states: ["decide", "write"]
@@ -103,7 +109,7 @@ steps:
     actions:
       - actor: this
         method: onlyIf
-        arguments: 'jexl:state.getString("done") == "true"'
+        arguments: 'jexl:state.getString("q.done") == "true"'
         execution: direct
 
   - states: ["decide", "ask"]
@@ -112,7 +118,7 @@ steps:
     actions:
       - actor: this
         method: onlyIf
-        arguments: 'jexl:state.getString("done") == "false"'
+        arguments: 'jexl:state.getString("q.done") == "false"'
         execution: direct
       - actor: this
         method: countUp
@@ -130,15 +136,15 @@ steps:
         method: askWorker
         arguments:
           - writer
-          - 'jexl:state.getString("question")'
+          - 'jexl:state.getString("q.question")'
         execution: direct
       - actor: this
         method: keepWorkerReply
         arguments: ["writer", "reply"]
         execution: direct
-      - actor: this
-        method: questionAnswer
-        arguments: ["reply"]
+      - actor: slots
+        method: answer
+        arguments: {reply: 'jexl:state.getString("reply")'}
         execution: direct
 
   - states: ["ask", "failed"]
@@ -149,10 +155,17 @@ steps:
     label: write-the-assignments
     note: The classes added or grown and the assignments are written, never over a file already there.
     actions:
-      - actor: this
-        method: slotsWrite
-        arguments: ["out", "tree"]
+      - actor: slots
+        method: write
+        arguments: {out: 'jexl:state.getString("out")', tree: 'jexl:state.getString("tree")'}
         execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: outcome, value: "jexl:result"}
+        execution: direct
+      - actor: loader
+        method: removeChild
+        arguments: "slots"
       - actor: this
         method: finish
         arguments: ["outcome"]
@@ -164,4 +177,11 @@ steps:
 
   - states: ["failed", "end"]
     label: report-failure
-    actions: [{actor: this, method: reportFailure, arguments: [], execution: direct}]
+    actions:
+      - actor: loader
+        method: removeChild
+        arguments: "slots"
+      - actor: this
+        method: reportFailure
+        arguments: []
+        execution: direct

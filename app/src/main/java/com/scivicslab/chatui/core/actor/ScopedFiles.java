@@ -51,6 +51,14 @@ public final class ScopedFiles implements FileGate {
         return out;
     }
 
+    /** Answers only for a path inside the range: whether a file is there outside it is not the workflow's to know. */
+    @Override
+    public boolean exists(Path path) {
+        Path target = path.toAbsolutePath().normalize();
+        if (!scope.canWrite(target) && !scope.canRead(target)) throw new SecurityException("outside the readable range: " + target);
+        return Files.exists(target);
+    }
+
     @Override
     public void mayWrite(Path file) {
         Path target = file.toAbsolutePath().normalize();

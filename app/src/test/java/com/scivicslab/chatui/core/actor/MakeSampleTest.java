@@ -112,7 +112,7 @@ class MakeSampleTest {
         plan = new PlanRunnerIIAR("plan", runner, system);
         system.addIIActor(plan);
         runner.setSelfActorRef(plan);
-        runner.setFileScope(new FileAccessScope(dir, List.of(dir)));
+        system.addIIActor(new WorkflowPluginLoader("loader", system, List.of()));
         system.addIIActor(new ScopedFilesIIAR("files", new ScopedFiles(new FileAccessScope(dir, List.of(dir))), system));
 
         Files.writeString(dir.resolve("book.md"), BOOK);
@@ -148,6 +148,7 @@ class MakeSampleTest {
     @DisplayName("段落の読み違いと関係、最後に用途を聞き、samples/<名前>.lisp とコードのファイルを書く")
     void theSubsectionBecomesASampleFile() throws Exception {
         String outcome = run();
+        org.junit.jupiter.api.Assertions.assertNull(system.getIIActor("sample"), "the workflow removes the actor it made");
 
         assertEquals("new explain-program-by-whole-example", outcome, "questions so far: " + writer.questions);
         assertEquals(3, writer.questions.size(), writer.questions.toString());
@@ -168,6 +169,8 @@ class MakeSampleTest {
 
         String outcome = run();
 
+        org.junit.jupiter.api.Assertions.assertNull(system.getIIActor("sample"), "the workflow removes the actor it made");
+
         assertTrue(outcome.startsWith("(plan"), outcome);
         assertEquals("keep me\n", Files.readString(dir.resolve("samples/explain-program-by-whole-example.lisp")));
     }
@@ -181,6 +184,8 @@ class MakeSampleTest {
         writer.judgement = "same: explain-program-by-whole-example";
 
         String outcome = run();
+
+        org.junit.jupiter.api.Assertions.assertNull(system.getIIActor("sample"), "the workflow removes the actor it made");
 
         assertEquals("same explain-program-by-whole-example", outcome, writer.questions.toString());
         String after = Files.readString(dir.resolve("samples/explain-program-by-whole-example.lisp"));

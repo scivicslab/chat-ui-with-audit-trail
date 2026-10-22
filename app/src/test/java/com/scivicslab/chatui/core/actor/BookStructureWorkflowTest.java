@@ -108,7 +108,6 @@ class BookStructureWorkflowTest {
         plan = new PlanRunnerIIAR("plan", runner, system);
         system.addIIActor(plan);
         runner.setSelfActorRef(plan);
-        runner.setFileScope(new FileAccessScope(dir, List.of(dir)));
         // the loader every instance has: the workflows create the books actor with it and remove it at the end
         system.addIIActor(new WorkflowPluginLoader("loader", system, List.of()));
         // the files actor every instance has: the books actor reads the book and opens the database through it

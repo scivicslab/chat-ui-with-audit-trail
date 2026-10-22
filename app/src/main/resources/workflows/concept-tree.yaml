@@ -47,6 +47,9 @@ steps:
     label: add-writer
     note: The writer is a conversation with no history of its own from before, on the loop that sends each question alone.
     actions:
+      - actor: loader
+        method: createChild
+        arguments: ["ROOT", "tree", "com.scivicslab.turingworkflow.plugins.rstframe.ConceptTreeJobIIAR"]
       - actor: this
         method: addWorker
         arguments: ["writer", 'jexl:state.getString("writer")']
@@ -75,9 +78,9 @@ steps:
         method: putJson
         arguments: {path: asked, value: "0"}
         execution: direct
-      - actor: this
-        method: conceptOpen
-        arguments: ["book", "name", "given"]
+      - actor: tree
+        method: open
+        arguments: {book: 'jexl:state.getString("book")', name: 'jexl:state.getString("name")', given: 'jexl:state.getString("given")'}
         execution: direct
 
   - states: ["1", "failed"]
@@ -87,9 +90,12 @@ steps:
   - states: ["next", "decide"]
     label: take-the-next-question
     actions:
+      - actor: tree
+        method: question
+        execution: direct
       - actor: this
-        method: questionNext
-        arguments: ["question", "done"]
+        method: putJson
+        arguments: {path: q, value: "jexl:result"}
         execution: direct
 
   - states: ["decide", "write"]
@@ -97,7 +103,7 @@ steps:
     actions:
       - actor: this
         method: onlyIf
-        arguments: 'jexl:state.getString("done") == "true"'
+        arguments: 'jexl:state.getString("q.done") == "true"'
         execution: direct
 
   - states: ["decide", "ask"]
@@ -106,7 +112,7 @@ steps:
     actions:
       - actor: this
         method: onlyIf
-        arguments: 'jexl:state.getString("done") == "false"'
+        arguments: 'jexl:state.getString("q.done") == "false"'
         execution: direct
       - actor: this
         method: countUp
@@ -124,15 +130,15 @@ steps:
         method: askWorker
         arguments:
           - writer
-          - 'jexl:state.getString("question")'
+          - 'jexl:state.getString("q.question")'
         execution: direct
       - actor: this
         method: keepWorkerReply
         arguments: ["writer", "reply"]
         execution: direct
-      - actor: this
-        method: questionAnswer
-        arguments: ["reply"]
+      - actor: tree
+        method: answer
+        arguments: {reply: 'jexl:state.getString("reply")'}
         execution: direct
 
   - states: ["ask", "failed"]
@@ -143,10 +149,17 @@ steps:
     label: write-the-tree
     note: The tree is written as a subjects file, never over a file already there.
     actions:
-      - actor: this
-        method: conceptWrite
-        arguments: ["out", "book"]
+      - actor: tree
+        method: write
+        arguments: {out: 'jexl:state.getString("out")', book: 'jexl:state.getString("book")'}
         execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: outcome, value: "jexl:result"}
+        execution: direct
+      - actor: loader
+        method: removeChild
+        arguments: "tree"
       - actor: this
         method: finish
         arguments: ["outcome"]
@@ -158,4 +171,11 @@ steps:
 
   - states: ["failed", "end"]
     label: report-failure
-    actions: [{actor: this, method: reportFailure, arguments: [], execution: direct}]
+    actions:
+      - actor: loader
+        method: removeChild
+        arguments: "tree"
+      - actor: this
+        method: reportFailure
+        arguments: []
+        execution: direct

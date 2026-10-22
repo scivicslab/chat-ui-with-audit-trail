@@ -214,8 +214,6 @@ public class Project {
 
     /** Where a job's lines are kept so that they outlive this process; null when there is no log. */
     private com.scivicslab.chatui.core.iolog.IoLogStore ioLogStore;
-
-    private com.scivicslab.chatui.agent.FileAccessScope fileScope;
     /** How a job puts one of its roles on a named provider kind; null when it may not. */
     private PlanRunner.ProviderChanger providerChanger;
     private Scheduler scheduler;
@@ -243,18 +241,6 @@ public class Project {
     }
 
     /**
-     * The same, with the range of the file system a job may read and write
-     * ({@code UnattendedFileRuns_260913_oo01}). A job started without one can call no file step.
-     *
-     * @param fileScope what the frame steps are allowed to touch
-     */
-    public void bind(String projectId, IIActorSystem system, ActorRef<Project> self,
-                     ActorRef<CallWatchdog> watchdog, String systemLogActorName,
-                     com.scivicslab.chatui.agent.FileAccessScope fileScope) {
-        bind(projectId, system, self, watchdog, systemLogActorName, fileScope, null);
-    }
-
-    /**
      * The same, with the way to put one of a job's roles on a named provider kind
      * ({@code ChooseTheLlmPerRole_260915_oo01}). A project bound without one runs jobs that can
      * name a model but not a provider kind, and say so rather than carry on quietly.
@@ -263,9 +249,8 @@ public class Project {
      */
     public void bind(String projectId, IIActorSystem system, ActorRef<Project> self,
                      ActorRef<CallWatchdog> watchdog, String systemLogActorName,
-                     com.scivicslab.chatui.agent.FileAccessScope fileScope,
                      PlanRunner.ProviderChanger providerChanger) {
-        bind(projectId, system, self, watchdog, systemLogActorName, fileScope, providerChanger, null);
+        bind(projectId, system, self, watchdog, systemLogActorName, providerChanger, null);
     }
 
     /**
@@ -277,12 +262,10 @@ public class Project {
      */
     public void bind(String projectId, IIActorSystem system, ActorRef<Project> self,
                      ActorRef<CallWatchdog> watchdog, String systemLogActorName,
-                     com.scivicslab.chatui.agent.FileAccessScope fileScope,
                      PlanRunner.ProviderChanger providerChanger,
                      com.scivicslab.chatui.core.iolog.IoLogStore ioLogStore) {
         this.ioLogStore = ioLogStore;
         this.providerChanger = providerChanger;
-        this.fileScope = fileScope;
         this.projectId = projectId;
         this.system = system;
         this.self = self;
@@ -372,7 +355,6 @@ public class Project {
         String name = queued.actorName();
         try {
             PlanRunner runner = new PlanRunner(name, system, watchdog);
-            runner.setFileScope(fileScope);
             runner.setProviderChanger(providerChanger);
             PlanRunnerIIAR runnerRef = new PlanRunnerIIAR(name, runner, system);
             runnerRef.setParentName(projectId);

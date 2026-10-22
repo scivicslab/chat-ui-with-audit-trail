@@ -115,7 +115,7 @@ class FillFrameTest {
         plan = new PlanRunnerIIAR("plan", runner, system);
         system.addIIActor(plan);
         runner.setSelfActorRef(plan);
-        runner.setFileScope(new FileAccessScope(dir, List.of(dir)));
+        system.addIIActor(new WorkflowPluginLoader("loader", system, List.of()));
         system.addIIActor(new ScopedFilesIIAR("files", new ScopedFiles(new FileAccessScope(dir, List.of(dir))), system));
 
         Files.writeString(dir.resolve("request.lisp"), REQUEST);
@@ -160,6 +160,7 @@ class FillFrameTest {
     @DisplayName("全部の空欄が、決まった順に 1 回ずつ聞かれて埋まり、書き手は前置きなしの質問だけを受ける")
     void everyBlankIsAskedOnceInOrderAndFilled() throws Exception {
         String outcome = run();
+        org.junit.jupiter.api.Assertions.assertNull(system.getIIActor("filler"), "the workflow removes the actor it made");
 
         assertEquals(dir.resolve("filled.lisp").toString(), outcome, "questions so far: " + writer.questions);
         String filled = Files.readString(dir.resolve("filled.lisp"));
@@ -215,6 +216,8 @@ class FillFrameTest {
 
         String outcome = run(request, frames.resolve("explanation"), dir.toString());
 
+        org.junit.jupiter.api.Assertions.assertNull(system.getIIActor("filler"), "the workflow removes the actor it made");
+
         assertEquals(dir.resolve("filled.lisp").toString(), outcome, "questions so far: " + writer.questions);
         assertEquals(2, writer.questions.size(), writer.questions.toString());
         assertTrue(writer.questions.get(0).contains("- [a1.lisp / p-system-what] FileBuy is a file-buying system."), writer.questions.get(0));
@@ -229,6 +232,8 @@ class FillFrameTest {
         writer.listReply = "。";
 
         String outcome = run();
+
+        org.junit.jupiter.api.Assertions.assertNull(system.getIIActor("filler"), "the workflow removes the actor it made");
 
         assertTrue(outcome.startsWith("(plan"), outcome);
         assertFalse(Files.exists(dir.resolve("filled.lisp")), "a half-filled file was installed as finished");

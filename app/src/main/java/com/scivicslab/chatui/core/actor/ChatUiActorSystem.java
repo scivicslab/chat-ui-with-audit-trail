@@ -793,7 +793,7 @@ public class ChatUiActorSystem implements ConversationControls {
      */
     private void wireProject(String projectId) {
         ActorRef<Project> ref = projects.get(projectId);
-        ref.tell(p -> p.bind(projectId, actorSystem, ref, callWatchdogRef, SYSTEM_LOG_ACTOR, fileScope,
+        ref.tell(p -> p.bind(projectId, actorSystem, ref, callWatchdogRef, SYSTEM_LOG_ACTOR,
                             this::changeProviderForPlan, ioLogStore));
         ref.tell(Project::startWatching);
     }

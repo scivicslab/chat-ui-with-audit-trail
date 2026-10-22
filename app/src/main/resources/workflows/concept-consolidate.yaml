@@ -42,6 +42,9 @@ steps:
     label: add-writer
     note: The writer is a conversation with no history of its own from before, on the loop that sends each question alone.
     actions:
+      - actor: loader
+        method: createChild
+        arguments: ["ROOT", "consolidation", "com.scivicslab.turingworkflow.plugins.rstframe.ConsolidationJobIIAR"]
       - actor: this
         method: addWorker
         arguments: ["writer", 'jexl:state.getString("writer")']
@@ -70,9 +73,9 @@ steps:
         method: putJson
         arguments: {path: asked, value: "0"}
         execution: direct
-      - actor: this
-        method: consolidateOpen
-        arguments: ["classes", "input"]
+      - actor: consolidation
+        method: open
+        arguments: {classes: 'jexl:state.getString("classes")', input: 'jexl:state.getString("input")'}
         execution: direct
 
   - states: ["1", "failed"]
@@ -82,9 +85,12 @@ steps:
   - states: ["next", "decide"]
     label: take-the-next-question
     actions:
+      - actor: consolidation
+        method: question
+        execution: direct
       - actor: this
-        method: questionNext
-        arguments: ["question", "done"]
+        method: putJson
+        arguments: {path: q, value: "jexl:result"}
         execution: direct
 
   - states: ["decide", "write"]
@@ -92,7 +98,7 @@ steps:
     actions:
       - actor: this
         method: onlyIf
-        arguments: 'jexl:state.getString("done") == "true"'
+        arguments: 'jexl:state.getString("q.done") == "true"'
         execution: direct
 
   - states: ["decide", "ask"]
@@ -101,7 +107,7 @@ steps:
     actions:
       - actor: this
         method: onlyIf
-        arguments: 'jexl:state.getString("done") == "false"'
+        arguments: 'jexl:state.getString("q.done") == "false"'
         execution: direct
       - actor: this
         method: countUp
@@ -119,15 +125,15 @@ steps:
         method: askWorker
         arguments:
           - writer
-          - 'jexl:state.getString("question")'
+          - 'jexl:state.getString("q.question")'
         execution: direct
       - actor: this
         method: keepWorkerReply
         arguments: ["writer", "reply"]
         execution: direct
-      - actor: this
-        method: questionAnswer
-        arguments: ["reply"]
+      - actor: consolidation
+        method: answer
+        arguments: {reply: 'jexl:state.getString("reply")'}
         execution: direct
 
   - states: ["ask", "failed"]
@@ -138,10 +144,17 @@ steps:
     label: write-the-smaller-tree
     note: The smaller tree is written as one file that stands alone, never over a file already there.
     actions:
-      - actor: this
-        method: consolidateWrite
-        arguments: ["out", "input"]
+      - actor: consolidation
+        method: write
+        arguments: {out: 'jexl:state.getString("out")', input: 'jexl:state.getString("input")'}
         execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: outcome, value: "jexl:result"}
+        execution: direct
+      - actor: loader
+        method: removeChild
+        arguments: "consolidation"
       - actor: this
         method: finish
         arguments: ["outcome"]
@@ -153,4 +166,11 @@ steps:
 
   - states: ["failed", "end"]
     label: report-failure
-    actions: [{actor: this, method: reportFailure, arguments: [], execution: direct}]
+    actions:
+      - actor: loader
+        method: removeChild
+        arguments: "consolidation"
+      - actor: this
+        method: reportFailure
+        arguments: []
+        execution: direct
