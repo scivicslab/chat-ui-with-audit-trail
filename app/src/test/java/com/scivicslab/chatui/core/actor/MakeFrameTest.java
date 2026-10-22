@@ -111,6 +111,7 @@ class MakeFrameTest {
         system.addIIActor(plan);
         runner.setSelfActorRef(plan);
         runner.setFileScope(new FileAccessScope(dir, List.of(dir)));
+        system.addIIActor(new ScopedFilesIIAR("files", new ScopedFiles(new FileAccessScope(dir, List.of(dir))), system));
 
         Files.createDirectories(dir.resolve("samples"));
         Files.writeString(dir.resolve("samples/show-whole-then-explain.lisp"), SAMPLE);

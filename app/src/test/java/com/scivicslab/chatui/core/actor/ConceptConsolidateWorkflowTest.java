@@ -100,6 +100,7 @@ class ConceptConsolidateWorkflowTest {
         system.addIIActor(plan);
         runner.setSelfActorRef(plan);
         runner.setFileScope(new FileAccessScope(dir, List.of(dir)));
+        system.addIIActor(new ScopedFilesIIAR("files", new ScopedFiles(new FileAccessScope(dir, List.of(dir))), system));
 
         Files.writeString(dir.resolve("loop.result.lisp"), RESULT);
     }

@@ -239,6 +239,9 @@ public class ChatUiActorSystem implements ConversationControls {
     /** The name a workflow calls the plugin loader by. */
     public static final String WORKFLOW_LOADER = "loader";
 
+    /** The name a job's workflow reads and writes files through ({@link ScopedFiles}). */
+    public static final String WORKFLOW_FILES = com.scivicslab.turingworkflow.plugins.rstframe.FileGate.ACTOR;
+
     @PostConstruct
     void init() {
         actorSystem = new IIActorSystem("chat-ui");
@@ -330,6 +333,12 @@ public class ChatUiActorSystem implements ConversationControls {
         // cannot be known in advance — every conversation carries the same catalog.
         List<Path> skillRootPaths = resolveSkillRoots();
         fileScope = resolveFileScope(skillRootPaths);
+        // The files a job's workflow may read and write (FileAccessScope_260830_oo01): the same range every
+        // conversation has, behind one actor. The actors of plugin-rst-frame reach it as their FileGate, so a
+        // workflow an LLM wrote cannot read or write past the range through them either.
+        ScopedFilesIIAR files = new ScopedFilesIIAR(WORKFLOW_FILES, new ScopedFiles(fileScope), actorSystem);
+        adopt(HOUSEKEEPER, files);
+        actorSystem.addIIActor(files);
         LOG.info("File access: write root " + fileScope.writeRoot()
                 + ", readable " + fileScope.describeReadRoots());
         SkillRegistry registry = new SkillRegistry(skillRootPaths);

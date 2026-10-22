@@ -77,9 +77,13 @@ steps:
         method: putJson
         arguments: {path: nudges, value: "0"}
         execution: direct
+      - actor: files
+        method: read
+        arguments: {path: 'jexl:state.getString("exampleFrame")'}
+        execution: direct
       - actor: this
-        method: readFile
-        arguments: ['jexl:state.getString("exampleFrame")', "frame"]
+        method: putJson
+        arguments: {path: "frame", value: "jexl:result"}
         execution: direct
       - actor: this
         method: clearWorker
@@ -97,9 +101,13 @@ steps:
         method: takeNext
         arguments: ["left", "part"]
         execution: direct
+      - actor: files
+        method: read
+        arguments: {path: 'jexl:state.getString("part")'}
+        execution: direct
       - actor: this
-        method: readFile
-        arguments: ['jexl:state.getString("part")', "text"]
+        method: putJson
+        arguments: {path: "text", value: "jexl:result"}
         execution: direct
       - actor: this
         method: putJson
@@ -131,9 +139,9 @@ steps:
         method: keepWorkerReply
         arguments: ["writer", "answer"]
         execution: direct
-      - actor: this
-        method: writeFile
-        arguments: ['jexl:state.getString("out") + "/template.1.answer.md"', "answer"]
+      - actor: files
+        method: write
+        arguments: {path: 'jexl:state.getString("out") + "/template.1.answer.md"', text: 'jexl:state.getString("answer")'}
         execution: direct
       - actor: this
         method: onlyIf
@@ -143,9 +151,9 @@ steps:
         method: putJson
         arguments: {path: template, value: 'jexl:state.getString("answer").substring(state.getString("answer").indexOf("```lisp") + 7, state.getString("answer").indexOf("```", state.getString("answer").indexOf("```lisp") + 7)).trim() + "\n"'}
         execution: direct
-      - actor: this
-        method: writeFile
-        arguments: ['jexl:state.getString("out") + "/template.1.lisp"', "template"]
+      - actor: files
+        method: write
+        arguments: {path: 'jexl:state.getString("out") + "/template.1.lisp"', text: 'jexl:state.getString("template")'}
         execution: direct
       - actor: this
         method: putJson
@@ -190,9 +198,9 @@ steps:
         method: keepWorkerReply
         arguments: ["writer", "answer"]
         execution: direct
-      - actor: this
-        method: writeFile
-        arguments: ['jexl:state.getString("out") + "/filled.answer.md"', "answer"]
+      - actor: files
+        method: write
+        arguments: {path: 'jexl:state.getString("out") + "/filled.answer.md"', text: 'jexl:state.getString("answer")'}
         execution: direct
       - actor: this
         method: onlyIf
@@ -202,9 +210,9 @@ steps:
         method: putJson
         arguments: {path: filled, value: 'jexl:state.getString("answer").substring(state.getString("answer").indexOf("```lisp") + 7, state.getString("answer").indexOf("```", state.getString("answer").indexOf("```lisp") + 7)).trim() + "\n"'}
         execution: direct
-      - actor: this
-        method: writeFile
-        arguments: ['jexl:state.getString("out") + "/filled.lisp"', "filled"]
+      - actor: files
+        method: write
+        arguments: {path: 'jexl:state.getString("out") + "/filled.lisp"', text: 'jexl:state.getString("filled")'}
         execution: direct
       - actor: this
         method: putJson
@@ -248,9 +256,9 @@ steps:
         method: keepWorkerReply
         arguments: ["writer", "answer"]
         execution: direct
-      - actor: this
-        method: writeFile
-        arguments: ['jexl:state.getString("out") + "/template.2.answer.md"', "answer"]
+      - actor: files
+        method: write
+        arguments: {path: 'jexl:state.getString("out") + "/template.2.answer.md"', text: 'jexl:state.getString("answer")'}
         execution: direct
       - actor: this
         method: onlyIf
@@ -260,9 +268,9 @@ steps:
         method: putJson
         arguments: {path: template2, value: 'jexl:state.getString("answer").substring(state.getString("answer").indexOf("```lisp") + 7, state.getString("answer").indexOf("```", state.getString("answer").indexOf("```lisp") + 7)).trim() + "\n"'}
         execution: direct
-      - actor: this
-        method: writeFile
-        arguments: ['jexl:state.getString("out") + "/template.2.lisp"', "template2"]
+      - actor: files
+        method: write
+        arguments: {path: 'jexl:state.getString("out") + "/template.2.lisp"', text: 'jexl:state.getString("template2")'}
         execution: direct
       - actor: this
         method: finish

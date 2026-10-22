@@ -104,13 +104,21 @@ steps:
         method: putJson
         arguments: {path: names, value: ""}
         execution: direct
-      - actor: this
-        method: readFile
-        arguments: ['jexl:state.getString("request")', "cur"]
+      - actor: files
+        method: read
+        arguments: {path: 'jexl:state.getString("request")'}
         execution: direct
       - actor: this
-        method: readFile
-        arguments: ['jexl:state.getString("subject")', "subject"]
+        method: putJson
+        arguments: {path: "cur", value: "jexl:result"}
+        execution: direct
+      - actor: files
+        method: read
+        arguments: {path: 'jexl:state.getString("subject")'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: "subject", value: "jexl:result"}
         execution: direct
 
   - states: ["1", "failed"]
@@ -140,9 +148,13 @@ steps:
         method: onlyIf
         arguments: 'jexl:state.getString("blank-kind") == "include"'
         execution: direct
+      - actor: files
+        method: read
+        arguments: {path: 'jexl:state.getString("frameDir") + "/" + state.getString("blank-include")'}
+        execution: direct
       - actor: this
-        method: readFile
-        arguments: ['jexl:state.getString("frameDir") + "/" + state.getString("blank-include")', "frame-text"]
+        method: putJson
+        arguments: {path: "frame-text", value: "jexl:result"}
         execution: direct
       - actor: this
         method: frameInclude
@@ -201,9 +213,13 @@ steps:
         method: keepWorkerReply
         arguments: ["writer", "reply"]
         execution: direct
+      - actor: files
+        method: read
+        arguments: {path: 'jexl:state.getString("frameDir") + "/" + state.getString("blank-frame")'}
+        execution: direct
       - actor: this
-        method: readFile
-        arguments: ['jexl:state.getString("frameDir") + "/" + state.getString("blank-frame")', "frame-text"]
+        method: putJson
+        arguments: {path: "frame-text", value: "jexl:result"}
         execution: direct
       - actor: this
         method: frameExpand
@@ -226,9 +242,9 @@ steps:
         method: frameFillCode
         arguments: ["cur", "blank", "reply", "out", "code-text", "code-path"]
         execution: direct
-      - actor: this
-        method: writeFile
-        arguments: ['jexl:state.getString("code-path")', "code-text"]
+      - actor: files
+        method: write
+        arguments: {path: 'jexl:state.getString("code-path")', text: 'jexl:state.getString("code-text")'}
         execution: direct
 
   - states: ["keep", "pick"]
@@ -273,9 +289,9 @@ steps:
     label: install
     note: The finished rule file is written where the request said. make-markdown (or html-saurus's Rebuild) writes the markdown from it, or reports the violations.
     actions:
-      - actor: this
-        method: writeFile
-        arguments: ['jexl:state.getString("out")', "cur"]
+      - actor: files
+        method: write
+        arguments: {path: 'jexl:state.getString("out")', text: 'jexl:state.getString("cur")'}
         execution: direct
       - actor: this
         method: finish

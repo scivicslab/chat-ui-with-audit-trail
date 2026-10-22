@@ -33,7 +33,7 @@ class ActionDescriptionTest {
     void planRunnerActions() {
         SortedSet<String> names = ActionCatalog.actionNamesOf(PlanRunnerIIAR.class);
         assertTrue(names.containsAll(List.of("askChat", "addWorker", "askWorker", "copyState", "checkState", "countUp",
-                "readFile", "writeFile", "listFiles", "takeNext", "finish", "reportFailure")), names.toString());
+                "takeNext", "finish", "reportFailure")), names.toString());
         assertTrue(names.containsAll(List.of("putJson", "appendJson", "onlyIf", "call", "apply")),
                 "the JSON State and interpreter actions come with the superclasses: " + names);
     }

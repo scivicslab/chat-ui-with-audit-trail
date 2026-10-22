@@ -66,9 +66,13 @@ steps:
     label: list-the-parts
     note: One .md per part, one directory below the book's directory, in name order.
     actions:
+      - actor: files
+        method: list
+        arguments: {dir: 'jexl:state.getString("book")', suffix: ".md", depth: "2"}
+        execution: direct
       - actor: this
-        method: listFiles
-        arguments: ['jexl:state.getString("book")', ".md", "parts", "2"]
+        method: putJson
+        arguments: {path: "parts", value: "jexl:result"}
         execution: direct
       - actor: this
         method: putJson
@@ -102,9 +106,13 @@ steps:
         method: takeNext
         arguments: ["parts", "part"]
         execution: direct
+      - actor: files
+        method: read
+        arguments: {path: 'jexl:state.getString("part")'}
+        execution: direct
       - actor: this
-        method: readFile
-        arguments: ['jexl:state.getString("part")', "text"]
+        method: putJson
+        arguments: {path: "text", value: "jexl:result"}
         execution: direct
       - actor: this
         method: putJson
@@ -208,9 +216,9 @@ steps:
         method: putJson
         arguments: {path: block, value: 'jexl:";;; " + state.getString("part") + "\n" + state.getString("answer").substring(state.getString("answer").indexOf("```lisp") + 7, state.getString("answer").indexOf("```", state.getString("answer").indexOf("```lisp") + 7)).trim() + "\n"'}
         execution: direct
-      - actor: this
-        method: writeFile
-        arguments: ['jexl:state.getString("out") + "/" + (state.getString("n").length() == 1 ? "0" : "") + state.getString("n") + ".lisp"', "block"]
+      - actor: files
+        method: write
+        arguments: {path: 'jexl:state.getString("out") + "/" + (state.getString("n").length() == 1 ? "0" : "") + state.getString("n") + ".lisp"', text: 'jexl:state.getString("block")'}
         execution: direct
       - actor: this
         method: putJson

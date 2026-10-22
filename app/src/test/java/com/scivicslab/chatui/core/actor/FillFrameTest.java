@@ -116,6 +116,7 @@ class FillFrameTest {
         system.addIIActor(plan);
         runner.setSelfActorRef(plan);
         runner.setFileScope(new FileAccessScope(dir, List.of(dir)));
+        system.addIIActor(new ScopedFilesIIAR("files", new ScopedFiles(new FileAccessScope(dir, List.of(dir))), system));
 
         Files.writeString(dir.resolve("request.lisp"), REQUEST);
         Files.writeString(dir.resolve("concept.lisp"), FRAME);

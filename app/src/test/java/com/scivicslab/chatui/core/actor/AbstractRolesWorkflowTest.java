@@ -117,6 +117,7 @@ class AbstractRolesWorkflowTest {
         system.addIIActor(plan);
         runner.setSelfActorRef(plan);
         runner.setFileScope(new FileAccessScope(dir, List.of(dir)));
+        system.addIIActor(new ScopedFilesIIAR("files", new ScopedFiles(new FileAccessScope(dir, List.of(dir))), system));
 
         Path paper = dir.resolve("loop");
         Files.createDirectories(paper);

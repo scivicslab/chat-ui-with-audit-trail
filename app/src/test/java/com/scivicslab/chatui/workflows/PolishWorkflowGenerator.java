@@ -208,13 +208,15 @@ public final class PolishWorkflowGenerator {
 
     /** Puts what the conversation wrote back into the plan's own state. */
     private static final String TAKE_BACK_THE_FILE =
-            "      - actor: this\n        method: readFile\n"
-            + "        arguments: ['jexl:state.getString(\"work\")', \"text\"]\n        execution: direct\n";
+            "      - actor: files\n        method: read\n"
+            + "        arguments: {path: 'jexl:state.getString(\"work\")'}\n        execution: direct\n"
+            + "      - actor: this\n        method: putJson\n"
+            + "        arguments: {path: \"text\", value: \"jexl:result\"}\n        execution: direct\n";
 
     /** Hands the conversation the text as it stands, as a file it can read and write. */
     private static final String PUT_THE_TEXT_IN_ITS_FILE =
-            "      - actor: this\n        method: writeFile\n"
-            + "        arguments: ['jexl:state.getString(\"work\")', \"text\"]\n        execution: direct\n";
+            "      - actor: files\n        method: write\n"
+            + "        arguments: {path: 'jexl:state.getString(\"work\")', text: 'jexl:state.getString(\"text\")'}\n        execution: direct\n";
 
     private static String rule(int index) {
         return "state.getString(\"rule-" + index + "\")";
@@ -281,8 +283,8 @@ public final class PolishWorkflowGenerator {
         String snapshot = c.deletes()
                 ? "      - actor: this\n        method: copyState\n"
                   + "        arguments: [\"text\", \"before\"]\n        execution: direct\n"
-                  + "      - actor: this\n        method: writeFile\n"
-                  + "        arguments: ['jexl:state.getString(\"before-path\")', \"before\"]\n"
+                  + "      - actor: files\n        method: write\n"
+                  + "        arguments: {path: 'jexl:state.getString(\"before-path\")', text: 'jexl:state.getString(\"before\")'}\n"
                   + "        execution: direct\n"
                 : "";
         String ruleFile = c.ruleDoc().substring(c.ruleDoc().lastIndexOf('/') + 1);
@@ -363,8 +365,11 @@ public final class PolishWorkflowGenerator {
     }
 
     private static String blockByValue(int i, Criterion c, String next) {
-        String load = "      - actor: this\n        method: readFile\n"
-                + "        arguments: [\"" + c.ruleDoc() + "\", \"rule-" + i + "\"]\n"
+        String load = "      - actor: files\n        method: read\n"
+                + "        arguments: {path: \"" + c.ruleDoc() + "\"}\n"
+                + "        execution: direct\n"
+                + "      - actor: this\n        method: putJson\n"
+                + "        arguments: {path: \"rule-" + i + "\", value: \"jexl:result\"}\n"
                 + "        execution: direct\n";
         String snapshot = c.deletes()
                 ? "      - actor: this\n        method: copyState\n"
@@ -629,9 +634,13 @@ params:
   - states: ["2", "next"]
     label: list-files
     actions:
+      - actor: files
+        method: list
+        arguments: {dir: 'jexl:state.getString("dir")', suffix: 'jexl:state.getString("suffix")', depth: 'jexl:state.getString("depth")'}
+        execution: direct
       - actor: this
-        method: listFiles
-        arguments: ['jexl:state.getString("dir")', 'jexl:state.getString("suffix")', "files", 'jexl:state.getString("depth")']
+        method: putJson
+        arguments: {path: "files", value: "jexl:result"}
         execution: direct
 
   - states: ["next", "enter-1"]
@@ -644,9 +653,13 @@ params:
         method: takeNext
         arguments: ["files", "file"]
         execution: direct
+      - actor: files
+        method: read
+        arguments: {path: 'jexl:state.getString("file")'}
+        execution: direct
       - actor: this
-        method: readFile
-        arguments: ['jexl:state.getString("file")', "text"]
+        method: putJson
+        arguments: {path: "text", value: "jexl:result"}
         execution: direct
       - actor: this
         method: takeFrontMatter
@@ -668,9 +681,9 @@ params:
         method: putJson
         arguments: {path: before-path, value: 'jexl:state.getString("work") + ".before.md"'}
         execution: direct
-      - actor: this
-        method: writeFile
-        arguments: ['jexl:state.getString("orig")', "original"]
+      - actor: files
+        method: write
+        arguments: {path: 'jexl:state.getString("orig")', text: 'jexl:state.getString("original")'}
         execution: direct
 """;
 
@@ -692,9 +705,9 @@ params:
           path: written
           value: 'jexl:state.getString("outDir") + "/" + state.getString("file").substring(state.getString("file").lastIndexOf("/") + 1)'
         execution: direct
-      - actor: this
-        method: writeFile
-        arguments: ['jexl:state.getString("written")', "whole"]
+      - actor: files
+        method: write
+        arguments: {path: 'jexl:state.getString("written")', text: 'jexl:state.getString("whole")'}
         execution: direct
       - actor: this
         method: appendJson

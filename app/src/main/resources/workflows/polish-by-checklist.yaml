@@ -107,9 +107,13 @@ steps:
       規則は 020_AntiPatternProblemDefinition_260922_oo01.md にある。
       規則を読み、いまの本文を控える。ここではまだ本文を書き換えない。
     actions:
+      - actor: files
+        method: read
+        arguments: {path: "/home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/020_AntiPatternProblemDefinition_260922_oo01/020_AntiPatternProblemDefinition_260922_oo01.md"}
+        execution: direct
       - actor: this
-        method: readFile
-        arguments: ["/home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/020_AntiPatternProblemDefinition_260922_oo01/020_AntiPatternProblemDefinition_260922_oo01.md", "rule-1"]
+        method: putJson
+        arguments: {path: "rule-1", value: "jexl:result"}
         execution: direct
       - actor: this
         method: copyState
@@ -227,9 +231,13 @@ steps:
       規則は 025_AntiPatternHowToDoIt_260922_oo01.md にある。
       規則を読み、いまの本文を控える。ここではまだ本文を書き換えない。
     actions:
+      - actor: files
+        method: read
+        arguments: {path: "/home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/025_AntiPatternHowToDoIt_260922_oo01/025_AntiPatternHowToDoIt_260922_oo01.md"}
+        execution: direct
       - actor: this
-        method: readFile
-        arguments: ["/home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/025_AntiPatternHowToDoIt_260922_oo01/025_AntiPatternHowToDoIt_260922_oo01.md", "rule-2"]
+        method: putJson
+        arguments: {path: "rule-2", value: "jexl:result"}
         execution: direct
       - actor: this
         method: copyState
@@ -347,9 +355,13 @@ steps:
       規則は 030_OneAxisPerSection_260913_oo01.md にある。
       規則を読み、いまの本文を控える。ここではまだ本文を書き換えない。
     actions:
+      - actor: files
+        method: read
+        arguments: {path: "/home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/030_OneAxisPerSection_260913_oo01/030_OneAxisPerSection_260913_oo01.md"}
+        execution: direct
       - actor: this
-        method: readFile
-        arguments: ["/home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/030_OneAxisPerSection_260913_oo01/030_OneAxisPerSection_260913_oo01.md", "rule-3"]
+        method: putJson
+        arguments: {path: "rule-3", value: "jexl:result"}
         execution: direct
       - actor: this
         method: copyState
@@ -467,9 +479,13 @@ steps:
       規則は 040_AntiPatternNaming_260922_oo01.md にある。
       規則を読み、いまの本文を控える。ここではまだ本文を書き換えない。
     actions:
+      - actor: files
+        method: read
+        arguments: {path: "/home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/040_AntiPatternNaming_260922_oo01/040_AntiPatternNaming_260922_oo01.md"}
+        execution: direct
       - actor: this
-        method: readFile
-        arguments: ["/home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/040_AntiPatternNaming_260922_oo01/040_AntiPatternNaming_260922_oo01.md", "rule-4"]
+        method: putJson
+        arguments: {path: "rule-4", value: "jexl:result"}
         execution: direct
       - actor: this
         method: copyState
@@ -587,9 +603,13 @@ steps:
       規則は 045_AntiPatternReference_260922_oo01.md にある。
       規則を読み、いまの本文を控える。ここではまだ本文を書き換えない。
     actions:
+      - actor: files
+        method: read
+        arguments: {path: "/home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/045_AntiPatternReference_260922_oo01/045_AntiPatternReference_260922_oo01.md"}
+        execution: direct
       - actor: this
-        method: readFile
-        arguments: ["/home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/045_AntiPatternReference_260922_oo01/045_AntiPatternReference_260922_oo01.md", "rule-5"]
+        method: putJson
+        arguments: {path: "rule-5", value: "jexl:result"}
         execution: direct
       - actor: this
         method: copyState
@@ -707,9 +727,13 @@ steps:
       規則は 050_AntiPatternSystemDiagram_260922_oo01.md にある。
       規則を読み、いまの本文を控える。ここではまだ本文を書き換えない。
     actions:
+      - actor: files
+        method: read
+        arguments: {path: "/home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/050_AntiPatternSystemDiagram_260922_oo01/050_AntiPatternSystemDiagram_260922_oo01.md"}
+        execution: direct
       - actor: this
-        method: readFile
-        arguments: ["/home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/050_AntiPatternSystemDiagram_260922_oo01/050_AntiPatternSystemDiagram_260922_oo01.md", "rule-6"]
+        method: putJson
+        arguments: {path: "rule-6", value: "jexl:result"}
         execution: direct
       - actor: this
         method: copyState
@@ -827,9 +851,13 @@ steps:
       規則は 060_AntiPatternRedundancy_260922_oo01.md にある。
       規則を読み、いまの本文を控える。ここではまだ本文を書き換えない。
     actions:
+      - actor: files
+        method: read
+        arguments: {path: "/home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/060_AntiPatternRedundancy_260922_oo01/060_AntiPatternRedundancy_260922_oo01.md"}
+        execution: direct
       - actor: this
-        method: readFile
-        arguments: ["/home/devteam/works/doc_Base010/docs/ProjectStandard2/030_ProgrammingProject/200_documentation/100_AntiPattern/060_AntiPatternRedundancy_260922_oo01/060_AntiPatternRedundancy_260922_oo01.md", "rule-7"]
+        method: putJson
+        arguments: {path: "rule-7", value: "jexl:result"}
         execution: direct
       - actor: this
         method: copyState

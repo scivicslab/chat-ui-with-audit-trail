@@ -104,6 +104,7 @@ class BookToRulesWorkflowTest {
         system.addIIActor(plan);
         runner.setSelfActorRef(plan);
         runner.setFileScope(new FileAccessScope(dir, List.of(dir)));
+        system.addIIActor(new ScopedFilesIIAR("files", new ScopedFiles(new FileAccessScope(dir, List.of(dir))), system));
 
         Path book = dir.resolve("book");
         Files.createDirectories(book.resolve("p001"));

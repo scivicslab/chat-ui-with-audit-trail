@@ -378,65 +378,6 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
     }
 
     /**
-     * Reads a file into this plan's state, so the work that follows needs no person to paste it in.
-     *
-     * <p>The path must be within the instance's read roots. Fails when the file could not be read.</p>
-     *
-     * <pre>{@code
-     * - actor: this
-     *   method: readFile
-     *   arguments: ["/home/devteam/works/notes/rule-1.md", "rule-1"]
-     * }</pre>
-     *
-     * @param args {@code [path, key]}: where to read from, then where to put the text
-     */
-    @Action("readFile")
-    public ActionResult readFile(String args) {
-        org.json.JSONArray a = arguments(args);
-        return runner().readFile(at(a, 0), at(a, 1));
-    }
-
-    /**
-     * Writes what the plan kept under a key to a file, creating the directories above it.
-     *
-     * <p>The path must be under the instance's write root. Fails when the file could not be written.</p>
-     *
-     * <pre>{@code
-     * - actor: this
-     *   method: writeFile
-     *   arguments: ['jexl:state.getString("orig")', "original"]
-     * }</pre>
-     *
-     * @param args {@code [path, key]}: where to write, then which value of this plan's state to write
-     */
-    @Action("writeFile")
-    public ActionResult writeFile(String args) {
-        org.json.JSONArray a = arguments(args);
-        return runner().writeFile(at(a, 0), at(a, 1));
-    }
-
-    /**
-     * Puts the files of one directory into this plan's state, one path per line.
-     *
-     * <p>{@code takeNext} then works through them. Fails when no file matched.</p>
-     *
-     * <pre>{@code
-     * - actor: this
-     *   method: listFiles
-     *   arguments: ['jexl:state.getString("dir")', ".md", "files", "3"]
-     * }</pre>
-     *
-     * @param args {@code [dir, suffix, key, depth]}: the directory, what a name must end with (every
-     *             file when blank), where to put the list, then how many levels to walk (this
-     *             directory alone when absent)
-     */
-    @Action("listFiles")
-    public ActionResult listFiles(String args) {
-        org.json.JSONArray a = arguments(args);
-        return runner().listFiles(at(a, 0), at(a, 1), at(a, 2), a.length() > 3 ? a.getString(3) : null);
-    }
-
-    /**
      * Moves the first line of a list into a key and shortens the list; fails when the list is empty.
      *
      * <p>The failure is what ends a loop over files: the transition falls through when nothing is left.</p>
@@ -824,7 +765,7 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
     /**
      * Writes the code in a reply into the code blank taken by {@code frameNext}: the rule becomes
      * {@code :file "<name>.txt" :kind code-block}, and the code and the path to write it to are kept
-     * for {@code writeFile}.
+     * for the {@code files} actor to write.
      * <pre>{@code
      * - actor: this
      *   method: frameFillCode
