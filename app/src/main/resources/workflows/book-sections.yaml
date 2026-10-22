@@ -1,0 +1,46 @@
+name: book-sections
+description: |
+  Cuts a book's text into the nodes of its table of contents (FrameOntology_261021_oo01, shaping the
+  book into a list of subsections), the step after book-toc.yaml. A book's markdown is split into files
+  of a few pages each, so a subsection often runs on into the next file; the files are read as one text
+  and cut at the headings of the table of contents instead. Each node gets the text from its heading to
+  the next node's heading, with the files it was read from. A heading a page file repeats continues its
+  node; a heading deeper than a subsection stays in its subsection; text before any node of a top-level
+  directory (preface, cover) belongs to none and is counted. The sections are stored in the H2 database
+  (table section_text). No LLM is used.
+params:
+  name:
+    label: "The book's name"
+    description: "The name book-toc.yaml stored the book under, e.g. core-java-14-vol1"
+    type: text
+    required: true
+  db:
+    label: "The database"
+    description: "Absolute path of the H2 database file, without .mv.db"
+    type: text
+    default: "/home/devteam/works/rst-on-lisp/db/books"
+steps:
+  - states: ["0", "1"]
+    label: cut-into-sections
+    note: The book's directory and its table of contents are read from the database, as book-toc.yaml stored them.
+    actions:
+      - actor: this
+        method: bookSections
+        arguments: ["db", "name"]
+        execution: direct
+
+  - states: ["0", "failed"]
+    label: could-not-cut
+    actions: [{actor: this, method: doNothing, arguments: ["the book is not in the database, or its files could not be read"], execution: direct}]
+
+  - states: ["1", "end"]
+    label: done
+    actions:
+      - actor: this
+        method: finish
+        arguments: ["outcome"]
+        execution: direct
+
+  - states: ["failed", "end"]
+    label: report-failure
+    actions: [{actor: this, method: reportFailure, arguments: [], execution: direct}]

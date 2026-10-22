@@ -692,6 +692,26 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
         return runner().consolidateWrite(at(a, 0), at(a, 1));
     }
 
+    /**
+     * Reads a book's table of contents from its headings into the H2 database, for {@code book-toc.yaml}.
+     * @param args {@code [dbKey, nameKey, dirKey]}
+     */
+    @Action("bookToc")
+    public ActionResult bookToc(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().bookToc(at(a, 0), at(a, 1), at(a, 2));
+    }
+
+    /**
+     * Cuts a book's text into the nodes of its table of contents in the H2 database, for {@code book-sections.yaml}.
+     * @param args {@code [dbKey, nameKey]}
+     */
+    @Action("bookSections")
+    public ActionResult bookSections(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().bookSections(at(a, 0), at(a, 1));
+    }
+
     @Action("framePrompt")
     public ActionResult framePrompt(String args) {
         org.json.JSONArray a = arguments(args);

@@ -1374,6 +1374,87 @@ public class PlanRunner extends Interpreter {
         }
     }
 
+    /**
+     * Plan step for {@code book-toc.yaml} ({@code FrameOntology_261021_oo01}): reads the table of contents of the book
+     * whose directory is kept under {@code dirKey} from the headings of its markdown files, and stores it in the H2
+     * database kept under {@code dbKey}, under the book's name kept under {@code nameKey}. No LLM.
+     */
+    public ActionResult bookToc(String dbKey, String nameKey, String dirKey) {
+        String db = kept(dbKey);
+        String name = kept(nameKey);
+        String dir = kept(dirKey);
+        if (db == null || db.isBlank() || name == null || name.isBlank() || dir == null || dir.isBlank()) {
+            return new ActionResult(false, "the database, the book's name and its directory must be kept first");
+        }
+        if (fileScope == null) return new ActionResult(false, "this job may not read files");
+        try {
+            java.nio.file.Path root = java.nio.file.Path.of(dir.strip()).toAbsolutePath().toRealPath();
+            java.nio.file.Path dbFile = java.nio.file.Path.of(db.strip()).toAbsolutePath().normalize();
+            if (!fileScope.canRead(root)) return new ActionResult(false, "outside the readable range: " + root);
+            if (!fileScope.canWrite(dbFile)) return new ActionResult(false, "outside the writable range: " + dbFile);
+            java.util.Map<String, String> files = bookMarkdown(root);
+            if (files.isEmpty()) return new ActionResult(false, "no markdown file under " + root);
+            var outline = com.scivicslab.turingworkflow.plugins.rstframe.BookOutline.read(files);
+            if (dbFile.getParent() != null) java.nio.file.Files.createDirectories(dbFile.getParent());
+            try (var store = new com.scivicslab.turingworkflow.plugins.rstframe.BookStore("jdbc:h2:" + dbFile + ";AUTO_SERVER=TRUE")) {
+                store.saveOutline(name.strip(), root.toString(), outline);
+            }
+            java.util.Map<String, Integer> byLevel = new java.util.LinkedHashMap<>();
+            for (var n : outline.nodes()) byLevel.merge(n.level(), 1, Integer::sum);
+            String summary = "read " + files.size() + " markdown file(s) of " + name.strip() + ": " + byLevel
+                    + (outline.notes().isEmpty() ? "" : "; " + String.join("; ", outline.notes()));
+            selfActorRef.putJson("outcome", summary);
+            return new ActionResult(true, summary);
+        } catch (Exception e) {
+            return new ActionResult(false, "could not read the table of contents: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Plan step for {@code book-sections.yaml} ({@code FrameOntology_261021_oo01}): cuts the text of the book kept under
+     * {@code nameKey} into the nodes of the table of contents {@code book-toc.yaml} stored in the H2 database kept under
+     * {@code dbKey}, and stores the sections there. No LLM.
+     */
+    public ActionResult bookSections(String dbKey, String nameKey) {
+        String db = kept(dbKey);
+        String name = kept(nameKey);
+        if (db == null || db.isBlank() || name == null || name.isBlank()) {
+            return new ActionResult(false, "the database and the book's name must be kept first");
+        }
+        if (fileScope == null) return new ActionResult(false, "this job may not read files");
+        try {
+            java.nio.file.Path dbFile = java.nio.file.Path.of(db.strip()).toAbsolutePath().normalize();
+            if (!fileScope.canWrite(dbFile)) return new ActionResult(false, "outside the writable range: " + dbFile);
+            try (var store = new com.scivicslab.turingworkflow.plugins.rstframe.BookStore("jdbc:h2:" + dbFile + ";AUTO_SERVER=TRUE")) {
+                String dir = store.dirOf(name.strip());
+                if (dir == null) return new ActionResult(false, "no book " + name.strip() + " in " + dbFile + "; run book-toc.yaml first");
+                java.nio.file.Path root = java.nio.file.Path.of(dir);
+                if (!fileScope.canRead(root)) return new ActionResult(false, "outside the readable range: " + root);
+                var result = com.scivicslab.turingworkflow.plugins.rstframe.BookSections.split(bookMarkdown(root), store.outline(name.strip()));
+                store.saveSections(name.strip(), result.sections());
+                long spanning = result.sections().stream().filter(x -> x.files().size() > 1).count();
+                long empty = result.sections().stream().filter(x -> x.text().isEmpty()).count();
+                String summary = result.sections().size() + " section(s) of " + name.strip() + "; " + empty + " with no text of their own; "
+                        + spanning + " spanning more than one file" + (result.notes().isEmpty() ? "" : "; " + String.join("; ", result.notes()));
+                selfActorRef.putJson("outcome", summary);
+                return new ActionResult(true, summary);
+            }
+        } catch (Exception e) {
+            return new ActionResult(false, "could not cut the book into sections: " + e.getMessage());
+        }
+    }
+
+    /** @return every markdown file under {@code root}, path under it to text, in path order */
+    private static java.util.Map<String, String> bookMarkdown(java.nio.file.Path root) throws java.io.IOException {
+        java.util.Map<String, String> files = new java.util.LinkedHashMap<>();
+        try (var walk = java.nio.file.Files.walk(root)) {
+            for (java.nio.file.Path p : walk.filter(p -> p.toString().endsWith(".md")).sorted().toList()) {
+                files.put(root.relativize(p).toString(), java.nio.file.Files.readString(p));
+            }
+        }
+        return files;
+    }
+
     /** The tree of concept classes being made smaller by {@code concept-consolidate.yaml}, or {@code null}. */
     private com.scivicslab.turingworkflow.plugins.rstframe.ConceptConsolidation consolidation;
     private com.scivicslab.turingworkflow.plugins.rstframe.ConceptClasses consolidating;

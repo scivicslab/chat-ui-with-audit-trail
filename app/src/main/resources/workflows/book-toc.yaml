@@ -1,0 +1,51 @@
+name: book-toc
+description: |
+  Reads the table of contents of a book (FrameOntology_261021_oo01, getting the concept hierarchy),
+  the first step of making frames from a book. A textbook's table of contents is the concept tree a
+  person made. When the book has no contents page, the table is read from the headings of its markdown
+  files: a book is parts, chapters, sections and subsections, and anything deeper is rounded to its
+  subsection. OCR writes every heading at the same depth, so the depth is read from the heading's number
+  ("Chapter 4 ▪ ..." a chapter, "4.1." a section, "4.1.1." a subsection); a numbered heading counts only
+  when its number lies in the current chapter. The table is stored in the H2 database of the
+  intermediate data (table toc_node), replacing what the book had there. No LLM is used.
+params:
+  book:
+    label: "The book's directory"
+    description: "Absolute path; every .md under it is read in path order, e.g. .../Books-Programming/CoreJava14th_Vol1"
+    type: text
+    required: true
+  name:
+    label: "The book's name"
+    description: "The name the book is stored under, lower-case words joined by '-', e.g. core-java-14-vol1"
+    type: text
+    required: true
+  db:
+    label: "The database"
+    description: "Absolute path of the H2 database file, without .mv.db"
+    type: text
+    default: "/home/devteam/works/rst-on-lisp/db/books"
+steps:
+  - states: ["0", "1"]
+    label: read-the-table-of-contents
+    note: Every markdown file under the book's directory is read; the table replaces what the book had in the database.
+    actions:
+      - actor: this
+        method: bookToc
+        arguments: ["db", "name", "book"]
+        execution: direct
+
+  - states: ["0", "failed"]
+    label: could-not-read
+    actions: [{actor: this, method: doNothing, arguments: ["the book could not be read, or the database could not be written"], execution: direct}]
+
+  - states: ["1", "end"]
+    label: done
+    actions:
+      - actor: this
+        method: finish
+        arguments: ["outcome"]
+        execution: direct
+
+  - states: ["failed", "end"]
+    label: report-failure
+    actions: [{actor: this, method: reportFailure, arguments: [], execution: direct}]
