@@ -32,7 +32,7 @@ params:
     default: ""
   out:
     label: "Where to write the assignments"
-    description: "Absolute path of the result file; an existing file is not overwritten"
+    description: "Absolute path of the result file, e.g. .../rst-on-lisp/assignments/claude-agent-loop.lisp, where the frame viewer's Classes tab reads it; an existing file is not overwritten"
     type: text
     required: true
   writer:
