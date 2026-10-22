@@ -626,6 +626,26 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
         return runner().conceptWrite(at(a, 0), at(a, 1));
     }
 
+    /**
+     * Opens a book, its concept tree and the concept classes for {@code abstract-roles.yaml}.
+     * @param args {@code [bookKey, nameKey, treeKey, classesKey]}
+     */
+    @Action("slotsOpen")
+    public ActionResult slotsOpen(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().slotsOpen(at(a, 0), at(a, 1), at(a, 2), at(a, 3));
+    }
+
+    /**
+     * Writes the classes grown and the assignments made by {@code abstract-roles.yaml}.
+     * @param args {@code [outKey, treeKey]}
+     */
+    @Action("slotsWrite")
+    public ActionResult slotsWrite(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().slotsWrite(at(a, 0), at(a, 1));
+    }
+
     @Action("framePrompt")
     public ActionResult framePrompt(String args) {
         org.json.JSONArray a = arguments(args);

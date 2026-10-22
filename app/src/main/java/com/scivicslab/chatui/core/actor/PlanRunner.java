@@ -1100,11 +1100,6 @@ public class PlanRunner extends Interpreter {
         }
     }
 
-    /**
-     * Plan step: keeps the next question of the open work ({@code bookOpen} or {@code sampleOpen})
-     * for the writer under {@code questionKey}, and under {@code doneKey} {@code "true"} when there is
-     * none left and {@code "false"} otherwise.
-     */
     /** The concept tree being built, while a concept-tree job runs ({@code FrameMakingWorkflow_261022_oo01}, step 2). */
     private com.scivicslab.turingworkflow.plugins.rstframe.ConceptTree conceptTree;
 
@@ -1128,13 +1123,7 @@ public class PlanRunner extends Interpreter {
         try {
             java.nio.file.Path root = java.nio.file.Path.of(dir.strip()).toAbsolutePath().toRealPath();
             if (!fileScope.canRead(root)) return new ActionResult(false, "outside the readable range: " + root);
-            java.util.Map<String, String> files = new java.util.LinkedHashMap<>();
-            try (var walk = java.nio.file.Files.walk(root)) {
-                for (java.nio.file.Path p : walk.filter(p -> p.toString().endsWith(".lisp")).sorted().toList()) {
-                    java.nio.file.Path md = p.resolveSibling(p.getFileName().toString().replaceFirst("\\.lisp$", ".md"));
-                    if (java.nio.file.Files.isRegularFile(md)) files.put(p.toString(), java.nio.file.Files.readString(p));
-                }
-            }
+            java.util.Map<String, String> files = ruleFiles(root);
             if (files.isEmpty()) return new ActionResult(false, "no rule file with its markdown beside it under " + root);
             List<String> concepts = new java.util.ArrayList<>();
             if (given != null && !given.isBlank()) {
@@ -1172,6 +1161,92 @@ public class PlanRunner extends Interpreter {
         }
     }
 
+    /** @return every rule file under {@code root} that has its markdown beside it, path to text, in path order */
+    private static java.util.Map<String, String> ruleFiles(java.nio.file.Path root) throws java.io.IOException {
+        java.util.Map<String, String> files = new java.util.LinkedHashMap<>();
+        try (var walk = java.nio.file.Files.walk(root)) {
+            for (java.nio.file.Path p : walk.filter(p -> p.toString().endsWith(".lisp")).sorted().toList()) {
+                java.nio.file.Path md = p.resolveSibling(p.getFileName().toString().replaceFirst("\\.lisp$", ".md"));
+                if (java.nio.file.Files.isRegularFile(md)) files.put(p.toString(), java.nio.file.Files.readString(p));
+            }
+        }
+        return files;
+    }
+
+    /** The paragraphs being assigned to concept classes, while an abstract-roles job runs ({@code ConceptClasses_261022_oo01}). */
+    private com.scivicslab.turingworkflow.plugins.rstframe.SlotAssignment slotAssignment;
+
+    /**
+     * Opens a book, its concept tree and the concept classes for {@code abstract-roles.yaml}
+     * ({@code FrameMakingWorkflow_261022_oo01}, step 3).
+     *
+     * @param bookKey    where the book's directory is kept (an absolute path)
+     * @param nameKey    where the book's name is kept
+     * @param treeKey    where the concept tree's file is kept, as {@code concept-tree.yaml} wrote it
+     * @param classesKey where the directory of concept class files is kept ({@code rst-on-lisp/concepts}); empty for none
+     */
+    public ActionResult slotsOpen(String bookKey, String nameKey, String treeKey, String classesKey) {
+        String dir = kept(bookKey);
+        String name = kept(nameKey);
+        String tree = kept(treeKey);
+        String classes = kept(classesKey);
+        if (dir == null || dir.isBlank() || name == null || name.isBlank() || tree == null || tree.isBlank()) {
+            return new ActionResult(false, "the book's directory, its name and its concept tree must be kept first");
+        }
+        if (fileScope == null) return new ActionResult(false, "this job may not read files");
+        try {
+            java.nio.file.Path root = java.nio.file.Path.of(dir.strip()).toAbsolutePath().toRealPath();
+            java.nio.file.Path t = java.nio.file.Path.of(tree.strip()).toAbsolutePath().normalize();
+            if (!fileScope.canRead(root)) return new ActionResult(false, "outside the readable range: " + root);
+            if (!fileScope.canRead(t)) return new ActionResult(false, "outside the readable range: " + t);
+            java.util.Map<String, String> files = ruleFiles(root);
+            if (files.isEmpty()) return new ActionResult(false, "no rule file with its markdown beside it under " + root);
+            java.util.Map<String, String> classFiles = new java.util.LinkedHashMap<>();
+            if (classes != null && !classes.isBlank()) {
+                java.nio.file.Path c = java.nio.file.Path.of(classes.strip()).toAbsolutePath().normalize();
+                if (!fileScope.canRead(c)) return new ActionResult(false, "outside the readable range: " + c);
+                try (var walk = java.nio.file.Files.walk(c)) {
+                    for (java.nio.file.Path p : walk.filter(p -> p.toString().endsWith(".lisp")).sorted().toList()) {
+                        classFiles.put(p.toString(), java.nio.file.Files.readString(p));
+                    }
+                }
+            }
+            slotAssignment = new com.scivicslab.turingworkflow.plugins.rstframe.SlotAssignment(name.strip(), files,
+                    java.nio.file.Files.readString(t), new com.scivicslab.turingworkflow.plugins.rstframe.ConceptClasses(classFiles));
+            questioner = slotAssignment;
+            return new ActionResult(true, "opened " + files.size() + " rule file(s) and " + classFiles.size() + " class file(s)");
+        } catch (Exception e) {
+            return new ActionResult(false, "could not open the book: " + e.getMessage());
+        }
+    }
+
+    /** Writes the classes grown and the assignments to the file kept under {@code outKey}; an existing file is not overwritten. */
+    public ActionResult slotsWrite(String outKey, String treeKey) {
+        if (slotAssignment == null) return new ActionResult(false, "no paragraphs are being assigned");
+        String out = kept(outKey);
+        if (out == null || out.isBlank()) return new ActionResult(false, "the output file must be kept first");
+        if (fileScope == null) return new ActionResult(false, "this job may not write files");
+        try {
+            java.nio.file.Path f = java.nio.file.Path.of(out.strip()).toAbsolutePath().normalize();
+            if (!fileScope.canWrite(f)) return new ActionResult(false, "outside the writable range: " + f);
+            if (java.nio.file.Files.exists(f)) return new ActionResult(false, f + " already exists; assignments are not overwritten");
+            if (f.getParent() != null) java.nio.file.Files.createDirectories(f.getParent());
+            String tree = kept(treeKey);
+            java.nio.file.Files.writeString(f, slotAssignment.resultFile(tree == null ? "?" : tree.strip()));
+            selfActorRef.putJson("outcome", f.toString());
+            return new ActionResult(true, "wrote " + slotAssignment.placed().size() + " concept(s), "
+                    + slotAssignment.added().size() + " class(es) added, " + slotAssignment.grown().size() + " grown to " + f
+                    + (slotAssignment.notes().isEmpty() ? "" : ", " + slotAssignment.notes().size() + " note(s)"));
+        } catch (Exception e) {
+            return new ActionResult(false, "could not write the assignments: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Plan step: keeps the next question of the open work ({@code bookOpen} or {@code sampleOpen})
+     * for the writer under {@code questionKey}, and under {@code doneKey} {@code "true"} when there is
+     * none left and {@code "false"} otherwise.
+     */
     public ActionResult questionNext(String questionKey, String doneKey) {
         if (questioner == null) return new ActionResult(false, "nothing is open");
         String q = questioner.nextQuestion();
