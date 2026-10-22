@@ -193,27 +193,6 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
     }
 
     /**
-     * Writes a list the plan built up as one line each, for a person to read.
-     *
-     * <p>The list is one {@code appendJson} filled. An empty list is written as なし, so a heading
-     * never stands over nothing.</p>
-     *
-     * <pre>{@code
-     * - actor: this
-     *   method: joinLines
-     *   arguments: ["done", "doneText"]
-     * }</pre>
-     *
-     * @param args {@code [listKey, intoKey]}: where the list is in this plan's state, then where to
-     *             put the lines
-     */
-    @Action("joinLines")
-    public ActionResult joinLines(String args) {
-        org.json.JSONArray a = arguments(args);
-        return runner().joinLines(at(a, 0), at(a, 1));
-    }
-
-    /**
      * Stops whatever a conversation is in the middle of — the same thing the Cancel button does.
      *
      * <p>Fails when there is no such conversation.</p>
@@ -230,90 +209,6 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
     public ActionResult stopChat(String args) {
         org.json.JSONArray a = arguments(args);
         return runner().stopChat(at(a, 0));
-    }
-
-    /**
-     * Succeeds when this verdict says the same as the one before it.
-     *
-     * <p>When a judge answers with the same words twice, another round will not change them; the
-     * success lets the workflow take the "they do not agree" path. Whitespace and markdown emphasis
-     * are ignored. Keep one memo key per criterion.</p>
-     *
-     * <pre>{@code
-     * - actor: this
-     *   method: sameAsLast
-     *   arguments: ["verdict", "last-verdict-1"]
-     * }</pre>
-     *
-     * @param args {@code [key, memoKey]}: where the verdict is, then where to keep it for the next round
-     */
-    @Action("sameAsLast")
-    public ActionResult sameAsLast(String args) {
-        org.json.JSONArray a = arguments(args);
-        return runner().sameAsLast(at(a, 0), at(a, 1));
-    }
-
-    /**
-     * Says what a rewrite changed that it had no business changing; the verdict is stored.
-     *
-     * <p>Compares the fenced blocks, the backquoted spans, the proper names and the numbers of two
-     * texts, and writes {@code ACCEPT}, or {@code REVISE:} followed by what went missing or appeared,
-     * in the shape a judge's verdict has. Fails only when a text was not there.</p>
-     *
-     * <pre>{@code
-     * - actor: this
-     *   method: compareTexts
-     *   arguments: ["original", "text", "verdict"]
-     * }</pre>
-     *
-     * @param args {@code [beforeKey, afterKey, intoKey]}: the text as it arrived, the text as it
-     *             stands, then where to put the verdict
-     */
-    @Action("compareTexts")
-    public ActionResult compareTexts(String args) {
-        org.json.JSONArray a = arguments(args);
-        return runner().compareTexts(at(a, 0), at(a, 1), at(a, 2));
-    }
-
-    /**
-     * Takes a document's front matter off, so that what is worked on is the text alone.
-     *
-     * <p>{@code joinFrontMatter} puts it back. The body key may be the text key, to work in place.
-     * Fails when there was no text to split.</p>
-     *
-     * <pre>{@code
-     * - actor: this
-     *   method: takeFrontMatter
-     *   arguments: ["text", "head", "text"]
-     * }</pre>
-     *
-     * @param args {@code [textKey, headKey, bodyKey]}: where the whole document is, where to put
-     *             the front matter, then where to put the rest
-     */
-    @Action("takeFrontMatter")
-    public ActionResult takeFrontMatter(String args) {
-        org.json.JSONArray a = arguments(args);
-        return runner().takeFrontMatter(at(a, 0), at(a, 1), at(a, 2));
-    }
-
-    /**
-     * Puts back what {@code takeFrontMatter} took off.
-     *
-     * <p>An empty head adds nothing. Fails when there was no text to write.</p>
-     *
-     * <pre>{@code
-     * - actor: this
-     *   method: joinFrontMatter
-     *   arguments: ["head", "text", "whole"]
-     * }</pre>
-     *
-     * @param args {@code [headKey, bodyKey, intoKey]}: where the front matter was put, where the
-     *             text is, then where to put the two together
-     */
-    @Action("joinFrontMatter")
-    public ActionResult joinFrontMatter(String args) {
-        org.json.JSONArray a = arguments(args);
-        return runner().joinFrontMatter(at(a, 0), at(a, 1), at(a, 2));
     }
 
     /**

@@ -56,7 +56,15 @@ params:
 steps:
   - states: ["0", "on-their-llms"]
     label: add-fixer
-    actions: [{actor: this, method: addWorker, arguments: ["fixer", 'jexl:state.getString("fixer")'], execution: direct}]
+    note: The texts actor (plugin-text) compares the texts and keeps the front matter apart; it is removed at the end.
+    actions:
+      - actor: loader
+        method: createChild
+        arguments: ["ROOT", "texts", "com.scivicslab.turingworkflow.plugins.text.TextsIIAR"]
+      - actor: this
+        method: addWorker
+        arguments: ["fixer", 'jexl:state.getString("fixer")']
+        execution: direct
 
   - states: ["on-their-llms", "1"]
     label: put-each-role-on-its-llm
@@ -138,9 +146,21 @@ steps:
         method: putJson
         arguments: {path: "text", value: "jexl:result"}
         execution: direct
-      - actor: this
+      - actor: texts
         method: takeFrontMatter
-        arguments: ["text", "head", "text"]
+        arguments: {text: 'jexl:state.getString("text")'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: split, value: "jexl:result"}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: head, value: 'jexl:state.getString("split.head")'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: text, value: 'jexl:state.getString("split.body")'}
         execution: direct
       - actor: this
         method: copyState
@@ -208,13 +228,21 @@ steps:
       which are the ones a person has to look at, because nothing was changed there
       (WhenTheTwoRolesDoNotAgree_260915_oo01).
     actions:
-      - actor: this
+      - actor: texts
         method: joinLines
-        arguments: ["done", "doneText"]
+        arguments: {list: 'jexl:state.select("done").toString()'}
         execution: direct
       - actor: this
+        method: putJson
+        arguments: {path: doneText, value: "jexl:result"}
+        execution: direct
+      - actor: texts
         method: joinLines
-        arguments: ["disagreements", "disagreementsText"]
+        arguments: {list: 'jexl:state.select("disagreements").toString()'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: disagreementsText, value: "jexl:result"}
         execution: direct
       - actor: this
         method: putJson
@@ -222,6 +250,9 @@ steps:
           path: report
           value: 'jexl:"=== 文章のブラッシュアップ ===\n\n--- 処理したファイル ---\n" + state.getString("doneText") + "\n\n--- 意見が合わず元のままにした観点 ---\n" + state.getString("disagreementsText")'
         execution: direct
+      - actor: loader
+        method: removeChild
+        arguments: "texts"
       - actor: this
         method: finish
         arguments: ["report"]
@@ -292,9 +323,9 @@ steps:
       入る前の本文に戻し、合わなかったことを報告に残して次へ進む
       (WhenTheTwoRolesDoNotAgree_260915_oo01)。
     actions:
-      - actor: this
+      - actor: texts
         method: sameAsLast
-        arguments: ["verdict", "last-verdict-1"]
+        arguments: {verdict: 'jexl:state.getString("verdict")', memo: "verdict-1"}
         execution: direct
       - actor: this
         method: copyState
@@ -431,9 +462,9 @@ steps:
       入る前の本文に戻し、合わなかったことを報告に残して次へ進む
       (WhenTheTwoRolesDoNotAgree_260915_oo01)。
     actions:
-      - actor: this
+      - actor: texts
         method: sameAsLast
-        arguments: ["verdict", "last-verdict-2"]
+        arguments: {verdict: 'jexl:state.getString("verdict")', memo: "verdict-2"}
         execution: direct
       - actor: this
         method: copyState
@@ -570,9 +601,9 @@ steps:
       入る前の本文に戻し、合わなかったことを報告に残して次へ進む
       (WhenTheTwoRolesDoNotAgree_260915_oo01)。
     actions:
-      - actor: this
+      - actor: texts
         method: sameAsLast
-        arguments: ["verdict", "last-verdict-3"]
+        arguments: {verdict: 'jexl:state.getString("verdict")', memo: "verdict-3"}
         execution: direct
       - actor: this
         method: copyState
@@ -709,9 +740,9 @@ steps:
       入る前の本文に戻し、合わなかったことを報告に残して次へ進む
       (WhenTheTwoRolesDoNotAgree_260915_oo01)。
     actions:
-      - actor: this
+      - actor: texts
         method: sameAsLast
-        arguments: ["verdict", "last-verdict-4"]
+        arguments: {verdict: 'jexl:state.getString("verdict")', memo: "verdict-4"}
         execution: direct
       - actor: this
         method: copyState
@@ -848,9 +879,9 @@ steps:
       入る前の本文に戻し、合わなかったことを報告に残して次へ進む
       (WhenTheTwoRolesDoNotAgree_260915_oo01)。
     actions:
-      - actor: this
+      - actor: texts
         method: sameAsLast
-        arguments: ["verdict", "last-verdict-5"]
+        arguments: {verdict: 'jexl:state.getString("verdict")', memo: "verdict-5"}
         execution: direct
       - actor: this
         method: copyState
@@ -987,9 +1018,9 @@ steps:
       入る前の本文に戻し、合わなかったことを報告に残して次へ進む
       (WhenTheTwoRolesDoNotAgree_260915_oo01)。
     actions:
-      - actor: this
+      - actor: texts
         method: sameAsLast
-        arguments: ["verdict", "last-verdict-6"]
+        arguments: {verdict: 'jexl:state.getString("verdict")', memo: "verdict-6"}
         execution: direct
       - actor: this
         method: copyState
@@ -1134,9 +1165,9 @@ steps:
       入る前の本文に戻し、合わなかったことを報告に残して次へ進む
       (WhenTheTwoRolesDoNotAgree_260915_oo01)。
     actions:
-      - actor: this
+      - actor: texts
         method: sameAsLast
-        arguments: ["verdict", "last-verdict-7"]
+        arguments: {verdict: 'jexl:state.getString("verdict")', memo: "verdict-7"}
         execution: direct
       - actor: this
         method: copyState
@@ -1217,9 +1248,13 @@ steps:
       had had a YAML block rewritten into something that does not run
       (WhatAProgramCanDo_260915_oo01).
     actions:
+      - actor: texts
+        method: compare
+        arguments: {before: 'jexl:state.getString("original")', after: 'jexl:state.getString("text")'}
+        execution: direct
       - actor: this
-        method: compareTexts
-        arguments: ["original", "text", "verdict"]
+        method: putJson
+        arguments: {path: verdict, value: "jexl:result"}
         execution: direct
 
   - states: ["verify-check", "write"]
@@ -1278,9 +1313,13 @@ steps:
       The report names the file that now exists, not the one that was read: a reader who goes to
       look at "written: <path>" must find the rewritten text there.
     actions:
-      - actor: this
+      - actor: texts
         method: joinFrontMatter
-        arguments: ["head", "text", "whole"]
+        arguments: {head: 'jexl:state.getString("head")', body: 'jexl:state.getString("text")'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: whole, value: "jexl:result"}
         execution: direct
       - actor: this
         method: putJson

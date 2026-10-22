@@ -320,8 +320,8 @@ public final class PolishWorkflowGenerator {
                 + "      入る前の本文に戻し、合わなかったことを報告に残して次へ進む\n"
                 + "      (WhenTheTwoRolesDoNotAgree_260915_oo01)。\n"
                 + "    actions:\n"
-                + "      - actor: this\n        method: sameAsLast\n"
-                + "        arguments: [\"verdict\", \"last-verdict-" + i + "\"]\n        execution: direct\n"
+                + "      - actor: texts\n        method: sameAsLast\n"
+                + "        arguments: {verdict: 'jexl:state.getString(\"verdict\")', memo: \"verdict-" + i + "\"}\n        execution: direct\n"
                 + "      - actor: this\n        method: copyState\n"
                 + "        arguments: [\"kept-" + i + "\", \"text\"]\n        execution: direct\n"
                 + "      - actor: this\n        method: appendJson\n"
@@ -430,8 +430,10 @@ public final class PolishWorkflowGenerator {
                 + "      had had a YAML block rewritten into something that does not run\n"
                 + "      (WhatAProgramCanDo_260915_oo01).\n"
                 + "    actions:\n"
-                + "      - actor: this\n        method: compareTexts\n"
-                + "        arguments: [\"original\", \"text\", \"verdict\"]\n        execution: direct\n"
+                + "      - actor: texts\n        method: compare\n"
+                + "        arguments: {before: 'jexl:state.getString(\"original\")', after: 'jexl:state.getString(\"text\")'}\n        execution: direct\n"
+                + "      - actor: this\n        method: putJson\n"
+                + "        arguments: {path: verdict, value: \"jexl:result\"}\n        execution: direct\n"
                 + "\n  - states: [\"verify-check\", \"" + next + "\"]\n"
                 + "    label: accept-verify\n"
                 + "    actions: [{actor: this, method: checkState, arguments: [\"verdict\", \"ACCEPT\"], execution: direct}]\n"
@@ -464,8 +466,10 @@ public final class PolishWorkflowGenerator {
                 + "    label: verify-nothing-was-brought-in\n"
                 + "    note: 受け取ったときの本文と見比べ、コマンド・名前・数値が変わっていないかを照合する。\n"
                 + "    actions:\n"
-                + "      - actor: this\n        method: compareTexts\n"
-                + "        arguments: [\"original\", \"text\", \"verdict\"]\n        execution: direct\n"
+                + "      - actor: texts\n        method: compare\n"
+                + "        arguments: {before: 'jexl:state.getString(\"original\")', after: 'jexl:state.getString(\"text\")'}\n        execution: direct\n"
+                + "      - actor: this\n        method: putJson\n"
+                + "        arguments: {path: verdict, value: \"jexl:result\"}\n        execution: direct\n"
                 + "\n  - states: [\"verify-check\", \"" + next + "\"]\n"
                 + "    label: accept-verify\n"
                 + "    actions: [{actor: this, method: checkState, arguments: [\"verdict\", \"ACCEPT\"], execution: direct}]\n"
@@ -536,7 +540,15 @@ params:
 steps:
   - states: ["0", "on-their-llms"]
     label: add-fixer
-    actions: [{actor: this, method: addWorker, arguments: ["fixer", 'jexl:state.getString("fixer")'], execution: direct}]
+    note: The texts actor (plugin-text) compares the texts and keeps the front matter apart; it is removed at the end.
+    actions:
+      - actor: loader
+        method: createChild
+        arguments: ["ROOT", "texts", "com.scivicslab.turingworkflow.plugins.text.TextsIIAR"]
+      - actor: this
+        method: addWorker
+        arguments: ["fixer", 'jexl:state.getString("fixer")']
+        execution: direct
 
   - states: ["on-their-llms", "1"]
     label: put-each-role-on-its-llm
@@ -661,9 +673,21 @@ params:
         method: putJson
         arguments: {path: "text", value: "jexl:result"}
         execution: direct
-      - actor: this
+      - actor: texts
         method: takeFrontMatter
-        arguments: ["text", "head", "text"]
+        arguments: {text: 'jexl:state.getString("text")'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: split, value: "jexl:result"}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: head, value: 'jexl:state.getString("split.head")'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: text, value: 'jexl:state.getString("split.body")'}
         execution: direct
       - actor: this
         method: copyState
@@ -695,9 +719,13 @@ params:
       The report names the file that now exists, not the one that was read: a reader who goes to
       look at "written: <path>" must find the rewritten text there.
     actions:
-      - actor: this
+      - actor: texts
         method: joinFrontMatter
-        arguments: ["head", "text", "whole"]
+        arguments: {head: 'jexl:state.getString("head")', body: 'jexl:state.getString("text")'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: whole, value: "jexl:result"}
         execution: direct
       - actor: this
         method: putJson
@@ -730,7 +758,7 @@ params:
 
   - states: ["done", "end"]
     label: done
-    actions: [{actor: this, method: finish, arguments: ["text"], execution: direct}]
+    actions: [{actor: loader, method: removeChild, arguments: "texts"}, {actor: this, method: finish, arguments: ["text"], execution: direct}]
 """;
 
     /**
@@ -766,14 +794,14 @@ params:
   - states: ["!end", "end"]
     label: catch-all
     note: どの遷移も通らなかった。いまの本文を返して終える。
-    actions: [{actor: this, method: finish, arguments: ["text"], execution: direct}]
+    actions: [{actor: loader, method: removeChild, arguments: "texts"}, {actor: this, method: finish, arguments: ["text"], execution: direct}]
 """;
 
     private static final String SKIP_TEXT = """
 
   - states: ["skip", "end"]
     label: the-last-check-did-not-pass
-    actions: [{actor: this, method: finish, arguments: ["text"], execution: direct}]
+    actions: [{actor: loader, method: removeChild, arguments: "texts"}, {actor: this, method: finish, arguments: ["text"], execution: direct}]
 """;
 
     private static final String ALL_DONE = """
@@ -791,13 +819,21 @@ params:
       which are the ones a person has to look at, because nothing was changed there
       (WhenTheTwoRolesDoNotAgree_260915_oo01).
     actions:
-      - actor: this
+      - actor: texts
         method: joinLines
-        arguments: ["done", "doneText"]
+        arguments: {list: 'jexl:state.select("done").toString()'}
         execution: direct
       - actor: this
+        method: putJson
+        arguments: {path: doneText, value: "jexl:result"}
+        execution: direct
+      - actor: texts
         method: joinLines
-        arguments: ["disagreements", "disagreementsText"]
+        arguments: {list: 'jexl:state.select("disagreements").toString()'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: disagreementsText, value: "jexl:result"}
         execution: direct
       - actor: this
         method: putJson
@@ -805,6 +841,9 @@ params:
           path: report
           value: 'jexl:"=== 文章のブラッシュアップ ===\\n\\n--- 処理したファイル ---\\n" + state.getString("doneText") + "\\n\\n--- 意見が合わず元のままにした観点 ---\\n" + state.getString("disagreementsText")'
         execution: direct
+      - actor: loader
+        method: removeChild
+        arguments: "texts"
       - actor: this
         method: finish
         arguments: ["report"]
