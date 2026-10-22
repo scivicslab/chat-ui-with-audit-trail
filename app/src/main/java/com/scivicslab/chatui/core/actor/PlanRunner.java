@@ -1261,7 +1261,8 @@ public class PlanRunner extends Interpreter {
 
     /**
      * Keeps, for the blank taken by {@code frameNext}, the paragraphs of the source books that play the same part
-     * ({@code FrameExamples}): one line each, its source, a tab, its text. None is kept when the frame is not found
+     * ({@code FrameExamples}, reading the frames under {@code framesRoot} and the edge lists in the {@code links/}
+     * beside it): one line each, its source, a tab, its text. None is kept when the frame is not found
      * in the library or names no such part; the step still succeeds, and the blank is asked with its sample alone.
      *
      * @param requestPath the frame being filled, as an absolute path
@@ -1295,8 +1296,20 @@ public class PlanRunner extends Interpreter {
             } catch (java.io.IOException e) {
                 return new ActionResult(false, "could not read the frame library: " + e.getMessage());
             }
+            // the edge lists sit beside frames/ in the library (FrameLinks_261022_oo01)
+            List<String> links = new java.util.ArrayList<>();
+            java.nio.file.Path linksDir = root.getParent() == null ? null : root.getParent().resolve("links");
+            if (linksDir != null && java.nio.file.Files.isDirectory(linksDir)) {
+                try (java.util.stream.Stream<java.nio.file.Path> walk = java.nio.file.Files.walk(linksDir)) {
+                    for (java.nio.file.Path p : walk.filter(p -> p.toString().endsWith(".tsv")).sorted().toList()) {
+                        links.add(java.nio.file.Files.readString(p));
+                    }
+                } catch (java.io.IOException e) {
+                    return new ActionResult(false, "could not read the edge lists: " + e.getMessage());
+                }
+            }
             final java.nio.file.Path base = works;
-            frameExamples = new com.scivicslab.turingworkflow.plugins.rstframe.FrameExamples(frames, rel -> {
+            frameExamples = new com.scivicslab.turingworkflow.plugins.rstframe.FrameExamples(frames, links, rel -> {
                 java.nio.file.Path p = base.resolve(rel).normalize();
                 try {
                     return p.startsWith(base) && java.nio.file.Files.isRegularFile(p) ? java.nio.file.Files.readString(p) : null;
