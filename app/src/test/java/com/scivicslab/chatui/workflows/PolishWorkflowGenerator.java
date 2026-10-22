@@ -321,7 +321,7 @@ public final class PolishWorkflowGenerator {
                 + "      (WhenTheTwoRolesDoNotAgree_260915_oo01)。\n"
                 + "    actions:\n"
                 + "      - actor: texts\n        method: sameAsLast\n"
-                + "        arguments: {verdict: 'jexl:state.getString(\"verdict\")', memo: \"verdict-" + i + "\"}\n        execution: direct\n"
+                + "        arguments: {verdict: 'jexl:state.getString(\"verdict\")', last: 'jexl:state.getString(\"last-verdict-" + i + "\")'}\n        execution: direct\n"
                 + "      - actor: this\n        method: copyState\n"
                 + "        arguments: [\"kept-" + i + "\", \"text\"]\n        execution: direct\n"
                 + "      - actor: this\n        method: appendJson\n"
@@ -329,8 +329,12 @@ public final class PolishWorkflowGenerator {
                 + "        execution: direct\n"
                 + "\n  - states: [\"check-" + i + "\", \"fix-" + i + "\"]\n"
                 + "    label: needs-fix-" + i + "\n"
-                + "    note: 満たしていない。直す回数が残っていれば直しへ。\n"
-                + "    actions: [{actor: this, method: countUp, arguments: [\"tries-" + i + "\", 'jexl:state.getString(\"tries\")'], execution: direct}]\n"
+                + "    note: 満たしていない。直す回数が残っていれば直しへ。次の判定と見比べるために、この判定を覚えておく。\n"
+                + "    actions:\n"
+                + "      - actor: this\n        method: countUp\n"
+                + "        arguments: [\"tries-" + i + "\", 'jexl:state.getString(\"tries\")']\n        execution: direct\n"
+                + "      - actor: this\n        method: copyState\n"
+                + "        arguments: [\"verdict\", \"last-verdict-" + i + "\"]\n        execution: direct\n"
                 + "\n  - states: [\"check-" + i + "\", \"" + next + "\"]\n"
                 + "    label: give-up-" + i + "\n"
                 + "    note: |\n"
@@ -401,8 +405,12 @@ public final class PolishWorkflowGenerator {
                 + "    actions: [{actor: this, method: checkState, arguments: [\"verdict\", \"ACCEPT\"], execution: direct}]\n"
                 + "\n  - states: [\"check-" + i + "\", \"fix-" + i + "\"]\n"
                 + "    label: needs-fix-" + i + "\n"
-                + "    note: 満たしていない。直す回数が残っていれば直しへ。\n"
-                + "    actions: [{actor: this, method: countUp, arguments: [\"tries-" + i + "\", 'jexl:state.getString(\"tries\")'], execution: direct}]\n"
+                + "    note: 満たしていない。直す回数が残っていれば直しへ。次の判定と見比べるために、この判定を覚えておく。\n"
+                + "    actions:\n"
+                + "      - actor: this\n        method: countUp\n"
+                + "        arguments: [\"tries-" + i + "\", 'jexl:state.getString(\"tries\")']\n        execution: direct\n"
+                + "      - actor: this\n        method: copyState\n"
+                + "        arguments: [\"verdict\", \"last-verdict-" + i + "\"]\n        execution: direct\n"
                 + "\n  - states: [\"check-" + i + "\", \"" + next + "\"]\n"
                 + "    label: give-up-" + i + "\n"
                 + "    note: |\n"
@@ -540,15 +548,7 @@ params:
 steps:
   - states: ["0", "on-their-llms"]
     label: add-fixer
-    note: The texts actor (plugin-text) compares the texts and keeps the front matter apart; it is removed at the end.
-    actions:
-      - actor: loader
-        method: createChild
-        arguments: ["ROOT", "texts", "com.scivicslab.turingworkflow.plugins.text.TextsIIAR"]
-      - actor: this
-        method: addWorker
-        arguments: ["fixer", 'jexl:state.getString("fixer")']
-        execution: direct
+    actions: [{actor: this, method: addWorker, arguments: ["fixer", 'jexl:state.getString("fixer")'], execution: direct}]
 
   - states: ["on-their-llms", "1"]
     label: put-each-role-on-its-llm
@@ -758,7 +758,7 @@ params:
 
   - states: ["done", "end"]
     label: done
-    actions: [{actor: loader, method: removeChild, arguments: "texts"}, {actor: this, method: finish, arguments: ["text"], execution: direct}]
+    actions: [{actor: this, method: finish, arguments: ["text"], execution: direct}]
 """;
 
     /**
@@ -794,14 +794,14 @@ params:
   - states: ["!end", "end"]
     label: catch-all
     note: どの遷移も通らなかった。いまの本文を返して終える。
-    actions: [{actor: loader, method: removeChild, arguments: "texts"}, {actor: this, method: finish, arguments: ["text"], execution: direct}]
+    actions: [{actor: this, method: finish, arguments: ["text"], execution: direct}]
 """;
 
     private static final String SKIP_TEXT = """
 
   - states: ["skip", "end"]
     label: the-last-check-did-not-pass
-    actions: [{actor: loader, method: removeChild, arguments: "texts"}, {actor: this, method: finish, arguments: ["text"], execution: direct}]
+    actions: [{actor: this, method: finish, arguments: ["text"], execution: direct}]
 """;
 
     private static final String ALL_DONE = """
@@ -841,9 +841,6 @@ params:
           path: report
           value: 'jexl:"=== 文章のブラッシュアップ ===\\n\\n--- 処理したファイル ---\\n" + state.getString("doneText") + "\\n\\n--- 意見が合わず元のままにした観点 ---\\n" + state.getString("disagreementsText")'
         execution: direct
-      - actor: loader
-        method: removeChild
-        arguments: "texts"
       - actor: this
         method: finish
         arguments: ["report"]

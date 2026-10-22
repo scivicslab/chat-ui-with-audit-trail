@@ -56,15 +56,7 @@ params:
 steps:
   - states: ["0", "on-their-llms"]
     label: add-fixer
-    note: The texts actor (plugin-text) compares the texts and keeps the front matter apart; it is removed at the end.
-    actions:
-      - actor: loader
-        method: createChild
-        arguments: ["ROOT", "texts", "com.scivicslab.turingworkflow.plugins.text.TextsIIAR"]
-      - actor: this
-        method: addWorker
-        arguments: ["fixer", 'jexl:state.getString("fixer")']
-        execution: direct
+    actions: [{actor: this, method: addWorker, arguments: ["fixer", 'jexl:state.getString("fixer")'], execution: direct}]
 
   - states: ["on-their-llms", "1"]
     label: put-each-role-on-its-llm
@@ -250,9 +242,6 @@ steps:
           path: report
           value: 'jexl:"=== 文章のブラッシュアップ ===\n\n--- 処理したファイル ---\n" + state.getString("doneText") + "\n\n--- 意見が合わず元のままにした観点 ---\n" + state.getString("disagreementsText")'
         execution: direct
-      - actor: loader
-        method: removeChild
-        arguments: "texts"
       - actor: this
         method: finish
         arguments: ["report"]
@@ -325,7 +314,7 @@ steps:
     actions:
       - actor: texts
         method: sameAsLast
-        arguments: {verdict: 'jexl:state.getString("verdict")', memo: "verdict-1"}
+        arguments: {verdict: 'jexl:state.getString("verdict")', last: 'jexl:state.getString("last-verdict-1")'}
         execution: direct
       - actor: this
         method: copyState
@@ -338,8 +327,16 @@ steps:
 
   - states: ["check-1", "fix-1"]
     label: needs-fix-1
-    note: 満たしていない。直す回数が残っていれば直しへ。
-    actions: [{actor: this, method: countUp, arguments: ["tries-1", 'jexl:state.getString("tries")'], execution: direct}]
+    note: 満たしていない。直す回数が残っていれば直しへ。次の判定と見比べるために、この判定を覚えておく。
+    actions:
+      - actor: this
+        method: countUp
+        arguments: ["tries-1", 'jexl:state.getString("tries")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["verdict", "last-verdict-1"]
+        execution: direct
 
   - states: ["check-1", "enter-2"]
     label: give-up-1
@@ -464,7 +461,7 @@ steps:
     actions:
       - actor: texts
         method: sameAsLast
-        arguments: {verdict: 'jexl:state.getString("verdict")', memo: "verdict-2"}
+        arguments: {verdict: 'jexl:state.getString("verdict")', last: 'jexl:state.getString("last-verdict-2")'}
         execution: direct
       - actor: this
         method: copyState
@@ -477,8 +474,16 @@ steps:
 
   - states: ["check-2", "fix-2"]
     label: needs-fix-2
-    note: 満たしていない。直す回数が残っていれば直しへ。
-    actions: [{actor: this, method: countUp, arguments: ["tries-2", 'jexl:state.getString("tries")'], execution: direct}]
+    note: 満たしていない。直す回数が残っていれば直しへ。次の判定と見比べるために、この判定を覚えておく。
+    actions:
+      - actor: this
+        method: countUp
+        arguments: ["tries-2", 'jexl:state.getString("tries")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["verdict", "last-verdict-2"]
+        execution: direct
 
   - states: ["check-2", "enter-3"]
     label: give-up-2
@@ -603,7 +608,7 @@ steps:
     actions:
       - actor: texts
         method: sameAsLast
-        arguments: {verdict: 'jexl:state.getString("verdict")', memo: "verdict-3"}
+        arguments: {verdict: 'jexl:state.getString("verdict")', last: 'jexl:state.getString("last-verdict-3")'}
         execution: direct
       - actor: this
         method: copyState
@@ -616,8 +621,16 @@ steps:
 
   - states: ["check-3", "fix-3"]
     label: needs-fix-3
-    note: 満たしていない。直す回数が残っていれば直しへ。
-    actions: [{actor: this, method: countUp, arguments: ["tries-3", 'jexl:state.getString("tries")'], execution: direct}]
+    note: 満たしていない。直す回数が残っていれば直しへ。次の判定と見比べるために、この判定を覚えておく。
+    actions:
+      - actor: this
+        method: countUp
+        arguments: ["tries-3", 'jexl:state.getString("tries")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["verdict", "last-verdict-3"]
+        execution: direct
 
   - states: ["check-3", "enter-4"]
     label: give-up-3
@@ -742,7 +755,7 @@ steps:
     actions:
       - actor: texts
         method: sameAsLast
-        arguments: {verdict: 'jexl:state.getString("verdict")', memo: "verdict-4"}
+        arguments: {verdict: 'jexl:state.getString("verdict")', last: 'jexl:state.getString("last-verdict-4")'}
         execution: direct
       - actor: this
         method: copyState
@@ -755,8 +768,16 @@ steps:
 
   - states: ["check-4", "fix-4"]
     label: needs-fix-4
-    note: 満たしていない。直す回数が残っていれば直しへ。
-    actions: [{actor: this, method: countUp, arguments: ["tries-4", 'jexl:state.getString("tries")'], execution: direct}]
+    note: 満たしていない。直す回数が残っていれば直しへ。次の判定と見比べるために、この判定を覚えておく。
+    actions:
+      - actor: this
+        method: countUp
+        arguments: ["tries-4", 'jexl:state.getString("tries")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["verdict", "last-verdict-4"]
+        execution: direct
 
   - states: ["check-4", "enter-5"]
     label: give-up-4
@@ -881,7 +902,7 @@ steps:
     actions:
       - actor: texts
         method: sameAsLast
-        arguments: {verdict: 'jexl:state.getString("verdict")', memo: "verdict-5"}
+        arguments: {verdict: 'jexl:state.getString("verdict")', last: 'jexl:state.getString("last-verdict-5")'}
         execution: direct
       - actor: this
         method: copyState
@@ -894,8 +915,16 @@ steps:
 
   - states: ["check-5", "fix-5"]
     label: needs-fix-5
-    note: 満たしていない。直す回数が残っていれば直しへ。
-    actions: [{actor: this, method: countUp, arguments: ["tries-5", 'jexl:state.getString("tries")'], execution: direct}]
+    note: 満たしていない。直す回数が残っていれば直しへ。次の判定と見比べるために、この判定を覚えておく。
+    actions:
+      - actor: this
+        method: countUp
+        arguments: ["tries-5", 'jexl:state.getString("tries")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["verdict", "last-verdict-5"]
+        execution: direct
 
   - states: ["check-5", "enter-6"]
     label: give-up-5
@@ -1020,7 +1049,7 @@ steps:
     actions:
       - actor: texts
         method: sameAsLast
-        arguments: {verdict: 'jexl:state.getString("verdict")', memo: "verdict-6"}
+        arguments: {verdict: 'jexl:state.getString("verdict")', last: 'jexl:state.getString("last-verdict-6")'}
         execution: direct
       - actor: this
         method: copyState
@@ -1033,8 +1062,16 @@ steps:
 
   - states: ["check-6", "fix-6"]
     label: needs-fix-6
-    note: 満たしていない。直す回数が残っていれば直しへ。
-    actions: [{actor: this, method: countUp, arguments: ["tries-6", 'jexl:state.getString("tries")'], execution: direct}]
+    note: 満たしていない。直す回数が残っていれば直しへ。次の判定と見比べるために、この判定を覚えておく。
+    actions:
+      - actor: this
+        method: countUp
+        arguments: ["tries-6", 'jexl:state.getString("tries")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["verdict", "last-verdict-6"]
+        execution: direct
 
   - states: ["check-6", "enter-7"]
     label: give-up-6
@@ -1167,7 +1204,7 @@ steps:
     actions:
       - actor: texts
         method: sameAsLast
-        arguments: {verdict: 'jexl:state.getString("verdict")', memo: "verdict-7"}
+        arguments: {verdict: 'jexl:state.getString("verdict")', last: 'jexl:state.getString("last-verdict-7")'}
         execution: direct
       - actor: this
         method: copyState
@@ -1180,8 +1217,16 @@ steps:
 
   - states: ["check-7", "fix-7"]
     label: needs-fix-7
-    note: 満たしていない。直す回数が残っていれば直しへ。
-    actions: [{actor: this, method: countUp, arguments: ["tries-7", 'jexl:state.getString("tries")'], execution: direct}]
+    note: 満たしていない。直す回数が残っていれば直しへ。次の判定と見比べるために、この判定を覚えておく。
+    actions:
+      - actor: this
+        method: countUp
+        arguments: ["tries-7", 'jexl:state.getString("tries")']
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ["verdict", "last-verdict-7"]
+        execution: direct
 
   - states: ["check-7", "verify"]
     label: give-up-7

@@ -242,6 +242,9 @@ public class ChatUiActorSystem implements ConversationControls {
     /** The name a job's workflow reads and writes files through ({@link ScopedFiles}). */
     public static final String WORKFLOW_FILES = com.scivicslab.turingworkflow.plugins.rstframe.FileGate.ACTOR;
 
+    /** The name a job's workflow reaches the text steps by ({@code TextsIIAR} of plugin-text). */
+    public static final String WORKFLOW_TEXTS = "texts";
+
     @PostConstruct
     void init() {
         actorSystem = new IIActorSystem("chat-ui");
@@ -339,6 +342,12 @@ public class ChatUiActorSystem implements ConversationControls {
         ScopedFilesIIAR files = new ScopedFilesIIAR(WORKFLOW_FILES, new ScopedFiles(fileScope), actorSystem);
         adopt(HOUSEKEEPER, files);
         actorSystem.addIIActor(files);
+        // The text steps of a job's workflow (plugin-text): they hold nothing, so one actor serves every job at once,
+        // and no job's workflow creates or removes it.
+        com.scivicslab.turingworkflow.plugins.text.TextsIIAR texts =
+                new com.scivicslab.turingworkflow.plugins.text.TextsIIAR(WORKFLOW_TEXTS, actorSystem);
+        adopt(HOUSEKEEPER, texts);
+        actorSystem.addIIActor(texts);
         LOG.info("File access: write root " + fileScope.writeRoot()
                 + ", readable " + fileScope.describeReadRoots());
         SkillRegistry registry = new SkillRegistry(skillRootPaths);

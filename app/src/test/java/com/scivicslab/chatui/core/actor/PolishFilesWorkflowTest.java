@@ -1,7 +1,6 @@
 package com.scivicslab.chatui.core.actor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.scivicslab.chatui.agent.FileAccessScope;
@@ -30,7 +29,7 @@ import org.junit.jupiter.api.io.TempDir;
 /**
  * {@code polish-files.yaml} run end to end on a plan runner, with a fixer that changes nothing and a judge that
  * answers the same complaint every time: every criterion ends as a disagreement, the last check finds nothing brought
- * in, and the file is written with its front matter put back. The texts actor of plugin-text does the comparing.
+ * in, and the file is written with its front matter put back. The texts actor of plugin-text, registered as the instance registers it, does the comparing.
  */
 @DisplayName("polish-files: 直す役と判定役が合わないとき、観点ごとに報告して元の本文を書く")
 class PolishFilesWorkflowTest {
@@ -102,6 +101,7 @@ class PolishFilesWorkflowTest {
         system.addIIActor(plan);
         runner.setSelfActorRef(plan);
         system.addIIActor(new WorkflowPluginLoader("loader", system, List.of()));
+        system.addIIActor(new com.scivicslab.turingworkflow.plugins.text.TextsIIAR("texts", system));
         system.addIIActor(new ScopedFilesIIAR("files", new ScopedFiles(new FileAccessScope(dir, List.of(dir))), system));
         Files.createDirectories(dir.resolve("in"));
         Files.writeString(dir.resolve("in/sample.md"), DOC);
@@ -113,7 +113,7 @@ class PolishFilesWorkflowTest {
     }
 
     @Test
-    @DisplayName("どの観点も合わず、元の本文がフロントマター付きで書かれ、texts アクターは片付く")
+    @DisplayName("どの観点も合わず、元の本文がフロントマター付きで書かれ、texts アクターはインスタンスのものとして残る")
     void everyCriterionDisagreesAndTheOriginalIsWritten() throws Exception {
         for (String[] p : new String[][] {
                 {"dir", dir.resolve("in").toString()}, {"suffix", ".md"}, {"depth", "1"}, {"outDir", dir.resolve("out").toString()},
@@ -139,6 +139,6 @@ class PolishFilesWorkflowTest {
         for (int i = 1; i <= 7; i++) assertTrue(report.contains("観点" + i + " "), "criterion " + i + " is reported: " + report);
         assertEquals(DOC, Files.readString(dir.resolve("out/sample.md")));
         assertTrue(judge.questions.size() >= 14, "each criterion is judged twice before the two are found not to agree");
-        assertNull(system.getIIActor("texts"), "the workflow removes the actor it made");
+        assertTrue(system.getIIActor("texts") != null, "the texts actor is the instance's, not the workflow's");
     }
 }
