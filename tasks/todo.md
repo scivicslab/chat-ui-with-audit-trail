@@ -262,3 +262,27 @@ request messagesに送った文を残す会話を作る手段がない。
 - [~] G7. `SampleToFrame`（プラグイン、テスト済み）。ジョブのワークフロー `make-frame.yaml` はまだ。同じ形の段落の並びのサブフレーム化もまだ
 
 確かめること（G1 の前）: Build Snapshot が plugin-rst-frame の SNAPSHOT を取れるか（取れなければ 4.6.0 のリリースが要る）
+
+# PlanRunner の action をプラグインのアクターへ移す（ActionsOnTheInterpreter_261023_oo01）
+
+順序は C → E → B → D（承認済み）。A（finish・reportFailure・countUp・copyState・checkState・takeNext）はインタプリタに残す。
+
+- [x] C. ファイル: プラグインに `FileGate`、audit-trail に起動時の `files` アクター（`ScopedFiles`、インスタンスの範囲）。`readFile`/`writeFile`/`listFiles` を外した（plugins cf0d398、audit-trail 2a260d2）
+- [x] E. フレーム関係の 23 action を plugin-rst-frame のジョブのアクター 7 種へ（`tree`・`slots`・`consolidation`・`bookFiles`・`sample`・`frame`・`filler`）。ワークフロー 7 本は最初に `loader.createChild`、終わりと失敗の経路で `removeChild`（plugins 5c55974、audit-trail 073da9b）
+- [x] B. 文字列操作 5 つを新しいプラグイン `plugin-text` の `texts` へ。状態を持たないので起動時に 1 つ登録し、ワークフローは作らない（plugins b90797a・9979425、audit-trail 487cdb6・ab5b655）。`PolishFilesWorkflowTest` で polish-files を通しで確かめる
+- [ ] D. 会話を操作する action（`addWorker` ほか 12 個）を audit-trail 内のアクターへ。`askChat` は消す。設計の選択が残る（下）
+
+## 残っている問題: ジョブのアクターの名前がインスタンス全体で 1 つ
+
+E のアクター（`tree` など）は固定の名前で作る。`createChild` は同じ名前の既存アクターを黙って置き換えるので、2 つのプロジェクトで同じ種類のジョブが同時に走ると、後のジョブのアクターが先のジョブのものを置き換え、先のジョブの `removeChild` が後のジョブのアクターを消す。
+B ではこれが polish 系（普段使うジョブ）に起きたので、`texts` を状態のないアクターにして解消した。E のアクターは状態（質問の進み具合）を持つので、この手が使えない。
+
+案: Turing-workflow の名前解決を「実行中のアクターの子を先に探す」に変え、`createChild` の親に実行中のアクター（`jexl:self`）を渡すと名前が `<plan>.<name>` になるようにする。ワークフローの `actor: tree` は書き換えずに済む。ジョブが止められたときは Project が runner の子を片付ける。土台ライブラリの変更なので確認してから。
+
+## D の設計の選択
+
+1. 会話を指す操作（`setChatModel`・`setChatAgentLoop`・`setChatNoThink`・`setChatEffort`・`setChatProvider`・`stopChat`・`endConversation`）は状態を持たない。`texts` と同じく起動時に 1 つ登録する `chats` アクターにできる。
+2. 作業枠の操作（`addWorker`・`askWorker`・`clearWorker`・`keepWorkerReply`・`collectWorkerReplies`）は、枠が計画（PlanRunner）の子で、問い合わせの待ち手の名前（CallWatchdog が循環を見つけるのに使う）が計画の名前である。
+   - 案 a: `chats.ask {chat, prompt, waiter: 'jexl:self'}` が答えを message で返し、ワークフローは `putJson` で受ける。枠を無くす。`keepWorkerReply` は不要になる。`apply` で複数の枠に同じ質問を配る `parallel-workers-plan.yaml` は書き直しが要る。
+   - 案 b: 枠を残し、Project がジョブごとに `workers` を runner の子として作る。名前の問題（上）と同じ問題を持つ。
+   どちらも、LLM がジョブのワークフローを書くときに見る action の一覧（`ActionCatalog`）の書き直しを伴う（polish 系だけで呼び出し 160 箇所）。
