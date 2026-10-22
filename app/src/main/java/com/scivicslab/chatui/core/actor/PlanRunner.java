@@ -1374,6 +1374,78 @@ public class PlanRunner extends Interpreter {
         }
     }
 
+    /** The book's file being made into a rule file by {@code book-to-rules.yaml}, or {@code null}. */
+    private com.scivicslab.turingworkflow.plugins.rstframe.BookFileToRules bookFile;
+    private java.nio.file.Path bookFilePath;
+
+    /**
+     * Plan step for {@code book-to-rules.yaml}: keeps under {@code fileKey} the first markdown file under the directory
+     * kept under {@code dirKey}, in path order, that has no rule file beside it yet, and under {@code doneKey}
+     * {@code "true"} when there is none left.
+     */
+    public ActionResult bookFileNext(String dirKey, String fileKey, String doneKey) {
+        String dir = kept(dirKey);
+        if (dir == null || dir.isBlank()) return new ActionResult(false, "the book's directory must be kept first");
+        if (fileScope == null) return new ActionResult(false, "this job may not read files");
+        try {
+            java.nio.file.Path root = java.nio.file.Path.of(dir.strip()).toAbsolutePath().toRealPath();
+            if (!fileScope.canRead(root)) return new ActionResult(false, "outside the readable range: " + root);
+            try (var walk = java.nio.file.Files.walk(root)) {
+                for (java.nio.file.Path md : walk.filter(p -> p.toString().endsWith(".md")).sorted().toList()) {
+                    if (java.nio.file.Files.exists(ruleFileOf(md))) continue;
+                    selfActorRef.putJson(fileKey, md.toString());
+                    selfActorRef.putJson(doneKey, "false");
+                    return new ActionResult(true, md.toString());
+                }
+            }
+            selfActorRef.putJson(doneKey, "true");
+            return new ActionResult(true, "every markdown file under " + root + " has its rule file");
+        } catch (Exception e) {
+            return new ActionResult(false, "could not look through the book: " + e.getMessage());
+        }
+    }
+
+    /** Opens the markdown file kept under {@code fileKey} to be made into a rule file, one question at a time. */
+    public ActionResult bookFileOpen(String fileKey) {
+        String path = kept(fileKey);
+        if (path == null || path.isBlank()) return new ActionResult(false, "the book's file must be kept first");
+        if (fileScope == null) return new ActionResult(false, "this job may not read files");
+        try {
+            java.nio.file.Path md = java.nio.file.Path.of(path.strip()).toAbsolutePath().toRealPath();
+            if (!fileScope.canRead(md)) return new ActionResult(false, "outside the readable range: " + md);
+            String id = "Book_" + md.getFileName().toString().replaceFirst("\\.md$", "").replaceAll("[^A-Za-z0-9]+", "_").replaceAll("^_|_$", "");
+            bookFile = new com.scivicslab.turingworkflow.plugins.rstframe.BookFileToRules(java.nio.file.Files.readString(md), md.toString(), id);
+            bookFilePath = md;
+            questioner = bookFile;
+            return new ActionResult(true, "opened " + md + ": " + bookFile.paragraphs() + " paragraph(s)");
+        } catch (Exception e) {
+            return new ActionResult(false, "could not open the book's file: " + e.getMessage());
+        }
+    }
+
+    /** Writes the open file's rule file beside it, with its code blocks' files; never over a file already there. */
+    public ActionResult bookFileWrite() {
+        if (bookFile == null) return new ActionResult(false, "no book's file is open");
+        try {
+            java.util.Map<java.nio.file.Path, String> out = new java.util.LinkedHashMap<>();
+            out.put(ruleFileOf(bookFilePath), bookFile.ruleFile());
+            for (java.util.Map.Entry<String, String> e : bookFile.codeFiles().entrySet()) out.put(bookFilePath.resolveSibling(e.getKey()), e.getValue());
+            for (java.nio.file.Path f : out.keySet()) {
+                if (!fileScope.canWrite(f)) return new ActionResult(false, "outside the writable range: " + f);
+                if (java.nio.file.Files.exists(f)) return new ActionResult(false, f + " already exists; it is not overwritten");
+            }
+            for (java.util.Map.Entry<java.nio.file.Path, String> e : out.entrySet()) java.nio.file.Files.writeString(e.getKey(), e.getValue());
+            selfActorRef.putJson("outcome", ruleFileOf(bookFilePath).toString());
+            return new ActionResult(true, "wrote " + ruleFileOf(bookFilePath) + " and " + bookFile.codeFiles().size() + " code file(s)");
+        } catch (Exception e) {
+            return new ActionResult(false, "could not write the rule file: " + e.getMessage());
+        }
+    }
+
+    private static java.nio.file.Path ruleFileOf(java.nio.file.Path md) {
+        return md.resolveSibling(md.getFileName().toString().replaceFirst("\\.md$", ".lisp"));
+    }
+
     /** The sub-section being made into a sample by this job, or {@code null} when none is open. */
     private com.scivicslab.turingworkflow.plugins.rstframe.BookToRules book;
 

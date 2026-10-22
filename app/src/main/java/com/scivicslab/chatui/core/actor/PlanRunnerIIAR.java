@@ -646,6 +646,32 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
         return runner().slotsWrite(at(a, 0), at(a, 1));
     }
 
+    /**
+     * Keeps the next markdown file of a book that has no rule file yet, for {@code book-to-rules.yaml}.
+     * @param args {@code [dirKey, fileKey, doneKey]}
+     */
+    @Action("bookFileNext")
+    public ActionResult bookFileNext(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().bookFileNext(at(a, 0), at(a, 1), at(a, 2));
+    }
+
+    /**
+     * Opens one markdown file of a book to be made into a rule file.
+     * @param args {@code [fileKey]}
+     */
+    @Action("bookFileOpen")
+    public ActionResult bookFileOpen(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().bookFileOpen(at(a, 0));
+    }
+
+    /** Writes the open file's rule file beside it. */
+    @Action("bookFileWrite")
+    public ActionResult bookFileWrite(String args) {
+        return runner().bookFileWrite();
+    }
+
     @Action("framePrompt")
     public ActionResult framePrompt(String args) {
         org.json.JSONArray a = arguments(args);
