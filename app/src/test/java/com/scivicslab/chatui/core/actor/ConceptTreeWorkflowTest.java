@@ -64,8 +64,11 @@ class ConceptTreeWorkflowTest {
         @Override
         public void sendPrompt(String prompt, String model, Consumer<ChatEvent> emitter, ProviderContext ctx) {
             questions.add(prompt);
-            String reply = prompt.startsWith("A new concept was found in a document: turn") ? "PART-OF agent loop"
-                    : prompt.startsWith("A new concept was found in a document: max turns") ? "SETTING-OF agent loop"
+            String reply = prompt.contains("the same thing as one of these") ? "DIFFERENT"
+                    : prompt.contains("Which one of these is the whole document about") ? "agent loop"
+                    : prompt.startsWith("In a document, max turns is explained as belonging to") ? "HERE"
+                    : prompt.startsWith("In a document, turn belongs to") ? "PART-OF"
+                    : prompt.startsWith("In a document, max turns belongs to") ? "SETTING-OF"
                     : prompt.contains("How the loop works") ? "NEW: agent loop"
                     : prompt.contains("A turn is one model call") ? "NEW: turn"
                     : prompt.contains("Max turns caps") ? "NEW: max turns"
@@ -136,12 +139,12 @@ class ConceptTreeWorkflowTest {
     }
 
     @Test
-    @DisplayName("段落ごとに概念を聞き、作業の見出しは節点にせず、新しい概念には関係を聞いて木にする")
+    @DisplayName("段落ごとに概念を聞き、作業の見出しは節点にせず、読み終えてから同じものと関係を聞いて木にする")
     void eachParagraphIsPlacedAndTheTreeIsWritten() throws Exception {
         String outcome = run();
 
         assertEquals(dir.resolve("subjects/loop-doc.lisp").toString(), outcome, "questions so far: " + writer.questions);
-        assertEquals(5, writer.questions.size(), writer.questions.toString());
+        assertEquals(10, writer.questions.size(), "3 paragraphs, 3 sameness, the root, 1 step down and 2 relation questions: " + writer.questions);
         String tree = Files.readString(dir.resolve("subjects/loop-doc.lisp"));
         assertTrue(tree.contains("(subject \"1\" \"agent loop\" :paragraphs \"title\")"), tree);
         assertTrue(tree.contains("(subject \"1.1\" \"turn\" :relation part-of :paragraphs \"p-turn\")"), tree);
