@@ -1,0 +1,156 @@
+name: concept-consolidate
+description: |
+  Makes a tree of concept classes smaller (ConceptClasses_261022_oo01), to be run between runs of
+  abstract-roles.yaml, which grow it. A subclass stays a class only while it says something its
+  superclass does not. A slot that two or more kinds of one class define goes up to that class; for
+  each slot a class with no subclasses defines itself, the writer is asked whether it can be asked
+  of every kind of the superclass, and if so it goes up; a class left with no slot of its own becomes
+  a value of its superclass, its paragraphs going with it. The candidates are found by the program;
+  the writer only judges. The result is one file that stands alone, a proposal for a person to take
+  into rst-on-lisp/concepts/. The writer is put on plain-text-no-context-loop.yaml.
+params:
+  classes:
+    label: "The concept classes"
+    description: "Absolute path of the directory of class files, e.g. .../rst-on-lisp/concepts; empty for none"
+    type: text
+    default: ""
+  input:
+    label: "A result of step 3"
+    description: "Absolute path of a file abstract-roles.yaml wrote, read on top of the classes; empty for none"
+    type: text
+    default: ""
+  out:
+    label: "Where to write the smaller tree"
+    description: "Absolute path, e.g. .../rst-on-lisp/assignments/claude-agent-loop.smaller.lisp; an existing file is not overwritten"
+    type: text
+    required: true
+  writer:
+    description: "The conversation that answers the questions"
+    default: "project1/chat-02"
+  writerModel:
+    description: "The model the writer runs on; empty leaves the conversation as it is"
+    default: ""
+  writerNoThink:
+    description: "true asks the writer's model to skip its thinking phase"
+    default: "true"
+  maxQuestions:
+    description: "How many questions one run asks at most; the run fails past it"
+    type: int
+    default: 2000
+steps:
+  - states: ["0", "1"]
+    label: add-writer
+    note: The writer is a conversation with no history of its own from before, on the loop that sends each question alone.
+    actions:
+      - actor: this
+        method: addWorker
+        arguments: ["writer", 'jexl:state.getString("writer")']
+        execution: direct
+      - actor: this
+        method: setChatAgentLoop
+        arguments: ['jexl:state.getString("writer")', "plain-text-no-context-loop.yaml"]
+        execution: direct
+      - actor: this
+        method: setChatModel
+        arguments: ['jexl:state.getString("writer")', 'jexl:state.getString("writerModel")']
+        execution: direct
+      - actor: this
+        method: setChatNoThink
+        arguments: ['jexl:state.getString("writer")', 'jexl:state.getString("writerNoThink")']
+        execution: direct
+      - actor: this
+        method: clearWorker
+        arguments: ["writer"]
+        execution: direct
+
+  - states: ["1", "next"]
+    label: open-the-book
+    actions:
+      - actor: this
+        method: putJson
+        arguments: {path: asked, value: "0"}
+        execution: direct
+      - actor: this
+        method: consolidateOpen
+        arguments: ["classes", "input"]
+        execution: direct
+
+  - states: ["1", "failed"]
+    label: no-rule-file
+    actions: [{actor: this, method: doNothing, arguments: ["the class files or the result of step 3 could not be read"], execution: direct}]
+
+  - states: ["next", "decide"]
+    label: take-the-next-question
+    actions:
+      - actor: this
+        method: questionNext
+        arguments: ["question", "done"]
+        execution: direct
+
+  - states: ["decide", "write"]
+    label: no-question-left
+    actions:
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("done") == "true"'
+        execution: direct
+
+  - states: ["decide", "ask"]
+    label: a-question-is-left
+    note: countUp bounds the run.
+    actions:
+      - actor: this
+        method: onlyIf
+        arguments: 'jexl:state.getString("done") == "false"'
+        execution: direct
+      - actor: this
+        method: countUp
+        arguments: ["asked", 'jexl:state.getString("maxQuestions")']
+        execution: direct
+
+  - states: ["decide", "failed"]
+    label: too-many-questions
+    actions: [{actor: this, method: doNothing, arguments: ["maxQuestions was passed"], execution: direct}]
+
+  - states: ["ask", "next"]
+    label: ask-the-writer
+    actions:
+      - actor: this
+        method: askWorker
+        arguments:
+          - writer
+          - 'jexl:state.getString("question")'
+        execution: direct
+      - actor: this
+        method: keepWorkerReply
+        arguments: ["writer", "reply"]
+        execution: direct
+      - actor: this
+        method: questionAnswer
+        arguments: ["reply"]
+        execution: direct
+
+  - states: ["ask", "failed"]
+    label: writer-gave-no-answer
+    actions: [{actor: this, method: doNothing, arguments: ["the writer gave no answer"], execution: direct}]
+
+  - states: ["write", "end"]
+    label: write-the-smaller-tree
+    note: The smaller tree is written as one file that stands alone, never over a file already there.
+    actions:
+      - actor: this
+        method: consolidateWrite
+        arguments: ["out", "input"]
+        execution: direct
+      - actor: this
+        method: finish
+        arguments: ["outcome"]
+        execution: direct
+
+  - states: ["write", "failed"]
+    label: could-not-write
+    actions: [{actor: this, method: doNothing, arguments: ["the smaller tree could not be written, or the file is already there"], execution: direct}]
+
+  - states: ["failed", "end"]
+    label: report-failure
+    actions: [{actor: this, method: reportFailure, arguments: [], execution: direct}]

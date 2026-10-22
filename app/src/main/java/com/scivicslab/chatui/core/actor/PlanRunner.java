@@ -1374,6 +1374,66 @@ public class PlanRunner extends Interpreter {
         }
     }
 
+    /** The tree of concept classes being made smaller by {@code concept-consolidate.yaml}, or {@code null}. */
+    private com.scivicslab.turingworkflow.plugins.rstframe.ConceptConsolidation consolidation;
+    private com.scivicslab.turingworkflow.plugins.rstframe.ConceptClasses consolidating;
+
+    /**
+     * Opens the concept classes for {@code concept-consolidate.yaml}: the class files under the directory kept under
+     * {@code classesKey}, with the result of step 3 kept under {@code inputKey} read on top of them (empty for none).
+     */
+    public ActionResult consolidateOpen(String classesKey, String inputKey) {
+        String classes = kept(classesKey);
+        String input = kept(inputKey);
+        if (fileScope == null) return new ActionResult(false, "this job may not read files");
+        try {
+            java.util.Map<String, String> files = new java.util.LinkedHashMap<>();
+            if (classes != null && !classes.isBlank()) {
+                java.nio.file.Path c = java.nio.file.Path.of(classes.strip()).toAbsolutePath().normalize();
+                if (!fileScope.canRead(c)) return new ActionResult(false, "outside the readable range: " + c);
+                try (var walk = java.nio.file.Files.walk(c)) {
+                    for (java.nio.file.Path p : walk.filter(p -> p.toString().endsWith(".lisp")).sorted().toList()) files.put(p.toString(), java.nio.file.Files.readString(p));
+                }
+            }
+            String result = "";
+            if (input != null && !input.isBlank()) {
+                java.nio.file.Path in = java.nio.file.Path.of(input.strip()).toAbsolutePath().normalize();
+                if (!fileScope.canRead(in)) return new ActionResult(false, "outside the readable range: " + in);
+                result = java.nio.file.Files.readString(in);
+                files.put(in.toString(), result);
+            }
+            if (files.isEmpty()) return new ActionResult(false, "no class file and no result of step 3 to make smaller");
+            if (consolidating != null) consolidating.close();
+            consolidating = new com.scivicslab.turingworkflow.plugins.rstframe.ConceptClasses(files);
+            int before = consolidating.names().size();
+            consolidation = new com.scivicslab.turingworkflow.plugins.rstframe.ConceptConsolidation(consolidating, result);
+            questioner = consolidation;
+            return new ActionResult(true, "opened " + before + " class(es) from " + files.size() + " file(s)");
+        } catch (Exception e) {
+            return new ActionResult(false, "could not open the classes: " + e.getMessage());
+        }
+    }
+
+    /** Writes the smaller tree, standing alone, to the file kept under {@code outKey}; an existing file is not overwritten. */
+    public ActionResult consolidateWrite(String outKey, String inputKey) {
+        if (consolidation == null) return new ActionResult(false, "no tree is being made smaller");
+        String out = kept(outKey);
+        if (out == null || out.isBlank()) return new ActionResult(false, "the output file must be kept first");
+        try {
+            java.nio.file.Path f = java.nio.file.Path.of(out.strip()).toAbsolutePath().normalize();
+            if (!fileScope.canWrite(f)) return new ActionResult(false, "outside the writable range: " + f);
+            if (java.nio.file.Files.exists(f)) return new ActionResult(false, f + " already exists; it is not overwritten");
+            if (f.getParent() != null) java.nio.file.Files.createDirectories(f.getParent());
+            String input = kept(inputKey);
+            java.nio.file.Files.writeString(f, consolidation.resultFile(input == null || input.isBlank() ? "the class files" : input.strip()));
+            selfActorRef.putJson("outcome", f.toString());
+            return new ActionResult(true, "wrote " + consolidating.names().size() + " class(es) and " + consolidating.instances().size()
+                    + " value(s) to " + f + "; " + consolidation.done().size() + " change(s)");
+        } catch (Exception e) {
+            return new ActionResult(false, "could not write the smaller tree: " + e.getMessage());
+        }
+    }
+
     /** The book's file being made into a rule file by {@code book-to-rules.yaml}, or {@code null}. */
     private com.scivicslab.turingworkflow.plugins.rstframe.BookFileToRules bookFile;
     private java.nio.file.Path bookFilePath;

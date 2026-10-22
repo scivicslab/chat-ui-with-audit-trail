@@ -672,6 +672,26 @@ public class PlanRunnerIIAR extends InterpreterIIAR {
         return runner().bookFileWrite();
     }
 
+    /**
+     * Opens concept classes to be made smaller by {@code concept-consolidate.yaml}.
+     * @param args {@code [classesKey, inputKey]}
+     */
+    @Action("consolidateOpen")
+    public ActionResult consolidateOpen(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().consolidateOpen(at(a, 0), at(a, 1));
+    }
+
+    /**
+     * Writes the smaller tree of concept classes.
+     * @param args {@code [outKey, inputKey]}
+     */
+    @Action("consolidateWrite")
+    public ActionResult consolidateWrite(String args) {
+        org.json.JSONArray a = arguments(args);
+        return runner().consolidateWrite(at(a, 0), at(a, 1));
+    }
+
     @Action("framePrompt")
     public ActionResult framePrompt(String args) {
         org.json.JSONArray a = arguments(args);
