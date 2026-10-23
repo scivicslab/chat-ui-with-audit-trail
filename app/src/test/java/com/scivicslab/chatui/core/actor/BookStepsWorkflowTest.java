@@ -61,8 +61,8 @@ class BookStepsWorkflowTest {
             String question = new JSONObject(body).getJSONArray("messages").getJSONObject(0).getString("content");
             String answer = question.contains("behavior   what the concept does")
                     ? "concurrent programming | property | 1\nconcurrent programming | behavior | 2\nmultithreading | property | 1"
-                    : question.contains("say what the thing it takes up is to")
-                    ? "p1 | kind | threads\np2 | kind | processes"
+                    : question.contains("First name the section's main concept C")
+                    ? "concept: concurrent programming\np1 | kind | threads\np2 | kind | processes"
                     : "R1 | is-a\nR2 | drop";
             byte[] out = new JSONObject().put("choices", new JSONArray().put(new JSONObject()
                     .put("message", new JSONObject().put("role", "assistant").put("content", answer)))).toString()
@@ -156,7 +156,7 @@ class BookStepsWorkflowTest {
         assertEquals("1 section(s) of core given a pattern: {partition=1}, 0 failed", run("book-patterns.yaml"));
         try (BookStore s = new BookStore("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
             var p = s.patterns("core").get("10.1.1");
-            assertEquals("concurrent programming", p.concept(), "the concept that stays on the list with the most rules");
+            assertEquals("concurrent programming", p.concept(), "the concept the model names");
             assertEquals(List.of("p1", "p2"), p.members().stream().map(m -> m.block()).toList());
         }
         assertNull(system.getIIActor("plan.books"), "the workflow removes the actor it made");

@@ -1,10 +1,10 @@
 name: book-patterns
 description: |
-  Asks how each section explains its main concept, after book-frame-prune.yaml. A section's heading rule only lists
-  its blocks ((defrule s1 -> b1 b2 b3 b4 :heading ...)); the model is shown the blocks by name and the section's main
-  concept (the one in the title with the most rules collected, else the one with the most rules), and says for each
-  block what the thing it takes up is to that concept: a kind of it (is-a), a part of it, a step of it, or an aspect of
-  it (definition, syntax, usage, caveat, ...). The relation most blocks bear is the section's pattern: partition (as 3.2
+  Asks how each section explains its main concept, after book-rules.yaml. A section's heading rule only lists
+  its blocks ((defrule s1 -> b1 b2 b3 b4 :heading ...)); the model is shown the blocks by name, names the section's
+  main concept from its title and its text (a group, when the title names one), and says for each thing a block takes
+  up what it is to that concept: a kind of it (is-a), a part of it, a step of it, or an aspect of
+  it (definition, syntax, usage, caveat, ...). The relation most of them bear (two at least, but for aspect) is the section's pattern: partition (as 3.2
   divides comment into //, /* */ and /** */), structure, sequence or aspects. Sections of one block are not asked. The
   answers are stored in the H2 database; the Sections tab shows them. The work is done by the books actor of
   plugin-rst-frame.
