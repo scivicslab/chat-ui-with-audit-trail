@@ -50,6 +50,9 @@ public class CliProcess {
     private final LinkedBlockingQueue<StreamEvent> turnQueue = new LinkedBlockingQueue<>();
     private final LinkedBlockingQueue<StreamEvent> autonomousQueue = new LinkedBlockingQueue<>();
     private volatile boolean turnActive;
+    // True from the first event of a turn the CLI started by itself until that turn's result.
+    // Written only by routeEvent (the reader thread) and reset when the process is restarted or cancelled.
+    private volatile boolean autonomousTurnOpen;
     private volatile String apiKey;
 
     /**
@@ -181,6 +184,7 @@ public class CliProcess {
         if (currentProcess == null || !currentProcess.isAlive()) {
             turnQueue.clear();
             autonomousQueue.clear();
+            autonomousTurnOpen = false;
             startProcess();
         }
 
@@ -201,6 +205,7 @@ public class CliProcess {
                     }
                     // Process has died — give up and discard any stale queued events.
                     turnActive = false;
+                    autonomousTurnOpen = false;
                     turnQueue.clear();
                     autonomousQueue.clear();
                     if (callback != null) callback.onComplete(-1);
@@ -258,11 +263,19 @@ public class CliProcess {
      * @param event the parsed stream event to route
      */
     void routeEvent(StreamEvent event) {
-        if (turnActive) {
-            turnQueue.offer(event);
-            if ("result".equals(event.type())) turnActive = false;
-        } else {
+        boolean isResult = "result".equals(event.type());
+        if (!turnActive) {
             autonomousQueue.offer(event);
+            autonomousTurnOpen = !isResult;
+        } else if (autonomousTurnOpen) {
+            // A prompt was written while the CLI was part-way through a turn it started by itself.
+            // The CLI answers the two turns in order, so the events up to the first result still
+            // belong to the autonomous turn; the prompt's own events follow.
+            autonomousQueue.offer(event);
+            if (isResult) autonomousTurnOpen = false;
+        } else {
+            turnQueue.offer(event);
+            if (isResult) turnActive = false;
         }
     }
 
@@ -288,6 +301,7 @@ public class CliProcess {
         Thread t = sendingThread;
         if (t != null) t.interrupt();
         turnActive = false;
+        autonomousTurnOpen = false;
         turnQueue.clear();
         autonomousQueue.clear();
         Process p = currentProcess;
