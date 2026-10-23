@@ -152,6 +152,12 @@ class BookStepsWorkflowTest {
         try (BookStore s = new BookStore("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
             var items = s.frameItems("core").get("10.1.1").get("concurrent programming");
             assertEquals("What is concurrent programming?", items.get(0).question());
+        }
+        assertEquals("1 concept(s) of core, 0 of them in more than one section, 0 failed; 0 concept(s) of core given 0 item(s), 0 failed; "
+                + "0 concept(s) of core given 0 item(s), 0 failed", run("book-generalize.yaml"),
+                "one section makes one concept of the book, nothing to merge, and no concept with two kinds that are concepts");
+        try (BookStore s = new BookStore("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
+            assertEquals(List.of("concurrent programming"), s.entities("core").stream().map(BookStore.Entity::id).toList());
             // a second block, so the section's blocks have something to say of each other
             s.saveSectionRules("core", new BookStore.SectionRules("10.1.1", """
                     (defrule s1 -> p1 p2 :heading "## 10.1.1. Threads")

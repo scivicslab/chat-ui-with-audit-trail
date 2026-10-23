@@ -1,0 +1,114 @@
+name: book-generalize
+description: |
+  Makes the frames of the book, after book-frame-items.yaml (FrameOntology_261021_oo01, the generalized frames), in three
+  steps. Recognize the concepts: the concrete-frame concepts of all sections whose names agree are candidates, and the
+  model says, by the questions each section answers about them, which are one concept; each concept of the book gets an
+  id. Merge: the frame material of a concept found in several sections is put together and asked the same question as
+  a concrete frame (which questions do the sentences answer, and which sentence answers which). Generalize: by the
+  concept tree (the reviewed is-a relations and the kinds the pattern step named), a concept with two kinds or more
+  becomes a generalized concept, whose material is its own and its kinds', asked the same question. The Book frames tab
+  shows the concepts of the book, their frames and their material. The work is done by the books actor of
+  plugin-rst-frame.
+params:
+  name:
+    label: "The book's name"
+    description: "The name book-toc.yaml stored the book under, e.g. core-java-14-vol1"
+    type: text
+    required: true
+  db:
+    label: "The database"
+    description: "Absolute path of the H2 database file, without .mv.db"
+    type: text
+    default: "/home/devteam/works/rst-on-lisp/db/books"
+  url:
+    label: "The chat endpoint"
+    description: "An OpenAI-compatible /v1/chat/completions; the GPU broker spreads the questions over its nodes"
+    type: text
+    default: "http://192.168.5.21:30805/v1/chat/completions"
+  model:
+    label: "The model"
+    description: "A model the endpoint serves (GET /v1/models on the broker lists them)"
+    type: text
+    default: "google/gemma-4-26B-A4B-it"
+  parallel:
+    description: "How many sections are asked at once"
+    type: int
+    default: 8
+steps:
+  - states: ["0", "1"]
+    label: build-actor-tree
+    note: The books actor (plugin-rst-frame) does the work; it is created here and removed at the end.
+    actions:
+      - actor: loader
+        method: createChild
+        arguments: ['jexl:self', "./books", "com.scivicslab.turingworkflow.plugins.rstframe.BookStructureIIAR"]
+
+  - states: ["1", "2"]
+    label: recognize-the-concepts
+    note: Every concrete-frame concept of the book is recognized again; the concepts of the book stored before are replaced.
+    actions:
+      - actor: ./books
+        method: identify
+        arguments: {db: 'jexl:state.getString("db")', name: 'jexl:state.getString("name")', url: 'jexl:state.getString("url")', model: 'jexl:state.getString("model")', parallel: 'jexl:state.getString("parallel")', sections: ""}
+      - actor: this
+        method: putJson
+        arguments: {path: identified, value: "jexl:result"}
+        execution: direct
+
+  - states: ["2", "3"]
+    label: merge-the-material
+    note: Each concept found in several sections is asked its items over its material put together.
+    actions:
+      - actor: ./books
+        method: merge
+        arguments: {db: 'jexl:state.getString("db")', name: 'jexl:state.getString("name")', url: 'jexl:state.getString("url")', model: 'jexl:state.getString("model")', parallel: 'jexl:state.getString("parallel")', sections: ""}
+      - actor: this
+        method: putJson
+        arguments: {path: merged, value: "jexl:result"}
+        execution: direct
+
+  - states: ["3", "4"]
+    label: generalize-the-concepts
+    note: Each concept with two kinds or more becomes a generalized concept, asked its items over its and its kinds' material.
+    actions:
+      - actor: ./books
+        method: generalize
+        arguments: {db: 'jexl:state.getString("db")', name: 'jexl:state.getString("name")', url: 'jexl:state.getString("url")', model: 'jexl:state.getString("model")', parallel: 'jexl:state.getString("parallel")', sections: ""}
+      - actor: this
+        method: putJson
+        arguments: {path: outcome, value: 'jexl:state.getString("identified") + "; " + state.getString("merged") + "; " + result'}
+        execution: direct
+
+  - states: ["1", "failed"]
+    label: could-not-recognize
+    actions: [{actor: this, method: doNothing, arguments: ["the book is not in the database, or the model could not be reached"], execution: direct}]
+
+  - states: ["2", "failed"]
+    label: could-not-merge
+    actions: [{actor: this, method: doNothing, arguments: ["the material could not be merged"], execution: direct}]
+
+  - states: ["3", "failed"]
+    label: could-not-generalize
+    actions: [{actor: this, method: doNothing, arguments: ["the concepts could not be generalized"], execution: direct}]
+
+  - states: ["4", "end"]
+    label: tear-down-actor-tree
+    actions:
+      - actor: loader
+        method: removeChild
+        arguments: ['jexl:self', "./books"]
+      - actor: this
+        method: finish
+        arguments: ["outcome"]
+        execution: direct
+
+  - states: ["failed", "end"]
+    label: report-failure
+    actions:
+      - actor: loader
+        method: removeChild
+        arguments: ['jexl:self', "./books"]
+      - actor: this
+        method: reportFailure
+        arguments: []
+        execution: direct
