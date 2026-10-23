@@ -61,8 +61,8 @@ class BookStepsWorkflowTest {
             String question = new JSONObject(body).getJSONArray("messages").getJSONObject(0).getString("content");
             String answer = question.contains("behavior   what the concept does")
                     ? "concurrent programming | property | 1\nconcurrent programming | behavior | 2\nmultithreading | property | 1"
-                    : question.contains("explains a concept in one of four ways")
-                    ? "pattern: partition\np1 | threads\np2 | processes"
+                    : question.contains("say what the thing it takes up is to")
+                    ? "p1 | kind | threads\np2 | kind | processes"
                     : "R1 | is-a\nR2 | drop";
             byte[] out = new JSONObject().put("choices", new JSONArray().put(new JSONObject()
                     .put("message", new JSONObject().put("role", "assistant").put("content", answer)))).toString()
