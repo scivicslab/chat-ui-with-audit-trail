@@ -61,6 +61,8 @@ class BookStepsWorkflowTest {
             String question = new JSONObject(body).getJSONArray("messages").getJSONObject(0).getString("content");
             String answer = question.contains("behavior   what the concept does")
                     ? "concurrent programming | property | 1\nconcurrent programming | behavior | 2\nmultithreading | property | 1"
+                    : question.contains("Name the questions about")
+                    ? "Q1: What is concurrent programming?\nQ2: Nothing answers this\np1/1 | Q1\np1/2 | Q1"
                     : question.contains("First name the section's main concept C")
                     ? "concept: concurrent programming\np1 | kind | threads\np2 | kind | processes"
                     : "R1 | is-a\nR2 | drop";
@@ -144,6 +146,12 @@ class BookStepsWorkflowTest {
             var list = s.frameConcepts("core").get("10.1.1");
             assertEquals(List.of("multithreading", "concurrent programming"), list.stream().map(BookStore.FrameConcept::concept).toList());
             assertEquals(List.of(false, true), list.stream().map(BookStore.FrameConcept::kept).toList());
+        }
+        assertEquals("1 concept(s) of core given 1 item(s), 0 failed", run("book-frame-items.yaml"),
+                "only the concept that stays on the list is asked; a question no rule answers is no item");
+        try (BookStore s = new BookStore("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
+            var items = s.frameItems("core").get("10.1.1").get("concurrent programming");
+            assertEquals("What is concurrent programming?", items.get(0).question());
             // a second block, so the section's blocks have something to say of each other
             s.saveSectionRules("core", new BookStore.SectionRules("10.1.1", """
                     (defrule s1 -> p1 p2 :heading "## 10.1.1. Threads")
