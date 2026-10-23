@@ -74,7 +74,7 @@ steps:
     actions:
       - actor: loader
         method: createChild
-        arguments: ["ROOT", "filler", "com.scivicslab.turingworkflow.plugins.rstframe.FrameFillingIIAR"]
+        arguments: ['jexl:self', "./filler", "com.scivicslab.turingworkflow.plugins.rstframe.FrameFillingIIAR"]
       - actor: this
         method: addWorker
         arguments: ["writer", 'jexl:state.getString("writer")']
@@ -143,7 +143,7 @@ steps:
     label: include-a-child-frame
     note: A blank with :include is one child frame, put in once as it is from frameDir; nothing is asked, and its own blanks come next.
     actions:
-      - actor: filler
+      - actor: ./filler
         method: next
         arguments: {file: 'jexl:state.getString("cur")'}
         execution: direct
@@ -163,7 +163,7 @@ steps:
         method: putJson
         arguments: {path: "frame-text", value: "jexl:result"}
         execution: direct
-      - actor: filler
+      - actor: ./filler
         method: include
         arguments: {file: 'jexl:state.getString("cur")', frameText: 'jexl:state.getString("frame-text")'}
         execution: direct
@@ -176,7 +176,7 @@ steps:
     label: next-blank
     note: Takes the next blank of the rule file as it stands. countUp bounds the run.
     actions:
-      - actor: filler
+      - actor: ./filler
         method: next
         arguments: {file: 'jexl:state.getString("cur")'}
         execution: direct
@@ -188,11 +188,11 @@ steps:
         method: countUp
         arguments: ["done", 'jexl:state.getString("maxBlanks")']
         execution: direct
-      - actor: filler
+      - actor: ./filler
         method: examples
         arguments: {request: 'jexl:state.getString("request")', framesRoot: 'jexl:state.getString("framesRoot")', frameDir: 'jexl:state.getString("frameDir")', works: 'jexl:state.getString("works")', max: 'jexl:state.getString("maxExamples")'}
         execution: direct
-      - actor: filler
+      - actor: ./filler
         method: prompt
         arguments: {file: 'jexl:state.getString("cur")', subject: 'jexl:state.getString("subject")', names: 'jexl:state.getString("names")', language: 'jexl:state.getString("language")', maxItems: 'jexl:state.getString("maxItems")'}
         execution: direct
@@ -240,7 +240,7 @@ steps:
         method: putJson
         arguments: {path: "frame-text", value: "jexl:result"}
         execution: direct
-      - actor: filler
+      - actor: ./filler
         method: expand
         arguments: {file: 'jexl:state.getString("cur")', frameText: 'jexl:state.getString("frame-text")', reply: 'jexl:state.getString("reply")', maxItems: 'jexl:state.getString("maxItems")'}
         execution: direct
@@ -269,7 +269,7 @@ steps:
         method: keepWorkerReply
         arguments: ["writer", "reply"]
         execution: direct
-      - actor: filler
+      - actor: ./filler
         method: fillCode
         arguments: {file: 'jexl:state.getString("cur")', reply: 'jexl:state.getString("reply")', out: 'jexl:state.getString("out")'}
         execution: direct
@@ -298,7 +298,7 @@ steps:
         method: keepWorkerReply
         arguments: ["writer", "reply"]
         execution: direct
-      - actor: filler
+      - actor: ./filler
         method: fillItems
         arguments: {file: 'jexl:state.getString("cur")', reply: 'jexl:state.getString("reply")'}
         execution: direct
@@ -319,7 +319,7 @@ steps:
         method: keepWorkerReply
         arguments: ["writer", "reply"]
         execution: direct
-      - actor: filler
+      - actor: ./filler
         method: fill
         arguments: {file: 'jexl:state.getString("cur")', reply: 'jexl:state.getString("reply")'}
         execution: direct
@@ -342,7 +342,7 @@ steps:
         execution: direct
       - actor: loader
         method: removeChild
-        arguments: "filler"
+        arguments: ['jexl:self', "./filler"]
       - actor: this
         method: finish
         arguments: ["out"]
@@ -353,7 +353,7 @@ steps:
     actions:
       - actor: loader
         method: removeChild
-        arguments: "filler"
+        arguments: ['jexl:self', "./filler"]
       - actor: this
         method: reportFailure
         arguments: []

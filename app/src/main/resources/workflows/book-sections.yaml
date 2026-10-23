@@ -27,13 +27,13 @@ steps:
     actions:
       - actor: loader
         method: createChild
-        arguments: ["ROOT", "books", "com.scivicslab.turingworkflow.plugins.rstframe.BookStructureIIAR"]
+        arguments: ['jexl:self', "./books", "com.scivicslab.turingworkflow.plugins.rstframe.BookStructureIIAR"]
 
   - states: ["1", "2"]
     label: cut-into-sections
     note: The book's directory and its table of contents are read from the database, as book-toc.yaml stored them.
     actions:
-      - actor: books
+      - actor: ./books
         method: sections
         arguments: {db: 'jexl:state.getString("db")', name: 'jexl:state.getString("name")'}
       - actor: this
@@ -50,7 +50,7 @@ steps:
     actions:
       - actor: loader
         method: removeChild
-        arguments: "books"
+        arguments: ['jexl:self', "./books"]
       - actor: this
         method: finish
         arguments: ["outcome"]
@@ -61,7 +61,7 @@ steps:
     actions:
       - actor: loader
         method: removeChild
-        arguments: "books"
+        arguments: ['jexl:self', "./books"]
       - actor: this
         method: reportFailure
         arguments: []

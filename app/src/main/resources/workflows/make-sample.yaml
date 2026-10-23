@@ -47,7 +47,7 @@ steps:
     actions:
       - actor: loader
         method: createChild
-        arguments: ["ROOT", "sample", "com.scivicslab.turingworkflow.plugins.rstframe.SampleJobIIAR"]
+        arguments: ['jexl:self', "./sample", "com.scivicslab.turingworkflow.plugins.rstframe.SampleJobIIAR"]
       - actor: this
         method: addWorker
         arguments: ["writer", 'jexl:state.getString("writer")']
@@ -76,7 +76,7 @@ steps:
         method: putJson
         arguments: {path: asked, value: "0"}
         execution: direct
-      - actor: sample
+      - actor: ./sample
         method: open
         arguments: {book: 'jexl:state.getString("book")', heading: 'jexl:state.getString("heading")', name: 'jexl:state.getString("name")', samples: 'jexl:state.getString("samples")'}
         execution: direct
@@ -88,7 +88,7 @@ steps:
   - states: ["next", "decide"]
     label: take-the-next-question
     actions:
-      - actor: sample
+      - actor: ./sample
         method: question
         execution: direct
       - actor: this
@@ -134,7 +134,7 @@ steps:
         method: keepWorkerReply
         arguments: ["writer", "reply"]
         execution: direct
-      - actor: sample
+      - actor: ./sample
         method: answer
         arguments: {reply: 'jexl:state.getString("reply")'}
         execution: direct
@@ -147,7 +147,7 @@ steps:
     label: act-on-the-judgement
     note: A new structure is written (never over a file already there), the same one gets an also-seen line, a one-off leaves nothing.
     actions:
-      - actor: sample
+      - actor: ./sample
         method: write
         arguments: {samples: 'jexl:state.getString("samples")'}
         execution: direct
@@ -157,7 +157,7 @@ steps:
         execution: direct
       - actor: loader
         method: removeChild
-        arguments: "sample"
+        arguments: ['jexl:self', "./sample"]
       - actor: this
         method: finish
         arguments: ["outcome"]
@@ -172,7 +172,7 @@ steps:
     actions:
       - actor: loader
         method: removeChild
-        arguments: "sample"
+        arguments: ['jexl:self', "./sample"]
       - actor: this
         method: reportFailure
         arguments: []

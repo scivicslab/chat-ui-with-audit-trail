@@ -44,7 +44,7 @@ steps:
     actions:
       - actor: loader
         method: createChild
-        arguments: ["ROOT", "consolidation", "com.scivicslab.turingworkflow.plugins.rstframe.ConsolidationJobIIAR"]
+        arguments: ['jexl:self', "./consolidation", "com.scivicslab.turingworkflow.plugins.rstframe.ConsolidationJobIIAR"]
       - actor: this
         method: addWorker
         arguments: ["writer", 'jexl:state.getString("writer")']
@@ -73,7 +73,7 @@ steps:
         method: putJson
         arguments: {path: asked, value: "0"}
         execution: direct
-      - actor: consolidation
+      - actor: ./consolidation
         method: open
         arguments: {classes: 'jexl:state.getString("classes")', input: 'jexl:state.getString("input")'}
         execution: direct
@@ -85,7 +85,7 @@ steps:
   - states: ["next", "decide"]
     label: take-the-next-question
     actions:
-      - actor: consolidation
+      - actor: ./consolidation
         method: question
         execution: direct
       - actor: this
@@ -131,7 +131,7 @@ steps:
         method: keepWorkerReply
         arguments: ["writer", "reply"]
         execution: direct
-      - actor: consolidation
+      - actor: ./consolidation
         method: answer
         arguments: {reply: 'jexl:state.getString("reply")'}
         execution: direct
@@ -144,7 +144,7 @@ steps:
     label: write-the-smaller-tree
     note: The smaller tree is written as one file that stands alone, never over a file already there.
     actions:
-      - actor: consolidation
+      - actor: ./consolidation
         method: write
         arguments: {out: 'jexl:state.getString("out")', input: 'jexl:state.getString("input")'}
         execution: direct
@@ -154,7 +154,7 @@ steps:
         execution: direct
       - actor: loader
         method: removeChild
-        arguments: "consolidation"
+        arguments: ['jexl:self', "./consolidation"]
       - actor: this
         method: finish
         arguments: ["outcome"]
@@ -169,7 +169,7 @@ steps:
     actions:
       - actor: loader
         method: removeChild
-        arguments: "consolidation"
+        arguments: ['jexl:self', "./consolidation"]
       - actor: this
         method: reportFailure
         arguments: []

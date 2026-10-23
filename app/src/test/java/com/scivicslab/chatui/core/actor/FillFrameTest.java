@@ -68,6 +68,9 @@ class FillFrameTest {
     private static final class FakeWriter implements LlmProvider {
         final List<String> questions = new ArrayList<>();
         String listReply = "ArrayList\nfor loop";
+        /** Asked at each question: where the job's own actor is registered while the job runs. */
+        java.util.function.Supplier<String> probe = () -> "";
+        final List<String> seen = new ArrayList<>();
 
         @Override public String id() { return "fake"; }
         @Override public String displayName() { return "Fake"; }
@@ -79,6 +82,7 @@ class FillFrameTest {
         @Override
         public void sendPrompt(String prompt, String model, Consumer<ChatEvent> emitter, ProviderContext ctx) {
             questions.add(prompt);
+            seen.add(probe.get());
             String reply = prompt.contains("List the items") ? listReply
                     : prompt.contains("only the code") ? "```\njava Squares.java\n```"
                     : prompt.contains("only the list's items") ? "- Name the class after the file\n- Print each square"
@@ -116,6 +120,8 @@ class FillFrameTest {
         system.addIIActor(plan);
         runner.setSelfActorRef(plan);
         system.addIIActor(new WorkflowPluginLoader("loader", system, List.of()));
+        writer.probe = () -> (system.getIIActor("plan.filler") != null ? "plan.filler" : "")
+                + (system.getIIActor("filler") != null ? " filler" : "");
         system.addIIActor(new ScopedFilesIIAR("files", new ScopedFiles(new FileAccessScope(dir, List.of(dir))), system));
 
         Files.writeString(dir.resolve("request.lisp"), REQUEST);
@@ -160,7 +166,9 @@ class FillFrameTest {
     @DisplayName("全部の空欄が、決まった順に 1 回ずつ聞かれて埋まり、書き手は前置きなしの質問だけを受ける")
     void everyBlankIsAskedOnceInOrderAndFilled() throws Exception {
         String outcome = run();
-        org.junit.jupiter.api.Assertions.assertNull(system.getIIActor("filler"), "the workflow removes the actor it made");
+        org.junit.jupiter.api.Assertions.assertNull(system.getIIActor("plan.filler"), "the workflow removes the actor it made");
+        assertTrue(!writer.seen.isEmpty() && writer.seen.stream().allMatch("plan.filler"::equals),
+                "while the job runs, its filler is registered under the job's own name and no other: " + writer.seen);
 
         assertEquals(dir.resolve("filled.lisp").toString(), outcome, "questions so far: " + writer.questions);
         String filled = Files.readString(dir.resolve("filled.lisp"));
@@ -216,7 +224,7 @@ class FillFrameTest {
 
         String outcome = run(request, frames.resolve("explanation"), dir.toString());
 
-        org.junit.jupiter.api.Assertions.assertNull(system.getIIActor("filler"), "the workflow removes the actor it made");
+        org.junit.jupiter.api.Assertions.assertNull(system.getIIActor("plan.filler"), "the workflow removes the actor it made");
 
         assertEquals(dir.resolve("filled.lisp").toString(), outcome, "questions so far: " + writer.questions);
         assertEquals(2, writer.questions.size(), writer.questions.toString());
@@ -233,7 +241,7 @@ class FillFrameTest {
 
         String outcome = run();
 
-        org.junit.jupiter.api.Assertions.assertNull(system.getIIActor("filler"), "the workflow removes the actor it made");
+        org.junit.jupiter.api.Assertions.assertNull(system.getIIActor("plan.filler"), "the workflow removes the actor it made");
 
         assertTrue(outcome.startsWith("(plan"), outcome);
         assertFalse(Files.exists(dir.resolve("filled.lisp")), "a half-filled file was installed as finished");

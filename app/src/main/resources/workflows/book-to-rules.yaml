@@ -33,7 +33,7 @@ steps:
     actions:
       - actor: loader
         method: createChild
-        arguments: ["ROOT", "bookFiles", "com.scivicslab.turingworkflow.plugins.rstframe.BookFileJobIIAR"]
+        arguments: ['jexl:self', "./bookFiles", "com.scivicslab.turingworkflow.plugins.rstframe.BookFileJobIIAR"]
       - actor: this
         method: addWorker
         arguments: ["writer", 'jexl:state.getString("writer")']
@@ -62,7 +62,7 @@ steps:
   - states: ["1", "pick"]
     label: find-the-next-file
     actions:
-      - actor: bookFiles
+      - actor: ./bookFiles
         method: next
         arguments: {dir: 'jexl:state.getString("book")'}
         execution: direct
@@ -84,7 +84,7 @@ steps:
         execution: direct
       - actor: loader
         method: removeChild
-        arguments: "bookFiles"
+        arguments: ['jexl:self', "./bookFiles"]
       - actor: this
         method: finish
         arguments: ["outcome"]
@@ -97,7 +97,7 @@ steps:
         method: onlyIf
         arguments: 'jexl:state.getString("pick.done") == "false"'
         execution: direct
-      - actor: bookFiles
+      - actor: ./bookFiles
         method: open
         arguments: {file: 'jexl:state.getString("pick.file")'}
         execution: direct
@@ -109,7 +109,7 @@ steps:
   - states: ["next", "decide"]
     label: take-the-next-question
     actions:
-      - actor: bookFiles
+      - actor: ./bookFiles
         method: question
         execution: direct
       - actor: this
@@ -155,7 +155,7 @@ steps:
         method: keepWorkerReply
         arguments: ["writer", "reply"]
         execution: direct
-      - actor: bookFiles
+      - actor: ./bookFiles
         method: answer
         arguments: {reply: 'jexl:state.getString("reply")'}
         execution: direct
@@ -168,7 +168,7 @@ steps:
     label: write-the-rule-file
     note: The rule file is written beside the markdown file, never over a file already there; then the next file.
     actions:
-      - actor: bookFiles
+      - actor: ./bookFiles
         method: write
         execution: direct
       - actor: this
@@ -185,7 +185,7 @@ steps:
     actions:
       - actor: loader
         method: removeChild
-        arguments: "bookFiles"
+        arguments: ['jexl:self', "./bookFiles"]
       - actor: this
         method: reportFailure
         arguments: []

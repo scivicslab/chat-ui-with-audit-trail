@@ -143,7 +143,7 @@ class ConceptTreeWorkflowTest {
     @DisplayName("段落ごとに概念を聞き、作業の見出しは節点にせず、読み終えてから同じものと関係を聞いて木にする")
     void eachParagraphIsPlacedAndTheTreeIsWritten() throws Exception {
         String outcome = run();
-        org.junit.jupiter.api.Assertions.assertNull(system.getIIActor("tree"), "the workflow removes the actor it made");
+        org.junit.jupiter.api.Assertions.assertNull(system.getIIActor("plan.tree"), "the workflow removes the actor it made");
 
         assertEquals(dir.resolve("subjects/loop-doc.lisp").toString(), outcome, "questions so far: " + writer.questions);
         assertEquals(10, writer.questions.size(), "3 paragraphs, 3 sameness, the root, 1 step down and 2 relation questions: " + writer.questions);

@@ -147,7 +147,7 @@ class BookStructureWorkflowTest {
     void theTableOfContentsThenTheSectionsLandInTheDatabase() throws Exception {
         String toc = run("book-toc.yaml");
         assertTrue(toc.contains("{chapter=1, section=2, subsection=1}"), toc);
-        assertNull(system.getIIActor("books"), "the books actor is removed at the end");
+        assertNull(system.getIIActor("plan.books"), "the books actor is removed at the end");
         String sections = run("book-sections.yaml");
         assertTrue(sections.startsWith("4 section(s) of core; 1 with no text of their own; 1 spanning more than one file"), sections);
         try (BookStore s = new BookStore("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
@@ -164,6 +164,6 @@ class BookStructureWorkflowTest {
     void sectionsWithoutATableOfContentsFail() throws Exception {
         String out = run("book-sections.yaml");
         assertFalse(out.contains("section(s)"), out);
-        assertNull(system.getIIActor("books"), "the books actor is removed on the failure path too");
+        assertNull(system.getIIActor("plan.books"), "the books actor is removed on the failure path too");
     }
 }

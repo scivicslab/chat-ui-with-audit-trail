@@ -55,7 +55,7 @@ steps:
     actions:
       - actor: loader
         method: createChild
-        arguments: ["ROOT", "slots", "com.scivicslab.turingworkflow.plugins.rstframe.SlotsJobIIAR"]
+        arguments: ['jexl:self', "./slots", "com.scivicslab.turingworkflow.plugins.rstframe.SlotsJobIIAR"]
       - actor: this
         method: addWorker
         arguments: ["writer", 'jexl:state.getString("writer")']
@@ -84,7 +84,7 @@ steps:
         method: putJson
         arguments: {path: asked, value: "0"}
         execution: direct
-      - actor: slots
+      - actor: ./slots
         method: open
         arguments: {book: 'jexl:state.getString("book")', name: 'jexl:state.getString("name")', tree: 'jexl:state.getString("tree")', classes: 'jexl:state.getString("classes")'}
         execution: direct
@@ -96,7 +96,7 @@ steps:
   - states: ["next", "decide"]
     label: take-the-next-question
     actions:
-      - actor: slots
+      - actor: ./slots
         method: question
         execution: direct
       - actor: this
@@ -142,7 +142,7 @@ steps:
         method: keepWorkerReply
         arguments: ["writer", "reply"]
         execution: direct
-      - actor: slots
+      - actor: ./slots
         method: answer
         arguments: {reply: 'jexl:state.getString("reply")'}
         execution: direct
@@ -155,7 +155,7 @@ steps:
     label: write-the-assignments
     note: The classes added or grown and the assignments are written, never over a file already there.
     actions:
-      - actor: slots
+      - actor: ./slots
         method: write
         arguments: {out: 'jexl:state.getString("out")', tree: 'jexl:state.getString("tree")'}
         execution: direct
@@ -165,7 +165,7 @@ steps:
         execution: direct
       - actor: loader
         method: removeChild
-        arguments: "slots"
+        arguments: ['jexl:self', "./slots"]
       - actor: this
         method: finish
         arguments: ["outcome"]
@@ -180,7 +180,7 @@ steps:
     actions:
       - actor: loader
         method: removeChild
-        arguments: "slots"
+        arguments: ['jexl:self', "./slots"]
       - actor: this
         method: reportFailure
         arguments: []

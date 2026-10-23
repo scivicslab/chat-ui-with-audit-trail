@@ -38,7 +38,7 @@ steps:
     actions:
       - actor: loader
         method: createChild
-        arguments: ["ROOT", "frame", "com.scivicslab.turingworkflow.plugins.rstframe.FrameJobIIAR"]
+        arguments: ['jexl:self', "./frame", "com.scivicslab.turingworkflow.plugins.rstframe.FrameJobIIAR"]
       - actor: this
         method: addWorker
         arguments: ["writer", 'jexl:state.getString("writer")']
@@ -67,7 +67,7 @@ steps:
         method: putJson
         arguments: {path: asked, value: "0"}
         execution: direct
-      - actor: frame
+      - actor: ./frame
         method: open
         arguments: {samples: 'jexl:state.getString("samples")', name: 'jexl:state.getString("name")'}
         execution: direct
@@ -79,7 +79,7 @@ steps:
   - states: ["next", "decide"]
     label: take-the-next-question
     actions:
-      - actor: frame
+      - actor: ./frame
         method: question
         execution: direct
       - actor: this
@@ -125,7 +125,7 @@ steps:
         method: keepWorkerReply
         arguments: ["writer", "reply"]
         execution: direct
-      - actor: frame
+      - actor: ./frame
         method: answer
         arguments: {reply: 'jexl:state.getString("reply")'}
         execution: direct
@@ -137,7 +137,7 @@ steps:
   - states: ["write", "end"]
     label: write-the-frame
     actions:
-      - actor: frame
+      - actor: ./frame
         method: write
         arguments: {dir: 'jexl:state.getString("frames")'}
         execution: direct
@@ -147,7 +147,7 @@ steps:
         execution: direct
       - actor: loader
         method: removeChild
-        arguments: "frame"
+        arguments: ['jexl:self', "./frame"]
       - actor: this
         method: finish
         arguments: ["written"]
@@ -162,7 +162,7 @@ steps:
     actions:
       - actor: loader
         method: removeChild
-        arguments: "frame"
+        arguments: ['jexl:self', "./frame"]
       - actor: this
         method: reportFailure
         arguments: []
