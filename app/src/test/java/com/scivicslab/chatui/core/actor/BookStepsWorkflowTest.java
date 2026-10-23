@@ -32,7 +32,7 @@ import org.junit.jupiter.api.io.TempDir;
  * The step workflows on a plan runner: {@code book-judge.yaml} (step 5, no model) and {@code book-review.yaml}
  * (step 7, against a local endpoint that answers as the GPU broker does), after the table of contents and the sections.
  */
-@DisplayName("book-judge / book-review: 段5と段7をワークフローで回す")
+@DisplayName("book-judge / book-review / book-frame-collect / book-frame-prune: 段5・段7と具象フレームの材料をワークフローで回す")
 class BookStepsWorkflowTest {
 
     @TempDir Path dir;
@@ -58,8 +58,12 @@ class BookStepsWorkflowTest {
             synchronized (asked) {
                 asked.add(new JSONObject(body).getJSONArray("messages").getJSONObject(0).getString("content"));
             }
+            String question = new JSONObject(body).getJSONArray("messages").getJSONObject(0).getString("content");
+            String answer = question.contains("behavior   what the concept does")
+                    ? "concurrent programming | property | 1\nconcurrent programming | behavior | 2\nmultithreading | property | 1"
+                    : "R1 | is-a\nR2 | drop";
             byte[] out = new JSONObject().put("choices", new JSONArray().put(new JSONObject()
-                    .put("message", new JSONObject().put("role", "assistant").put("content", "R1 | is-a\nR2 | drop")))).toString()
+                    .put("message", new JSONObject().put("role", "assistant").put("content", answer)))).toString()
                     .getBytes(StandardCharsets.UTF_8);
             ex.getResponseHeaders().add("Content-Type", "application/json");
             ex.sendResponseHeaders(200, out.length);
@@ -84,7 +88,7 @@ class BookStepsWorkflowTest {
         for (String[] p : new String[][] {
                 {"book", dir.resolve("book").toString()}, {"name", "core"}, {"db", dir.resolve("db/books").toString()},
                 {"url", "http://127.0.0.1:" + endpoint.getAddress().getPort() + "/v1/chat/completions"}, {"model", "fake"},
-                {"parallel", "2"}, {"sections", ""}}) {
+                {"parallel", "2"}, {"sections", ""}, {"min", "2"}}) {
             plan.callByActionName("putJson", new JSONObject().put("path", p[0]).put("value", p[1]).toString());
         }
         CompletableFuture<String> done = new CompletableFuture<>();
@@ -129,6 +133,15 @@ class BookStepsWorkflowTest {
             List<BookStore.Relation> after = s.relations("core").get("10.1.1");
             assertEquals("is-a", after.get(0).reviewed().kind());
             assertNull(after.get(1).reviewed(), "Java feature of concurrent programming is dropped");
+        }
+        String collected = run("book-frame-collect.yaml");
+        assertEquals("1 section(s) of core asked, 3 rule(s) collected, 0 failed", collected,
+                "the list is the two concepts of the relation that stands; Java's relation was dropped");
+        assertEquals("1 section(s) of core: 1 concept(s) stay, 1 taken off (fewer than 2 rule(s))", run("book-frame-prune.yaml"));
+        try (BookStore s = new BookStore("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
+            var list = s.frameConcepts("core").get("10.1.1");
+            assertEquals(List.of("multithreading", "concurrent programming"), list.stream().map(BookStore.FrameConcept::concept).toList());
+            assertEquals(List.of(false, true), list.stream().map(BookStore.FrameConcept::kept).toList());
         }
         assertNull(system.getIIActor("plan.books"), "the workflow removes the actor it made");
     }
