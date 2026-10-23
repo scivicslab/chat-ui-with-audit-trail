@@ -2,8 +2,9 @@ name: book-relations
 description: |
   Asks how the kept concepts of each section relate (FrameOntology_261021_oo01, step 6), the step after
   book-judge.yaml: which is a kind of which (is-a), a part of which (part-of), a feature of which
-  (feature), and which are related in another way (other: a way of doing the other, a use of it, a rule
-  about it), with the sentences that say so. other is there so that no relation is forced into the first three. Only the concepts listed are taken. The relations are stored in
+  (feature), an operation on which (operation: a method that acts on it), and which are related in another
+  way (other: a way of doing the other, a use of it, a rule about it), with the sentences that say so. other
+  is there so that no relation is forced into the first four. Only the concepts listed are taken. The relations are stored in
   the H2 database (table section_relation); the Sections tab of Frame Viewer shows them by kind, with the
   kept concepts no relation names apart, as the candidates for dropping. The work is done by the books actor
   of plugin-rst-frame.
