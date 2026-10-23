@@ -1,0 +1,82 @@
+name: book-rules
+description: |
+  Makes each section of a book into an rst-on-lisp rule file (FrameOntology_261021_oo01, step 3), the step
+  after book-sections.yaml. Each paragraph of a section is put to the model one question at a time, and its
+  sentences become rules: the nucleus of the paragraph, or a satellite with a named relation to it. The rule
+  files and the files their code blocks name are stored in the H2 database (tables section_rules and
+  section_code). A section done before is not asked again unless named. The work is done by the books actor
+  of plugin-rst-frame, created at the start and removed at the end.
+params:
+  name:
+    label: "The book's name"
+    description: "The name book-toc.yaml stored the book under, e.g. core-java-14-vol1"
+    type: text
+    required: true
+  db:
+    label: "The database"
+    description: "Absolute path of the H2 database file, without .mv.db"
+    type: text
+    default: "/home/devteam/works/rst-on-lisp/db/books"
+  url:
+    label: "The chat endpoint"
+    description: "An OpenAI-compatible /v1/chat/completions; the GPU broker spreads the questions over its nodes"
+    type: text
+    default: "http://192.168.5.21:30805/v1/chat/completions"
+  model:
+    label: "The model"
+    description: "A model the endpoint serves (GET /v1/models on the broker lists them)"
+    type: text
+    default: "google/gemma-4-26B-A4B-it"
+  parallel:
+    description: "How many sections are asked at once"
+    type: int
+    default: 8
+  sections:
+    description: "Section numbers to ask again, separated by spaces, e.g. 3.6 4.1.1; empty asks every section not done yet"
+    default: ""
+steps:
+  - states: ["0", "1"]
+    label: build-actor-tree
+    note: The books actor (plugin-rst-frame) does the work; it is created here and removed at the end.
+    actions:
+      - actor: loader
+        method: createChild
+        arguments: ['jexl:self', "./books", "com.scivicslab.turingworkflow.plugins.rstframe.BookStructureIIAR"]
+
+  - states: ["1", "2"]
+    label: make-the-rule-files
+    note: Each section with text and no rule file yet is asked, parallel at a time; the sections named are asked again.
+    actions:
+      - actor: ./books
+        method: rules
+        arguments: {db: 'jexl:state.getString("db")', name: 'jexl:state.getString("name")', url: 'jexl:state.getString("url")', model: 'jexl:state.getString("model")', parallel: 'jexl:state.getString("parallel")', sections: 'jexl:state.getString("sections")'}
+      - actor: this
+        method: putJson
+        arguments: {path: outcome, value: "jexl:result"}
+        execution: direct
+
+  - states: ["1", "failed"]
+    label: could-not-rules
+    actions: [{actor: this, method: doNothing, arguments: ["the book is not in the database, or the model could not be reached"], execution: direct}]
+
+  - states: ["2", "end"]
+    label: tear-down-actor-tree
+    actions:
+      - actor: loader
+        method: removeChild
+        arguments: ['jexl:self', "./books"]
+      - actor: this
+        method: finish
+        arguments: ["outcome"]
+        execution: direct
+
+  - states: ["failed", "end"]
+    label: report-failure
+    actions:
+      - actor: loader
+        method: removeChild
+        arguments: ['jexl:self', "./books"]
+      - actor: this
+        method: reportFailure
+        arguments: []
+        execution: direct

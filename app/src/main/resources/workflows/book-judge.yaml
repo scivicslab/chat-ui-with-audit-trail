@@ -1,0 +1,64 @@
+name: book-judge
+description: |
+  Judges which of each section's concepts to keep (FrameOntology_261021_oo01, step 5), the step after
+  book-concepts.yaml. A concept is kept when it is in the title, or when the sentences that explain it
+  include a nucleus, a definition or a list item; it is dropped when they only add around the point (an
+  example, background, a comment, an analogy) or are code. The judgement is stored with the concepts in the
+  H2 database. No model is asked. The work is done by the books actor of plugin-rst-frame.
+params:
+  name:
+    label: "The book's name"
+    description: "The name book-toc.yaml stored the book under, e.g. core-java-14-vol1"
+    type: text
+    required: true
+  db:
+    label: "The database"
+    description: "Absolute path of the H2 database file, without .mv.db"
+    type: text
+    default: "/home/devteam/works/rst-on-lisp/db/books"
+steps:
+  - states: ["0", "1"]
+    label: build-actor-tree
+    note: The books actor (plugin-rst-frame) does the work; it is created here and removed at the end.
+    actions:
+      - actor: loader
+        method: createChild
+        arguments: ['jexl:self', "./books", "com.scivicslab.turingworkflow.plugins.rstframe.BookStructureIIAR"]
+
+  - states: ["1", "2"]
+    label: judge-the-concepts
+    note: Every section with a rule file and concepts is judged again; a judgement only reads the database.
+    actions:
+      - actor: ./books
+        method: judge
+        arguments: {db: 'jexl:state.getString("db")', name: 'jexl:state.getString("name")'}
+      - actor: this
+        method: putJson
+        arguments: {path: outcome, value: "jexl:result"}
+        execution: direct
+
+  - states: ["1", "failed"]
+    label: could-not-judge
+    actions: [{actor: this, method: doNothing, arguments: ["the book is not in the database"], execution: direct}]
+
+  - states: ["2", "end"]
+    label: tear-down-actor-tree
+    actions:
+      - actor: loader
+        method: removeChild
+        arguments: ['jexl:self', "./books"]
+      - actor: this
+        method: finish
+        arguments: ["outcome"]
+        execution: direct
+
+  - states: ["failed", "end"]
+    label: report-failure
+    actions:
+      - actor: loader
+        method: removeChild
+        arguments: ['jexl:self', "./books"]
+      - actor: this
+        method: reportFailure
+        arguments: []
+        execution: direct

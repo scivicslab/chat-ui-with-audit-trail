@@ -68,7 +68,7 @@
     <dependency>
       <groupId>com.scivicslab.turingworkflow.plugins</groupId>
       <artifactId>plugin-log-db</artifactId>
-      <version>4.6.0</version>
+      <version>4.7.0-SNAPSHOT</version>
       <exclusions>
         <exclusion>
           <groupId>com.scivicslab</groupId>
@@ -88,7 +88,7 @@
     <dependency>
       <groupId>com.scivicslab.turingworkflow.plugins</groupId>
       <artifactId>plugin-log-output</artifactId>
-      <version>4.6.0</version>
+      <version>4.7.0-SNAPSHOT</version>
     </dependency>
     <!-- Prompt construction (TurnResourceLimits/DocRetrievalAgentLoop): PromptBuilderActor keeps
          the constraints sent with every step in the workflow YAML rather than in Java, which is
@@ -96,19 +96,19 @@
     <dependency>
       <groupId>com.scivicslab.turingworkflow.plugins</groupId>
       <artifactId>plugin-prompt-builder</artifactId>
-      <version>4.6.0</version>
+      <version>4.7.0-SNAPSHOT</version>
     </dependency>
     <!-- rst-on-lisp rule files and frames (FramesAndSamplesFromBooks_261021_oo01): the plan runner's
          frame actions read and rewrite rule files through this plugin's classes. -->
     <dependency>
       <groupId>com.scivicslab.turingworkflow.plugins</groupId>
       <artifactId>plugin-rst-frame</artifactId>
-      <version>4.6.0</version>
+      <version>4.7.0-SNAPSHOT</version>
     </dependency>
     <dependency>
       <groupId>com.scivicslab.turingworkflow.plugins</groupId>
       <artifactId>plugin-text</artifactId>
-      <version>4.6.0</version>
+      <version>4.7.0-SNAPSHOT</version>
     </dependency>
     <!-- Agent-loop tools (read/write/web_search/fetch/search_docs): jsoup for HTML parsing
          (DuckDuckGo results, fetched pages). Same version as quarkus-chat-ui3, which these
