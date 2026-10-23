@@ -3,9 +3,10 @@ description: |
   Asks how each section explains its main concept, after book-frame-prune.yaml. A section's heading rule only lists
   its blocks ((defrule s1 -> b1 b2 b3 b4 :heading ...)); the model is shown the blocks by name and the section's main
   concept (the one in the title with the most rules collected, else the one with the most rules), and must say which of
-  three ways the section takes: sequence (the blocks go through its steps in order), structure (they take it apart into
-  its parts) or partition (they divide it into its kinds, as 3.2 divides comment into //, /* */ and /** */). It also
-  names the block of each step, part or kind. Sections of one block are not asked. The answers are stored in the H2
+  four ways the section takes: sequence (the concept is a process and the blocks go through its steps in order),
+  structure (they take it apart into its parts), partition (they divide it into its kinds, as 3.2 divides comment into
+  //, /* */ and /** */) or aspects (they take up one aspect of it after another: definition, syntax, usage, caveat). It also
+  names the block of each step, part, kind or aspect. Sections of one block are not asked. The answers are stored in the H2
   database; the Sections tab shows them. The work is done by the books actor of plugin-rst-frame.
 params:
   name:
