@@ -270,9 +270,9 @@ request messagesに送った文を残す会話を作る手段がない。
 - [x] C. ファイル: プラグインに `FileGate`、audit-trail に起動時の `files` アクター（`ScopedFiles`、インスタンスの範囲）。`readFile`/`writeFile`/`listFiles` を外した（plugins cf0d398、audit-trail 2a260d2）
 - [x] E. フレーム関係の 23 action を plugin-rst-frame のジョブのアクター 7 種へ（`tree`・`slots`・`consolidation`・`bookFiles`・`sample`・`frame`・`filler`）。ワークフロー 7 本は最初に `loader.createChild`、終わりと失敗の経路で `removeChild`（plugins 5c55974、audit-trail 073da9b）
 - [x] B. 文字列操作 5 つを新しいプラグイン `plugin-text` の `texts` へ。状態を持たないので起動時に 1 つ登録し、ワークフローは作らない（plugins b90797a・9979425、audit-trail 487cdb6・ab5b655）。`PolishFilesWorkflowTest` で polish-files を通しで確かめる
-- [ ] D. 会話を操作する action（`addWorker` ほか 12 個）を audit-trail 内のアクターへ。`askChat` は消す。設計の選択が残る（下）
+- [x] D. 会話を操作する action 13 個を起動時に登録する `chats` アクター（`Chats`）へ。案a: 作業枠を無くし、ワークフローは役の会話を `chat-<役>`、最後の答えを `reply-<役>` に置く。`askChat` は消した。複数の会話への同時の質問は `askAll`（c2c63ab）
 
-## 残っている問題: ジョブのアクターの名前がインスタンス全体で 1 つ
+## 解決済み: ジョブのアクターの名前がインスタンス全体で 1 つ（Turing-workflow 4.6.0 の `./名前`、POJO-actor 4.6.0 は使われている名前の登録を拒む）
 
 E のアクター（`tree` など）は固定の名前で作る。`createChild` は同じ名前の既存アクターを黙って置き換えるので、2 つのプロジェクトで同じ種類のジョブが同時に走ると、後のジョブのアクターが先のジョブのものを置き換え、先のジョブの `removeChild` が後のジョブのアクターを消す。
 B ではこれが polish 系（普段使うジョブ）に起きたので、`texts` を状態のないアクターにして解消した。E のアクターは状態（質問の進み具合）を持つので、この手が使えない。
