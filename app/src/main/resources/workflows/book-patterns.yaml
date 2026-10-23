@@ -33,6 +33,10 @@ params:
     description: "How many sections are asked at once"
     type: int
     default: 8
+  examples:
+    description: "A file of worked examples of the cases that are easy to get wrong, put into every question; empty for none"
+    type: text
+    default: "/home/devteam/works/rst-on-lisp/frames/pattern-examples.md"
   sections:
     description: "Section numbers to ask again, separated by spaces, e.g. 3.6 4.1.1; empty asks every section not done yet"
     default: ""
@@ -51,7 +55,7 @@ steps:
     actions:
       - actor: ./books
         method: patterns
-        arguments: {db: 'jexl:state.getString("db")', name: 'jexl:state.getString("name")', url: 'jexl:state.getString("url")', model: 'jexl:state.getString("model")', parallel: 'jexl:state.getString("parallel")', sections: 'jexl:state.getString("sections")'}
+        arguments: {db: 'jexl:state.getString("db")', name: 'jexl:state.getString("name")', url: 'jexl:state.getString("url")', model: 'jexl:state.getString("model")', parallel: 'jexl:state.getString("parallel")', sections: 'jexl:state.getString("sections")', examples: 'jexl:state.getString("examples")'}
       - actor: this
         method: putJson
         arguments: {path: outcome, value: "jexl:result"}
