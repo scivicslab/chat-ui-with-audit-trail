@@ -61,6 +61,8 @@ class BookStepsWorkflowTest {
             String question = new JSONObject(body).getJSONArray("messages").getJSONObject(0).getString("content");
             String answer = question.contains("behavior   what the concept does")
                     ? "concurrent programming | property | 1\nconcurrent programming | behavior | 2\nmultithreading | property | 1"
+                    : question.contains("explains a concept in one of three ways")
+                    ? "pattern: partition\np1 | threads\np2 | processes"
                     : "R1 | is-a\nR2 | drop";
             byte[] out = new JSONObject().put("choices", new JSONArray().put(new JSONObject()
                     .put("message", new JSONObject().put("role", "assistant").put("content", answer)))).toString()
@@ -142,6 +144,20 @@ class BookStepsWorkflowTest {
             var list = s.frameConcepts("core").get("10.1.1");
             assertEquals(List.of("multithreading", "concurrent programming"), list.stream().map(BookStore.FrameConcept::concept).toList());
             assertEquals(List.of(false, true), list.stream().map(BookStore.FrameConcept::kept).toList());
+            // a second block, so the section's blocks have something to say of each other
+            s.saveSectionRules("core", new BookStore.SectionRules("10.1.1", """
+                    (defrule s1 -> p1 p2 :heading "## 10.1.1. Threads")
+                    (defrule p1 -> :nucleus p1/1 :example p1/2)
+                    (defrule p1/1 -> "Multithreading is one way to program concurrently.")
+                    (defrule p1/2 -> "Java has threads.")
+                    (defrule p2 -> "Running processes side by side is another.")
+                    """, Map.of(), 2));
+        }
+        assertEquals("1 section(s) of core given a pattern: {partition=1}, 0 failed", run("book-patterns.yaml"));
+        try (BookStore s = new BookStore("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
+            var p = s.patterns("core").get("10.1.1");
+            assertEquals("concurrent programming", p.concept(), "the concept that stays on the list with the most rules");
+            assertEquals(List.of("p1", "p2"), p.members().stream().map(m -> m.block()).toList());
         }
         assertNull(system.getIIActor("plan.books"), "the workflow removes the actor it made");
     }
