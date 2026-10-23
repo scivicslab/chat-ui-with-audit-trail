@@ -104,12 +104,13 @@ class BookStructureWorkflowTest {
         queue.tellNow(q -> q.setSelf(queue)).join();
         ActorRef<CallWatchdog> watchdog = writerChat.createChild("watchdog-for-test", new CallWatchdog());
 
-        PlanRunner runner = new PlanRunner("plan", system, watchdog);
+        PlanRunner runner = new PlanRunner("plan", system);
         plan = new PlanRunnerIIAR("plan", runner, system);
         system.addIIActor(plan);
         runner.setSelfActorRef(plan);
         // the loader every instance has: the workflows create the books actor with it and remove it at the end
         system.addIIActor(new WorkflowPluginLoader("loader", system, List.of()));
+        system.addIIActor(new ChatsIIAR("chats", new Chats(system, watchdog, null), system));
         // the files actor every instance has: the books actor reads the book and opens the database through it
         system.addIIActor(new ScopedFilesIIAR("files", new ScopedFiles(new FileAccessScope(dir, List.of(dir))), system));
 

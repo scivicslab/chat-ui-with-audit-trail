@@ -42,16 +42,14 @@ class ChooseTheLlmTest {
     }
 
     private IIActorSystem system;
-    private PlanRunner runner;
+    private ChatsIIAR chats;
     private RecordingProvider provider;
 
     @BeforeEach
     void setUp() {
         system = new IIActorSystem("choose-llm-test");
-        runner = new PlanRunner("plan", system, null);
-        PlanRunnerIIAR iiar = new PlanRunnerIIAR("plan", runner, system);
-        system.addIIActor(iiar);
-        runner.setSelfActorRef(iiar);
+        chats = new ChatsIIAR("chats", new Chats(system, null, null), system);
+        system.addIIActor(chats);
 
         provider = new RecordingProvider();
         ActorRef<Object> conversationSquad = system.actorOf("project1/chat-02", new Object());
@@ -67,7 +65,7 @@ class ChooseTheLlmTest {
 
     @Test
     void theModelNamedInTheJobIsTheOneTheRoleRunsOn() {
-        ActionResult result = runner.setChatModel("project1/chat-02", "Qwen/Qwen3.8-27B");
+        ActionResult result = chats.callByActionName("setModel", new org.json.JSONObject().put("chat", "project1/chat-02").put("model", "Qwen/Qwen3.8-27B").toString());
 
         assertTrue(result.isSuccess(), result.getResult());
         assertEquals("Qwen/Qwen3.8-27B", provider.getCurrentModel());
@@ -76,7 +74,7 @@ class ChooseTheLlmTest {
     /** Nothing named means the conversation keeps whatever it was on. */
     @Test
     void nothingNamedLeavesTheConversationAsItWas() {
-        ActionResult result = runner.setChatModel("project1/chat-02", "");
+        ActionResult result = chats.callByActionName("setModel", new org.json.JSONObject().put("chat", "project1/chat-02").put("model", "").toString());
 
         assertTrue(result.isSuccess(), result.getResult());
         assertEquals("first-model", provider.getCurrentModel());
@@ -84,7 +82,7 @@ class ChooseTheLlmTest {
 
     @Test
     void aConversationThatIsNotThereIsSaidSoRatherThanPassedOver() {
-        ActionResult result = runner.setChatModel("project1/chat-nobody", "some-model");
+        ActionResult result = chats.callByActionName("setModel", new org.json.JSONObject().put("chat", "project1/chat-nobody").put("model", "some-model").toString());
 
         assertFalse(result.isSuccess());
         assertTrue(result.getResult().contains("project1/chat-nobody"), result.getResult());
@@ -93,7 +91,7 @@ class ChooseTheLlmTest {
     /** Without the wiring that can change a provider kind, the step says so instead of pretending. */
     @Test
     void aProviderKindCannotBeChangedWithoutTheWayToDoIt() {
-        ActionResult result = runner.setChatProvider("project1/chat-02", "claude", "");
+        ActionResult result = chats.callByActionName("setProvider", new org.json.JSONObject().put("chat", "project1/chat-02").put("kind", "claude").put("tools", "").toString());
 
         assertFalse(result.isSuccess());
         assertTrue(result.getResult().contains("provider"), result.getResult());
@@ -101,6 +99,6 @@ class ChooseTheLlmTest {
 
     @Test
     void nothingNamedIsNotAProviderChangeAtAll() {
-        assertTrue(runner.setChatProvider("project1/chat-02", "", "").isSuccess());
+        assertTrue(chats.callByActionName("setProvider", new org.json.JSONObject().put("chat", "project1/chat-02").put("kind", "").put("tools", "").toString()).isSuccess());
     }
 }

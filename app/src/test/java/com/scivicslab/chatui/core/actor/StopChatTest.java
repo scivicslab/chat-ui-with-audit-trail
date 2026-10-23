@@ -43,16 +43,14 @@ class StopChatTest {
     }
 
     private IIActorSystem system;
-    private PlanRunner runner;
+    private ChatsIIAR chats;
     private CancellableProvider provider;
 
     @BeforeEach
     void setUp() {
         system = new IIActorSystem("stop-chat-test");
-        runner = new PlanRunner("plan", system, null);
-        PlanRunnerIIAR iiar = new PlanRunnerIIAR("plan", runner, system);
-        system.addIIActor(iiar);
-        runner.setSelfActorRef(iiar);
+        chats = new ChatsIIAR("chats", new Chats(system, null, null), system);
+        system.addIIActor(chats);
 
         provider = new CancellableProvider();
         ChatSessionIIAR chat = new ChatSessionIIAR("project1/chat-02.chat", provider,
@@ -72,7 +70,7 @@ class StopChatTest {
 
     @Test
     void theConversationIsToldToStop() {
-        ActionResult result = runner.stopChat("project1/chat-02");
+        ActionResult result = chats.callByActionName("stop", new org.json.JSONObject().put("chat", "project1/chat-02").toString());
 
         assertTrue(result.isSuccess(), result.getResult());
         assertTrue(provider.cancelled, "the call it was in the middle of is cancelled");
@@ -80,7 +78,7 @@ class StopChatTest {
 
     @Test
     void aConversationThatIsNotThereIsSaidSoRatherThanPassedOver() {
-        ActionResult result = runner.stopChat("project1/chat-nobody");
+        ActionResult result = chats.callByActionName("stop", new org.json.JSONObject().put("chat", "project1/chat-nobody").toString());
 
         assertFalse(result.isSuccess());
         assertTrue(result.getResult().contains("project1/chat-nobody"), result.getResult());

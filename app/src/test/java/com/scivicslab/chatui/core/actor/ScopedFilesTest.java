@@ -40,7 +40,7 @@ class ScopedFilesTest {
         system = new IIActorSystem("scoped-files-test");
         files = new ScopedFilesIIAR("files", new ScopedFiles(new FileAccessScope(dir, List.of(dir))), system);
         system.addIIActor(files);
-        PlanRunner runner = new PlanRunner("plan", system, null);
+        PlanRunner runner = new PlanRunner("plan", system);
         plan = new PlanRunnerIIAR("plan", runner, system);
         system.addIIActor(plan);
         runner.setSelfActorRef(plan);

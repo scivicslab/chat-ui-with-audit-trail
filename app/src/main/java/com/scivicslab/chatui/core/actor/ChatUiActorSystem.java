@@ -245,6 +245,9 @@ public class ChatUiActorSystem implements ConversationControls {
     /** The name a job's workflow reaches the text steps by ({@code TextsIIAR} of plugin-text). */
     public static final String WORKFLOW_TEXTS = "texts";
 
+    /** The name a job's workflow reaches the conversations by ({@link Chats}). */
+    public static final String WORKFLOW_CHATS = "chats";
+
     @PostConstruct
     void init() {
         actorSystem = new IIActorSystem("chat-ui");
@@ -348,6 +351,11 @@ public class ChatUiActorSystem implements ConversationControls {
                 new com.scivicslab.turingworkflow.plugins.text.TextsIIAR(WORKFLOW_TEXTS, actorSystem);
         adopt(HOUSEKEEPER, texts);
         actorSystem.addIIActor(texts);
+        // What a job's workflow does with the conversations: ask, clear, stop, set a model or a provider. It holds
+        // nothing that changes, so the jobs of every project use this one, naming each conversation in full.
+        ChatsIIAR chatsActor = new ChatsIIAR(WORKFLOW_CHATS, new Chats(actorSystem, callWatchdogRef, this::changeProviderForPlan), actorSystem);
+        adopt(HOUSEKEEPER, chatsActor);
+        actorSystem.addIIActor(chatsActor);
         LOG.info("File access: write root " + fileScope.writeRoot()
                 + ", readable " + fileScope.describeReadRoots());
         SkillRegistry registry = new SkillRegistry(skillRootPaths);
@@ -802,8 +810,7 @@ public class ChatUiActorSystem implements ConversationControls {
      */
     private void wireProject(String projectId) {
         ActorRef<Project> ref = projects.get(projectId);
-        ref.tell(p -> p.bind(projectId, actorSystem, ref, callWatchdogRef, SYSTEM_LOG_ACTOR,
-                            this::changeProviderForPlan, ioLogStore));
+        ref.tell(p -> p.bind(projectId, actorSystem, ref, SYSTEM_LOG_ACTOR, ioLogStore));
         ref.tell(Project::startWatching);
     }
 

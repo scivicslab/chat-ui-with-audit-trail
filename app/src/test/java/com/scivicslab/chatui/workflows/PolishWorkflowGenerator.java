@@ -98,10 +98,10 @@ public final class PolishWorkflowGenerator {
 
     /** The two conversations are emptied before each turn, so no prompt inherits the last one. */
     private static final String CLEAR =
-            "      - actor: this\n        method: clearWorker\n"
-            + "        arguments: [\"fixer\"]\n        execution: direct\n"
-            + "      - actor: this\n        method: clearWorker\n"
-            + "        arguments: [\"judge\"]\n        execution: direct\n";
+            "      - actor: chats\n        method: clear\n"
+            + "        arguments: {chat: 'jexl:state.getString(\"chat-fixer\")'}\n        execution: direct\n"
+            + "      - actor: chats\n        method: clear\n"
+            + "        arguments: {chat: 'jexl:state.getString(\"chat-judge\")'}\n        execution: direct\n";
 
     public static void main(String[] args) throws IOException {
         Files.writeString(Path.of(BUNDLED, "polish-by-checklist.yaml"), build(false));
@@ -121,10 +121,13 @@ public final class PolishWorkflowGenerator {
      * ({@code ForgetTheConversationOnBothSides_260917_oo01}).</p>
      */
     private static String ask(String expression, String slot) {
-        return "      - actor: this\n        method: clearWorker\n"
-                + "        arguments: [\"" + slot + "\"]\n        execution: direct\n"
-                + "      - actor: this\n        method: askWorker\n"
-                + "        arguments: [\"" + slot + "\", 'jexl:" + expression + "']\n"
+        return "      - actor: chats\n        method: clear\n"
+                + "        arguments: {chat: 'jexl:state.getString(\"chat-" + slot + "\")'}\n        execution: direct\n"
+                + "      - actor: chats\n        method: ask\n"
+                + "        arguments: {chat: 'jexl:state.getString(\"chat-" + slot + "\")', prompt: 'jexl:" + expression + "', waiter: 'jexl:self'}\n"
+                + "        execution: direct\n"
+                + "      - actor: this\n        method: putJson\n"
+                + "        arguments: {path: 'reply-" + slot + "', value: 'jexl:result'}\n"
                 + "        execution: direct\n";
     }
 
@@ -196,8 +199,8 @@ public final class PolishWorkflowGenerator {
                 + "      " + slot + " が答えなかった。待つのをやめた側が相手の仕事も止め、本文を戻して先へ進む。\n"
                 + "      受け皿が無いと、会話ひとつの不調で実行全体が終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。\n"
                 + "    actions:\n"
-                + "      - actor: this\n        method: stopChat\n"
-                + "        arguments: ['jexl:state.getString(\"" + slot + "\")']\n        execution: direct\n"
+                + "      - actor: chats\n        method: stop\n"
+                + "        arguments: {chat: 'jexl:state.getString(\"" + slot + "\")'}\n        execution: direct\n"
                 + (back == null ? ""
                    : "      - actor: this\n        method: copyState\n"
                      + "        arguments: [\"" + back + "\", \"text\"]\n        execution: direct\n")
@@ -304,8 +307,8 @@ public final class PolishWorkflowGenerator {
                 + "    note: 本文がこの規則を満たしているかを見る。満たしていれば本文には触れない。\n"
                 + "    actions:\n"
                 + ask(judgePromptByPath(c, c.deletes()), "judge")
-                + "      - actor: this\n        method: keepWorkerReply\n"
-                + "        arguments: [\"judge\", \"verdict\"]\n        execution: direct\n"
+                + "      - actor: this\n        method: copyState\n"
+                + "        arguments: [\"reply-judge\", \"verdict\"]\n        execution: direct\n"
                 + didNotAnswer("judge-" + i, "judge-did-not-answer-" + i, "judge", "kept-" + i,
                         "観点" + i + " " + c.name() + " | 判定役が答えなかった", next)
                 + "\n  - states: [\"check-" + i + "\", \"" + next + "\"]\n"
@@ -359,8 +362,8 @@ public final class PolishWorkflowGenerator {
                 + "      入る前の本文に戻し、次の観点へ進む。受け皿が無いと、会話ひとつの不調で実行全体が\n"
                 + "      「一致する遷移が無い」で終わる (WhenTheTwoRolesDoNotAgree_260915_oo01)。\n"
                 + "    actions:\n"
-                + "      - actor: this\n        method: stopChat\n"
-                + "        arguments: ['jexl:state.getString(\"fixer\")']\n        execution: direct\n"
+                + "      - actor: chats\n        method: stop\n"
+                + "        arguments: {chat: 'jexl:state.getString(\"fixer\")'}\n        execution: direct\n"
                 + "      - actor: this\n        method: copyState\n"
                 + "        arguments: [\"kept-" + i + "\", \"text\"]\n        execution: direct\n"
                 + "      - actor: this\n        method: appendJson\n"
@@ -395,8 +398,8 @@ public final class PolishWorkflowGenerator {
                 + "    note: 本文がこの規則を満たしているかを見る。満たしていれば本文には触れない。\n"
                 + "    actions:\n"
                 + CLEAR + ask(judgePrompt(i, c.deletes()), "judge")
-                + "      - actor: this\n        method: keepWorkerReply\n"
-                + "        arguments: [\"judge\", \"verdict\"]\n        execution: direct\n"
+                + "      - actor: this\n        method: copyState\n"
+                + "        arguments: [\"reply-judge\", \"verdict\"]\n        execution: direct\n"
                 + didNotAnswer("judge-" + i, "judge-did-not-answer-" + i, "judge", "kept-" + i,
                         "観点" + i + " " + c.name() + " | 判定役が答えなかった", next)
                 + "\n  - states: [\"check-" + i + "\", \"" + next + "\"]\n"
@@ -421,8 +424,8 @@ public final class PolishWorkflowGenerator {
                 + "    label: fix-" + i + "-" + c.name() + "\n"
                 + "    actions:\n"
                 + CLEAR + ask(redoPrompt(i, c.deletes()), "fixer")
-                + "      - actor: this\n        method: keepWorkerReply\n"
-                + "        arguments: [\"fixer\", \"text\"]\n        execution: direct\n"
+                + "      - actor: this\n        method: copyState\n"
+                + "        arguments: [\"reply-fixer\", \"text\"]\n        execution: direct\n"
                 + didNotAnswer("fix-" + i, "fixer-did-not-answer-" + i, "fixer", "kept-" + i,
                         "観点" + i + " " + c.name() + " | 直す役が答えなかった", next);
     }
@@ -493,8 +496,8 @@ public final class PolishWorkflowGenerator {
                 + "    label: take-back-what-was-brought-in\n"
                 + "    actions:\n"
                 + CLEAR + ask(VERIFY_FIX, "fixer")
-                + "      - actor: this\n        method: keepWorkerReply\n"
-                + "        arguments: [\"fixer\", \"text\"]\n        execution: direct\n"
+                + "      - actor: this\n        method: copyState\n"
+                + "        arguments: [\"reply-fixer\", \"text\"]\n        execution: direct\n"
                 + didNotAnswer("verify-fix", "verify-fixer-did-not-answer", "fixer", null,
                         "最後の照合の直しに答えなかった", "skip");
     }
@@ -548,7 +551,7 @@ params:
 steps:
   - states: ["0", "on-their-llms"]
     label: add-fixer
-    actions: [{actor: this, method: addWorker, arguments: ["fixer", 'jexl:state.getString("fixer")'], execution: direct}]
+    actions: [{actor: this, method: putJson, arguments: {path: 'chat-fixer', value: 'jexl:state.getString("fixer")'}, execution: direct}]
 
   - states: ["on-their-llms", "1"]
     label: put-each-role-on-its-llm
@@ -557,45 +560,45 @@ steps:
       rather than leaving them on the conversations. An empty value leaves a conversation as it is;
       a provider this instance was not started with fails here (ChooseTheLlmPerRole_260915_oo01).
     actions:
-      - actor: this
-        method: setChatProvider
-        arguments: ['jexl:state.getString("fixer")', 'jexl:state.getString("fixerProvider")', ""]
+      - actor: chats
+        method: setProvider
+        arguments: {chat: 'jexl:state.getString("fixer")', kind: 'jexl:state.getString("fixerProvider")', tools: ''}
         execution: direct
-      - actor: this
-        method: setChatModel
-        arguments: ['jexl:state.getString("fixer")', 'jexl:state.getString("fixerModel")']
+      - actor: chats
+        method: setModel
+        arguments: {chat: 'jexl:state.getString("fixer")', model: 'jexl:state.getString("fixerModel")'}
         execution: direct
-      - actor: this
-        method: setChatProvider
-        arguments: ['jexl:state.getString("judge")', 'jexl:state.getString("judgeProvider")', ""]
+      - actor: chats
+        method: setProvider
+        arguments: {chat: 'jexl:state.getString("judge")', kind: 'jexl:state.getString("judgeProvider")', tools: ''}
         execution: direct
-      - actor: this
-        method: setChatModel
-        arguments: ['jexl:state.getString("judge")', 'jexl:state.getString("judgeModel")']
+      - actor: chats
+        method: setModel
+        arguments: {chat: 'jexl:state.getString("judge")', model: 'jexl:state.getString("judgeModel")'}
         execution: direct
-      - actor: this
-        method: setChatNoThink
-        arguments: ['jexl:state.getString("fixer")', 'jexl:state.getString("fixerNoThink")']
+      - actor: chats
+        method: setNoThink
+        arguments: {chat: 'jexl:state.getString("fixer")', value: 'jexl:state.getString("fixerNoThink")'}
         execution: direct
-      - actor: this
-        method: setChatNoThink
-        arguments: ['jexl:state.getString("judge")', 'jexl:state.getString("judgeNoThink")']
+      - actor: chats
+        method: setNoThink
+        arguments: {chat: 'jexl:state.getString("judge")', value: 'jexl:state.getString("judgeNoThink")'}
         execution: direct
-      - actor: this
-        method: setChatEffort
-        arguments: ['jexl:state.getString("fixer")', 'jexl:state.getString("fixerEffort")']
+      - actor: chats
+        method: setEffort
+        arguments: {chat: 'jexl:state.getString("fixer")', effort: 'jexl:state.getString("fixerEffort")'}
         execution: direct
-      - actor: this
-        method: setChatEffort
-        arguments: ['jexl:state.getString("judge")', 'jexl:state.getString("judgeEffort")']
+      - actor: chats
+        method: setEffort
+        arguments: {chat: 'jexl:state.getString("judge")', effort: 'jexl:state.getString("judgeEffort")'}
         execution: direct
 
   - states: ["1", "enter-1"]
     label: add-judge
     actions:
       - actor: this
-        method: addWorker
-        arguments: ["judge", 'jexl:state.getString("judge")']
+        method: putJson
+        arguments: {path: 'chat-judge', value: 'jexl:state.getString("judge")'}
         execution: direct
       - actor: this
         method: copyState
@@ -635,8 +638,8 @@ params:
       A file variant has no text yet: each file is read, and kept as it arrived, in take-next-file.
     actions:
       - actor: this
-        method: addWorker
-        arguments: ["judge", 'jexl:state.getString("judge")']
+        method: putJson
+        arguments: {path: 'chat-judge', value: 'jexl:state.getString("judge")'}
         execution: direct
 """
             .stripTrailing();

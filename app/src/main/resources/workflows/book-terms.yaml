@@ -50,16 +50,16 @@ steps:
     label: add-extractor
     actions:
       - actor: this
-        method: addWorker
-        arguments: ["extractor", 'jexl:state.getString("extractor")']
+        method: putJson
+        arguments: {path: 'chat-extractor', value: 'jexl:state.getString("extractor")'}
         execution: direct
-      - actor: this
-        method: setChatModel
-        arguments: ['jexl:state.getString("extractor")', 'jexl:state.getString("extractorModel")']
+      - actor: chats
+        method: setModel
+        arguments: {chat: 'jexl:state.getString("extractor")', model: 'jexl:state.getString("extractorModel")'}
         execution: direct
-      - actor: this
-        method: setChatNoThink
-        arguments: ['jexl:state.getString("extractor")', 'jexl:state.getString("extractorNoThink")']
+      - actor: chats
+        method: setNoThink
+        arguments: {chat: 'jexl:state.getString("extractor")', value: 'jexl:state.getString("extractorNoThink")'}
         execution: direct
 
   - states: ["1", "next"]
@@ -122,9 +122,9 @@ steps:
         method: putJson
         arguments: {path: nudges-relations, value: "0"}
         execution: direct
-      - actor: this
-        method: clearWorker
-        arguments: ["extractor"]
+      - actor: chats
+        method: clear
+        arguments: {chat: 'jexl:state.getString("chat-extractor")'}
         execution: direct
 
   - states: ["next", "end"]
@@ -140,11 +140,13 @@ steps:
     label: terms-turn
     note: The part's whole text is in the prompt; the extractor reads nothing itself.
     actions:
+      - actor: chats
+        method: ask
+        arguments: {chat: 'jexl:state.getString("chat-extractor")', prompt: 'jexl:"次は、" + state.getString("subject") + "の教科書の一部です（ファイル: " + state.getString("part") + "）。\n\n----- ここから -----\n" + state.getString("text") + "\n----- ここまで -----\n\nこの部分から、" + state.getString("subject") + "の専門用語（名詞句）を抜き出してください。\n- この部分が定義しているか、意味を説明している用語だけを抜き出します。名前が出てくるだけの用語や、program、computer のような一般的な語は入れません。\n- 用語ごとに、この部分の中でその用語を定義または説明している文を、本文のとおり 1〜2 文引用します。訳したり言い換えたりしません。\n- 答えは「用語 | 引用」の形の行を、用語 1 つにつき 1 行並べます。\n- 答えの最後の行には「" + state.getString("end-mark") + "」とだけ書いてください。"', waiter: 'jexl:self'}
+        execution: direct
       - actor: this
-        method: askWorker
-        arguments:
-          - extractor
-          - 'jexl:"次は、" + state.getString("subject") + "の教科書の一部です（ファイル: " + state.getString("part") + "）。\n\n----- ここから -----\n" + state.getString("text") + "\n----- ここまで -----\n\nこの部分から、" + state.getString("subject") + "の専門用語（名詞句）を抜き出してください。\n- この部分が定義しているか、意味を説明している用語だけを抜き出します。名前が出てくるだけの用語や、program、computer のような一般的な語は入れません。\n- 用語ごとに、この部分の中でその用語を定義または説明している文を、本文のとおり 1〜2 文引用します。訳したり言い換えたりしません。\n- 答えは「用語 | 引用」の形の行を、用語 1 つにつき 1 行並べます。\n- 答えの最後の行には「" + state.getString("end-mark") + "」とだけ書いてください。"'
+        method: putJson
+        arguments: {path: 'reply-extractor', value: 'jexl:result'}
         execution: direct
 
   - states: ["terms", "failed"]
@@ -155,8 +157,8 @@ steps:
     label: keep-terms
     actions:
       - actor: this
-        method: keepWorkerReply
-        arguments: ["extractor", "terms"]
+        method: copyState
+        arguments: ['reply-extractor', 'terms']
         execution: direct
       - actor: this
         method: onlyIf
@@ -170,11 +172,13 @@ steps:
         method: countUp
         arguments: ["nudges-terms", 'jexl:state.getString("maxNudges")']
         execution: direct
+      - actor: chats
+        method: ask
+        arguments: {chat: 'jexl:state.getString("chat-extractor")', prompt: 'jexl:"作業を続けてください。用語を「用語 | 引用」の行で並べ、答えの最後の行には「" + state.getString("end-mark") + "」とだけ書いてください。"', waiter: 'jexl:self'}
+        execution: direct
       - actor: this
-        method: askWorker
-        arguments:
-          - extractor
-          - 'jexl:"作業を続けてください。用語を「用語 | 引用」の行で並べ、答えの最後の行には「" + state.getString("end-mark") + "」とだけ書いてください。"'
+        method: putJson
+        arguments: {path: 'reply-extractor', value: 'jexl:result'}
         execution: direct
 
   - states: ["keep-terms", "failed"]
@@ -187,11 +191,13 @@ steps:
       The next turn of the same conversation, so the terms just listed are in front of the extractor.
       The terms of the parts before come with their definitions left out: names and relations only.
     actions:
+      - actor: chats
+        method: ask
+        arguments: {chat: 'jexl:state.getString("chat-extractor")', prompt: 'jexl:"次に、抜き出した用語と、用語どうしの関係を、rst-on-lisp の規則で書いてください。\n\n書き方:\n- 用語 1 つを規則 2 つで書きます。\n  (defrule term/<名前> -> :nucleus term/<名前>/text <関係の対>…)\n  (defrule term/<名前>/text -> \"<前のターンで引用した文>\")\n- <名前> は用語の英語を小文字にし、語をハイフンでつなぎます（例: term/instance-field）。\n- 関係の対は :<関係名> term/<相手の名前> と書きます。向きは「この用語 <関係名> 相手」です。たとえば (defrule term/object -> :nucleus term/object/text :instance-of term/class) は「object は class のインスタンスである」と読みます。\n- 関係名は、次の一覧の中からだけ選びます。\n  " + state.getString("relations-list") + "\n- この部分の本文に書いてある関係だけを書きます。関係の無い用語は :nucleus の対だけにします。\n- 相手の用語は、この部分で抜き出した用語か、下の「前の部分の用語」のどれかです。前の部分の用語の規則は書き直しません。\n- 前の部分と同じ用語には、同じ名前を使います。\n- 引用の文は 1 行に書きます。文の中の \" は \\\" と書きます。\n\n前の部分の用語（定義の文は省いています）:\n" + (state.getString("known") == "" ? "なし" : state.getString("known")) + "\n\n返事は規則だけを、```lisp で始まるコードブロック 1 つで書いてください。"', waiter: 'jexl:self'}
+        execution: direct
       - actor: this
-        method: askWorker
-        arguments:
-          - extractor
-          - 'jexl:"次に、抜き出した用語と、用語どうしの関係を、rst-on-lisp の規則で書いてください。\n\n書き方:\n- 用語 1 つを規則 2 つで書きます。\n  (defrule term/<名前> -> :nucleus term/<名前>/text <関係の対>…)\n  (defrule term/<名前>/text -> \"<前のターンで引用した文>\")\n- <名前> は用語の英語を小文字にし、語をハイフンでつなぎます（例: term/instance-field）。\n- 関係の対は :<関係名> term/<相手の名前> と書きます。向きは「この用語 <関係名> 相手」です。たとえば (defrule term/object -> :nucleus term/object/text :instance-of term/class) は「object は class のインスタンスである」と読みます。\n- 関係名は、次の一覧の中からだけ選びます。\n  " + state.getString("relations-list") + "\n- この部分の本文に書いてある関係だけを書きます。関係の無い用語は :nucleus の対だけにします。\n- 相手の用語は、この部分で抜き出した用語か、下の「前の部分の用語」のどれかです。前の部分の用語の規則は書き直しません。\n- 前の部分と同じ用語には、同じ名前を使います。\n- 引用の文は 1 行に書きます。文の中の \" は \\\" と書きます。\n\n前の部分の用語（定義の文は省いています）:\n" + (state.getString("known") == "" ? "なし" : state.getString("known")) + "\n\n返事は規則だけを、```lisp で始まるコードブロック 1 つで書いてください。"'
+        method: putJson
+        arguments: {path: 'reply-extractor', value: 'jexl:result'}
         execution: direct
 
   - states: ["relations", "failed"]
@@ -205,8 +211,8 @@ steps:
       rules taken out, which leaves each term's name and relations.
     actions:
       - actor: this
-        method: keepWorkerReply
-        arguments: ["extractor", "answer"]
+        method: copyState
+        arguments: ['reply-extractor', 'answer']
         execution: direct
       - actor: this
         method: onlyIf
@@ -232,11 +238,13 @@ steps:
         method: countUp
         arguments: ["nudges-relations", 'jexl:state.getString("maxNudges")']
         execution: direct
+      - actor: chats
+        method: ask
+        arguments: {chat: 'jexl:state.getString("chat-extractor")', prompt: '作業を続けてください。規則だけを、```lisp で始まるコードブロック 1 つで返してください。', waiter: 'jexl:self'}
+        execution: direct
       - actor: this
-        method: askWorker
-        arguments:
-          - extractor
-          - '作業を続けてください。規則だけを、```lisp で始まるコードブロック 1 つで返してください。'
+        method: putJson
+        arguments: {path: 'reply-extractor', value: 'jexl:result'}
         execution: direct
 
   - states: ["keep-relations", "failed"]
@@ -249,9 +257,9 @@ steps:
       The conversation is stopped first: a turn the plan stopped waiting for (askWorker gives up after
       1800 s) goes on using the GPU otherwise, as a qwen write turn did after its job had ended.
     actions:
-      - actor: this
-        method: stopChat
-        arguments: ['jexl:state.getString("extractor")']
+      - actor: chats
+        method: stop
+        arguments: {chat: 'jexl:state.getString("extractor")'}
         execution: direct
       - actor: this
         method: reportFailure

@@ -96,11 +96,12 @@ class PolishFilesWorkflowTest {
         judge = new Fake("REVISE: 同じ指摘です。");
         ActorRef<CallWatchdog> watchdog = chat("02", fixer);
         chat("03", judge);
-        PlanRunner runner = new PlanRunner("plan", system, watchdog);
+        PlanRunner runner = new PlanRunner("plan", system);
         plan = new PlanRunnerIIAR("plan", runner, system);
         system.addIIActor(plan);
         runner.setSelfActorRef(plan);
         system.addIIActor(new WorkflowPluginLoader("loader", system, List.of()));
+        system.addIIActor(new ChatsIIAR("chats", new Chats(system, watchdog, null), system));
         system.addIIActor(new com.scivicslab.turingworkflow.plugins.text.TextsIIAR("texts", system));
         system.addIIActor(new ScopedFilesIIAR("files", new ScopedFiles(new FileAccessScope(dir, List.of(dir))), system));
         Files.createDirectories(dir.resolve("in"));

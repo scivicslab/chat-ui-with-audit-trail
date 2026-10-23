@@ -95,11 +95,12 @@ class ConceptConsolidateWorkflowTest {
         queue.tellNow(q -> q.setSelf(queue)).join();
         ActorRef<CallWatchdog> watchdog = writerChat.createChild("watchdog-for-test", new CallWatchdog());
 
-        PlanRunner runner = new PlanRunner("plan", system, watchdog);
+        PlanRunner runner = new PlanRunner("plan", system);
         plan = new PlanRunnerIIAR("plan", runner, system);
         system.addIIActor(plan);
         runner.setSelfActorRef(plan);
         system.addIIActor(new WorkflowPluginLoader("loader", system, List.of()));
+        system.addIIActor(new ChatsIIAR("chats", new Chats(system, watchdog, null), system));
         system.addIIActor(new ScopedFilesIIAR("files", new ScopedFiles(new FileAccessScope(dir, List.of(dir))), system));
 
         Files.writeString(dir.resolve("loop.result.lisp"), RESULT);

@@ -22,47 +22,59 @@ params:
 steps:
   - states: ["0", "1"]
     label: add-writer
-    actions: [{actor: this, method: addWorker, arguments: ["writer", 'jexl:state.getString("writer")'], execution: direct}]
+    actions: [{actor: this, method: putJson, arguments: {path: 'chat-writer', value: 'jexl:state.getString("writer")'}, execution: direct}]
 
   - states: ["1", "2"]
     label: add-reviewer
-    actions: [{actor: this, method: addWorker, arguments: ["reviewer", 'jexl:state.getString("reviewer")'], execution: direct}]
+    actions: [{actor: this, method: putJson, arguments: {path: 'chat-reviewer', value: 'jexl:state.getString("reviewer")'}, execution: direct}]
 
   - states: ["2", "3"]
     label: first-draft
     actions:
+      - actor: chats
+        method: ask
+        arguments: {chat: 'jexl:state.getString("chat-writer")', prompt: 'jexl:"次の文章を、意味を変えずに読みやすく書き直してください。書き直した本文だけを返してください。\n\n" + state.getString("text")', waiter: 'jexl:self'}
+        execution: direct
       - actor: this
-        method: askWorker
-        arguments: ["writer", 'jexl:"次の文章を、意味を変えずに読みやすく書き直してください。書き直した本文だけを返してください。\n\n" + state.getString("text")']
+        method: putJson
+        arguments: {path: 'reply-writer', value: 'jexl:result'}
         execution: direct
 
   - states: ["3", "4"]
     label: keep-draft
-    actions: [{actor: this, method: keepWorkerReply, arguments: ["writer", "draft"], execution: direct}]
+    actions: [{actor: this, method: copyState, arguments: ['reply-writer', 'draft'], execution: direct}]
 
   - states: ["4", "5"]
     label: review
     actions:
+      - actor: chats
+        method: ask
+        arguments: {chat: 'jexl:state.getString("chat-reviewer")', prompt: 'jexl:"次の文章を、この基準で批評してください。直すべき点だけを箇条書きで挙げてください。\n\n基準:\n" + state.getString("criteria") + "\n\n文章:\n" + state.getString("draft")', waiter: 'jexl:self'}
+        execution: direct
       - actor: this
-        method: askWorker
-        arguments: ["reviewer", 'jexl:"次の文章を、この基準で批評してください。直すべき点だけを箇条書きで挙げてください。\n\n基準:\n" + state.getString("criteria") + "\n\n文章:\n" + state.getString("draft")']
+        method: putJson
+        arguments: {path: 'reply-reviewer', value: 'jexl:result'}
         execution: direct
 
   - states: ["5", "6"]
     label: keep-critique
-    actions: [{actor: this, method: keepWorkerReply, arguments: ["reviewer", "critique"], execution: direct}]
+    actions: [{actor: this, method: copyState, arguments: ['reply-reviewer', 'critique'], execution: direct}]
 
   - states: ["6", "7"]
     label: revise
     actions:
+      - actor: chats
+        method: ask
+        arguments: {chat: 'jexl:state.getString("chat-writer")', prompt: 'jexl:"次の批評に従って文章を直してください。直した本文だけを返してください。\n\n批評:\n" + state.getString("critique") + "\n\n文章:\n" + state.getString("draft")', waiter: 'jexl:self'}
+        execution: direct
       - actor: this
-        method: askWorker
-        arguments: ["writer", 'jexl:"次の批評に従って文章を直してください。直した本文だけを返してください。\n\n批評:\n" + state.getString("critique") + "\n\n文章:\n" + state.getString("draft")']
+        method: putJson
+        arguments: {path: 'reply-writer', value: 'jexl:result'}
         execution: direct
 
   - states: ["7", "8"]
     label: keep-final
-    actions: [{actor: this, method: keepWorkerReply, arguments: ["writer", "polished"], execution: direct}]
+    actions: [{actor: this, method: copyState, arguments: ['reply-writer', 'polished'], execution: direct}]
 
   - states: ["8", "end"]
     label: done

@@ -49,7 +49,7 @@ class ProjectJobQueueTest {
         ActorRef<CallWatchdog> watchdog = system.getActor("callWatchdog") != null
                 ? system.getActor("callWatchdog") : system.actorOf("callWatchdog", new CallWatchdog());
         ActorRef<Project> ref = system.actorOf(projectId, new Project());
-        ref.tell(p -> p.bind(projectId, system, ref, watchdog, null)).join();
+        ref.tell(p -> p.bind(projectId, system, ref, null)).join();
         return ref;
     }
 

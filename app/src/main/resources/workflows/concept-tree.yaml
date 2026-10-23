@@ -51,24 +51,24 @@ steps:
         method: createChild
         arguments: ['jexl:self', "./tree", "com.scivicslab.turingworkflow.plugins.rstframe.ConceptTreeJobIIAR"]
       - actor: this
-        method: addWorker
-        arguments: ["writer", 'jexl:state.getString("writer")']
+        method: putJson
+        arguments: {path: 'chat-writer', value: 'jexl:state.getString("writer")'}
         execution: direct
-      - actor: this
-        method: setChatAgentLoop
-        arguments: ['jexl:state.getString("writer")', "plain-text-no-context-loop.yaml"]
+      - actor: chats
+        method: setAgentLoop
+        arguments: {chat: 'jexl:state.getString("writer")', loop: 'plain-text-no-context-loop.yaml'}
         execution: direct
-      - actor: this
-        method: setChatModel
-        arguments: ['jexl:state.getString("writer")', 'jexl:state.getString("writerModel")']
+      - actor: chats
+        method: setModel
+        arguments: {chat: 'jexl:state.getString("writer")', model: 'jexl:state.getString("writerModel")'}
         execution: direct
-      - actor: this
-        method: setChatNoThink
-        arguments: ['jexl:state.getString("writer")', 'jexl:state.getString("writerNoThink")']
+      - actor: chats
+        method: setNoThink
+        arguments: {chat: 'jexl:state.getString("writer")', value: 'jexl:state.getString("writerNoThink")'}
         execution: direct
-      - actor: this
-        method: clearWorker
-        arguments: ["writer"]
+      - actor: chats
+        method: clear
+        arguments: {chat: 'jexl:state.getString("chat-writer")'}
         execution: direct
 
   - states: ["1", "next"]
@@ -126,15 +126,17 @@ steps:
   - states: ["ask", "next"]
     label: ask-the-writer
     actions:
-      - actor: this
-        method: askWorker
-        arguments:
-          - writer
-          - 'jexl:state.getString("q.question")'
+      - actor: chats
+        method: ask
+        arguments: {chat: 'jexl:state.getString("chat-writer")', prompt: 'jexl:state.getString("q.question")', waiter: 'jexl:self'}
         execution: direct
       - actor: this
-        method: keepWorkerReply
-        arguments: ["writer", "reply"]
+        method: putJson
+        arguments: {path: 'reply-writer', value: 'jexl:result'}
+        execution: direct
+      - actor: this
+        method: copyState
+        arguments: ['reply-writer', 'reply']
         execution: direct
       - actor: ./tree
         method: answer

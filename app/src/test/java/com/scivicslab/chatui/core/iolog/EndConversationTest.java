@@ -3,7 +3,6 @@ package com.scivicslab.chatui.core.iolog;
 import com.scivicslab.chatui.core.actor.ChatSession;
 import com.scivicslab.chatui.core.actor.ChatSessionIIAR;
 import com.scivicslab.chatui.core.actor.ChatUiActorSystem;
-import com.scivicslab.chatui.core.actor.PlanRunner;
 import com.scivicslab.chatui.core.provider.LlmProvider;
 import com.scivicslab.chatui.core.provider.ProviderContext;
 import com.scivicslab.chatui.core.rest.ChatEvent;
@@ -79,8 +78,10 @@ class EndConversationTest {
         return chatName;
     }
 
-    private PlanRunner runner() {
-        return new PlanRunner("project1.plan", system, null);
+    private ActionResult end(String chatName) {
+        com.scivicslab.chatui.core.actor.ChatsIIAR chats = new com.scivicslab.chatui.core.actor.ChatsIIAR("chats",
+                new com.scivicslab.chatui.core.actor.Chats(system, null, null), system);
+        return chats.callByActionName("end", new org.json.JSONObject().put("chat", chatName).toString());
     }
 
     @Test
@@ -89,7 +90,7 @@ class EndConversationTest {
         long sessionId = ioLog.ensureSession(chatName);
         ioLog.record(sessionId, chatName + ".chat", "turn1/conversation", "QUESTION:\nhello");
 
-        ActionResult result = runner().endConversation(chatName);
+        ActionResult result = end(chatName);
 
         assertTrue(result.isSuccess(), result.getResult());
         SessionSummary session = ioLog.store().listSessions(50).stream()
@@ -108,7 +109,7 @@ class EndConversationTest {
         ioLog.ensureSession(ending);
         ioLog.ensureSession(keeping);
 
-        runner().endConversation(ending);
+        end(ending);
 
         assertTrue(ioLog.resumableConversationSquads().contains(keeping),
                 "the one that was not named is still reopened: " + ioLog.resumableConversationSquads());
@@ -137,7 +138,7 @@ class EndConversationTest {
         assertTrue(ioLog.resumableConversationSquads().contains(chatName),
                 "the ConversationSquad is one a restart would build: " + ioLog.resumableConversationSquads());
 
-        ActionResult result = runner().endConversation(chatName);
+        ActionResult result = end(chatName);
 
         assertTrue(result.isSuccess(), result.getResult());
         assertFalse(ioLog.resumableConversationSquads().contains(chatName),
@@ -146,7 +147,7 @@ class EndConversationTest {
 
     @Test
     void aConversationThatIsNotThereIsSaidSoRatherThanPassedOver() {
-        ActionResult result = runner().endConversation("project1/chat-nobody");
+        ActionResult result = end("project1/chat-nobody");
 
         assertFalse(result.isSuccess());
         assertTrue(result.getResult().contains("project1/chat-nobody"), result.getResult());

@@ -102,7 +102,7 @@ class ProjectWorkflowCatalogTest {
         assertNotNull(doc);
         assertEquals(ProjectWorkflowCatalog.ORIGIN_BUNDLED, doc.origin());
         assertFalse(doc.editable());
-        assertTrue(doc.yaml().contains("addWorker"));
+        assertTrue(doc.yaml().contains("askAll"));
     }
 
     @Test

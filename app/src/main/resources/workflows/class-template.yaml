@@ -50,16 +50,16 @@ steps:
     label: add-writer
     actions:
       - actor: this
-        method: addWorker
-        arguments: ["writer", 'jexl:state.getString("writer")']
+        method: putJson
+        arguments: {path: 'chat-writer', value: 'jexl:state.getString("writer")'}
         execution: direct
-      - actor: this
-        method: setChatModel
-        arguments: ['jexl:state.getString("writer")', 'jexl:state.getString("writerModel")']
+      - actor: chats
+        method: setModel
+        arguments: {chat: 'jexl:state.getString("writer")', model: 'jexl:state.getString("writerModel")'}
         execution: direct
-      - actor: this
-        method: setChatNoThink
-        arguments: ['jexl:state.getString("writer")', 'jexl:state.getString("writerNoThink")']
+      - actor: chats
+        method: setNoThink
+        arguments: {chat: 'jexl:state.getString("writer")', value: 'jexl:state.getString("writerNoThink")'}
         execution: direct
 
   - states: ["1", "read"]
@@ -85,9 +85,9 @@ steps:
         method: putJson
         arguments: {path: "frame", value: "jexl:result"}
         execution: direct
-      - actor: this
-        method: clearWorker
-        arguments: ["writer"]
+      - actor: chats
+        method: clear
+        arguments: {chat: 'jexl:state.getString("chat-writer")'}
         execution: direct
 
   - states: ["1", "failed"]
@@ -121,11 +121,13 @@ steps:
   - states: ["template", "keep-template"]
     label: template-turn
     actions:
+      - actor: chats
+        method: ask
+        arguments: {chat: 'jexl:state.getString("chat-writer")', prompt: 'jexl:"次は教科書の一部です。\n" + state.getString("material") + "\n----- ここまで -----\n\nこの部分で、教科書は" + state.getString("subject") + "を、どんな部分に分け、どの順で説明していますか。それを読み取り、" + state.getString("subject") + "を説明する文書のテンプレートを rst-on-lisp で書いてください。\n\nrst-on-lisp では、文書を (defrule 名前 -> 右辺 :key 値) の規則の集まりとして書きます。右辺に名前を並べた規則は節の並びを、:nucleus と関係名の対を並べた規則は段落の文どうしの関係を表します。右辺を書かずに :instruction \"指示\" だけを持つ規則は、後で LLM が埋める空欄です。テンプレートとは、空欄（:instruction の規則）を持つ文書です。\n\n形の例として、1 行の意味を説明するフレームを渡します。Problem Definition に説明が持つ部分を、How to do it にその部分を全部埋めた例を書いた文書です。\n```lisp\n" + state.getString("frame") + "\n```\n\n書き方:\n- 骨組みは次のとおりにします。\n  (in-package :rst)\n  (defdocument ClassTemplate_261013_oo01)\n  (defrule document -> title description problem-definition how-to-do-it under-the-hood related-docs)\n  (defrule title -> \"…\")\n  (defrule description -> \"…\")\n  (defrule problem-definition -> :nucleus pd/1)\n  (defrule pd/1 -> \"このテンプレートが何を説明するためのものかを書く\")\n  (defrule how-to-do-it -> :nucleus how/sections)\n  (defrule how/sections -> how/<部分1> how/<部分2> …)\n  (defrule under-the-hood ->)\n  (defrule related-docs ->)\n- How to do it の部分 1 つを、見出しを持つ規則 1 つにします。(defrule how/<部分> -> how/<部分>/1 :heading \"### <番号>. <部分の名前>\")\n- 中身は空欄にします。(defrule how/<部分>/1 -> :instruction \"<この部分に何を、どう書くか>\" :source \"<この書き方の元になった教科書の節番号と見出し>\")\n- :instruction には、教科書の説明の仕方を、別のクラスにも当てはまる言い方で書きます。Employee など教科書の例の名前を書きません。\n- 用語どうしの細かな関係は要りません。説明の部分と順序を決めることが目的です。\n\n返事は、テンプレートの全文を ```lisp で始まるコードブロック 1 つで書いてください。"', waiter: 'jexl:self'}
+        execution: direct
       - actor: this
-        method: askWorker
-        arguments:
-          - writer
-          - 'jexl:"次は教科書の一部です。\n" + state.getString("material") + "\n----- ここまで -----\n\nこの部分で、教科書は" + state.getString("subject") + "を、どんな部分に分け、どの順で説明していますか。それを読み取り、" + state.getString("subject") + "を説明する文書のテンプレートを rst-on-lisp で書いてください。\n\nrst-on-lisp では、文書を (defrule 名前 -> 右辺 :key 値) の規則の集まりとして書きます。右辺に名前を並べた規則は節の並びを、:nucleus と関係名の対を並べた規則は段落の文どうしの関係を表します。右辺を書かずに :instruction \"指示\" だけを持つ規則は、後で LLM が埋める空欄です。テンプレートとは、空欄（:instruction の規則）を持つ文書です。\n\n形の例として、1 行の意味を説明するフレームを渡します。Problem Definition に説明が持つ部分を、How to do it にその部分を全部埋めた例を書いた文書です。\n```lisp\n" + state.getString("frame") + "\n```\n\n書き方:\n- 骨組みは次のとおりにします。\n  (in-package :rst)\n  (defdocument ClassTemplate_261013_oo01)\n  (defrule document -> title description problem-definition how-to-do-it under-the-hood related-docs)\n  (defrule title -> \"…\")\n  (defrule description -> \"…\")\n  (defrule problem-definition -> :nucleus pd/1)\n  (defrule pd/1 -> \"このテンプレートが何を説明するためのものかを書く\")\n  (defrule how-to-do-it -> :nucleus how/sections)\n  (defrule how/sections -> how/<部分1> how/<部分2> …)\n  (defrule under-the-hood ->)\n  (defrule related-docs ->)\n- How to do it の部分 1 つを、見出しを持つ規則 1 つにします。(defrule how/<部分> -> how/<部分>/1 :heading \"### <番号>. <部分の名前>\")\n- 中身は空欄にします。(defrule how/<部分>/1 -> :instruction \"<この部分に何を、どう書くか>\" :source \"<この書き方の元になった教科書の節番号と見出し>\")\n- :instruction には、教科書の説明の仕方を、別のクラスにも当てはまる言い方で書きます。Employee など教科書の例の名前を書きません。\n- 用語どうしの細かな関係は要りません。説明の部分と順序を決めることが目的です。\n\n返事は、テンプレートの全文を ```lisp で始まるコードブロック 1 つで書いてください。"'
+        method: putJson
+        arguments: {path: 'reply-writer', value: 'jexl:result'}
         execution: direct
 
   - states: ["template", "failed"]
@@ -136,8 +138,8 @@ steps:
     label: keep-template
     actions:
       - actor: this
-        method: keepWorkerReply
-        arguments: ["writer", "answer"]
+        method: copyState
+        arguments: ['reply-writer', 'answer']
         execution: direct
       - actor: files
         method: write
@@ -167,9 +169,13 @@ steps:
         method: countUp
         arguments: ["nudges", 'jexl:state.getString("maxNudges")']
         execution: direct
+      - actor: chats
+        method: ask
+        arguments: {chat: 'jexl:state.getString("chat-writer")', prompt: '作業を続けてください。テンプレートの全文を、```lisp で始まるコードブロック 1 つで返してください。', waiter: 'jexl:self'}
+        execution: direct
       - actor: this
-        method: askWorker
-        arguments: [writer, '作業を続けてください。テンプレートの全文を、```lisp で始まるコードブロック 1 つで返してください。']
+        method: putJson
+        arguments: {path: 'reply-writer', value: 'jexl:result'}
         execution: direct
 
   - states: ["keep-template", "failed"]
@@ -180,11 +186,13 @@ steps:
     label: fill-turn
     note: The next turn of the same conversation; the book's parts and the template are still in front of the writer.
     actions:
+      - actor: chats
+        method: ask
+        arguments: {chat: 'jexl:state.getString("chat-writer")', prompt: 'jexl:"次に、いま書いたテンプレートを使って、" + state.getString("trial") + "を説明する文書を書いてください。\n- テンプレートの :instruction の規則を、1 つずつ、指示どおりの本文の規則に置き換えます。1 つの空欄を、必要なら段落や箇条書きの規則の組にしてかまいません。\n- 置き換えた規則には :instruction と :source を書きません。\n- defdocument の id は ClassTemplateTrial_261013_oo01 にし、title と description と pd/1 は、この説明の文書のものに書き換えます。\n- 本文は日本語で書き、コードや識別子はバッククォートで囲みます。説明の内容は教科書に書いてあることに限ります。\n\n返事は、文書の全文を ```lisp で始まるコードブロック 1 つで書いてください。"', waiter: 'jexl:self'}
+        execution: direct
       - actor: this
-        method: askWorker
-        arguments:
-          - writer
-          - 'jexl:"次に、いま書いたテンプレートを使って、" + state.getString("trial") + "を説明する文書を書いてください。\n- テンプレートの :instruction の規則を、1 つずつ、指示どおりの本文の規則に置き換えます。1 つの空欄を、必要なら段落や箇条書きの規則の組にしてかまいません。\n- 置き換えた規則には :instruction と :source を書きません。\n- defdocument の id は ClassTemplateTrial_261013_oo01 にし、title と description と pd/1 は、この説明の文書のものに書き換えます。\n- 本文は日本語で書き、コードや識別子はバッククォートで囲みます。説明の内容は教科書に書いてあることに限ります。\n\n返事は、文書の全文を ```lisp で始まるコードブロック 1 つで書いてください。"'
+        method: putJson
+        arguments: {path: 'reply-writer', value: 'jexl:result'}
         execution: direct
 
   - states: ["fill", "failed"]
@@ -195,8 +203,8 @@ steps:
     label: keep-fill
     actions:
       - actor: this
-        method: keepWorkerReply
-        arguments: ["writer", "answer"]
+        method: copyState
+        arguments: ['reply-writer', 'answer']
         execution: direct
       - actor: files
         method: write
@@ -226,9 +234,13 @@ steps:
         method: countUp
         arguments: ["nudges", 'jexl:state.getString("maxNudges")']
         execution: direct
+      - actor: chats
+        method: ask
+        arguments: {chat: 'jexl:state.getString("chat-writer")', prompt: '作業を続けてください。説明の文書の全文を、```lisp で始まるコードブロック 1 つで返してください。', waiter: 'jexl:self'}
+        execution: direct
       - actor: this
-        method: askWorker
-        arguments: [writer, '作業を続けてください。説明の文書の全文を、```lisp で始まるコードブロック 1 つで返してください。']
+        method: putJson
+        arguments: {path: 'reply-writer', value: 'jexl:result'}
         execution: direct
 
   - states: ["keep-fill", "failed"]
@@ -238,11 +250,13 @@ steps:
   - states: ["review", "keep-review"]
     label: review-turn
     actions:
+      - actor: chats
+        method: ask
+        arguments: {chat: 'jexl:state.getString("chat-writer")', prompt: 'jexl:"最後に、書いた説明の文書を教科書と比べて、テンプレートを見直してください。\n- 教科書が説明しているのに、テンプレートに欄が無いために書けなかったことを挙げます。\n- 欄はあるのに、教科書に書くことが無かった欄、ほかの欄と同じことを書いた欄を挙げます。\n- 欄の順序が、教科書の説明の順序や、読者が知る必要のある順序と食い違うところを挙げます。\n\n返事は、見つけたことの箇条書きに続けて、直したテンプレートの全文を ```lisp で始まるコードブロック 1 つで書いてください。直したテンプレートの defdocument の id は ClassTemplate_261013_oo01 のままにします。"', waiter: 'jexl:self'}
+        execution: direct
       - actor: this
-        method: askWorker
-        arguments:
-          - writer
-          - 'jexl:"最後に、書いた説明の文書を教科書と比べて、テンプレートを見直してください。\n- 教科書が説明しているのに、テンプレートに欄が無いために書けなかったことを挙げます。\n- 欄はあるのに、教科書に書くことが無かった欄、ほかの欄と同じことを書いた欄を挙げます。\n- 欄の順序が、教科書の説明の順序や、読者が知る必要のある順序と食い違うところを挙げます。\n\n返事は、見つけたことの箇条書きに続けて、直したテンプレートの全文を ```lisp で始まるコードブロック 1 つで書いてください。直したテンプレートの defdocument の id は ClassTemplate_261013_oo01 のままにします。"'
+        method: putJson
+        arguments: {path: 'reply-writer', value: 'jexl:result'}
         execution: direct
 
   - states: ["review", "failed"]
@@ -253,8 +267,8 @@ steps:
     label: keep-review
     actions:
       - actor: this
-        method: keepWorkerReply
-        arguments: ["writer", "answer"]
+        method: copyState
+        arguments: ['reply-writer', 'answer']
         execution: direct
       - actor: files
         method: write
@@ -284,9 +298,13 @@ steps:
         method: countUp
         arguments: ["nudges", 'jexl:state.getString("maxNudges")']
         execution: direct
+      - actor: chats
+        method: ask
+        arguments: {chat: 'jexl:state.getString("chat-writer")', prompt: '作業を続けてください。見つけたことの箇条書きに続けて、直したテンプレートの全文を、```lisp で始まるコードブロック 1 つで返してください。', waiter: 'jexl:self'}
+        execution: direct
       - actor: this
-        method: askWorker
-        arguments: [writer, '作業を続けてください。見つけたことの箇条書きに続けて、直したテンプレートの全文を、```lisp で始まるコードブロック 1 つで返してください。']
+        method: putJson
+        arguments: {path: 'reply-writer', value: 'jexl:result'}
         execution: direct
 
   - states: ["keep-review", "failed"]
@@ -297,9 +315,9 @@ steps:
     label: report-failure
     note: The conversation is stopped first, so a turn the plan stopped waiting for does not go on using the GPU.
     actions:
-      - actor: this
-        method: stopChat
-        arguments: ['jexl:state.getString("writer")']
+      - actor: chats
+        method: stop
+        arguments: {chat: 'jexl:state.getString("writer")'}
         execution: direct
       - actor: this
         method: reportFailure

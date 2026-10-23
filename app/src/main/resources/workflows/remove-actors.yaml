@@ -28,9 +28,9 @@ steps:
     label: remove-a-conversation
     note: Ends the recorded session first, so a restart does not bring the conversation back.
     actions:
-      - actor: this
-        method: endConversation
-        arguments: ['jexl:state.getString("name")']
+      - actor: chats
+        method: end
+        arguments: {chat: 'jexl:state.getString("name")'}
         execution: direct
       - actor: loader
         method: removeChild

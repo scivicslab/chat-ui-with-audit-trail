@@ -28,7 +28,7 @@ class PlanFinishTest {
     @BeforeEach
     void setUp() {
         system = new IIActorSystem("plan-finish-test");
-        runner = new PlanRunner("plan", system, null);
+        runner = new PlanRunner("plan", system);
         iiar = new PlanRunnerIIAR("plan", runner, system);
         system.addIIActor(iiar);
         runner.setSelfActorRef(iiar);

@@ -193,9 +193,7 @@ public class Project {
     private String projectId;
     private IIActorSystem system;
     private ActorRef<Project> self;
-    private ActorRef<CallWatchdog> watchdog;
     private String systemLogActorName;
-    /** What a job's file steps may touch; {@code null} means none. */
     /**
      * The label on an ordinary line of a job's record: one transition, as it was left.
      *
@@ -214,8 +212,6 @@ public class Project {
 
     /** Where a job's lines are kept so that they outlive this process; null when there is no log. */
     private com.scivicslab.chatui.core.iolog.IoLogStore ioLogStore;
-    /** How a job puts one of its roles on a named provider kind; null when it may not. */
-    private PlanRunner.ProviderChanger providerChanger;
     private Scheduler scheduler;
     private final Map<String, JobView> jobs = new LinkedHashMap<>();
     private final Map<String, RecentEntriesAccumulator> jobLogs = new HashMap<>();
@@ -232,25 +228,10 @@ public class Project {
      * @param projectId          this project's id, the prefix of its jobs' names
      * @param system             the actor system the runners are registered in
      * @param self               this actor's own reference, the runners' parent
-     * @param watchdog           the shared {@link CallWatchdog} a plan's {@code askChat} steps use
      * @param systemLogActorName the system-wide log actor a job's log forwards to
      */
-    public void bind(String projectId, IIActorSystem system, ActorRef<Project> self,
-                     ActorRef<CallWatchdog> watchdog, String systemLogActorName) {
-        bind(projectId, system, self, watchdog, systemLogActorName, null);
-    }
-
-    /**
-     * The same, with the way to put one of a job's roles on a named provider kind
-     * ({@code ChooseTheLlmPerRole_260915_oo01}). A project bound without one runs jobs that can
-     * name a model but not a provider kind, and say so rather than carry on quietly.
-     *
-     * @param providerChanger how a plan changes a conversation's provider kind
-     */
-    public void bind(String projectId, IIActorSystem system, ActorRef<Project> self,
-                     ActorRef<CallWatchdog> watchdog, String systemLogActorName,
-                     PlanRunner.ProviderChanger providerChanger) {
-        bind(projectId, system, self, watchdog, systemLogActorName, providerChanger, null);
+    public void bind(String projectId, IIActorSystem system, ActorRef<Project> self, String systemLogActorName) {
+        bind(projectId, system, self, systemLogActorName, null);
     }
 
     /**
@@ -260,16 +241,12 @@ public class Project {
      *
      * @param ioLogStore where a job opens a session of its own
      */
-    public void bind(String projectId, IIActorSystem system, ActorRef<Project> self,
-                     ActorRef<CallWatchdog> watchdog, String systemLogActorName,
-                     PlanRunner.ProviderChanger providerChanger,
+    public void bind(String projectId, IIActorSystem system, ActorRef<Project> self, String systemLogActorName,
                      com.scivicslab.chatui.core.iolog.IoLogStore ioLogStore) {
         this.ioLogStore = ioLogStore;
-        this.providerChanger = providerChanger;
         this.projectId = projectId;
         this.system = system;
         this.self = self;
-        this.watchdog = watchdog;
         this.systemLogActorName = systemLogActorName;
         // The order of the jobs is kept by a child of its own (ProjectJobQueue_261014_oo01); this
         // actor asks it which job runs next and starts that one.
@@ -354,8 +331,7 @@ public class Project {
         JobView queued = jobs.get(jobId);
         String name = queued.actorName();
         try {
-            PlanRunner runner = new PlanRunner(name, system, watchdog);
-            runner.setProviderChanger(providerChanger);
+            PlanRunner runner = new PlanRunner(name, system);
             PlanRunnerIIAR runnerRef = new PlanRunnerIIAR(name, runner, system);
             runnerRef.setParentName(projectId);
             self.getNamesOfChildren().add(name);
@@ -432,7 +408,7 @@ public class Project {
                     // the loop and returns "Maximum iterations exceeded" — the wrong thing to report.
                     outcome = "(plan stopped by request after " + runner.getCurrentState() + ")";
                 } else if (result.isSuccess()) {
-                    outcome = runner.lastReply() != null ? runner.lastReply() : "(plan finished with no result)";
+                    outcome = runner.lastResult() != null ? runner.lastResult() : "(plan finished with no result)";
                 } else {
                     outcome = "(plan did not finish: " + result.getResult() + ")";
                 }

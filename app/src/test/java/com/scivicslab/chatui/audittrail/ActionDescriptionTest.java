@@ -3,7 +3,7 @@ package com.scivicslab.chatui.audittrail;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.scivicslab.chatui.core.actor.ChatSessionIIAR;
 import com.scivicslab.chatui.core.actor.PlanRunnerIIAR;
-import com.scivicslab.chatui.core.actor.PlanWorkerIIAR;
+import com.scivicslab.chatui.core.actor.ChatsIIAR;
 import com.scivicslab.pojoactor.action.schema.ActionCatalog;
 import com.scivicslab.pojoactor.action.schema.ActionManifest;
 import com.scivicslab.pojoactor.action.schema.ActionSchemaRegistry;
@@ -32,28 +32,20 @@ class ActionDescriptionTest {
     @DisplayName("this: the plan's own steps and the engine's, all @Action methods now")
     void planRunnerActions() {
         SortedSet<String> names = ActionCatalog.actionNamesOf(PlanRunnerIIAR.class);
-        assertTrue(names.containsAll(List.of("askChat", "addWorker", "askWorker", "copyState", "checkState", "countUp",
-                "takeNext", "finish", "reportFailure")), names.toString());
+        assertTrue(names.containsAll(List.of("copyState", "checkState", "countUp", "takeNext", "finish", "reportFailure")), names.toString());
+        assertTrue(names.stream().noneMatch(List.of("askChat", "addWorker", "askWorker", "keepWorkerReply", "setChatModel")::contains),
+                "the conversation steps are the chats actor's: " + names);
         assertTrue(names.containsAll(List.of("putJson", "appendJson", "onlyIf", "call", "apply")),
                 "the JSON State and interpreter actions come with the superclasses: " + names);
     }
 
     @Test
-    @DisplayName("this.askWorker: the first sentence, the argument positions, and the step the bundled YAML writes")
-    void askWorker() {
-        ObjectNode d = ActionCatalog.describe(PlanRunnerIIAR.class, "askWorker", SCHEMAS, MANIFEST);
-        assertTrue(d.get("description").asText().startsWith("Hands a prompt to one worker slot"), d.toString());
-        assertTrue(d.get("argument").get("description").asText().startsWith("[workerId, prompt]"), d.toString());
-        assertTrue(d.get("example").asText().startsWith("- actor: this\n  method: askWorker\n  arguments: [\"judge\""), d.toString());
-        assertEquals(d.get("example").asText(), ActionStepYaml.of("this", "askWorker", d));
-    }
-
-    @Test
-    @DisplayName("worker.ask: reached through apply, and documented so")
-    void workerAsk() {
-        ObjectNode d = ActionCatalog.describe(PlanWorkerIIAR.class, "ask", SCHEMAS, MANIFEST);
-        assertTrue(d.get("description").asText().startsWith("Sends a prompt to this slot's conversation"), d.toString());
-        assertTrue(d.get("example").asText().contains("method: apply"), d.toString());
+    @DisplayName("chats.ask: the first sentence, the arguments, and the step it is written as")
+    void chatsAsk() {
+        ObjectNode d = ActionCatalog.describe(ChatsIIAR.class, "ask", SCHEMAS, MANIFEST);
+        assertTrue(d.get("description").asText().startsWith("Sends a prompt to a conversation and waits for its reply"), d.toString());
+        assertTrue(d.get("argument").get("description").asText().startsWith("{chat, prompt, waiter}"), d.toString());
+        assertTrue(d.get("example").asText().startsWith("- actor: chats\n  method: ask\n  arguments: {chat:"), d.toString());
     }
 
     @Test

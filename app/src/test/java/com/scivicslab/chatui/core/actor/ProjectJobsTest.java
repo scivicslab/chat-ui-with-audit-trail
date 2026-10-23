@@ -47,7 +47,7 @@ class ProjectJobsTest {
     private static ActorRef<Project> boundProject(IIActorSystem system) {
         ActorRef<CallWatchdog> watchdog = system.actorOf("callWatchdog", new CallWatchdog());
         ActorRef<Project> ref = system.actorOf("project1", new Project());
-        ref.tell(p -> p.bind("project1", system, ref, watchdog, null)).join();
+        ref.tell(p -> p.bind("project1", system, ref, null)).join();
         return ref;
     }
 

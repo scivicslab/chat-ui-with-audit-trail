@@ -1,9 +1,6 @@
 package com.scivicslab.chatui.core.actor;
 
-import com.scivicslab.chatui.agent.AskChatTool;
-import com.scivicslab.chatui.core.provider.LlmProvider;
 import com.scivicslab.pojoactor.action.ActionResult;
-import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 import com.scivicslab.turingworkflow.workflow.Interpreter;
 
@@ -24,35 +21,30 @@ import java.util.logging.Logger;
  * {@code requestStop()} (inherited from {@link Interpreter}, safe to send via {@code tellNow}) can
  * stop it between transitions.</p>
  *
- * <p>Holds no {@code ActorRef} to the conversation that owns it; it only knows that conversation's
- * name, which it uses as the waiter id when it waits on someone
+ * <p>Holds nothing of the conversations a plan talks to: a plan reaches them through the actor
+ * {@code chats} by their names, and gives its own name ({@code jexl:self}) as the one who waits
  * ({@code ChatSessionPorting_260823_oo01}'s "look up by name at the point of use").</p>
  */
 public class PlanRunner extends Interpreter {
 
     private static final Logger LOG = Logger.getLogger(PlanRunner.class.getName());
 
-    /** Long, for the same reason {@code ChatSession}'s babysitter phases use one: the conversation
-     *  this asks runs its own multi-step turn inside the call. */
-    private static final int ASK_TIMEOUT_SECONDS = 1800;
-
-    private final ActorRef<CallWatchdog> watchdog;
-    /** This runner's own actor name, e.g. {@code project1/chat-01.plan} — its waiter id. */
+    /** This runner's own actor name, e.g. {@code project1/job-03}. */
     private final String myName;
 
-    /** The last reply a plan step received, and the plan's result when it finishes. */
-    private String lastReply;
+    /** What the last transition left answered; the plan's result when it ends without naming one. */
+    private String lastResult;
+    /** What the last transition that failed answered: why the plan stopped, when it reports a failure. */
+    private String lastFailure;
     /** Completed by {@link #finish()} (or by the caller if the plan never reaches it). */
     private CompletableFuture<String> done;
 
     /**
-     * @param myName   this runner's own actor name
-     * @param system   the actor system, used to reach the conversations a plan step talks to
-     * @param watchdog the shared {@link CallWatchdog}
+     * @param myName this runner's own actor name
+     * @param system the actor system, where the actors a plan step calls are
      */
-    public PlanRunner(String myName, IIActorSystem system, ActorRef<CallWatchdog> watchdog) {
+    public PlanRunner(String myName, IIActorSystem system) {
         this.myName = myName;
-        this.watchdog = watchdog;
         // Assigns Interpreter's own inherited field — do not redeclare it here. A private field of
         // the same name would shadow it, leaving the one Interpreter.action() reads null, and the
         // plan would die on its first step with an NPE.
@@ -80,6 +72,10 @@ public class PlanRunner extends Interpreter {
     @Override
     protected void onExitTransition(com.scivicslab.turingworkflow.workflow.Transition transition,
                                     boolean success, ActionResult result) {
+        if (result != null && result.getResult() != null && !result.getResult().isBlank()) {
+            lastResult = result.getResult();
+            if (!success) lastFailure = result.getResult();
+        }
         java.util.function.Consumer<String> listener = stepListener;
         if (listener != null && transition != null) {
             String label = transition.getLabel();
@@ -99,41 +95,9 @@ public class PlanRunner extends Interpreter {
         super.onExitTransition(transition, success, result);
     }
 
-    /** @return the reply the last plan step received, or {@code null} */
-    public String lastReply() { return lastReply; }
+    /** @return what the last transition left answered, or {@code null} */
+    public String lastResult() { return lastResult; }
 
-    /**
-     * Plan step: sends {@code prompt} to a conversation and waits for its reply. The target is a
-     * qualified conversation name ({@code project1/chat-02}), since a plan is written knowing which
-     * conversations it drives.
-     *
-     * @param target the target conversation's qualified name
-     * @param prompt what to ask it to do
-     * @return {@link ActionResult} with {@code success=true} iff the conversation replied
-     */
-    public ActionResult askChat(String target, String prompt) {
-        if (target == null || target.isBlank()) {
-            return new ActionResult(false, "askChat: target is required");
-        }
-        String reply = AskChatTool.askQualified(system, watchdog, myName, target, prompt,
-                ASK_TIMEOUT_SECONDS);
-        if (reply == null || reply.startsWith("error:")) {
-            lastReply = reply != null ? reply : "no reply from " + target;
-            return new ActionResult(false, lastReply);
-        }
-        lastReply = reply;
-        return new ActionResult(true, "reply received");
-    }
-
-    /**
-     * Plan step: gives this plan a worker slot standing in for one conversation, as its own child
-     * named {@code <plan>.worker-<id>}. Several slots can then be driven at once with {@code apply}
-     * and a pattern such as {@code *.worker-*} ({@code ParallelWorkerPool_260829_oo01}).
-     *
-     * @param workerId       short id for this slot, e.g. {@code "a"}
-     * @param targetChatName the conversation it forwards to, e.g. {@code project1/chat-03}
-     * @return {@link ActionResult} with {@code success=true} iff the slot was created
-     */
     /**
      * Runs one transition, with its {@code note} available to anything the transition creates
      * ({@code ActorPurposeFromWorkflowNote_260831_oo01}). {@code code} and
@@ -156,314 +120,6 @@ public class PlanRunner extends Interpreter {
         } finally {
             ActorNotes.leaveTransition();
         }
-    }
-
-    public ActionResult addWorker(String workerId, String targetChatName) {
-        if (workerId == null || workerId.isBlank()) return new ActionResult(false, "workerId is required");
-        if (targetChatName == null || targetChatName.isBlank()) {
-            return new ActionResult(false, "targetChatName is required");
-        }
-        if (selfActorRef == null || system == null) {
-            return new ActionResult(false, "plan runner is not wired to an actor system");
-        }
-        String workerName = myName + ".worker-" + workerId;
-        if (system.getIIActor(workerName) == null) {
-            PlanWorkerIIAR workerIIAR = new PlanWorkerIIAR(workerName,
-                    new PlanWorker(system, watchdog, myName, targetChatName), system);
-            workerIIAR.setParentName(myName);
-            system.addIIActor(workerIIAR);
-            ActorNotes.record(workerName);
-        }
-        // apply() matches against the caller's own child names, so the slot has to be recorded here.
-        selfActorRef.getNamesOfChildren().add(workerName);
-        return new ActionResult(true, "worker " + workerName + " -> " + targetChatName);
-    }
-
-    /**
-     * Plan step: hands {@code prompt} to one worker slot and waits for its reply
-     * ({@code ChainedRolesInAPlan_260913_oo01}).
-     *
-     * <p>The way to give a conversation a prompt this plan computed. {@code apply} cannot: its
-     * inner {@code arguments} sit inside the outer action's arguments, and the interpreter
-     * evaluates {@code jexl:} only at the top level, so a computed prompt reaches the conversation
-     * as the text {@code jexl:…}. This method's arguments are top-level, so
-     * <code>jexl:'…' + state.getString('draft')</code> is evaluated before it is called.
-     * {@code apply} remains what fans one fixed prompt out to several slots at once.</p>
-     *
-     * @param workerId the slot's short id, as {@link #addWorker} was given it
-     * @param prompt   what to ask the conversation behind it
-     * @return {@link ActionResult} with {@code success=true} iff that slot exists and replied
-     */
-    public ActionResult askWorker(String workerId, String prompt) {
-        if (selfActorRef == null || system == null) {
-            return new ActionResult(false, "plan runner is not wired to an actor system");
-        }
-        if (workerId == null || workerId.isBlank()) return new ActionResult(false, "workerId is required");
-        if (prompt == null || prompt.isBlank()) return new ActionResult(false, "prompt is required");
-        String workerName = myName + ".worker-" + workerId;
-        Object child = system.getIIActor(workerName);
-        if (!(child instanceof PlanWorkerIIAR workerIIAR)) {
-            return new ActionResult(false, "no worker slot named " + workerName);
-        }
-        ActionResult asked = workerIIAR.worker().ask(prompt);
-        if (asked.isSuccess()) lastReply = workerIIAR.worker().lastReply();
-        return asked;
-    }
-
-    /**
-     * How a plan changes which provider kind a conversation talks to, when it is given one.
-     *
-     * <p>Changing the kind builds a provider from a plugin the instance was started with, which is
-     * {@code ChatUiActorSystem}'s work and not something reachable from an actor reference. A plan
-     * started without this can still name a model ({@code ChooseTheLlmPerRole_260915_oo01}).</p>
-     */
-    public interface ProviderChanger {
-        /**
-         * @param chatName the conversation's full actor name
-         * @param kind     the provider kind, e.g. {@code claude}
-         * @param tools    the tool set, or {@code ""} for the kind's own default
-         * @return what went wrong, or {@code null} when the change was made
-         */
-        String change(String chatName, String kind, String tools);
-    }
-
-    private ProviderChanger providerChanger;
-
-    /** @param changer how to change a conversation's provider kind; {@code null} to refuse to */
-    public void setProviderChanger(ProviderChanger changer) {
-        this.providerChanger = changer;
-    }
-
-    /**
-     * Plan step: puts one role's conversation on a named model.
-     *
-     * <p>Which model judged a document is part of what the run was. Named in the job's parameters
-     * rather than left on the conversation, the run says it itself, and the change is written to
-     * that conversation's settings record as any other would be
-     * ({@code ChooseTheLlmPerRole_260915_oo01}).</p>
-     *
-     * @param chatName the conversation's full actor name, e.g. {@code project1/chat-02}
-     * @param model    the model to run on; blank leaves the conversation as it was
-     * @return {@link ActionResult} with {@code success=true} iff that conversation was there
-     */
-    public ActionResult setChatModel(String chatName, String model) {
-        if (system == null) return new ActionResult(false, "plan runner is not wired to an actor system");
-        if (chatName == null || chatName.isBlank()) return new ActionResult(false, "chatName is required");
-        if (model == null || model.isBlank()) {
-            return new ActionResult(true, "no model named; " + chatName + " stays as it was");
-        }
-        ActorRef<LlmProvider> providerRef = system.getActor(chatName + ".chat.provider");
-        if (providerRef == null) return new ActionResult(false, "chat not found: " + chatName);
-        providerRef.tell(p -> p.setModel(model)).join();
-        return new ActionResult(true, chatName + " runs on " + model);
-    }
-
-    /**
-     * Plan step: puts a conversation on another agent loop, which also decides how each of its
-     * prompts is built ({@code AgentLoopDecidesThePrompt_261020_oo01}).
-     *
-     * @param chatName the conversation's qualified name
-     * @param loopFile an agent loop under {@code /workflows/}, e.g. {@code plain-text-loop.yaml}; blank leaves it as it is
-     * @return {@link ActionResult} with {@code success=true} iff the conversation is on that loop
-     */
-    public ActionResult setChatAgentLoop(String chatName, String loopFile) {
-        if (system == null) return new ActionResult(false, "plan runner is not wired to an actor system");
-        if (chatName == null || chatName.isBlank()) return new ActionResult(false, "chatName is required");
-        if (loopFile == null || loopFile.isBlank()) {
-            return new ActionResult(true, "no agent loop named; " + chatName + " stays as it was");
-        }
-        Object session = system.getIIActor(chatName + ".chat");
-        if (!(session instanceof ChatSessionIIAR chatSessionIIAR)) {
-            return new ActionResult(false, "chat not found: " + chatName);
-        }
-        String refused = chatSessionIIAR.setAgentLoopWorkflowFile(loopFile.strip());
-        return refused == null
-                ? new ActionResult(true, chatName + " runs " + loopFile.strip())
-                : new ActionResult(false, refused);
-    }
-
-    /**
-     * Plan step: says whether one role's conversation asks its model to skip the thinking phase
-     * ({@code ThinkingAndEffortAreConversationSettings_260917_oo01}).
-     *
-     * <p>{@code askWorker} carries a prompt and nothing else, so a run that wants an answer without
-     * reasoning cannot ask for it prompt by prompt. It says so once, here, as it names the model.</p>
-     *
-     * @param chatName the conversation's full actor name
-     * @param value    {@code true} or {@code false}; blank leaves the conversation as it was
-     * @return {@link ActionResult} with {@code success=true} iff that conversation was there
-     */
-    public ActionResult setChatNoThink(String chatName, String value) {
-        if (system == null) return new ActionResult(false, "plan runner is not wired to an actor system");
-        if (chatName == null || chatName.isBlank()) return new ActionResult(false, "chatName is required");
-        if (value == null || value.isBlank()) {
-            return new ActionResult(true, "nothing said about thinking; " + chatName + " stays as it was");
-        }
-        Object session = system.getIIActor(chatName + ".chat");
-        if (!(session instanceof ChatSessionIIAR chatSessionIIAR)) {
-            return new ActionResult(false, "chat not found: " + chatName);
-        }
-        boolean noThink = Boolean.parseBoolean(value.trim());
-        chatSessionIIAR.tell(a -> ((ChatSession) a).setNoThink(noThink)).join();
-        return new ActionResult(true, chatName + (noThink ? " answers without thinking" : " thinks as it did"));
-    }
-
-    /**
-     * Plan step: says how hard one role's conversation should work on an answer, where its provider
-     * has such a setting ({@code ThinkingAndEffortAreConversationSettings_260917_oo01}).
-     *
-     * @param chatName the conversation's full actor name
-     * @param effort   what the harness calls its levels; blank leaves the conversation as it was
-     * @return {@link ActionResult} with {@code success=true} iff that conversation was there
-     */
-    public ActionResult setChatEffort(String chatName, String effort) {
-        if (system == null) return new ActionResult(false, "plan runner is not wired to an actor system");
-        if (chatName == null || chatName.isBlank()) return new ActionResult(false, "chatName is required");
-        if (effort == null || effort.isBlank()) {
-            return new ActionResult(true, "no effort named; " + chatName + " stays as it was");
-        }
-        ActorRef<LlmProvider> providerRef = system.getActor(chatName + ".chat.provider");
-        if (providerRef == null) return new ActionResult(false, "chat not found: " + chatName);
-        providerRef.tell(p -> p.setEffort(effort)).join();
-        return new ActionResult(true, chatName + " works at " + effort);
-    }
-
-    /**
-     * Plan step: puts one role's conversation on a named provider kind.
-     *
-     * @param chatName the conversation's full actor name
-     * @param kind     {@code openai-compat}, {@code claude}, {@code codex}; blank leaves it as it was
-     * @param tools    the tool set to give it, or blank for the kind's own default
-     * @return {@link ActionResult} with {@code success=true} iff the change was made; a kind this
-     *         instance was not started with is a failure, not a silent fallback
-     */
-    public ActionResult setChatProvider(String chatName, String kind, String tools) {
-        if (chatName == null || chatName.isBlank()) return new ActionResult(false, "chatName is required");
-        if (kind == null || kind.isBlank()) {
-            return new ActionResult(true, "no provider named; " + chatName + " stays as it was");
-        }
-        if (providerChanger == null) {
-            return new ActionResult(false,
-                    "this job cannot change a provider kind; name a model instead, or set the"
-                            + " provider on " + chatName + " before running");
-        }
-        String why = providerChanger.change(chatName, kind, tools == null ? "" : tools);
-        return why == null
-                ? new ActionResult(true, chatName + " talks to " + kind)
-                : new ActionResult(false, why);
-    }
-
-    /**
-     * Plan step: stops whatever a conversation is in the middle of.
-     *
-     * <p>A plan that has stopped waiting has to stop the work too. One run's fixer answered for
-     * thirty minutes and 131,000 characters; the plan timed out, the job ended, and the
-     * conversation carried on writing with the GPU to itself. The same thing the Cancel button
-     * does ({@code WhenTheTwoRolesDoNotAgree_260915_oo01}).</p>
-     *
-     * @param chatName the conversation's full actor name
-     * @return {@link ActionResult} with {@code success=true} iff that conversation was there
-     */
-    public ActionResult stopChat(String chatName) {
-        if (system == null) return new ActionResult(false, "plan runner is not wired to an actor system");
-        if (chatName == null || chatName.isBlank()) return new ActionResult(false, "chatName is required");
-        Object session = system.getIIActor(chatName + ".chat");
-        if (!(session instanceof ChatSessionIIAR chatSessionIIAR)) {
-            return new ActionResult(false, "chat not found: " + chatName);
-        }
-        chatSessionIIAR.tellNow(a -> ((ChatSession) a).cancel()).join();
-        return new ActionResult(true, "told " + chatName + " to stop");
-    }
-
-    /**
-     * Plan step: ends one conversation — its recorded session and the history it is holding —
-     * named in full, whether or not this plan ever used it.
-     *
-     * <p>What {@code clearWorker} does for a slot this plan created, for a conversation that was
-     * already there. Removing a conversation's actor is not enough on its own: the I/O log still
-     * holds a running session for it, and {@code reopenRecordedConversationSquads} builds a ConversationSquad for every
-     * running session at start-up, so the conversation would come back at the next restart. Ending
-     * the session leaves every line it wrote in the database — {@code IoLogSearch} still finds
-     * them — and stops it being reopened.</p>
-     *
-     * @param chatName the conversation's full actor name, e.g. {@code project1/chat-t1}
-     * @return {@link ActionResult} with {@code success=true} iff that conversation was there
-     */
-    public ActionResult endConversation(String chatName) {
-        if (system == null) {
-            return new ActionResult(false, "plan runner is not wired to an actor system");
-        }
-        if (chatName == null || chatName.isBlank()) return new ActionResult(false, "chatName is required");
-        Object session = system.getIIActor(chatName + ".chat");
-        if (!(session instanceof ChatSessionIIAR chatSessionIIAR)) {
-            return new ActionResult(false, "chat not found: " + chatName);
-        }
-        chatSessionIIAR.tell(a -> ((ChatSession) a).clearHistory()).join();
-        return new ActionResult(true, "ended the conversation " + chatName);
-    }
-
-    /**
-     * Plan step: empties the conversation behind one worker slot, so the next prompt starts from
-     * nothing ({@code SelfContainedPromptsPerCriterion_260913_oo01}).
-     *
-     * <p>What a checklist run needs. Each prompt carries the rule and the whole text, so the
-     * conversation's history adds nothing and costs the context it takes up. Left to accumulate, a
-     * run over six criteria pushes the model past its window and the conversation answers with
-     * nothing, which reaches the plan as {@code no result from chat}.</p>
-     *
-     * @param workerId the slot's short id, as {@link #addWorker} was given it
-     * @return {@link ActionResult} with {@code success=true} iff that slot's conversation was found
-     */
-    public ActionResult clearWorker(String workerId) {
-        if (selfActorRef == null || system == null) {
-            return new ActionResult(false, "plan runner is not wired to an actor system");
-        }
-        if (workerId == null || workerId.isBlank()) return new ActionResult(false, "workerId is required");
-        String workerName = myName + ".worker-" + workerId;
-        Object slot = system.getIIActor(workerName);
-        if (!(slot instanceof PlanWorkerIIAR workerIIAR)) {
-            return new ActionResult(false, "no worker slot named " + workerName);
-        }
-        String chatName = workerIIAR.worker().targetChatName();
-        Object session = system.getIIActor(chatName + ".chat");
-        if (!(session instanceof ChatSessionIIAR chatSessionIIAR)) {
-            return new ActionResult(false, "chat not found: " + chatName);
-        }
-        chatSessionIIAR.tell(a -> ((ChatSession) a).clearHistory()).join();
-        return new ActionResult(true, "cleared the history of " + chatName);
-    }
-
-    /**
-     * Plan step: puts what one worker slot last replied into this plan's own state, under
-     * {@code key}, so a later step can hand it to somebody else with
-     * <code>jexl:state.getString('key')</code> ({@code ChainedRolesInAPlan_260913_oo01}).
-     *
-     * <p>What a plan needs to pass a draft from a writer to a reviewer, and the reviewer's
-     * criticism back to the writer. {@code collectWorkerReplies} gathers every slot at once and is
-     * the end of a fan-out; this takes one slot and is the middle of a chain. An expression cannot
-     * read the slot itself: JEXL may only call methods on the engine's own packages, so
-     * {@code actors.get(…).lastReply()} answers {@code null} for a conversation's slot.</p>
-     *
-     * @param workerId the slot's short id, as {@link #addWorker} was given it
-     * @param key      where to put the reply in this plan's state
-     * @return {@link ActionResult} with {@code success=true} iff that slot exists and has replied
-     */
-    public ActionResult keepWorkerReply(String workerId, String key) {
-        if (selfActorRef == null || system == null) {
-            return new ActionResult(false, "plan runner is not wired to an actor system");
-        }
-        if (workerId == null || workerId.isBlank()) return new ActionResult(false, "workerId is required");
-        if (key == null || key.isBlank()) return new ActionResult(false, "key is required");
-        String workerName = myName + ".worker-" + workerId;
-        Object child = system.getIIActor(workerName);
-        if (!(child instanceof PlanWorkerIIAR workerIIAR)) {
-            return new ActionResult(false, "no worker slot named " + workerName);
-        }
-        String reply = workerIIAR.worker().lastReply();
-        if (reply == null) return new ActionResult(false, workerName + " has not replied yet");
-        selfActorRef.putJson(key, reply);
-        return new ActionResult(true, "kept " + reply.length() + " chars of " + workerName
-                + " as '" + key + "'");
     }
 
     /**
@@ -572,34 +228,6 @@ public class PlanRunner extends Interpreter {
     }
 
     /**
-     * Plan step: gathers what every worker slot replied into this plan's result, in slot-name order
-     * so the output does not depend on which slot happened to finish first.
-     *
-     * @return {@link ActionResult} with {@code success=true} iff at least one slot had a reply
-     */
-    public ActionResult collectWorkerReplies() {
-        if (selfActorRef == null || system == null) {
-            return new ActionResult(false, "plan runner is not wired to an actor system");
-        }
-        StringBuilder joined = new StringBuilder();
-        int found = 0;
-        for (String childName : new java.util.TreeSet<>(selfActorRef.getNamesOfChildren())) {
-            // Object, not IIActorRef<?>: getIIActor's element type and PlanWorkerIIAR's differ, so
-            // the compiler rejects the pattern match on the narrower static type.
-            Object child = system.getIIActor(childName);
-            if (!(child instanceof PlanWorkerIIAR workerIIAR)) continue;
-            PlanWorker worker = workerIIAR.worker();
-            if (worker.lastReply() == null) continue;
-            found++;
-            joined.append("## ").append(worker.targetChatName()).append("\n")
-                  .append(worker.lastReply()).append("\n\n");
-        }
-        if (found == 0) return new ActionResult(false, "no worker replies to collect");
-        lastReply = joined.toString().stripTrailing();
-        return new ActionResult(true, "collected " + found + " worker reply/replies");
-    }
-
-    /**
      * Terminal step: hands the last reply back to whoever is waiting on this plan.
      *
      * @return {@link ActionResult} with {@code success=true} always
@@ -609,18 +237,18 @@ public class PlanRunner extends Interpreter {
     }
 
     /**
-     * Terminal step: hands back what this plan's state holds under {@code key}, or its last reply
-     * when no key is given ({@code ChainedRolesInAPlan_260913_oo01}). A chain that kept each role's
-     * answer with {@link #keepWorkerReply} names the one that is the plan's product, rather than
-     * ending with whatever the last step happened to answer.
+     * Terminal step: hands back what this plan's state holds under {@code key}, or what the last
+     * transition answered when no key is given ({@code ChainedRolesInAPlan_260913_oo01}). A chain that
+     * kept each role's answer names the one that is the plan's product, rather than ending with
+     * whatever the last step happened to answer.
      *
-     * @param key where the result is in this plan's state, or {@code null} for the last reply
+     * @param key where the result is in this plan's state, or {@code null} for the last answer
      * @return {@link ActionResult} with {@code success=true} always
      */
     public ActionResult finish(String key) {
         String kept = (key == null || key.isBlank() || selfActorRef == null)
                 ? null : keptUnder(key);
-        String result = kept != null && !kept.isBlank() ? kept : lastReply;
+        String result = kept != null && !kept.isBlank() ? kept : lastResult;
         complete(result != null ? result : "(plan finished with no result)");
         return new ActionResult(true, "finished");
     }
@@ -645,14 +273,15 @@ public class PlanRunner extends Interpreter {
     }
 
     /**
-     * Fallback step, for the same reason the babysitter workflows have one: a failed
-     * {@link #askChat} would otherwise leave its state with no transition left to try, and whoever
-     * is waiting would wait until their own timeout instead of being told what happened.
+     * Fallback step, for the same reason the babysitter workflows have one: a failed step would
+     * otherwise leave its state with no transition left to try, and whoever is waiting would wait
+     * until their own timeout instead of being told what happened. Says what the last failed
+     * transition answered.
      *
      * @return {@link ActionResult} with {@code success=true} always
      */
     public ActionResult reportFailure() {
-        complete("(plan stopped: " + lastReply + ")");
+        complete("(plan stopped: " + (lastFailure != null ? lastFailure : "no step failed") + ")");
         return new ActionResult(true, "reported failure");
     }
 
