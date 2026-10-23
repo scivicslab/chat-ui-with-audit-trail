@@ -2,7 +2,7 @@ name: book-review
 description: |
   Reviews the relations book-relations.yaml found (FrameOntology_261021_oo01, step 7, a simple review). The
   model is shown a section's sentences, its concepts and its relations numbered, and says of each whether it
-  stands (keep), is of another kind (is-a, part-of, feature), runs the other way (reverse), or is wrong
+  stands (keep), is of another kind (is-a, part-of, feature, other), runs the other way (reverse), or is wrong
   (drop): "multithreading part-of concurrent programming" should be is-a, and "Java feature of concurrent
   programming" should go. The verdicts are stored with the relations in the H2 database; the Sections tab
   shows the relations as the review left them. The work is done by the books actor of plugin-rst-frame.
