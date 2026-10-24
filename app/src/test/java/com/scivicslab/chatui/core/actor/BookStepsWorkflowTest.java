@@ -59,9 +59,9 @@ class BookStepsWorkflowTest {
                 asked.add(new JSONObject(body).getJSONArray("messages").getJSONObject(0).getString("content"));
             }
             String question = new JSONObject(body).getJSONArray("messages").getJSONObject(0).getString("content");
-            String answer = question.contains("Split the blocks into groups")
+            String answer = question.contains("Split the blocks into units")
                     ? "p1-p2 | sequence"
-                    : question.contains("The blocks have been split into these groups")
+                    : question.contains("The blocks have been split into these units")
                     ? "g1: concurrent programming\np1 | multithreading\np2 | processes side by side"
                     : question.contains("Which sentences state a property of")
                     ? "p1/1 | is | one way to program concurrently"
@@ -180,8 +180,7 @@ class BookStepsWorkflowTest {
             assertEquals("concurrent programming", p.concept(), "the concept the model names");
             assertEquals(List.of("p1", "p2"), p.members().stream().map(m -> m.block()).toList());
         }
-        assertEquals("1 section(s) of core split into groups: {sequence=1}, 0 failed; 0 section(s) of core asked for clusters: {}, 0 failed; "
-                + "1 section(s) of core asked: 0 cause(s), 0 motive(s), "
+        assertEquals("1 section(s) of core split into groups: {sequence=1}, 0 failed; 1 section(s) of core asked: 0 cause(s), 0 motive(s), "
                 + "0 failed; 1 section(s) of core asked: {is=1}, 0 failed", run("book-frame-data.yaml"),
                 "the section has no sentence of cause or motive, so only its group and one property are read");
         try (BookStore s = new BookStore("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
