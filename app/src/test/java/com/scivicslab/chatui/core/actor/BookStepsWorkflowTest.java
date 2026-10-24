@@ -153,11 +153,12 @@ class BookStepsWorkflowTest {
             var items = s.frameItems("core").get("10.1.1").get("concurrent programming");
             assertEquals("What is concurrent programming?", items.get(0).question());
         }
-        assertEquals("1 concept(s) of core, 0 of them in more than one section, 0 failed; 0 concept(s) of core given 0 item(s), 0 failed; "
-                + "0 concept(s) of core given 0 item(s), 0 failed", run("book-generalize.yaml"),
-                "one section makes one concept of the book, nothing to merge, and no concept with two kinds that are concepts");
+        assertEquals("1 concrete frame(s) of core placed: 0 into frames already made, 1 new; 1 generalized frame(s) in the registry, 0 failed; "
+                + "0 relation(s) between generalized frames from core: {}; 0 generalized frame(s) named, 0 failed; 0 generalized frame(s) given 0 item(s), 0 failed", run("book-generalize.yaml"),
+                "one concrete frame starts the registry with a new id; a frame of one concrete frame keeps its items");
         try (BookStore s = new BookStore("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
-            assertEquals(List.of("concurrent programming"), s.entities("core").stream().map(BookStore.Entity::id).toList());
+            assertEquals(List.of("F0001 concurrent programming"), s.registry().stream().map(f -> f.id() + " " + f.name()).toList());
+            assertEquals("What is concurrent programming?", s.registryItems().get("F0001").get(0).question());
             // a second block, so the section's blocks have something to say of each other
             s.saveSectionRules("core", new BookStore.SectionRules("10.1.1", """
                     (defrule s1 -> p1 p2 :heading "## 10.1.1. Threads")

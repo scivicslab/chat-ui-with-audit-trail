@@ -1,14 +1,14 @@
 name: book-generalize
 description: |
-  Makes the frames of the book, after book-frame-items.yaml (FrameOntology_261021_oo01, the generalized frames), in three
-  steps. Recognize the concepts: the concrete-frame concepts of all sections whose names agree are candidates, and the
-  model says, by the questions each section answers about them, which are one concept; each concept of the book gets an
-  id. Merge: the frame material of a concept found in several sections is put together and asked the same question as
-  a concrete frame (which questions do the sentences answer, and which sentence answers which). Generalize: by the
-  concept tree (the reviewed is-a relations and the kinds the pattern step named), a concept with two kinds or more
-  becomes a generalized concept, whose material is its own and its kinds', asked the same question. The Book frames tab
-  shows the concepts of the book, their frames and their material. The work is done by the books actor of
-  plugin-rst-frame.
+  Makes the generalized frames, after book-frame-items.yaml (FrameOntology_261021_oo01), in a registry kept across books
+  and runs. Place: the registry starts empty (sections "reset" empties it); each concrete frame of the book, in the
+  book's order, is matched against the generalized frames already made, and put into the one that explains the same
+  kind of subject, or starts a new one with a new id. Each new id has the is-a tree looked at again around it: whether
+  the new frame is a kind of one already made, or ones already made are kinds of it. Relate: the relations the sections
+  found between their concepts (part-of, feature, operation, other) are given to the generalized frames, the network
+  beside the is-a tree. Name: a generalized frame with several concrete frames is named from all of them. Items: such a frame is asked the same question as a
+  concrete frame over their material put together. The Integrated frames tab shows the is-a tree, each frame's
+  relations, its frame and its material. The work is done by the books actor of plugin-rst-frame.
 params:
   name:
     label: "The book's name"
@@ -44,54 +44,70 @@ steps:
         arguments: ['jexl:self', "./books", "com.scivicslab.turingworkflow.plugins.rstframe.BookStructureIIAR"]
 
   - states: ["1", "2"]
-    label: recognize-the-concepts
-    note: Every concrete-frame concept of the book is recognized again; the concepts of the book stored before are replaced.
+    label: place-the-concrete-frames
+    note: Each concrete frame not placed yet is matched against the registry, one at a time; the registry grows.
     actions:
       - actor: ./books
-        method: identify
+        method: place
         arguments: {db: 'jexl:state.getString("db")', name: 'jexl:state.getString("name")', url: 'jexl:state.getString("url")', model: 'jexl:state.getString("model")', parallel: 'jexl:state.getString("parallel")', sections: ""}
       - actor: this
         method: putJson
-        arguments: {path: identified, value: "jexl:result"}
+        arguments: {path: placed, value: "jexl:result"}
         execution: direct
 
   - states: ["2", "3"]
-    label: merge-the-material
-    note: Each concept found in several sections is asked its items over its material put together.
+    label: relate-the-frames
+    note: The sections' relations between their concepts become relations between generalized frames.
     actions:
       - actor: ./books
-        method: merge
+        method: relate
         arguments: {db: 'jexl:state.getString("db")', name: 'jexl:state.getString("name")', url: 'jexl:state.getString("url")', model: 'jexl:state.getString("model")', parallel: 'jexl:state.getString("parallel")', sections: ""}
       - actor: this
         method: putJson
-        arguments: {path: merged, value: "jexl:result"}
+        arguments: {path: related, value: "jexl:result"}
         execution: direct
 
   - states: ["3", "4"]
-    label: generalize-the-concepts
-    note: Each concept with two kinds or more becomes a generalized concept, asked its items over its and its kinds' material.
+    label: name-the-frames
+    note: Each generalized frame with several concrete frames is named from all of them; while frames are placed, names stay.
     actions:
       - actor: ./books
-        method: generalize
+        method: frame-names
         arguments: {db: 'jexl:state.getString("db")', name: 'jexl:state.getString("name")', url: 'jexl:state.getString("url")', model: 'jexl:state.getString("model")', parallel: 'jexl:state.getString("parallel")', sections: ""}
       - actor: this
         method: putJson
-        arguments: {path: outcome, value: 'jexl:state.getString("identified") + "; " + state.getString("merged") + "; " + result'}
+        arguments: {path: named, value: "jexl:result"}
+        execution: direct
+
+  - states: ["4", "5"]
+    label: ask-the-frames-items
+    note: Each generalized frame with several concrete frames is asked its items over their material put together.
+    actions:
+      - actor: ./books
+        method: frame-items
+        arguments: {db: 'jexl:state.getString("db")', name: 'jexl:state.getString("name")', url: 'jexl:state.getString("url")', model: 'jexl:state.getString("model")', parallel: 'jexl:state.getString("parallel")', sections: ""}
+      - actor: this
+        method: putJson
+        arguments: {path: outcome, value: 'jexl:state.getString("placed") + "; " + state.getString("related") + "; " + state.getString("named") + "; " + result'}
         execution: direct
 
   - states: ["1", "failed"]
-    label: could-not-recognize
+    label: could-not-place
     actions: [{actor: this, method: doNothing, arguments: ["the book is not in the database, or the model could not be reached"], execution: direct}]
 
   - states: ["2", "failed"]
-    label: could-not-merge
-    actions: [{actor: this, method: doNothing, arguments: ["the material could not be merged"], execution: direct}]
+    label: could-not-relate
+    actions: [{actor: this, method: doNothing, arguments: ["the frames could not be related"], execution: direct}]
 
   - states: ["3", "failed"]
-    label: could-not-generalize
-    actions: [{actor: this, method: doNothing, arguments: ["the concepts could not be generalized"], execution: direct}]
+    label: could-not-name
+    actions: [{actor: this, method: doNothing, arguments: ["the frames could not be named"], execution: direct}]
 
-  - states: ["4", "end"]
+  - states: ["4", "failed"]
+    label: could-not-ask-items
+    actions: [{actor: this, method: doNothing, arguments: ["the items of the frames could not be asked"], execution: direct}]
+
+  - states: ["5", "end"]
     label: tear-down-actor-tree
     actions:
       - actor: loader
