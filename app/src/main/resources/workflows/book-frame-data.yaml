@@ -1,9 +1,10 @@
 name: book-frame-data
 description: |
-  Takes from a book the data the writing steps need (FrameDataWorkflow_261024_oo01), after book-rules.yaml, in three
+  Takes from a book the data the writing steps need (FrameDataWorkflow_261024_oo01), after book-rules.yaml, in four
   steps. Groups: each section's blocks are split into groups of consecutive blocks, each explaining one main concept by
   sequence, structure, set, or one block making one point; the model names each group's main concept and what each block
-  is in it. Causes: every sentence joined to its nucleus by a relation of cause or motive is read with its block, and the
+  is in it. Clusters: consecutive groups that together explain one larger thing (the groups on three kinds of comment
+  are the set of comments) are put under it, as a set, a structure or a sequence. Causes: every sentence joined to its nucleus by a relation of cause or motive is read with its block, and the
   model names the two things it ties. Properties: for each group, the model says which sentences state what its main
   concept is, has or does. A section done is not asked again; the sections named are. The answers are stored in the H2
   database; the Sections tab shows them. The work is done by the books actor of plugin-rst-frame.
@@ -56,7 +57,19 @@ steps:
         arguments: {path: groups, value: "jexl:result"}
         execution: direct
 
-  - states: ["2", "3"]
+  - states: ["2", "2c"]
+    label: put-groups-into-clusters
+    note: Each section of two groups or more not asked yet; a run of groups explaining one larger thing becomes a cluster.
+    actions:
+      - actor: ./books
+        method: clusters
+        arguments: {db: 'jexl:state.getString("db")', name: 'jexl:state.getString("name")', url: 'jexl:state.getString("url")', model: 'jexl:state.getString("model")', parallel: 'jexl:state.getString("parallel")', sections: 'jexl:state.getString("sections")'}
+      - actor: this
+        method: putJson
+        arguments: {path: clusters, value: "jexl:result"}
+        execution: direct
+
+  - states: ["2c", "3"]
     label: ask-the-causes
     note: The causes and motives of each grouped section not asked yet.
     actions:
@@ -77,7 +90,7 @@ steps:
         arguments: {db: 'jexl:state.getString("db")', name: 'jexl:state.getString("name")', url: 'jexl:state.getString("url")', model: 'jexl:state.getString("model")', parallel: 'jexl:state.getString("parallel")', sections: 'jexl:state.getString("sections")'}
       - actor: this
         method: putJson
-        arguments: {path: outcome, value: 'jexl:state.getString("groups") + "; " + state.getString("causes") + "; " + result'}
+        arguments: {path: outcome, value: 'jexl:state.getString("groups") + "; " + state.getString("clusters") + "; " + state.getString("causes") + "; " + result'}
         execution: direct
 
   - states: ["1", "failed"]
@@ -85,6 +98,10 @@ steps:
     actions: [{actor: this, method: doNothing, arguments: ["the book is not in the database, or the model could not be reached"], execution: direct}]
 
   - states: ["2", "failed"]
+    label: could-not-ask-clusters
+    actions: [{actor: this, method: doNothing, arguments: ["the clusters could not be asked"], execution: direct}]
+
+  - states: ["2c", "failed"]
     label: could-not-ask-causes
     actions: [{actor: this, method: doNothing, arguments: ["the causes could not be asked"], execution: direct}]
 
