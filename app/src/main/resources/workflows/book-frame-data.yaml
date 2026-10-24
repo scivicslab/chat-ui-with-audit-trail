@@ -1,11 +1,14 @@
 name: book-frame-data
 description: |
-  Takes from a book the data the writing steps need (FrameDataWorkflow_261024_oo01), after book-rules.yaml, in three
+  Takes from a book the data the writing steps need (FrameDataWorkflow_261024_oo01), after book-rules.yaml, in four
   steps. Units: each section's blocks are split into the smallest units of an explanatory text, runs of consecutive
   blocks that each explain one subject along one axis (sequence, structure or set; section 3.2 on comments is one unit,
   a set, whose members are the three kinds of comment); the model names each unit's main concept and what each block
   is in it. Causes: every sentence joined to its nucleus by a relation of cause or motive is read with its block, and the
-  model names the two things it ties. Properties: for each unit, the model says which sentences state what its main
+  model names the two things it ties. Relations: each member of a set unit is a kind of its main concept, each part of a
+  structure unit a part of it; every sentence joined to its nucleus by comparison, antithesis, analogy, part-whole,
+  set-member, background, general-specific or example is read with its block, and the model names the two things it
+  ties, the relation's name saying how. Properties: for each unit, the model says which sentences state what its main
   concept is, has or does. A section done is not asked again; the sections named are. The answers are stored in the H2
   database; the Sections tab shows them. The work is done by the books actor of plugin-rst-frame.
 params:
@@ -69,7 +72,19 @@ steps:
         arguments: {path: causes, value: "jexl:result"}
         execution: direct
 
-  - states: ["3", "4"]
+  - states: ["3", "3r"]
+    label: read-the-relations-of-the-concepts
+    note: The relations of each unit's concepts to other concepts, for each section with units not read yet.
+    actions:
+      - actor: ./books
+        method: relationsOfConcepts
+        arguments: {db: 'jexl:state.getString("db")', name: 'jexl:state.getString("name")', url: 'jexl:state.getString("url")', model: 'jexl:state.getString("model")', parallel: 'jexl:state.getString("parallel")', sections: 'jexl:state.getString("sections")'}
+      - actor: this
+        method: putJson
+        arguments: {path: relations, value: "jexl:result"}
+        execution: direct
+
+  - states: ["3r", "4"]
     label: ask-the-properties
     note: The properties of each grouped section's main concepts not asked yet.
     actions:
@@ -78,7 +93,7 @@ steps:
         arguments: {db: 'jexl:state.getString("db")', name: 'jexl:state.getString("name")', url: 'jexl:state.getString("url")', model: 'jexl:state.getString("model")', parallel: 'jexl:state.getString("parallel")', sections: 'jexl:state.getString("sections")'}
       - actor: this
         method: putJson
-        arguments: {path: outcome, value: 'jexl:state.getString("groups") + "; " + state.getString("causes") + "; " + result'}
+        arguments: {path: outcome, value: 'jexl:state.getString("groups") + "; " + state.getString("causes") + "; " + state.getString("relations") + "; " + result'}
         execution: direct
 
   - states: ["1", "failed"]
@@ -90,6 +105,10 @@ steps:
     actions: [{actor: this, method: doNothing, arguments: ["the causes could not be asked"], execution: direct}]
 
   - states: ["3", "failed"]
+    label: could-not-read-relations
+    actions: [{actor: this, method: doNothing, arguments: ["the relations of the concepts could not be read"], execution: direct}]
+
+  - states: ["3r", "failed"]
     label: could-not-ask-properties
     actions: [{actor: this, method: doNothing, arguments: ["the properties could not be asked"], execution: direct}]
 

@@ -63,6 +63,8 @@ class BookStepsWorkflowTest {
                     ? "p1-p2 | sequence"
                     : question.contains("The blocks have been split into these units")
                     ? "g1: concurrent programming\np1 | multithreading\np2 | processes side by side"
+                    : question.contains("a relation that may tie two things")
+                    ? "p1 | Java threads | multithreading"
                     : question.contains("Which sentences state a property of")
                     ? "p1/1 | is | one way to program concurrently"
                     : question.contains("behavior   what the concept does")
@@ -181,8 +183,8 @@ class BookStepsWorkflowTest {
             assertEquals(List.of("p1", "p2"), p.members().stream().map(m -> m.block()).toList());
         }
         assertEquals("1 section(s) of core split into groups: {sequence=1}, 0 failed; 1 section(s) of core asked: 0 cause(s), 0 motive(s), "
-                + "0 failed; 1 section(s) of core asked: {is=1}, 0 failed", run("book-frame-data.yaml"),
-                "the section has no sentence of cause or motive, so only its group and one property are read");
+                + "0 failed; 1 section(s) of core asked for relations: {example of=1}, 0 failed; 1 section(s) of core asked: {is=1}, 0 failed", run("book-frame-data.yaml"),
+                "the section has no sentence of cause or motive; its example is read as a relation, and one property");
         try (BookStore s = new BookStore("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
             var g = s.groups("core").get("10.1.1");
             assertEquals("concurrent programming", g.get(0).concept());
