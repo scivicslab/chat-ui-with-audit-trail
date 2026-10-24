@@ -59,7 +59,13 @@ class BookStepsWorkflowTest {
                 asked.add(new JSONObject(body).getJSONArray("messages").getJSONObject(0).getString("content"));
             }
             String question = new JSONObject(body).getJSONArray("messages").getJSONObject(0).getString("content");
-            String answer = question.contains("behavior   what the concept does")
+            String answer = question.contains("Split the blocks into groups")
+                    ? "p1-p2 | sequence"
+                    : question.contains("The blocks have been split into these groups")
+                    ? "g1: concurrent programming\np1 | multithreading\np2 | processes side by side"
+                    : question.contains("Which sentences state a property of")
+                    ? "p1/1 | is | one way to program concurrently"
+                    : question.contains("behavior   what the concept does")
                     ? "concurrent programming | property | 1\nconcurrent programming | behavior | 2\nmultithreading | property | 1"
                     : question.contains("Name the questions about")
                     ? "Q1: What is concurrent programming?\nQ2: Nothing answers this\np1/1 | Q1\np1/2 | Q1"
@@ -173,6 +179,14 @@ class BookStepsWorkflowTest {
             var p = s.patterns("core").get("10.1.1");
             assertEquals("concurrent programming", p.concept(), "the concept the model names");
             assertEquals(List.of("p1", "p2"), p.members().stream().map(m -> m.block()).toList());
+        }
+        assertEquals("1 section(s) of core split into groups: {sequence=1}, 0 failed; 1 section(s) of core asked: 0 cause(s), 0 motive(s), "
+                + "0 failed; 1 section(s) of core asked: {is=1}, 0 failed", run("book-frame-data.yaml"),
+                "the section has no sentence of cause or motive, so only its group and one property are read");
+        try (BookStore s = new BookStore("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
+            var g = s.groups("core").get("10.1.1");
+            assertEquals("concurrent programming", g.get(0).concept());
+            assertEquals("one way to program concurrently", s.properties("core").get("10.1.1").get(0).property());
         }
         assertNull(system.getIIActor("plan.books"), "the workflow removes the actor it made");
     }

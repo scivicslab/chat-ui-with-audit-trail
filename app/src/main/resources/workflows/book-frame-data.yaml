@@ -1,0 +1,115 @@
+name: book-frame-data
+description: |
+  Takes from a book the data the writing steps need (FrameDataWorkflow_261024_oo01), after book-rules.yaml, in three
+  steps. Groups: each section's blocks are split into groups of consecutive blocks, each explaining one main concept by
+  sequence, structure, set, or one block making one point; the model names each group's main concept and what each block
+  is in it. Causes: every sentence joined to its nucleus by a relation of cause or motive is read with its block, and the
+  model names the two things it ties. Properties: for each group, the model says which sentences state what its main
+  concept is, has or does. A section done is not asked again; the sections named are. The answers are stored in the H2
+  database; the Sections tab shows them. The work is done by the books actor of plugin-rst-frame.
+params:
+  name:
+    label: "The book's name"
+    description: "The name book-toc.yaml stored the book under, e.g. core-java-14-vol1"
+    type: text
+    required: true
+  db:
+    label: "The database"
+    description: "Absolute path of the H2 database file, without .mv.db"
+    type: text
+    default: "/home/devteam/works/rst-on-lisp/db/books"
+  url:
+    label: "The chat endpoint"
+    description: "An OpenAI-compatible /v1/chat/completions; the GPU broker spreads the questions over its nodes"
+    type: text
+    default: "http://192.168.5.21:30805/v1/chat/completions"
+  model:
+    label: "The model"
+    description: "A model the endpoint serves (GET /v1/models on the broker lists them)"
+    type: text
+    default: "google/gemma-4-26B-A4B-it"
+  parallel:
+    description: "How many sections are asked at once"
+    type: int
+    default: 8
+  sections:
+    description: "Section numbers to ask again, separated by spaces, e.g. 1.2.5 4.1.1; empty asks every section not done yet"
+    default: ""
+steps:
+  - states: ["0", "1"]
+    label: build-actor-tree
+    note: The books actor (plugin-rst-frame) does the work; it is created here and removed at the end.
+    actions:
+      - actor: loader
+        method: createChild
+        arguments: ['jexl:self', "./books", "com.scivicslab.turingworkflow.plugins.rstframe.BookStructureIIAR"]
+
+  - states: ["1", "2"]
+    label: split-into-groups
+    note: Each section with a rule file and no groups yet is split; the sections named are split again.
+    actions:
+      - actor: ./books
+        method: groups
+        arguments: {db: 'jexl:state.getString("db")', name: 'jexl:state.getString("name")', url: 'jexl:state.getString("url")', model: 'jexl:state.getString("model")', parallel: 'jexl:state.getString("parallel")', sections: 'jexl:state.getString("sections")'}
+      - actor: this
+        method: putJson
+        arguments: {path: groups, value: "jexl:result"}
+        execution: direct
+
+  - states: ["2", "3"]
+    label: ask-the-causes
+    note: The causes and motives of each grouped section not asked yet.
+    actions:
+      - actor: ./books
+        method: causes
+        arguments: {db: 'jexl:state.getString("db")', name: 'jexl:state.getString("name")', url: 'jexl:state.getString("url")', model: 'jexl:state.getString("model")', parallel: 'jexl:state.getString("parallel")', sections: 'jexl:state.getString("sections")'}
+      - actor: this
+        method: putJson
+        arguments: {path: causes, value: "jexl:result"}
+        execution: direct
+
+  - states: ["3", "4"]
+    label: ask-the-properties
+    note: The properties of each grouped section's main concepts not asked yet.
+    actions:
+      - actor: ./books
+        method: properties
+        arguments: {db: 'jexl:state.getString("db")', name: 'jexl:state.getString("name")', url: 'jexl:state.getString("url")', model: 'jexl:state.getString("model")', parallel: 'jexl:state.getString("parallel")', sections: 'jexl:state.getString("sections")'}
+      - actor: this
+        method: putJson
+        arguments: {path: outcome, value: 'jexl:state.getString("groups") + "; " + state.getString("causes") + "; " + result'}
+        execution: direct
+
+  - states: ["1", "failed"]
+    label: could-not-group
+    actions: [{actor: this, method: doNothing, arguments: ["the book is not in the database, or the model could not be reached"], execution: direct}]
+
+  - states: ["2", "failed"]
+    label: could-not-ask-causes
+    actions: [{actor: this, method: doNothing, arguments: ["the causes could not be asked"], execution: direct}]
+
+  - states: ["3", "failed"]
+    label: could-not-ask-properties
+    actions: [{actor: this, method: doNothing, arguments: ["the properties could not be asked"], execution: direct}]
+
+  - states: ["4", "end"]
+    label: tear-down-actor-tree
+    actions:
+      - actor: loader
+        method: removeChild
+        arguments: ['jexl:self', "./books"]
+      - actor: this
+        method: finish
+        arguments: ["outcome"]
+        execution: direct
+
+  - states: ["failed", "end"]
+    label: report-failure
+    actions:
+      - actor: loader
+        method: removeChild
+        arguments: ['jexl:self', "./books"]
+      - actor: this
+        method: reportFailure
+        arguments: []
+        execution: direct
