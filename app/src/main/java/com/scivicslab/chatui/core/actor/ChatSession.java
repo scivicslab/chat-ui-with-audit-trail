@@ -1038,6 +1038,9 @@ public class ChatSession extends Interpreter {
      */
     public List<ChatEvent> handleCommand(String input) {
         List<ChatEvent> responses = new ArrayList<>(provider.handleCommand(input));
+        if (provider.isExchangeWithBackend(input)) {
+            recordCommandIo(input.trim(), responses);
+        }
         if (input.trim().toLowerCase().startsWith("/clear")) {
             clearHistory();
         }
@@ -2583,6 +2586,43 @@ public class ChatSession extends Interpreter {
         } catch (Exception e) {
             logger.log(Level.WARNING, "I/O log turn record failed", e);
         }
+    }
+
+    /**
+     * Writes a command that the backing process carried out (such as {@code /compact}) to the I/O
+     * log: the line it was given and the text it answered. It is not a turn of the conversation,
+     * so it has no turn number; it is kept under {@code command/<time>}, the way a one-shot call
+     * is kept under {@code oneshot/<time>}.
+     */
+    private void recordCommandIo(String line, List<ChatEvent> answer) {
+        if (ioLog == null) return;
+        try {
+            long session = ioLog.ensureSession(myChatName());
+            ioLog.record(session, "agent", "command/" + System.currentTimeMillis(), commandIoRecord(line, answer));
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "I/O log command record failed", e);
+        }
+    }
+
+    /** The I/O log content for one command: {@code REQUEST:} the line, {@code RESPONSE:} the answer, {@code ERROR:} a failure. */
+    static String commandIoRecord(String line, List<ChatEvent> answer) {
+        String requestJson = new org.json.JSONObject()
+                .put("messages", new org.json.JSONArray().put(
+                        new org.json.JSONObject().put("role", "user").put("content", line)))
+                .toString();
+        StringBuilder text = new StringBuilder();
+        StringBuilder error = new StringBuilder();
+        for (ChatEvent event : answer) {
+            if (event.content() == null) continue;
+            StringBuilder into = "error".equals(event.type()) ? error : "info".equals(event.type()) ? text : null;
+            if (into == null) continue;
+            if (!into.isEmpty()) into.append('\n');
+            into.append(event.content());
+        }
+        StringBuilder m = new StringBuilder("REQUEST:\n").append(requestJson)
+                .append("\n\nRESPONSE:\n").append(text);
+        if (!error.isEmpty()) m.append("\n\nERROR:\n").append(error);
+        return m.toString();
     }
 
     /**

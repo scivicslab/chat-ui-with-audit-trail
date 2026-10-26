@@ -82,24 +82,119 @@ public class ClaudeCodeProvider implements LlmProvider {
     @Override
     public boolean isCommand(String input) { return commandHandler.isCommand(input); }
 
+    /** A line the CLI carries out, such as {@code /compact}, as opposed to a command of this program. */
+    @Override
+    public boolean isExchangeWithBackend(String input) {
+        return commandHandler.isCommand(input) && !commandHandler.isLocalCommand(input);
+    }
+
     /**
      * Carries out one command and returns what the person should see.
      *
-     * <p>{@code /clear} also deletes the file this provider keeps its session id in. Left there,
-     * the id would be read back the next time a provider is created for this conversation, and the
-     * conversation the command was meant to leave behind would come back.</p>
+     * <p>A command of this program ({@link SlashCommandHandler#isLocalCommand}) is carried out
+     * here. {@code /clear} also deletes the file this provider keeps its session id in. Left
+     * there, the id would be read back the next time a provider is created for this conversation,
+     * and the conversation the command was meant to leave behind would come back.</p>
+     *
+     * <p>Any other line is a command of the CLI, such as {@code /compact}, and is sent to it
+     * ({@link #sendToCli}).</p>
      *
      * @param input the whole line, leading slash included
      * @return one event per thing to show
      */
     @Override
     public List<ChatEvent> handleCommand(String input) {
+        if (!commandHandler.isLocalCommand(input)) {
+            return sendToCli(input.trim());
+        }
         List<ChatEvent> responses = new ArrayList<>();
         commandHandler.handle(input, responses::add);
         if (input.trim().toLowerCase().startsWith("/clear")) {
             deleteSessionFile();
         }
         return responses;
+    }
+
+    /**
+     * Sends a line beginning with a slash to {@code claude} as it is, and returns the answer to show.
+     *
+     * <p>The line has to reach the CLI as the whole of the message: the CLI recognises a command
+     * only at the start of the message, and the prompts the conversation builds for a turn open
+     * with {@link #PREFACE} and the tool list. So the line does not go through the prompt queue,
+     * and it is not a turn of the conversation, so it has no turn number. The conversation writes it
+     * to the I/O log as an exchange of its own ({@link #isExchangeWithBackend}), unlike the commands
+     * of this program, which only change settings.</p>
+     *
+     * <p>Run with a turn in flight, the line would be answered in the middle of that turn's events,
+     * so it is refused instead.</p>
+     *
+     * @param line the whole line, leading slash included
+     * @return the CLI's answer as {@code info} events, or one {@code error} event
+     */
+    List<ChatEvent> sendToCli(String line) {
+        if (cliProcess.isTurnActive()) {
+            return List.of(ChatEvent.error(
+                    "A turn is running. Send " + line.split("\\s+", 2)[0] + " when it has finished."));
+        }
+        if (!cliProcess.isAlive()) {
+            String lastSessionId = cliProcess.getLastSessionId();
+            if (lastSessionId != null) {
+                cliProcess.setConfig(cliProcess.getConfig().withSessionId(lastSessionId));
+            }
+        }
+        List<ChatEvent> produced = new ArrayList<>();
+        List<String> printed = new ArrayList<>();
+        // One pair of flags for the whole line: the answer's text arrives both as an assistant
+        // event and again in the result, and the flags are how the second is recognised.
+        boolean[] staleSession = {false};
+        boolean[] sawAssistant = {false};
+        try {
+            cliProcess.sendPrompt(line, List.of(), event -> {
+                if (StreamEventParser.LOCAL_COMMAND_OUTPUT.equals(event.type())) {
+                    printed.add(event.content());
+                } else {
+                    dispatch(event, produced::add, staleSession, sawAssistant);
+                }
+            });
+        } catch (IOException e) {
+            logger.log(Level.WARNING, "claude CLI failed on " + line, e);
+            return List.of(ChatEvent.error("claude CLI error: " + e.getMessage()));
+        }
+        return commandAnswer(printed, produced);
+    }
+
+    /**
+     * What to show for a command of the CLI. What the command itself printed ({@code Compacted}) is
+     * the answer when there is any: around it the CLI replays the last lines it showed before the
+     * command, and those would read as the command's answer. Otherwise the text of the turn is.
+     */
+    static List<ChatEvent> commandAnswer(List<String> printed, List<ChatEvent> produced) {
+        if (!printed.isEmpty()) {
+            return printed.stream().<ChatEvent>map(ChatEvent::info).toList();
+        }
+        return asCommandAnswer(produced);
+    }
+
+    /**
+     * The events of a turn, reduced to what answers a command: the text becomes {@code info}
+     * (the pane shows a command's answer as such), an error stays an error, and the rest of a
+     * turn's events (the result, tool calls, thinking) are dropped because a command is not a turn.
+     */
+    static List<ChatEvent> asCommandAnswer(List<ChatEvent> produced) {
+        List<ChatEvent> answer = new ArrayList<>();
+        for (ChatEvent event : produced) {
+            switch (event.type()) {
+                case "delta" -> {
+                    if (event.content() != null && !event.content().isBlank()) {
+                        answer.add(ChatEvent.info(event.content()));
+                    }
+                }
+                case "error" -> answer.add(event);
+                default -> { }
+            }
+        }
+        if (answer.isEmpty()) answer.add(ChatEvent.info("Done (the CLI printed nothing)."));
+        return answer;
     }
 
     /** @return the conversation's tool set this provider was created for */

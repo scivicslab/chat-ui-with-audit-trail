@@ -167,6 +167,9 @@ public class StreamEventParser {
     private List<StreamEvent> parseUser(JSONObject json, String rawJson) {
         List<StreamEvent> events = new ArrayList<>();
         JSONObject message = json.optJSONObject("message");
+        if (message != null && message.opt("content") instanceof String text) {
+            return parseUserText(text, rawJson);
+        }
         if (message != null) {
             JSONArray content = message.optJSONArray("content");
             if (content != null) {
@@ -187,6 +190,26 @@ public class StreamEventParser {
             return List.of(StreamEvent.toolResult(null, toolResult.toString(), false, rawJson));
         }
         return List.of(new StreamEvent("tool_result", null, null, -1, -1, false, rawJson));
+    }
+
+    /** The type of the event that carries what a command of the CLI printed. */
+    static final String LOCAL_COMMAND_OUTPUT = "local_command_output";
+
+    private static final java.util.regex.Pattern LOCAL_COMMAND_STDOUT = java.util.regex.Pattern.compile(
+            "<local-command-stdout>(.*?)</local-command-stdout>", java.util.regex.Pattern.DOTALL);
+
+    /**
+     * A {@code user} line whose content is a plain string, which is what the CLI writes while it
+     * carries out one of its own slash commands. {@code /compact} writes two: the summary it
+     * continues the conversation from, which is the CLI's own business and is dropped, and the
+     * command's printed answer, wrapped in {@code <local-command-stdout>}, which is shown.
+     */
+    private List<StreamEvent> parseUserText(String text, String rawJson) {
+        java.util.regex.Matcher m = LOCAL_COMMAND_STDOUT.matcher(text);
+        if (!m.find()) return List.of();
+        String printed = m.group(1).trim();
+        if (printed.isEmpty()) return List.of();
+        return List.of(new StreamEvent(LOCAL_COMMAND_OUTPUT, printed, null, -1, -1, false, rawJson));
     }
 
     /**

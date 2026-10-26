@@ -233,6 +233,13 @@ public interface LlmProvider {
     /** True if the given input is a slash command handled by this provider. */
     default boolean isCommand(String input) { return false; }
 
+    /**
+     * Whether carrying out this command is an exchange with the backing process or model, as
+     * opposed to a change of this program's own settings. Such an exchange is written to the I/O
+     * log, which records what the backing process was asked and what it answered.
+     */
+    default boolean isExchangeWithBackend(String input) { return false; }
+
     /** Handles a slash command and returns response events. */
     default List<ChatEvent> handleCommand(String input) {
         return List.of(ChatEvent.error("Slash commands not supported by provider: " + id()));

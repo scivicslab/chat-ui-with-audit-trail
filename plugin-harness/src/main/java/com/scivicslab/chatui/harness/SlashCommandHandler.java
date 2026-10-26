@@ -9,10 +9,12 @@ import com.scivicslab.chatui.core.rest.ChatEvent;
  * The commands a person types into the prompt box that this program answers itself, rather than
  * sending to the CLI ({@code SlashCommandsAndClearButton_260929_oo01}).
  *
- * <p>The CLI's own slash commands belong to its interactive screen. Started with
- * {@code --output-format stream-json}, it has no such screen, and a line beginning with a slash
- * reaches the model as a question to answer in prose. What these commands change is the
- * {@link CliConfig} the next {@code claude} invocation is built from.</p>
+ * <p>What these commands change is the {@link CliConfig} the next {@code claude} invocation is
+ * built from, so only this program can carry them out. Every other line beginning with a slash is
+ * the CLI's: started with {@code --output-format stream-json}, the CLI runs its own commands
+ * ({@code /compact}, {@code /context}, {@code /usage} and the rest of the {@code slash_commands}
+ * list in its {@code init} line) itself, without asking the model, and answers a name it does not
+ * know as a question to the model. {@link ClaudeCodeProvider} sends those lines to the CLI.</p>
  *
  * <p>Ported from {@code quarkus-chat-ui}'s handler of the same name, which is where this set of
  * five commands comes from.</p>
@@ -32,12 +34,27 @@ public class SlashCommandHandler {
         this.cliProcess = cliProcess;
     }
 
+    /** The commands this program carries out itself, lower case, leading slash included. */
+    private static final java.util.Set<String> LOCAL_COMMANDS =
+            java.util.Set.of("/model", "/effort", "/clear", "/session", "/help", "/?");
+
     /**
      * @param input the raw text a person typed
-     * @return whether this program answers it instead of the CLI
+     * @return whether it is a line beginning with a slash, which is a command of this program or of
+     *         the CLI and never a question for the model
      */
     public boolean isCommand(String input) {
         return input != null && input.startsWith("/");
+    }
+
+    /**
+     * @param input the raw text a person typed
+     * @return whether this program carries the command out itself; false for a command that belongs
+     *         to the CLI, such as {@code /compact}
+     */
+    public boolean isLocalCommand(String input) {
+        if (!isCommand(input)) return false;
+        return LOCAL_COMMANDS.contains(input.trim().split("\\s+", 2)[0].toLowerCase());
     }
 
     /**
@@ -120,6 +137,9 @@ public class SlashCommandHandler {
               /effort [level]    Show or change the effort level
                                  (low, medium, high, xhigh, max)
               /session [id]      Show or set session ID
-              /clear             Clear session (start fresh)"""));
+              /clear             Clear session (start fresh)
+
+            Any other line beginning with / is sent to the CLI, which runs its own
+            commands itself (for example /compact, /context, /usage)."""));
     }
 }

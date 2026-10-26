@@ -203,15 +203,15 @@ request messagesに送った文を残す会話を作る手段がない。
 - [x] 1. 前置きを部品に分け、ワークフローの操作として足す（d9f2e2a。部品は `ChatSession` の操作 `toolInstructions`/`skillCatalog`/`projectInstructions`/`turnText`。
       PromptBuilder 自身はツールを知らないため、操作は会話側に置いた。文章生成用 `prompt-construction-plain.yaml` を追加）。以下は元の記述:: ツール説明（会話の `ToolSet` の分だけ）、ツールの決まり、
       スキル一覧、プロジェクトの指示（`AGENTS.md`/`CLAUDE.md`）。`firstStepPrompt()` はこれらを積む既定の手順に置き換える（出力は変えない）
-- [ ] 2. ワークフローが `messages`（JSON）をそのまま渡せるようにする: `PromptBuilder.buildMessages(request messages)` の結果を会話が受け取り、
+- [x] 2. ワークフローが `messages`（JSON）をそのまま渡せるようにする: `PromptBuilder.buildMessages(request messages)` の結果を会話が受け取り、
       提供元が文字列の代わりに配列を送れるようにする（`sendPrompt` に並ぶ入口）
 - [x] 3. エージェントループの YAML が、使うプロンプト構築のサブワークフローを自分で指定する（最上位の `promptWorkflow: <file>`。
       ループを読み込むときに設定し、書かないループは既定に戻す。存在しないファイルを書いたループは断り、前のループに戻す。
       `plain-text-loop.yaml` を追加。`doc-retrieval-loop.yaml` には書かない：ベンチマークの型 3 はループだけを替えて測るため）。以下は元の記述:（`constructPrompt(ファイル名)` のような操作）。
       別に選ぶ `POST .../prompt-workflow` は、ループの指定が無いときの既定として残す
-- [ ] 4. request messagesに残す内容もループが決める: 既定は今のまま（ターン終了時に利用者の文と最終回答だけにする）。
+- [x] 4. request messagesに残す内容もループが決める: 既定は今のまま（ターン終了時に利用者の文と最終回答だけにする）。
       送った文をそのまま残すループを作れるようにする
-- [ ] 5. 用途別のループを作る: ① 既定（いまと同じ）② 文章生成用（利用者の文だけ、ツール説明なし）
+- [x] 5. 用途別のループを作る: ① 既定（いまと同じ）② 文章生成用（利用者の文だけ、ツール説明なし）
       ③ 文書検索（`doc-retrieval-loop`）
 - [ ] 6. テスト: 既定のループが送る文が変更前と一致する／文章生成用ループが送る messages が利用者の文だけである／
       ループがrequest messagesを残す内容を変えられる／`ToolSet` の拒否が効く。`mvn test` を回す
@@ -286,3 +286,42 @@ B ではこれが polish 系（普段使うジョブ）に起きたので、`tex
    - 案 a: `chats.ask {chat, prompt, waiter: 'jexl:self'}` が答えを message で返し、ワークフローは `putJson` で受ける。枠を無くす。`keepWorkerReply` は不要になる。`apply` で複数の枠に同じ質問を配る `parallel-workers-plan.yaml` は書き直しが要る。
    - 案 b: 枠を残し、Project がジョブごとに `workers` を runner の子として作る。名前の問題（上）と同じ問題を持つ。
    どちらも、LLM がジョブのワークフローを書くときに見る action の一覧（`ActionCatalog`）の書き直しを伴う（polish 系だけで呼び出し 160 箇所）。
+
+---
+
+# スラッシュコマンド: CLI の組み込みコマンド(/compact など)を通す
+
+## 経緯
+`/compact` を入力すると `Unknown command: /compact` になる。`plugin-harness` の `SlashCommandHandler` が、
+`/` で始まる行を全部自分で受け、5 つ(`/model` `/effort` `/clear` `/session` `/help`)以外を誤りとして返すため。
+`quarkus-chat-ui` の `provider-claude-code` の同名クラスも同じ 5 つだが、`quarkus-chat-ui` は画面(app.js)が
+5 つ以外を通常のプロンプトとして backend に送り、CLI(tmux)が実行する。
+
+## 実機で分かったこと(claude 2.1.295)
+- `--output-format stream-json --input-format stream-json` の常駐プロセスは、`/compact` `/context` `/cost` `/usage` を
+  モデルに送らず CLI の中で処理する(結果は `<synthetic>` の assistant 行、ターン 0・費用 0)。
+- `/compact` は `system status compacting` → `compact_boundary` → `user`(要約、content が文字列)
+  → `user`(`<local-command-stdout>Compacted </local-command-stdout>`)→ `result`(本文は空)の順に返す。
+  文脈は 22.3k から 17.3k トークンに減った。
+- CLI が知らない `/foo` はモデルに渡り、散文で答える。
+- この UI はプロンプトの前に前置き(PREFACE)とツール一覧を付けるので、キューに入れると行頭が `/` でなくなる。
+  したがって CLI の組み込みコマンドは、前置きなしの 1 行として provider が直接 CLI に送る必要がある。
+
+## 手順
+- [x] 1. `SlashCommandHandler`: この UI 自身のコマンド(`isLocalCommand`)とそれ以外を分ける。Javadoc の「CLI のスラッシュコマンドは使えない」を直す
+- [x] 2. `ClaudeCodeProvider.handleCommand`: 自分のコマンド以外は、前置きなしで CLI に送り、答えを info イベントにして返す。ターン実行中は断る
+- [x] 3. `StreamEventParser.parseUser`: 文字列 content の `user` 行。`<local-command-stdout>` は本文を表示し、それ以外(要約)は捨てる
+- [x] 4. `ChatResource.runProviderCommand`: タイムアウトを 30 秒から 10 分に(`/compact` は長い)
+- [x] 5. 単体テストを足し、`rm -rf target && mvn test`(`plugin-harness` と `app`)
+- [x] 6. 設計文書 `SlashCommandsAndClearButton_260929_oo01` を直す
+- [x] 7. デプロイは行わない(稼働中の 28014 に触れない)
+
+## Review
+- `plugin-harness` 41 件、`app` は test-compile まで通った。実物の `claude` に `ClaudeCodeProvider` から
+  `/context` `/compact` `/context` `/model` `/nosuchcommand` を順に渡し、答えが 1 回ずつ表示されることを確かめた
+  (`/tmp` の使い捨ての `Probe`、稼働中の UI には触れていない)。
+- 実機の確認で、答えが 2 回出る誤り(`sawAssistant` の旗を行ごとに作り直していた)と、`/compact` の前に
+  古い `/context` の表が混じる件が見つかり、直した。
+- 画面(app.js)は触っていない。`/` で始まる行は従来どおりサーバが受ける。
+- 動作中の 28014 には反映していない。反映には `app` と `plugin-harness` の jar を作り直して置き換える必要がある。
+- CLI のコマンドは I/O ログに残す(ラベル `command/<時刻>`、`REQUEST:`/`RESPONSE:`/`ERROR:`。`oneshot/<時刻>` と同じ置き方)。この製品のコマンドは設定を変えるだけなので残さない。`app` 404 件、`plugin-harness` 42 件が通った。

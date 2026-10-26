@@ -445,7 +445,10 @@ public class ChatResource {
     /** What the provider says should be shown for this command, or one error event. */
     private List<ChatEvent> runProviderCommand(ChatSessionIIAR chatSessionIIAR, String text) {
         try {
-            return chatSessionIIAR.ask(a -> ((ChatSession) a).handleCommand(text)).get(30, TimeUnit.SECONDS);
+            // A command of the CLI such as /compact is answered when the CLI has finished it, which
+            // takes as long as summarising the conversation does; this program's own commands
+            // answer at once.
+            return chatSessionIIAR.ask(a -> ((ChatSession) a).handleCommand(text)).get(10, TimeUnit.MINUTES);
         } catch (Exception e) {
             LOG.log(java.util.logging.Level.WARNING, "Command '" + text + "' failed", e);
             return List.of(ChatEvent.error("Command failed: " + e.getMessage()));

@@ -143,6 +143,28 @@ class SlashCommandHandlerTest {
     }
 
     @Test
+    @DisplayName("このプログラムのコマンドと、CLI のコマンドを見分ける")
+    void isLocalCommand_separatesThisProgramsFromTheCli() {
+        for (String own : List.of("/model", "/model opus", "/EFFORT high", "/clear", "/session", "/help", "/?", "/help  ")) {
+            assertTrue(handler.isLocalCommand(own), own + " is carried out here");
+        }
+        for (String cli : List.of("/compact", "/context", "/usage", "/cost", "/compact keep the API notes", "/nosuchcommand")) {
+            assertFalse(handler.isLocalCommand(cli), cli + " belongs to the CLI");
+            assertTrue(handler.isCommand(cli), cli + " is still a line that is not a question for the model");
+        }
+        assertFalse(handler.isLocalCommand("この行は質問です"));
+        assertFalse(handler.isLocalCommand(null));
+    }
+
+    @Test
+    @DisplayName("/help は、ほかの / の行を CLI に送ると伝える")
+    void help_saysOtherLinesGoToTheCli() {
+        handler.handle("/help", shown::add);
+
+        assertTrue(shownText().contains("/compact"), shownText());
+    }
+
+    @Test
     @DisplayName("知らないコマンドは何も変えず、エラーとして返る")
     void unknownCommand_changesNothing() {
         handler.handle("/nosuchcommand", shown::add);

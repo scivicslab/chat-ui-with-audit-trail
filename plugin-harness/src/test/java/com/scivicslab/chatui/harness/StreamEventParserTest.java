@@ -64,6 +64,30 @@ class StreamEventParserTest {
     }
 
     @Test
+    void parse_userLineWithCompactSummary_isDropped() {
+        String line = """
+                {"type":"user","message":{"role":"user","content":"This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion."},"session_id":"s1"}""";
+        assertTrue(parser.parse(line).isEmpty(), "the summary a /compact continues from is the CLI's own business");
+    }
+
+    @Test
+    void parse_userLineWithLocalCommandStdout_isShownAsText() {
+        String line = """
+                {"type":"user","message":{"role":"user","content":"<local-command-stdout>Compacted </local-command-stdout>"},"session_id":"s1"}""";
+        List<StreamEvent> events = parser.parse(line);
+        assertEquals(1, events.size(), events.toString());
+        assertEquals("local_command_output", events.get(0).type());
+        assertEquals("Compacted", events.get(0).content());
+    }
+
+    @Test
+    void parse_userLineWithEmptyLocalCommandStdout_yieldsNothing() {
+        String line = """
+                {"type":"user","message":{"role":"user","content":"<local-command-stdout></local-command-stdout>"}}""";
+        assertTrue(parser.parse(line).isEmpty());
+    }
+
+    @Test
     void parse_resultLine_carriesSessionIdAndFinalText() {
         String line = "{\"type\":\"result\",\"subtype\":\"success\",\"session_id\":\"s1\","
                 + "\"result\":\"done\",\"total_cost_usd\":0.01,\"duration_ms\":1200}";
