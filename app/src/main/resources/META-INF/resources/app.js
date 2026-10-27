@@ -1523,10 +1523,19 @@
     // Grows #prompt-input to fit what was typed, up to the drag handle's own max (500px) — and
     // once the human has dragged the handle, treats that height as a floor instead of recomputing
     // from scratch and shrinking straight back past it on the next keystroke.
+    // Fits the box to its text. Resetting the height to "auto" and reading scrollHeight makes the
+    // browser lay out the whole page again, and doing it at every key is slow on a long chat. So the
+    // reset is done only when the text got shorter (the box may have to shrink); while the text
+    // grows, scrollHeight is read as it is and the height is set only when it differs.
+    var lastPromptLength = 0;
     function autoResize() {
-        promptInput.style.height = "auto";
+        var length = promptInput.value.length;
+        var shrank = length < lastPromptLength;
+        lastPromptLength = length;
+        if (shrank || length === 0) promptInput.style.height = "auto";
         var contentHeight = Math.min(promptInput.scrollHeight, 500);
-        promptInput.style.height = Math.max(contentHeight, manualInputHeight || 0) + "px";
+        var height = Math.max(contentHeight, manualInputHeight || 0) + "px";
+        if (promptInput.style.height !== height) promptInput.style.height = height;
     }
 
     function initInputResize() {
