@@ -46,6 +46,23 @@ public class ChatResource {
     @Inject
     ChatUiActorSystem actorSystem;
 
+    /**
+     * Takes a thread dump when a conversation that is not answering stops answering questions
+     * ({@link #noteTimeout}); see {@link StallDiagnostics}.
+     */
+    private final StallDiagnostics stallDiagnostics = StallDiagnostics.atDefaultLocation();
+
+    /**
+     * Called when a question asked of a conversation's actor timed out. A timeout while a turn is
+     * running is expected, since the turn occupies the actor's thread; a timeout while the
+     * conversation is idle is a stall, and is recorded with a thread dump taken now, while the
+     * stall lasts.
+     */
+    private void noteTimeout(String projectId, String chatId, ChatSessionIIAR chatSessionIIAR) {
+        if (chatSessionIIAR.isBusyDirect()) return;
+        stallDiagnostics.dumpIfDue(projectId + "/chat-" + chatId);
+    }
+
     // ── Projects ──────────────────────────────────────────────────────────────
 
     /**
@@ -413,7 +430,7 @@ public class ChatResource {
         // (SlashCommandsAndClearButton_260929_oo01). Queueing it would make "/session" report the
         // state as it was when the line was typed rather than now, and would put a turn in the
         // I/O log for something that is not one exchange of the conversation.
-        if (isProviderCommand(chatSessionIIAR, text)) {
+        if (isProviderCommand(projectId, chatId, chatSessionIIAR, text)) {
             for (ChatEvent event : runProviderCommand(chatSessionIIAR, text)) {
                 emitter.accept(event);
             }
@@ -433,9 +450,13 @@ public class ChatResource {
     }
 
     /** Whether the conversation's provider answers this line itself. False when it cannot be asked. */
-    private boolean isProviderCommand(ChatSessionIIAR chatSessionIIAR, String text) {
+    private boolean isProviderCommand(String projectId, String chatId, ChatSessionIIAR chatSessionIIAR, String text) {
         try {
             return chatSessionIIAR.ask(a -> ((ChatSession) a).isCommand(text)).get(5, TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            LOG.log(java.util.logging.Level.WARNING, "Could not ask whether '" + text + "' is a command", e);
+            noteTimeout(projectId, chatId, chatSessionIIAR);
+            return false;
         } catch (Exception e) {
             LOG.log(java.util.logging.Level.WARNING, "Could not ask whether '" + text + "' is a command", e);
             return false;
@@ -972,6 +993,10 @@ public class ChatResource {
         ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
         try {
             return chatSessionIIAR.ask(interp -> ((ChatSession) interp).getAvailableModels()).get(5, TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            LOG.warning("Failed to list models for ConversationSquad " + chatId + ": timed out after 5 s");
+            noteTimeout(projectId, chatId, chatSessionIIAR);
+            return List.of();
         } catch (Exception e) {
             LOG.warning("Failed to list models for ConversationSquad " + chatId + ": " + e.getMessage());
             return List.of();
