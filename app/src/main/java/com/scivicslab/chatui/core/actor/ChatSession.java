@@ -1569,6 +1569,15 @@ public class ChatSession extends Interpreter {
             return new ActionResult(false, "error: " + e.getMessage());
         }
 
+        // Cancel destroys the call that was in flight, and a destroyed call comes back with no text
+        // and no tool call. That is not an empty stop to retry: the retry below would send the same
+        // prompt again, so the Cancel the human just pressed would restart the turn instead of
+        // ending it.
+        if (cancelled) {
+            finalAnswer = null;
+            return new ActionResult(false, "cancelled");
+        }
+
         // No tool call, no text and no error is not a final answer — a genuine one always has
         // prose, and a genuine failure sets turnError. This is finish_reason=stop with nothing
         // written, observed on qwen3.8-flash-next-iq3_xxs after a long tool observation: the
@@ -1587,6 +1596,13 @@ public class ChatSession extends Interpreter {
                 finalAnswer = null;
                 return new ActionResult(false, "error: " + e.getMessage());
             }
+        }
+
+        // A Cancel that landed during the retry call ends the turn too, and a tool call the model
+        // had already asked for is not run.
+        if (cancelled) {
+            finalAnswer = null;
+            return new ActionResult(false, "cancelled");
         }
 
         if (!outcome.calls().isEmpty()) {
