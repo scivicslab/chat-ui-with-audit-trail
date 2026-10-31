@@ -41,6 +41,13 @@ public class SseConnection {
      */
     private final StringBuilder activity = new StringBuilder();
 
+    /**
+     * The provisional answer the pane is showing for the current step: the {@code answer_delta}
+     * text since the step began, until it is taken back, or the turn's answer, result or error is
+     * emitted. A browser that opens the stream mid-step is sent it as an {@code answer_snapshot}.
+     */
+    private final StringBuilder answer = new StringBuilder();
+
     public SseConnection(ObjectMapper mapper) {
         this.mapper = mapper;
     }
@@ -56,6 +63,9 @@ public class SseConnection {
         processor = UnicastProcessor.create();
         if (!activity.isEmpty()) {
             send(processor, ChatEvent.thinkingSnapshot(activity.toString()));
+        }
+        if (!answer.isEmpty()) {
+            send(processor, ChatEvent.answerSnapshot(answer.toString()));
         }
         return processor;
     }
@@ -82,7 +92,21 @@ public class SseConnection {
                     activity.delete(0, activity.length() - ACTIVITY_TAIL_CHARS);
                 }
             }
-            case "delta", "result", "error" -> activity.setLength(0);
+            case "answer_delta" -> {
+                if (event.content() != null) answer.append(event.content());
+            }
+            case "answer_retract" -> {
+                // The pane moves the provisional text to its thinking trace; keep the same.
+                activity.append(answer);
+                if (activity.length() > ACTIVITY_TAIL_CHARS) {
+                    activity.delete(0, activity.length() - ACTIVITY_TAIL_CHARS);
+                }
+                answer.setLength(0);
+            }
+            case "delta", "result", "error" -> {
+                activity.setLength(0);
+                answer.setLength(0);
+            }
             default -> { }
         }
     }

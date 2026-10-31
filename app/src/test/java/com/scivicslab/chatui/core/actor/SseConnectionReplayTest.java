@@ -89,4 +89,49 @@ class SseConnectionReplayTest {
         assertEquals(SseConnection.ACTIVITY_TAIL_CHARS, content.length());
         assertTrue(content.endsWith("END"));
     }
+
+    @Test
+    void aProvisionalAnswerEmittedWhileAwayIsReplayedAsOneSnapshot() throws Exception {
+        SseConnection sse = new SseConnection(mapper);
+        sse.emit(ChatEvent.answerDelta("The answer "));
+        sse.emit(ChatEvent.answerDelta("so far"));
+
+        JsonNode event = firstEvents(sse, 1).get(0);
+
+        assertEquals("answer_snapshot", event.get("type").asText());
+        assertEquals("The answer so far", event.get("content").asText());
+    }
+
+    @Test
+    void aRetractedAnswerIsReplayedAsActivityNotAsAnAnswer() throws Exception {
+        SseConnection sse = new SseConnection(mapper);
+        sse.emit(ChatEvent.answerDelta("Let me check. "));
+        sse.emit(ChatEvent.answerRetract());
+        sse.emit(ChatEvent.thinking("<invoke name=\"calc\">"));
+
+        List<JsonNode> events = firstEvents(sse, 1);
+
+        assertEquals("thinking_snapshot", events.get(0).get("type").asText());
+        assertEquals("Let me check. <invoke name=\"calc\">", events.get(0).get("content").asText());
+    }
+
+    @Test
+    void theConfirmedAnswerEndsTheProvisionalOne() throws Exception {
+        SseConnection sse = new SseConnection(mapper);
+        sse.emit(ChatEvent.answerDelta("candidate"));
+        sse.emit(ChatEvent.delta("candidate, confirmed"));
+
+        AssertSubscriber<String> sub = sse.openStream().subscribe().withSubscriber(AssertSubscriber.create(1));
+        assertTrue(sub.getItems().isEmpty(), "the pane has the confirmed answer; nothing is replayed");
+    }
+
+    @Test
+    void anErrorEndsTheProvisionalAnswer() throws Exception {
+        SseConnection sse = new SseConnection(mapper);
+        sse.emit(ChatEvent.answerDelta("candidate"));
+        sse.emit(ChatEvent.error("boom"));
+
+        AssertSubscriber<String> sub = sse.openStream().subscribe().withSubscriber(AssertSubscriber.create(1));
+        assertTrue(sub.getItems().isEmpty());
+    }
 }

@@ -1657,21 +1657,24 @@ public class ChatSession extends Interpreter {
                 + ", promptChars=" + promptToSend.length());
         AtomicLong streamedChars = new AtomicLong();
         AtomicLong progressLoggedAt = new AtomicLong(System.currentTimeMillis());
+        StepAnswerStream answerStream = new StepAnswerStream(e -> turnEmitter.accept(e));
 
         providerRef.ask(p -> {
-            // Relabel the provider's own "delta"/"result" as "thinking" / (dropped): this step
-            // might still be a tool call, not the final answer, so its streamed text goes to the
-            // browser's live trace, not the answer bubble — only finish() emits the browser's
-            // "delta"/"result" for the answer, exactly once, with the confirmed final text.
-            // Forwarding the provider's raw per-step "delta"/"result" here would (a) show
-            // intermediate steps' raw <invoke> text as if it were the answer, and (b) show the
-            // final step's answer text twice (once streamed here, once from finish()) — both
-            // observed live before this fix.
+            // The provider's own "delta"/"result" are not forwarded as they are: this step might
+            // still be a tool call, not the final answer. Its streamed text goes to the browser as
+            // a provisional answer ("answer_delta"), which StepAnswerStream takes back
+            // ("answer_retract", text moved to the live trace) as soon as a tool-call spelling
+            // appears. Only finish() emits the browser's "delta"/"result" for the answer, exactly
+            // once, with the confirmed final text, and that replaces the provisional text.
+            // Forwarding the provider's raw per-step "delta"/"result" would (a) show intermediate
+            // steps' raw <invoke> text as if it were the answer, and (b) show the final step's
+            // answer text twice (once streamed here, once from finish()) — both observed live
+            // before the provisional bubble replaced the raw forwarding.
             Consumer<ChatEvent> wrapped = event -> {
                 if ("delta".equals(event.type()) && event.content() != null) {
                     assistantBuf.append(event.content());
                     noteStreamProgress(stepLabel, streamedChars, progressLoggedAt, event.content());
-                    turnEmitter.accept(ChatEvent.thinking(event.content()));
+                    answerStream.accept(event.content());
                 } else if ("result".equals(event.type())) {
                     // The provider's own per-call completion signal; the agent loop's real
                     // completion signal is finish()'s result event, emitted once for the turn.
@@ -1715,6 +1718,7 @@ public class ChatSession extends Interpreter {
 
         String text = assistantBuf.toString();
         List<ToolCall> calls = TextToolCallParser.parse(text);
+        answerStream.finish(!calls.isEmpty());
         recordStepIo(promptToSend, sentBody.get(), text, thinkingBuf.toString(), calls);
         return new LlmStepOutcome(text, calls);
     }

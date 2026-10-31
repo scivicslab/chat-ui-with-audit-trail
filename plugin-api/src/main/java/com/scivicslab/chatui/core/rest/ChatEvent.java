@@ -16,6 +16,9 @@ import java.util.List;
  *   <li>{@code mcp_user} - User message received via MCP (displayed like a user message with MCP attribution)</li>
  *   <li>{@code status} - Status update (model, session, busy state)</li>
  *   <li>{@code thinking} - Thinking/activity indicator</li>
+ *   <li>{@code answer_delta} / {@code answer_snapshot} / {@code answer_retract} - A step's text
+ *       shown as a provisional answer while it streams: appended, replaced, or taken back when
+ *       the step turns out to call a tool</li>
  *   <li>{@code prompt} - Interactive prompt from the LLM (tool permission, yes/no, etc.)</li>
  *   <li>{@code heartbeat} - Keep-alive for SSE connection</li>
  *   <li>{@code log} - Server log entry (level, logger, message, timestamp)</li>
@@ -193,6 +196,41 @@ public record ChatEvent(
      */
     public static ChatEvent thinkingSnapshot(String content) {
         return new ChatEvent("thinking_snapshot", content, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+    }
+
+    /**
+     * Creates an event carrying the next piece of a step's text that may turn out to be the
+     * answer. The pane appends it to a provisional answer bubble; the turn's {@code delta} later
+     * replaces the bubble's text with the confirmed answer, and {@link #answerRetract()} removes
+     * the bubble if the step turns out to be a tool call.
+     *
+     * @param content the next piece of the candidate answer
+     * @return a new answer_delta event
+     */
+    public static ChatEvent answerDelta(String content) {
+        return new ChatEvent("answer_delta", content, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+    }
+
+    /**
+     * Creates an event carrying the whole candidate answer so far, sent when a browser opens the
+     * stream mid-step. Unlike {@link #answerDelta}, the pane replaces the bubble's text with it.
+     *
+     * @param content the candidate answer accumulated since the step began
+     * @return a new answer_snapshot event
+     */
+    public static ChatEvent answerSnapshot(String content) {
+        return new ChatEvent("answer_snapshot", content, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+    }
+
+    /**
+     * Creates an event telling the pane that the text it was showing as a candidate answer belongs
+     * to a step that calls a tool: the pane removes the bubble and moves its text to the thinking
+     * trace.
+     *
+     * @return a new answer_retract event
+     */
+    public static ChatEvent answerRetract() {
+        return new ChatEvent("answer_retract", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**

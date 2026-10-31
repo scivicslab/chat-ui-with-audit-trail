@@ -60,7 +60,15 @@
     var streamingEl = null;   // the live assistant bubble currently receiving deltas
     var streamingMarkdown = "";  // its markdown source, kept for the footer's copy button
     var thinkingEl = null;    // the live "thinking" trace bubble, if any
+    var answerEl = null;      // the provisional answer bubble of the running step, if any
+    var answerText = "";      // its markdown source so far
+    var answerTimer = null;   // pending redraw of answerEl
     var busy = false;
+    // Bubbles for prompts this pane sent while a turn was running. The server holds such a prompt
+    // in its queue and echoes it (a "user" event) only when it dispatches it, which can be a long
+    // time after the click. Until then the pane shows it here, oldest first, kept below everything
+    // the running turn draws so the conversation still reads in the order things happened.
+    var pendingEls = [];
 
     // Enable KaTeX math rendering inside markdown so LaTeX ($...$, $$...$$) in assistant answers
     // is typeset. Optional: if the CDN scripts did not load, fall back to plain markdown.
@@ -593,6 +601,35 @@
         return badge;
     }
 
+    // Adds a bubble to the pane above any prompts still waiting in the server's queue, so what the
+    // running turn draws never lands below a prompt that was sent after it.
+    function placeInChat(el) {
+        if (pendingEls.length) chatArea.insertBefore(el, pendingEls[0]);
+        else chatArea.appendChild(el);
+    }
+
+    // Draws a prompt this pane just sent while a turn was running, marked as waiting.
+    function appendPendingPrompt(text) {
+        var div = document.createElement("div");
+        div.className = "message user pending";
+        div.dataset.prompt = text;
+        div.textContent = text;
+        var note = document.createElement("span");
+        note.className = "pending-note";
+        note.textContent = "waiting for the current turn to finish";
+        div.appendChild(note);
+        chatArea.appendChild(div);
+        pendingEls.push(div);
+        scrollToBottom();
+        return div;
+    }
+
+    function removePendingPrompt(div) {
+        var i = pendingEls.indexOf(div);
+        if (i >= 0) pendingEls.splice(i, 1);
+        if (div.parentNode) div.parentNode.removeChild(div);
+    }
+
     // `at` is when the line was written, in milliseconds since the epoch. Left out, it is now, which
     // is right for a line arriving live. A line restored from history passes the time the server
     // recorded, or null when the server has none: a footer filled with the time of the reload would
@@ -622,7 +659,7 @@
             footer.appendChild(copyButton(text, "Copy"));
             footer.appendChild(translateSelect(div, text, false));
         }
-        chatArea.appendChild(div);
+        placeInChat(div);
         scrollToBottom();
         return div;
     }
@@ -634,7 +671,7 @@
         div.className = "message " + role;
         div.innerHTML = renderMarkdown(text);
         decorateCodeBlocks(div);
-        chatArea.appendChild(div);
+        placeInChat(div);
         scrollToBottom();
         return div;
     }
@@ -809,6 +846,9 @@
                     row.appendChild(queueEditButton(item));
                     var removeBtn = queueRemoveButton();
                     removeBtn.addEventListener("click", function () {
+                        // A removed prompt is never echoed, so its waiting line has to go now.
+                        var line = pendingEls.find(function (el) { return el.dataset.prompt === item.prompt; });
+                        if (line) removePendingPrompt(line);
                         fetch(apiUrl(chatUrl("/queue/" + i)), { method: "DELETE" }).then(refreshQueue);
                     });
                     row.appendChild(removeBtn);
@@ -975,7 +1015,7 @@
         if (!thinkingEl) {
             thinkingEl = document.createElement("div");
             thinkingEl.className = "message thinking";
-            chatArea.appendChild(thinkingEl);
+            placeInChat(thinkingEl);
             thinkingText = "";
         }
         thinkingText += chunk;
@@ -991,6 +1031,36 @@
         });
     }
 
+    // A step's text is shown as a provisional answer while it streams (answer_delta). It is taken
+    // back if the step turns out to call a tool (answer_retract), and replaced by the confirmed
+    // text when the turn's "delta" arrives. Redrawn at most every ANSWER_REDRAW_MS: marked parses
+    // the whole text each time, and tokens arrive faster than that is worth doing.
+    var ANSWER_REDRAW_MS = 80;
+
+    function redrawAnswer() {
+        answerTimer = null;
+        if (!answerEl) return;
+        answerEl.innerHTML = renderMarkdown(answerText);
+        decorateCodeBlocks(answerEl);
+        scrollToBottom();
+    }
+
+    function showAnswer(text, replace) {
+        answerText = replace ? text : answerText + text;
+        if (!answerEl) answerEl = appendMarkdownMessage("assistant", "");
+        if (answerTimer === null) answerTimer = setTimeout(redrawAnswer, ANSWER_REDRAW_MS);
+    }
+
+    // Removes the provisional answer bubble and returns the text it held.
+    function dropAnswer() {
+        if (answerTimer !== null) { clearTimeout(answerTimer); answerTimer = null; }
+        var text = answerText;
+        if (answerEl) answerEl.remove();
+        answerEl = null;
+        answerText = "";
+        return text;
+    }
+
     function clearThinking() {
         if (thinkingFrame !== null) { cancelAnimationFrame(thinkingFrame); thinkingFrame = null; }
         if (thinkingEl) thinkingEl.remove();
@@ -1002,6 +1072,7 @@
         switch (event.type) {
             case "status":
                 setBusy(!!event.busy);
+                if (!event.busy) dropAnswer();   // a cancelled turn ends here with no delta or result
                 refreshQueue();
                 // The turn reports which model is running it. Following it keeps the dropdown
                 // honest when the model was settled on elsewhere — a REST caller or an MCP agent
@@ -1022,8 +1093,32 @@
                 // stream as "thinking" instead, since an intermediate step might still be a tool call).
                 clearThinking();
                 streamingMarkdown = event.content || "";
-                streamingEl = appendMarkdownMessage("assistant", streamingMarkdown);
+                if (answerEl) {
+                    // The provisional bubble becomes the answer, with the confirmed text.
+                    if (answerTimer !== null) { clearTimeout(answerTimer); answerTimer = null; }
+                    streamingEl = answerEl;
+                    answerEl = null;
+                    answerText = "";
+                    streamingEl.innerHTML = renderMarkdown(streamingMarkdown);
+                    decorateCodeBlocks(streamingEl);
+                } else {
+                    streamingEl = appendMarkdownMessage("assistant", streamingMarkdown);
+                }
                 scrollToBottom();
+                break;
+            case "answer_delta":
+                showAnswer(event.content || "", false);
+                break;
+            case "answer_snapshot":
+                // Sent when the stream is opened mid-step: replaces rather than appends, as
+                // thinking_snapshot does.
+                showAnswer(event.content || "", true);
+                break;
+            case "answer_retract":
+                // The step turned out to call a tool: what was shown as the answer was the start
+                // of the call's trace, not the answer.
+                var retracted = dropAnswer();
+                if (retracted) appendThinking(retracted);
                 break;
             case "result":
                 // The answer's bubble was added by the delta event above; this event is what
@@ -1031,6 +1126,7 @@
                 if (streamingEl) appendAnswerFooter(streamingEl, streamingMarkdown, event);
                 streamingEl = null;
                 streamingMarkdown = "";
+                dropAnswer();   // a turn that ended without an answer leaves no provisional bubble
                 clearThinking();
                 setBusy(false);
                 scrollToBottom();
@@ -1038,10 +1134,14 @@
             case "error":
                 appendMessage("error", "Error: " + (event.content || "unknown error"));
                 streamingEl = null;
+                dropAnswer();
                 clearThinking();
                 setBusy(false);
                 break;
             case "user":
+                // The server is now sending the oldest prompt this pane showed as waiting:
+                // swap the placeholder for the real line (a queue is first in, first out).
+                if (event.origin === "screen" && pendingEls.length) removePendingPrompt(pendingEls[0]);
                 appendMessage("user", event.content || "", event.images, event.origin);
                 scrollToBottom();
                 refreshQueue(); // the item just moved from pending to sent (QueueChecklistView_260913_oo01)
@@ -1088,6 +1188,10 @@
         // The prompt is NOT drawn here. The server echoes it when it dispatches it, so a prompt
         // typed in this pane, one posted to the REST API, one from an MCP agent and one from
         // another conversation's ask_chat all appear the same way and exactly once.
+        // Exception: while a turn is running the server only queues the prompt and echoes it when
+        // it dispatches it, which can be many seconds away. Show it now, marked as waiting, so the
+        // click is seen to have done something; the echo then replaces it.
+        var waiting = busy ? appendPendingPrompt(text) : null;
         promptInput.value = "";
         forceScrollToBottom();
         setBusy(true);
@@ -1101,6 +1205,7 @@
         }).then(function (r) { return r.json(); })
           .then(function (result) {
               if (result && result.type === "error") {
+                  if (waiting) removePendingPrompt(waiting);
                   notify(result.message || "request rejected", true);
                   setBusy(false);
               } else {
@@ -1109,6 +1214,7 @@
               // Otherwise: content arrives over SSE.
           })
           .catch(function (err) {
+              if (waiting) removePendingPrompt(waiting);
               notify("send failed: " + err.message, true);
               setBusy(false);
           });
@@ -1358,6 +1464,8 @@
         streamingEl = null;
         streamingMarkdown = "";
         thinkingEl = null;
+        dropAnswer();
+        pendingEls = [];
         setBusy(false);
         if (queueArea) { queueArea.style.display = "none"; queueArea.dataset.forcedOpen = "0"; }
         queueDrawn = null;   // another conversation: draw its queue even if it has the same shape
@@ -1395,6 +1503,8 @@
         streamingEl = null;
         streamingMarkdown = "";
         thinkingEl = null;
+        dropAnswer();
+        pendingEls = [];
         if (promptInput) promptInput.focus();
         fetch(apiUrl(chatUrl("/conversation")), { method: "DELETE" })
             .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); })

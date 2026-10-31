@@ -1575,3 +1575,10 @@ body { font-family: var(--font-body); }
 .message.user.from-workflow { border-left: 3px solid var(--accent-blue, #a5b4fc); }
 .message.user.from-chat { border-left: 3px solid var(--accent-green, #86efac); }
 .message.user.from-api { border-left: 3px solid var(--accent-amber, #fbbf24); }
+
+/* A prompt sent while a turn was running: shown at once, dimmed, until the server dispatches it
+   and echoes the real line. */
+.message.user.pending { opacity: 0.6; border-style: dashed; }
+.message.user.pending .pending-note {
+    display: block; margin-top: 4px; font-size: 11px; color: var(--text-secondary, #9a9a9a);
+}
