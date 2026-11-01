@@ -291,6 +291,18 @@ public class PromptQueue {
     }
 
     /**
+     * Moves the item at {@code index} to the front, so that it is the next one sent. The items it
+     * passes keep their order.
+     *
+     * @return {@code true} if the item existed and was not already at the front
+     */
+    public boolean moveToFront(int index) {
+        if (index <= 0 || index >= queue.size()) return false;
+        queue.add(0, queue.remove(index));
+        return true;
+    }
+
+    /**
      * Sets whether the item at {@code index} auto-dispatches once it is at the front and
      * {@code ChatSession} is idle ({@code true}, the default), or waits for an explicit
      * {@link #advance} instead ({@code false}) — a manual checkpoint the browser can insert

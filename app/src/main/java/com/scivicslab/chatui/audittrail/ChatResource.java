@@ -910,7 +910,7 @@ public class ChatResource {
      *
      * @param chatId ConversationSquad identifier
      * @param index position in the queue
-     * @param body  {@code {"direction": "up"|"down"}}
+     * @param body  {@code {"direction": "up"|"down"|"top"}}; "top" moves the item to the front, to be sent next
      */
     @POST
     @Path("/{projectId}/chats/{chatId}/queue/{index}/move")
@@ -920,9 +920,11 @@ public class ChatResource {
                                    Map<String, Object> body) {
         ActorRef<PromptQueue> promptQueueRef = actorSystem.getPromptQueue(projectId, chatId);
         if (promptQueueRef == null) return Response.status(404).build();
-        int direction = "down".equals(body != null ? body.get("direction") : null) ? 1 : -1;
+        Object said = body != null ? body.get("direction") : null;
         try {
-            boolean moved = promptQueueRef.ask(q -> q.moveInQueue(index, direction)).get(5, TimeUnit.SECONDS);
+            boolean moved = "top".equals(said)
+                    ? promptQueueRef.ask(q -> q.moveToFront(index)).get(5, TimeUnit.SECONDS)
+                    : promptQueueRef.ask(q -> q.moveInQueue(index, "down".equals(said) ? 1 : -1)).get(5, TimeUnit.SECONDS);
             return moved ? Response.ok(Map.of("type", "moved")).build() : Response.status(409).build();
         } catch (Exception e) {
             LOG.warning("Failed to move queue item " + index + " for ConversationSquad " + chatId + ": " + e.getMessage());

@@ -793,6 +793,15 @@
                     autoLabel.appendChild(document.createTextNode(" Auto"));
                     row.appendChild(autoLabel);
 
+                    // Jumps this prompt over all the others to the front, so it is the next one sent.
+                    var topBtn = document.createElement("button");
+                    topBtn.className = "queue-move queue-move-top";
+                    topBtn.title = "Move to the front (send next)";
+                    topBtn.innerHTML = "&#8657;";
+                    topBtn.disabled = (i === 0);
+                    topBtn.addEventListener("click", function () { moveQueueItem(i, "top"); });
+                    row.appendChild(topBtn);
+
                     var upBtn = document.createElement("button");
                     upBtn.className = "queue-move";
                     upBtn.title = "Move up";

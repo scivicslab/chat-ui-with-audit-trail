@@ -181,6 +181,30 @@ class PromptQueueDispatchTest {
         r.provider().holdLatch.countDown(); // release the held first turn so no thread leaks past the test
     }
 
+    @Test
+    void moveToFront_makesTheItemTheNextOneSent_andKeepsTheOthersInOrder() {
+        Rig r = setUp();
+        r.provider().holdNext = true;
+        r.queueRef().tellNow(q -> q.enqueue("running", null, "queue", e -> {}, r.chatRef(), "human")).join();
+        waitUntil(() -> r.provider().receivedPrompts.size() == 1, 2000); // chat now busy, holding
+
+        for (String p : List.of("a", "b", "c")) {
+            r.queueRef().tellNow(q -> q.enqueue(p, null, "queue", e -> {}, r.chatRef(), "human")).join();
+        }
+        waitUntil(() -> r.queueRef().askNow(PromptQueue::getQueueSize).join() == 3, 1000);
+
+        assertTrue(r.queueRef().askNow(q -> q.moveToFront(2)).join()); // "c" jumps ahead of "a" and "b"
+        List<PromptQueue.QueueEntry> snap = r.queueRef().askNow(PromptQueue::snapshot).join();
+        assertEquals(List.of("c", "a", "b"), snap.stream().map(PromptQueue.QueueEntry::prompt).toList());
+
+        assertEquals(false, r.queueRef().askNow(q -> q.moveToFront(0)).join(), "already at the front");
+        assertEquals(false, r.queueRef().askNow(q -> q.moveToFront(3)).join(), "no such item");
+
+        r.provider().holdLatch.countDown();
+        waitUntil(() -> r.provider().receivedPrompts.size() == 4, 3000);
+        assertTrue(r.provider().receivedPrompts.get(1).endsWith("\n\nc"), "c is sent next");
+    }
+
     /** QueueChecklistView_260913_oo01: a dispatched item moves to the sent list, in order. */
     @Test
     void dispatch_movesTheItemToTheSentList() {
