@@ -64,11 +64,6 @@
     var answerText = "";      // its markdown source so far
     var answerTimer = null;   // pending redraw of answerEl
     var busy = false;
-    // Bubbles for prompts this pane sent while a turn was running. The server holds such a prompt
-    // in its queue and echoes it (a "user" event) only when it dispatches it, which can be a long
-    // time after the click. Until then the pane shows it here, oldest first, kept below everything
-    // the running turn draws so the conversation still reads in the order things happened.
-    var pendingEls = [];
 
     // Enable KaTeX math rendering inside markdown so LaTeX ($...$, $$...$$) in assistant answers
     // is typeset. Optional: if the CDN scripts did not load, fall back to plain markdown.
@@ -601,35 +596,6 @@
         return badge;
     }
 
-    // Adds a bubble to the pane above any prompts still waiting in the server's queue, so what the
-    // running turn draws never lands below a prompt that was sent after it.
-    function placeInChat(el) {
-        if (pendingEls.length) chatArea.insertBefore(el, pendingEls[0]);
-        else chatArea.appendChild(el);
-    }
-
-    // Draws a prompt this pane just sent while a turn was running, marked as waiting.
-    function appendPendingPrompt(text) {
-        var div = document.createElement("div");
-        div.className = "message user pending";
-        div.dataset.prompt = text;
-        div.textContent = text;
-        var note = document.createElement("span");
-        note.className = "pending-note";
-        note.textContent = "waiting for the current turn to finish";
-        div.appendChild(note);
-        chatArea.appendChild(div);
-        pendingEls.push(div);
-        scrollToBottom();
-        return div;
-    }
-
-    function removePendingPrompt(div) {
-        var i = pendingEls.indexOf(div);
-        if (i >= 0) pendingEls.splice(i, 1);
-        if (div.parentNode) div.parentNode.removeChild(div);
-    }
-
     // `at` is when the line was written, in milliseconds since the epoch. Left out, it is now, which
     // is right for a line arriving live. A line restored from history passes the time the server
     // recorded, or null when the server has none: a footer filled with the time of the reload would
@@ -659,7 +625,7 @@
             footer.appendChild(copyButton(text, "Copy"));
             footer.appendChild(translateSelect(div, text, false));
         }
-        placeInChat(div);
+        chatArea.appendChild(div);
         scrollToBottom();
         return div;
     }
@@ -671,7 +637,7 @@
         div.className = "message " + role;
         div.innerHTML = renderMarkdown(text);
         decorateCodeBlocks(div);
-        placeInChat(div);
+        chatArea.appendChild(div);
         scrollToBottom();
         return div;
     }
@@ -846,9 +812,6 @@
                     row.appendChild(queueEditButton(item));
                     var removeBtn = queueRemoveButton();
                     removeBtn.addEventListener("click", function () {
-                        // A removed prompt is never echoed, so its waiting line has to go now.
-                        var line = pendingEls.find(function (el) { return el.dataset.prompt === item.prompt; });
-                        if (line) removePendingPrompt(line);
                         fetch(apiUrl(chatUrl("/queue/" + i)), { method: "DELETE" }).then(refreshQueue);
                     });
                     row.appendChild(removeBtn);
@@ -1015,7 +978,7 @@
         if (!thinkingEl) {
             thinkingEl = document.createElement("div");
             thinkingEl.className = "message thinking";
-            placeInChat(thinkingEl);
+            chatArea.appendChild(thinkingEl);
             thinkingText = "";
         }
         thinkingText += chunk;
@@ -1106,6 +1069,11 @@
                 }
                 scrollToBottom();
                 break;
+            case "queue":
+                // A prompt entered the queue, from this pane, the REST endpoint or another
+                // conversation. The polling in setBusy() is only the fallback for a missed event.
+                refreshQueue();
+                break;
             case "answer_delta":
                 showAnswer(event.content || "", false);
                 break;
@@ -1139,9 +1107,6 @@
                 setBusy(false);
                 break;
             case "user":
-                // The server is now sending the oldest prompt this pane showed as waiting:
-                // swap the placeholder for the real line (a queue is first in, first out).
-                if (event.origin === "screen" && pendingEls.length) removePendingPrompt(pendingEls[0]);
                 appendMessage("user", event.content || "", event.images, event.origin);
                 scrollToBottom();
                 refreshQueue(); // the item just moved from pending to sent (QueueChecklistView_260913_oo01)
@@ -1188,10 +1153,6 @@
         // The prompt is NOT drawn here. The server echoes it when it dispatches it, so a prompt
         // typed in this pane, one posted to the REST API, one from an MCP agent and one from
         // another conversation's ask_chat all appear the same way and exactly once.
-        // Exception: while a turn is running the server only queues the prompt and echoes it when
-        // it dispatches it, which can be many seconds away. Show it now, marked as waiting, so the
-        // click is seen to have done something; the echo then replaces it.
-        var waiting = busy ? appendPendingPrompt(text) : null;
         promptInput.value = "";
         forceScrollToBottom();
         setBusy(true);
@@ -1205,7 +1166,6 @@
         }).then(function (r) { return r.json(); })
           .then(function (result) {
               if (result && result.type === "error") {
-                  if (waiting) removePendingPrompt(waiting);
                   notify(result.message || "request rejected", true);
                   setBusy(false);
               } else {
@@ -1214,7 +1174,6 @@
               // Otherwise: content arrives over SSE.
           })
           .catch(function (err) {
-              if (waiting) removePendingPrompt(waiting);
               notify("send failed: " + err.message, true);
               setBusy(false);
           });
@@ -1465,7 +1424,6 @@
         streamingMarkdown = "";
         thinkingEl = null;
         dropAnswer();
-        pendingEls = [];
         setBusy(false);
         if (queueArea) { queueArea.style.display = "none"; queueArea.dataset.forcedOpen = "0"; }
         queueDrawn = null;   // another conversation: draw its queue even if it has the same shape
@@ -1504,7 +1462,6 @@
         streamingMarkdown = "";
         thinkingEl = null;
         dropAnswer();
-        pendingEls = [];
         if (promptInput) promptInput.focus();
         fetch(apiUrl(chatUrl("/conversation")), { method: "DELETE" })
             .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); })

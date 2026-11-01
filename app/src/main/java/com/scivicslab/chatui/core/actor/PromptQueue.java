@@ -194,6 +194,9 @@ public class PromptQueue {
                 logToConversationSquad("queue: queued prompt (queue size=" + queue.size() + ")");
             }
         }
+        // Whoever sent it (the pane, the REST endpoint, another conversation's ask_chat), the
+        // pane is told now, so its Queue panel shows the prompt without waiting for its next poll.
+        emitter.accept(ChatEvent.queueChanged());
 
         requestDispatch(chatSessionRef, false);
     }

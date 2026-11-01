@@ -16,6 +16,7 @@ import java.util.List;
  *   <li>{@code mcp_user} - User message received via MCP (displayed like a user message with MCP attribution)</li>
  *   <li>{@code status} - Status update (model, session, busy state)</li>
  *   <li>{@code thinking} - Thinking/activity indicator</li>
+ *   <li>{@code queue} - The conversation's queue changed; the pane reads it again</li>
  *   <li>{@code answer_delta} / {@code answer_snapshot} / {@code answer_retract} - A step's text
  *       shown as a provisional answer while it streams: appended, replaced, or taken back when
  *       the step turns out to call a tool</li>
@@ -231,6 +232,17 @@ public record ChatEvent(
      */
     public static ChatEvent answerRetract() {
         return new ChatEvent("answer_retract", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+    }
+
+    /**
+     * Creates an event telling the pane that the conversation's queue changed, so it should read
+     * it again. It carries no content: the queue itself is read from the REST endpoint, which is
+     * the one place that knows its order.
+     *
+     * @return a new queue event
+     */
+    public static ChatEvent queueChanged() {
+        return new ChatEvent("queue", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     /**

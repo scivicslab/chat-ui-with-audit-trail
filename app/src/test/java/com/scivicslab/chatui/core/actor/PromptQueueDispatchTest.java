@@ -93,6 +93,24 @@ class PromptQueueDispatchTest {
     }
 
     @Test
+    void enqueue_tellsThePaneTheQueueChanged_whateverSentIt() {
+        Rig r = setUp();
+        r.provider().holdNext = true;
+        r.queueRef().tellNow(q -> q.enqueue("first", null, "queue", e -> {}, r.chatRef(), "human")).join();
+        waitUntil(() -> r.provider().receivedPrompts.size() == 1, 2000); // "first" now occupies the conversation
+
+        // A prompt that arrives while the conversation is busy sits in the queue; the pane has to
+        // be told at once, not on its next poll.
+        List<ChatEvent> emitted = Collections.synchronizedList(new ArrayList<>());
+        r.queueRef().tellNow(q -> q.enqueue("second", null, "queue", emitted::add, r.chatRef(), "agent:ask_chat:other")).join();
+
+        assertTrue(emitted.stream().anyMatch(e -> "queue".equals(e.type())),
+                "the enqueue must emit a queue event: " + emitted);
+        assertEquals(1, r.queueRef().askNow(PromptQueue::getQueueSize).join());
+        r.provider().holdLatch.countDown();
+    }
+
+    @Test
     void enqueue_withImages_reachesProviderAndIsEchoedToThePane() {
         Rig r = setUp();
         List<String> images = List.of("data:image/png;base64,QUJD");

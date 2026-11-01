@@ -430,7 +430,16 @@ public class ChatResource {
         // (SlashCommandsAndClearButton_260929_oo01). Queueing it would make "/session" report the
         // state as it was when the line was typed rather than now, and would put a turn in the
         // I/O log for something that is not one exchange of the conversation.
-        if (isProviderCommand(projectId, chatId, chatSessionIIAR, text)) {
+        if (chatSessionIIAR.isCommandDirect(text)) {
+            // A command is carried out by the conversation itself, one at a time after the turn
+            // that is running, so while it answers there is nothing to run it with. Say so now
+            // rather than hold the request for the whole turn, or send the line to the model as if
+            // it were a prompt.
+            if (chatSessionIIAR.isBusyDirect()) {
+                emitter.accept(ChatEvent.info("The conversation is answering, so " + text.trim()
+                        + " was not run. Send it again when the answer has finished, or cancel the answer first."));
+                return Response.ok(Map.of("type", "accepted")).build();
+            }
             for (ChatEvent event : runProviderCommand(chatSessionIIAR, text)) {
                 emitter.accept(event);
             }
@@ -447,20 +456,6 @@ public class ChatResource {
                 noThink, !hold, images));
 
         return Response.ok(Map.of("type", "accepted")).build();
-    }
-
-    /** Whether the conversation's provider answers this line itself. False when it cannot be asked. */
-    private boolean isProviderCommand(String projectId, String chatId, ChatSessionIIAR chatSessionIIAR, String text) {
-        try {
-            return chatSessionIIAR.ask(a -> ((ChatSession) a).isCommand(text)).get(5, TimeUnit.SECONDS);
-        } catch (java.util.concurrent.TimeoutException e) {
-            LOG.log(java.util.logging.Level.WARNING, "Could not ask whether '" + text + "' is a command", e);
-            noteTimeout(projectId, chatId, chatSessionIIAR);
-            return false;
-        } catch (Exception e) {
-            LOG.log(java.util.logging.Level.WARNING, "Could not ask whether '" + text + "' is a command", e);
-            return false;
-        }
     }
 
     /** What the provider says should be shown for this command, or one error event. */

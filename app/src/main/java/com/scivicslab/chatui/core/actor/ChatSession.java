@@ -83,7 +83,8 @@ public class ChatSession extends Interpreter {
 
     /** The conversation's provider. Not final: setProvider replaces it when the conversation's
  *  provider kind changes (CliHarnessProvider_260912_oo01). */
-    private LlmProvider provider;
+    // volatile: isCommand() is read from a request thread while a turn occupies this actor's thread.
+    private volatile LlmProvider provider;
     private AuthMode authMode;
 
     /** Complete I/O log (Sessions tab). May be null (logging disabled / not yet ported). */

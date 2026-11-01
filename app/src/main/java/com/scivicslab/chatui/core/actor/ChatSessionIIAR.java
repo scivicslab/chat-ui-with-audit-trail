@@ -138,6 +138,13 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     public boolean isBusyDirect() { return chatSession().isBusy(); }
 
     /**
+     * Whether the provider treats {@code input} as one of its commands, asked without going through
+     * the actor's mailbox. It is a read of the line alone, so it can be answered while a turn is
+     * running, when a question put to the actor would wait behind the turn.
+     */
+    public boolean isCommandDirect(String input) { return chatSession().isCommand(input); }
+
+    /**
      * One completion from exactly the given messages, bypassing the actor's mailbox: it works while
      * a turn is running, because it uses none of the conversation's state
      * ({@code RequestMessagesControl_261018_oo01}).
