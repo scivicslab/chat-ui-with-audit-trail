@@ -8,7 +8,7 @@
 - [x] A1. `ChatSession` にターン ID（`<会話>:s<セッション>:t<ターン>`）と、ターンごとの `ask_chat` の回数から作る依頼 ID（`<ターン ID>:r<回数>`）を持たせる。素の `startPrompt` の経路でもセッションとターン番号を持たせる
 - [x] A2. 待ち行列の項目に `requestId`（依頼ならその ID、返事なら答えている依頼の ID）を足し、`ChatSession.start` まで渡す。`ask_chat` の依頼では `resultKey` に依頼 ID を使う
 - [x] A3. `ask_chat` の結果・依頼の見出し `[request <ID> from <会話>]`・返事の見出し `[reply to request <ID>, from <ターン ID>]`・返事が無いときの1行を 090 のとおりにする。`TurnReply` にターン ID を足す
-- [~] A4. 会話の記録（`HistoryEntry`）に `turnId` と `requestId` を足し、記録から描く吹き出しの足元に出す。ブラウザでの確認は deploy の後。生の SSE で届く吹き出しには、まだ ID が出ない
+- [x] A4. 会話の記録（`HistoryEntry`）に `turnId` と `requestId` を足し、記録から描く吹き出しの足元に出す。ブラウザでの確認は deploy の後。生の SSE で届く吹き出しには、まだ ID が出ない
 - [x] A5. `ask_chat` の道具の説明を新しい見出しに合わせる
 - [x] A6. 単体テスト → W206 の Job で `mvn test`: 全モジュール成功（app 442、plugin 17・11・42、失敗 0）
 
@@ -21,6 +21,11 @@
 - [x] B4. 単体テスト `OpenRequestsTest`（6件）と `ConversationToolsTest` の2件。委ねる試験は段Aのコードで赤（依頼元に最初のターンの答えが届く）、直して緑。W206 の Job で全モジュール成功（app 450、plugin 17・11・42、失敗 0）
 
 ## 段C: deploy（確認を取ってから）・28010 で実機試験
+
+- [x] C1. Build Snapshot と 6 インスタンスの再起動（22:30〜22:31、全て AI-workspace の子プロセス、新しい jar）
+- [x] C2. 監督役 `chat-19`（Claude Code）が `chat-16`・`chat-18` に配った試験: 依頼元に届いたのは t3 の最終報告の1通だけ。見出しと表の ID が辻褄が合う
+- [x] C3. 吹き出しの足元の Turn・Request の表示をブラウザで確認（ユーザー）
+- [x] C4. Claude Code の自発のターン: 背景の `sleep 45` の後に t5 が自分で始まり、`[follow-up to request …:t579:r1, from …:t5]` が依頼元に届いた
 
 ## Review
 
