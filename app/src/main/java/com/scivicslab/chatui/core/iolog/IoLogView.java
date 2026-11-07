@@ -167,7 +167,13 @@ public class IoLogView {
     public static final String SETTINGS_LABEL = "settings";
 
     /** A conversation's provider kind, tool set and model, as one settings record holds them. */
-    public record Settings(String provider, String tools, String model, Double temperature) {}
+    public record Settings(String provider, String tools, String model, Double temperature,
+                           Long urgentWaitMinutes, Long childReplyWarnMinutes) {
+        /** A record written before the timekeeper's limits were kept: neither is set. */
+        public Settings(String provider, String tools, String model, Double temperature) {
+            this(provider, tools, model, temperature, null, null);
+        }
+    }
 
     /**
      * The last settings record of a session, or {@code null} when it has none
@@ -253,7 +259,10 @@ public class IoLogView {
             org.json.JSONObject o = new org.json.JSONObject(message);
             return new Settings(o.optString("provider", null), o.optString("tools", null),
                     o.optString("model", null),
-                    o.has("temperature") && !o.isNull("temperature") ? o.optDouble("temperature") : null);
+                    o.has("temperature") && !o.isNull("temperature") ? o.optDouble("temperature") : null,
+                    o.has("urgentWaitMinutes") && !o.isNull("urgentWaitMinutes") ? o.optLong("urgentWaitMinutes") : null,
+                    o.has("childReplyWarnMinutes") && !o.isNull("childReplyWarnMinutes")
+                            ? o.optLong("childReplyWarnMinutes") : null);
         } catch (Exception e) {
             return null;
         }

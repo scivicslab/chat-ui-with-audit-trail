@@ -47,8 +47,8 @@ public class Timekeeper {
     private final ChatSessionIIAR chat;
     private final ActorRef<PromptQueue> queue;
     private final Consumer<ChatEvent> watchers;
-    private final long urgentWaitMillis;
-    private final long childReplyWarnMillis;
+    private long urgentWaitMillis;
+    private long childReplyWarnMillis;
     private final Set<String> warned = new HashSet<>();
 
     /**
@@ -67,6 +67,28 @@ public class Timekeeper {
         this.watchers = watchers;
         this.urgentWaitMillis = urgentWaitMillis;
         this.childReplyWarnMillis = childReplyWarnMillis;
+    }
+
+    /**
+     * Changes this conversation's limits ({@code TimekeeperPausesATurnForAnUrgentRequest_261107_oo01}).
+     *
+     * @param urgentWaitMinutes     how long an urgent request may wait at the front of a running turn, or
+     *                              {@code null} to keep the current value
+     * @param childReplyWarnMinutes how long a sent request may go without a reply, or {@code null} to keep it
+     */
+    public void setLimits(Long urgentWaitMinutes, Long childReplyWarnMinutes) {
+        if (urgentWaitMinutes != null) urgentWaitMillis = TimeUnit.MINUTES.toMillis(urgentWaitMinutes);
+        if (childReplyWarnMinutes != null) childReplyWarnMillis = TimeUnit.MINUTES.toMillis(childReplyWarnMinutes);
+    }
+
+    /** @return how long, in minutes, an urgent request may wait at the front of a running turn */
+    public long urgentWaitMinutes() {
+        return TimeUnit.MILLISECONDS.toMinutes(urgentWaitMillis);
+    }
+
+    /** @return how long, in minutes, a sent request may go without a reply before the conversation is told */
+    public long childReplyWarnMinutes() {
+        return TimeUnit.MILLISECONDS.toMinutes(childReplyWarnMillis);
     }
 
     /**

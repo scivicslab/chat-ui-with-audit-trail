@@ -14,6 +14,7 @@ import com.scivicslab.chatui.agent.GetChatLogTool;
 import com.scivicslab.chatui.agent.RequestMessagesTools;
 import com.scivicslab.chatui.agent.CreateChatTool;
 import com.scivicslab.chatui.agent.ProviderTools;
+import com.scivicslab.chatui.agent.TimekeeperTool;
 import com.scivicslab.chatui.agent.DeleteChatTool;
 import com.scivicslab.chatui.agent.GetChatStatusTool;
 import com.scivicslab.chatui.agent.ListChatModelsTool;
@@ -295,6 +296,14 @@ public class ChatSession extends Interpreter {
               conversation you gave work to an urgent request asking, in one paragraph, how far it
               has got — saying it should answer only that and keep the work it is doing — then end
               your turn. When every answer is back, sum up how far each one has got.
+            """);
+        m.put("set_chat_timekeeper", """
+            - set_chat_timekeeper(chatId, urgentWaitMinutes, childReplyWarnMinutes): change another
+              conversation of this project's timekeeper. urgentWaitMinutes is how long an urgent
+              request may wait while that conversation runs a long turn before the turn is paused to
+              answer it (default 10); childReplyWarnMinutes is how long a request it sent may go
+              without a reply before it is told (default 30). Requires a "chatId" <parameter> tag and
+              at least one of the other two, in whole minutes; one left out keeps its value.
             """);
         m.put("set_workflow", """
             - set_workflow(chatId, yaml): replace another ConversationSquad's agent-loop workflow
@@ -2548,6 +2557,9 @@ public class ChatSession extends Interpreter {
                     extractInput(args, "provider"), extractInput(args, "model"));
             case "set_chat_provider" -> ProviderTools.setChatProvider(conversationControls, projectId,
                     extractInput(args, "chatId"), extractInput(args, "provider"));
+            case "set_chat_timekeeper" -> TimekeeperTool.set(conversationControls, projectId,
+                    extractInput(args, "chatId"), extractInput(args, "urgentWaitMinutes"),
+                    extractInput(args, "childReplyWarnMinutes"));
             case "delete_chat" -> DeleteChatTool.delete(conversationControls, projectId, myChatName(),
                     extractInput(args, "chatId"));
             case "get_chat_log" -> GetChatLogTool.get(conversationControls, projectId,

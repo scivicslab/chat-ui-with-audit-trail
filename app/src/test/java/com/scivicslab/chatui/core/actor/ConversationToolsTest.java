@@ -82,6 +82,14 @@ class ConversationToolsTest {
                                           com.scivicslab.chatui.agent.ToolSet toolSet) {
             providerCalls.add(projectId + "/" + chatId + "=" + kind + ":" + toolSet.id());
         }
+        final List<String> timekeeperCalls = new ArrayList<>();
+        @Override public long[] setTimekeeperLimits(String projectId, String chatId, Long urgent, Long warn) {
+            if ((urgent != null && urgent < 1) || (warn != null && warn < 1)) {
+                throw new IllegalArgumentException("a limit is a whole number of minutes, at least 1");
+            }
+            timekeeperCalls.add(projectId + "/" + chatId + "=" + urgent + "," + warn);
+            return new long[] {urgent == null ? 10 : urgent, warn == null ? 30 : warn};
+        }
         @Override public ChatUiActorSystem.ChatDeletion deleteChat(String projectId, String chatId) {
             deleted.add(projectId + "/" + chatId);
             return switch (chatId) {
@@ -694,6 +702,29 @@ class ConversationToolsTest {
         List<ChatSession.HistoryEntry> asked = two.asChatSessionRef().ask(ChatSession::historySnapshot)
                 .get(5, java.util.concurrent.TimeUnit.SECONDS);
         assertTrue(asked.get(0).requestId().matches("job-7:q\\d+"), asked.toString());
+    }
+
+    @Test
+    void setChatTimekeeperChangesTheLimitsAndKeepsAnOmittedOne() {
+        FakeControls controls = new FakeControls();
+        String result = callFromChat01(invoke("set_chat_timekeeper", "chatId", "02", "urgentWaitMinutes", "1"),
+                MODELS, controls);
+        assertTrue(result.contains("ok: project1/chat-02 now pauses a turn for an urgent request after 1 minute(s), "
+                + "and reports a request with no reply after 30 minute(s)"), result);
+        assertEquals(List.of("project1/02=1,null"), controls.timekeeperCalls);
+    }
+
+    @Test
+    void setChatTimekeeperRefusesAnotherProjectAndALimitBelowAMinute() {
+        FakeControls controls = new FakeControls();
+        String other = callFromChat01(invoke("set_chat_timekeeper", "chatId", "project2/02", "urgentWaitMinutes", "1"),
+                MODELS, controls);
+        assertTrue(other.contains("error: refused — project2/02 belongs to another project"), other);
+        String zero = callFromChat01(invoke("set_chat_timekeeper", "chatId", "02", "childReplyWarnMinutes", "0"),
+                MODELS, controls);
+        assertTrue(zero.contains("error: a limit is a whole number of minutes, at least 1"), zero);
+        String none = callFromChat01(invoke("set_chat_timekeeper", "chatId", "02"), MODELS, controls);
+        assertTrue(none.contains("error: give urgentWaitMinutes, childReplyWarnMinutes, or both"), none);
     }
 
     @Test

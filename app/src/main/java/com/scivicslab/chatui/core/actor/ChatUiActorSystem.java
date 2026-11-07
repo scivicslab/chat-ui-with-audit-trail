@@ -1651,6 +1651,37 @@ public class ChatUiActorSystem implements ConversationControls {
         return true;
     }
 
+    /**
+     * Changes one conversation's timekeeper limits and records them with its other settings
+     * ({@code TimekeeperPausesATurnForAnUrgentRequest_261107_oo01}).
+     *
+     * @param urgentWaitMinutes     the new limit for an urgent request waiting at the front, or {@code null} to keep it
+     * @param childReplyWarnMinutes the new limit for a sent request with no reply, or {@code null} to keep it
+     * @return the limits now in force, as {@code [urgentWaitMinutes, childReplyWarnMinutes]}
+     * @throws IllegalArgumentException for an unknown conversation or a limit below one minute
+     */
+    @Override
+    public long[] setTimekeeperLimits(String projectId, String chatId, Long urgentWaitMinutes, Long childReplyWarnMinutes) {
+        if ((urgentWaitMinutes != null && urgentWaitMinutes < 1) || (childReplyWarnMinutes != null && childReplyWarnMinutes < 1)) {
+            throw new IllegalArgumentException("a limit is a whole number of minutes, at least 1");
+        }
+        String name = chatActorName(projectId, chatId);
+        ActorRef<Timekeeper> keeper = actorSystem.getActor(name + ".timekeeper");
+        ChatSessionIIAR session = chatSessions.get(name);
+        if (keeper == null || session == null) throw new IllegalArgumentException("no such conversation: " + name);
+        long[] limits;
+        try {
+            limits = keeper.ask(k -> {
+                k.setLimits(urgentWaitMinutes, childReplyWarnMinutes);
+                return new long[] {k.urgentWaitMinutes(), k.childReplyWarnMinutes()};
+            }).get(5, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            throw new IllegalStateException("the timekeeper of " + name + " did not answer: " + e.getMessage(), e);
+        }
+        recordSettings(name, session.getProviderIdDirect(), session.getToolSetDirect(), session.getModelDirect());
+        return limits;
+    }
+
     public boolean setTemperature(String projectId, String chatId, Double temperature) {
         ActorRef<LlmProvider> providerRef = getProviderRef(projectId, chatId);
         if (providerRef == null) return false;
@@ -1731,6 +1762,15 @@ public class ChatUiActorSystem implements ConversationControls {
             o.put("tools", tools == null ? org.json.JSONObject.NULL : tools);
             o.put("model", model == null ? org.json.JSONObject.NULL : model);
             o.put("temperature", temperature == null ? org.json.JSONObject.NULL : temperature);
+            // The timekeeper's limits, so a restart puts them back too
+            // (TimekeeperPausesATurnForAnUrgentRequest_261107_oo01).
+            ActorRef<Timekeeper> keeper = actorSystem.getActor(conversationSquadName + ".timekeeper");
+            if (keeper != null) {
+                long[] limits = keeper.ask(k -> new long[] {k.urgentWaitMinutes(), k.childReplyWarnMinutes()})
+                        .get(5, TimeUnit.SECONDS);
+                o.put("urgentWaitMinutes", limits[0]);
+                o.put("childReplyWarnMinutes", limits[1]);
+            }
             ioLogStore.record(sessionId, "agent", IoLogView.SETTINGS_LABEL, o.toString());
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Could not record the settings of " + conversationSquadName, e);
@@ -1784,6 +1824,14 @@ public class ChatUiActorSystem implements ConversationControls {
             if (providerRef != null) {
                 Double t = s.temperature();
                 providerRef.tell(p -> p.setTemperature(t));
+            }
+        }
+        if (s.urgentWaitMinutes() != null || s.childReplyWarnMinutes() != null) {
+            ActorRef<Timekeeper> keeper = actorSystem.getActor(conversationSquadName + ".timekeeper");
+            if (keeper != null) {
+                Long urgent = s.urgentWaitMinutes();
+                Long warn = s.childReplyWarnMinutes();
+                keeper.tell(k -> k.setLimits(urgent, warn));
             }
         }
         LOG.info("Restored settings of " + conversationSquadName + ": provider=" + kind + ", tools=" + toolSet.id()

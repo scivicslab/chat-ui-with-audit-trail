@@ -44,6 +44,17 @@ class ConversationSettingsTest {
     }
 
     @Test
+    void parseSettings_readsTheTimekeeperLimitsAndLeavesThemNullInAnOlderRecord() {
+        IoLogView.Settings s = IoLogView.parseSettings(
+                "{\"provider\":\"claude\",\"urgentWaitMinutes\":1,\"childReplyWarnMinutes\":5}");
+        assertEquals(Long.valueOf(1), s.urgentWaitMinutes());
+        assertEquals(Long.valueOf(5), s.childReplyWarnMinutes());
+        IoLogView.Settings older = IoLogView.parseSettings("{\"provider\":\"claude\",\"temperature\":0.2}");
+        assertNull(older.urgentWaitMinutes());
+        assertNull(older.childReplyWarnMinutes());
+    }
+
+    @Test
     void parseSettings_missingFields_areNull() {
         IoLogView.Settings s = IoLogView.parseSettings("{\"provider\":\"openai-compat\"}");
         assertEquals("openai-compat", s.provider());

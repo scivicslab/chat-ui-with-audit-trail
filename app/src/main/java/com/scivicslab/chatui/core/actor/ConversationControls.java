@@ -63,4 +63,16 @@ public interface ConversationControls {
      * @throws IllegalArgumentException for an unknown conversation or kind, or a tool set the kind cannot take
      */
     void setProvider(String projectId, String chatId, String kind, ToolSet toolSet);
+
+    /**
+     * Changes a conversation's timekeeper limits and records them with its other settings
+     * ({@code TimekeeperPausesATurnForAnUrgentRequest_261107_oo01}).
+     *
+     * @param urgentWaitMinutes     how long an urgent request may wait at the front of a running turn, or
+     *                              {@code null} to keep it
+     * @param childReplyWarnMinutes how long a sent request may go without a reply, or {@code null} to keep it
+     * @return the limits now in force, as {@code [urgentWaitMinutes, childReplyWarnMinutes]}
+     * @throws IllegalArgumentException for an unknown conversation or a limit below one minute
+     */
+    long[] setTimekeeperLimits(String projectId, String chatId, Long urgentWaitMinutes, Long childReplyWarnMinutes);
 }
