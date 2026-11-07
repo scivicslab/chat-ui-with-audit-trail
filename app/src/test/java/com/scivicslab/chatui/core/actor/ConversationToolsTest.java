@@ -82,6 +82,12 @@ class ConversationToolsTest {
                                           com.scivicslab.chatui.agent.ToolSet toolSet) {
             providerCalls.add(projectId + "/" + chatId + "=" + kind + ":" + toolSet.id());
         }
+        final List<String> nameCalls = new ArrayList<>();
+        @Override public String setChatName(String projectId, String chatId, String name) {
+            if (chatId.equals("99")) return "error: unknown conversation: " + projectId + "/chat-99";
+            nameCalls.add(projectId + "/" + chatId + "=" + name);
+            return name == null ? "ok: name cleared" : "ok: name set to " + name;
+        }
         final List<String> timekeeperCalls = new ArrayList<>();
         @Override public long[] setTimekeeperLimits(String projectId, String chatId, Long urgent, Long warn) {
             if ((urgent != null && urgent < 1) || (warn != null && warn < 1)) {
@@ -725,6 +731,32 @@ class ConversationToolsTest {
         assertTrue(zero.contains("error: a limit is a whole number of minutes, at least 1"), zero);
         String none = callFromChat01(invoke("set_chat_timekeeper", "chatId", "02"), MODELS, controls);
         assertTrue(none.contains("error: give urgentWaitMinutes, childReplyWarnMinutes, or both"), none);
+    }
+
+    @Test
+    void setChatNameNamesAConversationOfThisProjectAndClearsIt() {
+        FakeControls controls = new FakeControls();
+        String named = callFromChat01(invoke("set_chat_name", "chatId", "02", "name", "  worker 1-3:\n  articles A-F "),
+                MODELS, controls);
+        assertTrue(named.contains("ok: project1/chat-02 is now named \"worker 1-3: articles A-F\""), named);
+        String own = callFromChat01(invoke("set_chat_name", "chatId", "01", "name", "platoon leader"), MODELS, controls);
+        assertTrue(own.contains("ok: project1/chat-01 is now named \"platoon leader\""), own);
+        String cleared = callFromChat01(invoke("set_chat_name", "chatId", "02", "name", ""), MODELS, controls);
+        assertTrue(cleared.contains("ok: project1/chat-02 has no name now"), cleared);
+        assertEquals(List.of("project1/02=worker 1-3: articles A-F", "project1/01=platoon leader", "project1/02=null"),
+                controls.nameCalls);
+    }
+
+    @Test
+    void setChatNameRefusesAnotherProjectAnUnknownConversationAndAParagraph() {
+        FakeControls controls = new FakeControls();
+        String other = callFromChat01(invoke("set_chat_name", "chatId", "project2/02", "name", "x"), MODELS, controls);
+        assertTrue(other.contains("error: refused — project2/02 belongs to another project"), other);
+        String unknown = callFromChat01(invoke("set_chat_name", "chatId", "99", "name", "x"), MODELS, controls);
+        assertTrue(unknown.contains("error: unknown conversation: project1/chat-99"), unknown);
+        String tooLong = callFromChat01(invoke("set_chat_name", "chatId", "02", "name", "y".repeat(81)), MODELS, controls);
+        assertTrue(tooLong.contains("error: a name is at most 80 characters; this one has 81"), tooLong);
+        assertTrue(controls.nameCalls.isEmpty(), controls.nameCalls.toString());
     }
 
     /** Keeps what the end of each turn put into the history, so a test can read a paused turn's progress. */

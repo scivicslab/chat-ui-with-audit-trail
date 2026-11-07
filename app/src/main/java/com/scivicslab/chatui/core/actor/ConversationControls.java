@@ -75,4 +75,13 @@ public interface ConversationControls {
      * @throws IllegalArgumentException for an unknown conversation or a limit below one minute
      */
     long[] setTimekeeperLimits(String projectId, String chatId, Long urgentWaitMinutes, Long childReplyWarnMinutes);
+
+    /**
+     * Sets the name a person reads for a conversation, as the Project tab's name field does, and records it so a
+     * restart keeps it; see {@link ChatUiActorSystem#setChatName}.
+     *
+     * @param name the name, or {@code null}/blank to clear it
+     * @return {@code "ok: ..."}, or {@code "error: ..."} when there is no such conversation
+     */
+    String setChatName(String projectId, String chatId, String name);
 }

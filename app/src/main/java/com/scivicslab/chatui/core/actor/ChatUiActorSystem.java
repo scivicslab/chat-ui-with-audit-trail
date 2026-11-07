@@ -1361,6 +1361,7 @@ public class ChatUiActorSystem implements ConversationControls {
      * @param name      the name, or null/blank to clear it
      * @return {@code "ok: ..."}, or {@code "error: ..."} when there is no such conversation
      */
+    @Override
     public String setChatName(String projectId, String chatId, String name) {
         String qualifiedName = chatActorName(projectId, chatId);
         ActorRef<ConversationSquad> squadRef = chats.get(qualifiedName);
