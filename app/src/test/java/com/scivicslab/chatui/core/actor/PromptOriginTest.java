@@ -34,6 +34,9 @@ class PromptOriginTest {
     @Test
     void anotherConversation() {
         assertEquals("chat project1/chat-01", ChatSession.originOf("agent:ask_chat:project1/chat-01"));
+        // What a conversation's own timekeeper puts into its queue says so.
+        assertEquals("timekeeper resume", ChatSession.originOf(ChatSession.RESUME_SOURCE));
+        assertEquals("timekeeper notice", ChatSession.originOf(Timekeeper.SOURCE));
     }
 
     /** The reply to a model's ask_chat comes back as a message from the conversation that answered. */

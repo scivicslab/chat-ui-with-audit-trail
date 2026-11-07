@@ -3194,6 +3194,10 @@ public class ChatSession extends Interpreter {
         if (source == null || source.isBlank() || "human".equals(source)) return "api";
         if ("screen".equals(source)) return "screen";
         if ("agent:workflow".equals(source)) return "workflow";
+        // Put into the queue by this conversation itself, not by a person or another conversation
+        // (TimekeeperPausesATurnForAnUrgentRequest_261107_oo01).
+        if (RESUME_SOURCE.equals(source)) return "timekeeper resume";
+        if (Timekeeper.SOURCE.equals(source)) return "timekeeper notice";
         if (source.startsWith(ASK_CHAT_REPLY_SOURCE_PREFIX)) {
             return "reply from chat " + source.substring(ASK_CHAT_REPLY_SOURCE_PREFIX.length());
         }

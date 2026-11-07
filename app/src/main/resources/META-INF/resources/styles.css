@@ -1582,6 +1582,7 @@ body { font-family: var(--font-body); }
 .origin-badge.origin-workflow { color: var(--accent-blue, #a5b4fc); border-color: var(--accent-blue, #a5b4fc); }
 .origin-badge.origin-chat { color: var(--accent-green, #86efac); border-color: var(--accent-green, #86efac); }
 .origin-badge.origin-api { color: var(--accent-amber, #fbbf24); border-color: var(--accent-amber, #fbbf24); }
+.origin-badge.origin-timekeeper { color: var(--accent-mauve, #c4b5fd); border-color: var(--accent-mauve, #c4b5fd); }
 .message.user.from-workflow { border-left: 3px solid var(--accent-blue, #a5b4fc); }
 .message.user.from-chat { border-left: 3px solid var(--accent-green, #86efac); }
 .message.user.from-api { border-left: 3px solid var(--accent-amber, #fbbf24); }
