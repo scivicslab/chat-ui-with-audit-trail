@@ -466,6 +466,60 @@ class ConversationToolsTest {
         assertTrue(caller.prompts.get(2).contains("as request project1/chat-01:t1:r2;"), caller.prompts.get(2));
     }
 
+    private static ActorRef<PromptQueue> queueOf(ChatSessionIIAR chat) {
+        ActorRef<PromptQueue> q = chat.createChild(chat.getName().replace(".chat", ".queue"), new PromptQueue());
+        q.tellNow(x -> x.setSelf(q)).join();
+        return q;
+    }
+
+    /**
+     * chat-02 is asked by chat-01, hands the work to chat-03 and chat-04, and writes its report in the
+     * turn after both replies are back. chat-01 gets exactly one reply, and it is that report
+     * ({@code ReportReachesTheAskerAfterDelegation_261107_oo01}).
+     */
+    @Test
+    void theAskerGetsOneReplyAndItIsTheReportWrittenAfterEveryChildRequestReturned() throws Exception {
+        IIActorSystem system = new IIActorSystem("conversation-tools-delegation");
+        FakeControls controls = new FakeControls();
+        Scripted asker = new Scripted(List.of("thanks"), List.of());
+        Scripted supervisor = new Scripted(List.of(
+                invoke("ask_chat", "chatId", "03", "prompt", "job A"),
+                invoke("ask_chat", "chatId", "04", "prompt", "job B"),
+                "sent both",
+                "one back",
+                "final report"), List.of());
+        ChatSessionIIAR one = chat(system, "01", asker, controls);
+        ChatSessionIIAR two = chat(system, "02", supervisor, controls);
+        ChatSessionIIAR three = chat(system, "03", new Scripted(List.of("A done"), List.of()), controls);
+        ChatSessionIIAR four = chat(system, "04", new Scripted(List.of("B done"), List.of()), controls);
+        for (ChatSessionIIAR c : List.of(one, two, three, four)) queueOf(c);
+
+        AskChatTool.send(system, "project1", "01", "02", "do the work", "project1/chat-01:s7:t3:r1");
+
+        long deadline = System.currentTimeMillis() + 20_000;
+        while (supervisor.prompts.size() < 5 && System.currentTimeMillis() < deadline) Thread.sleep(50);
+        while (asker.prompts.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(50);
+        Thread.sleep(500);
+        assertEquals(5, supervisor.prompts.size(), "the supervisor answered both replies: " + supervisor.prompts);
+        assertEquals(1, asker.prompts.size(), "one reply only: " + asker.prompts);
+        String reply = asker.prompts.get(0);
+        assertTrue(reply.contains("[reply to request project1/chat-01:s7:t3:r1, from project1/chat-02:t3]\nfinal report"),
+                reply);
+    }
+
+    @Test
+    void anItemRemovedFromTheQueueTellsItsAskerThereWillBeNoReply() throws Exception {
+        IIActorSystem system = new IIActorSystem("conversation-tools-removed-item");
+        ChatSessionIIAR two = chat(system, "02", new Scripted(List.of("unused"), List.of()), new FakeControls());
+        ActorRef<PromptQueue> queue = queueOf(two);
+        CompletableFuture<TurnReply> done = new CompletableFuture<>();
+        // Held (auto off), so it waits in the queue until it is removed.
+        queue.tellNow(q -> q.enqueue("held", null, "queue", e -> {}, two.asChatSessionRef(),
+                "agent:ask_chat:project1/chat-01", "k", done, false, false, List.of(), "project1/chat-01:t1:r1")).join();
+        assertTrue(queue.ask(q -> q.removeAt(0)).get(5, java.util.concurrent.TimeUnit.SECONDS));
+        assertEquals(TurnReply.NONE, done.get(5, java.util.concurrent.TimeUnit.SECONDS));
+    }
+
     @Test
     void askChatToAConversationThatDoesNotExistIsRefusedAtOnce() {
         IIActorSystem system = new IIActorSystem("conversation-tools-ask-missing");

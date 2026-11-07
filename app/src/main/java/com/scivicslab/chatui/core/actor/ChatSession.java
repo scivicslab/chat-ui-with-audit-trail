@@ -438,6 +438,18 @@ public class ChatSession extends Interpreter {
 
     /** How many times the current turn has called {@code ask_chat}; numbers its request ids from 1. */
     private int askCount;
+
+    /**
+     * The requests this conversation has received and not yet answered, and the requests sent for
+     * them ({@code ReportReachesTheAskerAfterDelegation_261107_oo01}).
+     */
+    private final OpenRequests openRequests = new OpenRequests();
+
+    /** The original request the current turn works for, or {@code null}. */
+    private String turnOriginal;
+
+    /** The current turn's answer, its ending line and its id, once {@link #finish} has it. */
+    private TurnReply turnAnswer;
     private List<ToolCall> pendingCalls;
     private String finalAnswer;
     private int stepCount;
@@ -1162,6 +1174,8 @@ public class ChatSession extends Interpreter {
         this.ioTurnNo = ioTurnNo;
         this.turnRequestId = null;
         this.askCount = 0;
+        this.turnOriginal = null;
+        this.turnAnswer = null;
         recordHistory("user", prompt);
         if (resultKey != null) {
             pendingResultKeys.remove(resultKey);
@@ -1238,6 +1252,14 @@ public class ChatSession extends Interpreter {
         TurnReply reply = activeResultKey == null
                 ? TurnReply.NONE
                 : new TurnReply(completedResults.get(activeResultKey), completedEndings.get(activeResultKey), turnId());
+        // A turn that works for a request this conversation received answers it only when none of the
+        // requests sent for it is still out; until then the asker's done stays open, and the answer
+        // of the turn that finishes the work goes in it (ReportReachesTheAskerAfterDelegation_261107_oo01).
+        CompletableFuture<TurnReply> originalDone = null;
+        if (turnOriginal != null) {
+            originalDone = openRequests.doneOf(turnOriginal);
+            openRequests.turnEnded(turnOriginal, turnAnswer != null ? turnAnswer : new TurnReply(null, null, turnId()));
+        }
         busy = false;
         activeResultKey = null;
 
@@ -1247,7 +1269,7 @@ public class ChatSession extends Interpreter {
         }
 
         emitter.accept(ChatEvent.status(provider.getCurrentModel(), provider.getSessionId(), false));
-        done.complete(reply);
+        if (done != originalDone) done.complete(reply);
     }
 
     // ---- Agent loop (ChatSessionAgentLoop_260823_oo01) ----
@@ -1328,6 +1350,15 @@ public class ChatSession extends Interpreter {
         this.ioTurnNo = ++ioTurn;
         this.turnRequestId = requestId;
         this.askCount = 0;
+        this.turnAnswer = null;
+        if (requestId != null && source != null && source.startsWith(ASK_CHAT_SOURCE_PREFIX)) {
+            openRequests.received(requestId, source.substring(ASK_CHAT_SOURCE_PREFIX.length()), done);
+            this.turnOriginal = requestId;
+        } else if (requestId != null && source != null && source.startsWith(ASK_CHAT_REPLY_SOURCE_PREFIX)) {
+            this.turnOriginal = openRequests.replyArrived(requestId);
+        } else {
+            this.turnOriginal = null;
+        }
         recordHistory("user", prompt, originOf(source), null, null);
         if (resultKey != null) {
             pendingResultKeys.remove(resultKey);
@@ -2160,11 +2191,13 @@ public class ChatSession extends Interpreter {
             long answeredIn = System.currentTimeMillis() - turnStartedAt;
             recordHistory("assistant", answer, null, provider.getCurrentModel(), answeredIn);
             recordConversationIo(question, answer, provider.getCurrentModel(), answeredIn);
+            String ending = ChatInspection.endingLine(
+                    stepLimitHit ? ChatInspection.ENDED_STEP_LIMIT : ChatInspection.ENDED_ANSWERED,
+                    stepCount, turnToolCalls);
+            turnAnswer = new TurnReply(answer, ending, turnId());
             if (activeResultKey != null) {
                 storeCompletedResult(activeResultKey, answer);
-                completedEndings.put(activeResultKey, ChatInspection.endingLine(
-                        stepLimitHit ? ChatInspection.ENDED_STEP_LIMIT : ChatInspection.ENDED_ANSWERED,
-                        stepCount, turnToolCalls));
+                completedEndings.put(activeResultKey, ending);
             }
             turnEmitter.accept(ChatEvent.delta(answer));
             // The browser puts what this event carries under the answer, as quarkus-chat-ui does.
@@ -2418,8 +2451,14 @@ public class ChatSession extends Interpreter {
             case "search_docs" -> DocSearchTool.search(extractInput(args, "query"), 0);
             case "list_references" -> ReferenceLinkTool.list(extractInput(args, "id"),
                     extractInput(args, "direction"), extractInput(args, "relation"));
-            case "ask_chat" -> AskChatTool.send(system, projectId, chatId,
-                    extractInput(args, "chatId"), extractInput(args, "prompt"), nextRequestId());
+            case "ask_chat" -> {
+                String requestId = nextRequestId();
+                String sent = AskChatTool.send(system, projectId, chatId,
+                        extractInput(args, "chatId"), extractInput(args, "prompt"), requestId);
+                // Sent for the request this turn works for: that request waits for its reply.
+                if (turnOriginal != null && sent.startsWith("sent to ")) openRequests.childSent(turnOriginal, requestId);
+                yield sent;
+            }
             case "set_workflow" -> SetWorkflowTool.setWorkflow(system, projectId,
                     extractInput(args, "chatId"), extractInput(args, "yaml"));
             case "load_skill" -> LoadSkillTool.load(skillRegistryRef, extractInput(args, "name"));
@@ -2567,6 +2606,16 @@ public class ChatSession extends Interpreter {
         this.askCount = 0;
         recordHistory("assistant", assistant);
         recordTurnIo(ioSession, ioTurnNo, "(autonomous continuation)", assistant, thinking);
+        // The provider went on by itself after the last request's turn, so this is more work on that
+        // request: its answer if the request is still waiting, else a follow-up to the same asker.
+        String original = openRequests.last();
+        if (original != null) {
+            TurnReply r = new TurnReply(assistant, null, turnId());
+            if (openRequests.turnEnded(original, r) == null) {
+                String asker = openRequests.askerIfAnswered(original);
+                if (asker != null) AskChatTool.followUp(system, myChatName(), asker, original, r);
+            }
+        }
     }
 
     /**

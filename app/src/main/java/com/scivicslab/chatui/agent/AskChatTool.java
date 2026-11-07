@@ -146,6 +146,34 @@ public final class AskChatTool {
                 + cause.getClass().getSimpleName() + ": " + cause.getMessage() + "]";
     }
 
+    /**
+     * Sends the answer of a turn the provider started by itself, after the request it went on with
+     * had been answered, to that request's asker as a follow-up
+     * ({@code ReportReachesTheAskerAfterDelegation_261107_oo01}). Queued like a reply, under the same
+     * request id, with the heading {@code [follow-up to request <id>, from <turn id>]}.
+     *
+     * @param system    the actor system both conversations live in
+     * @param myName    the qualified name of the conversation that went on
+     * @param askerName the qualified name of the conversation that sent the request
+     * @param requestId the request the follow-up is about
+     * @param turn      the answer of the turn that went on, and that turn's id
+     */
+    public static void followUp(IIActorSystem system, String myName, String askerName, String requestId,
+                                TurnReply turn) {
+        IIActorRef<?> askerActor = system.getIIActor(askerName + ".chat");
+        ActorRef<PromptQueue> askerQueue = system.getActor(askerName + ".queue");
+        if (!(askerActor instanceof ChatSessionIIAR askerChat) || askerQueue == null) {
+            LOG.warning("follow-up to request " + requestId + " not sent: " + askerName + " is gone");
+            return;
+        }
+        String text = "[follow-up to request " + requestId + ", from "
+                + (turn.turnId() == null ? myName : turn.turnId()) + "]\n" + turn.reply();
+        Consumer<ChatEvent> watchers = watchersOf(system, askerName);
+        askerQueue.tell(q -> q.enqueue(text, null, "queue", watchers, askerChat.asChatSessionRef(),
+                ChatSession.ASK_CHAT_REPLY_SOURCE_PREFIX + myName, null, new CompletableFuture<>(),
+                false, true, java.util.List.of(), requestId));
+    }
+
     /** What a conversation says goes to whoever is watching it; nothing when no SSE actor is registered (unit tests). */
     private static Consumer<ChatEvent> watchersOf(IIActorSystem system, String chatName) {
         ActorRef<SseConnection> sse = system.getActor(chatName + ".sse");

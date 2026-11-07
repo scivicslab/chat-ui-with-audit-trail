@@ -226,7 +226,11 @@ public class PromptQueue {
      */
     public void clearAgentMessages() {
         int before = queue.size();
-        queue.removeIf(e -> e.source() != null && e.source().startsWith("agent:"));
+        queue.removeIf(e -> {
+            if (e.source() == null || !e.source().startsWith("agent:")) return false;
+            abandon(e);
+            return true;
+        });
         int removed = before - queue.size();
         if (removed > 0) {
             LOG.info("queue: cleared " + removed + " agent messages on cancel");
@@ -286,8 +290,17 @@ public class PromptQueue {
      */
     public boolean removeAt(int index) {
         if (index < 0 || index >= queue.size()) return false;
-        queue.remove(index);
+        abandon(queue.remove(index));
         return true;
+    }
+
+    /**
+     * Completes the {@code done} of an item taken out of the queue without running, with no answer.
+     * Another conversation's {@code ask_chat} waits on it; left incomplete, that conversation would
+     * never hear that its request will not be answered ({@code ReportReachesTheAskerAfterDelegation_261107_oo01}).
+     */
+    private static void abandon(QueueItem item) {
+        if (item.done() != null) item.done().complete(TurnReply.NONE);
     }
 
     /**
