@@ -84,4 +84,26 @@ public interface ConversationControls {
      * @return {@code "ok: ..."}, or {@code "error: ..."} when there is no such conversation
      */
     String setChatName(String projectId, String chatId, String name);
+
+    /**
+     * Lists the project's conversations, one line each: id, name, superior, number of subordinates, provider
+     * and model, busy or idle; the caller and the liaison are marked ({@code ConversationReportingLines_261108_oo01}).
+     */
+    String listChats(String projectId, String callerChatId);
+
+    /**
+     * Makes {@code superiorChatId} the superior of {@code chatId}, or leaves it with none when blank.
+     *
+     * @return {@code "ok: ..."}, or {@code "error: ..."} with the reason and nothing changed
+     */
+    String setSuperior(String projectId, String chatId, String superiorChatId);
+
+    /** @return {@code null} when the conversation can take one more subordinate, otherwise why not */
+    String roomFor(String projectId, String superiorChatId);
+
+    /**
+     * @return the paragraph telling a conversation its place in the organization, read at the start of each
+     *         of its turns, or {@code null} when it has no superior, no subordinates and is not the liaison
+     */
+    String positionOf(String projectId, String chatId);
 }

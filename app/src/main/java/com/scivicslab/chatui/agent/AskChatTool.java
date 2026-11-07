@@ -4,6 +4,7 @@ import com.scivicslab.chatui.core.actor.CallWatchdog;
 import com.scivicslab.chatui.core.actor.ChatSession;
 import com.scivicslab.chatui.core.actor.ChatSessionIIAR;
 import com.scivicslab.chatui.core.actor.ChatUiActorSystem;
+import com.scivicslab.chatui.core.actor.Organization;
 import com.scivicslab.chatui.core.actor.PromptQueue;
 import com.scivicslab.chatui.core.actor.SseConnection;
 import com.scivicslab.chatui.core.actor.TurnReply;
@@ -112,14 +113,18 @@ public final class AskChatTool {
         done.whenCompleteAsync((reply, failure) ->
                 deliverReply(system, myName, myChat, myQueue, targetName, requestId, urgent, reply, failure));
         Consumer<ChatEvent> targetWatchers = watchersOf(system, targetName);
-        String headed = "[" + (urgent ? "urgent request " : "request ") + requestId + " from " + myName + "]\n" + prompt;
+        // A message from the target's superior goes into the urgent rank, without the asker choosing it:
+        // a decision sent down must not wait behind other work (ConversationReportingLines_261108_oo01).
+        boolean fromSuperior = !urgent && isSuperiorOf(system, myProjectId, myChatId, targetName);
+        String headed = "[" + (urgent ? "urgent request " : "request ") + requestId + " from " + myName
+                + (fromSuperior ? ", your superior" : "") + "]\n" + prompt;
         int passed;
         try {
             // Asked rather than told: the result says how many waiting items an urgent request passed.
             // The queue is its own actor, so this does not wait for the target's turn.
             passed = targetQueue.ask(q -> q.enqueue(headed, null, "queue", targetWatchers,
                     targetChat.asChatSessionRef(), ChatSession.ASK_CHAT_SOURCE_PREFIX + myName, resultKey, done,
-                    false, true, java.util.List.of(), requestId, urgent)).get(5, TimeUnit.SECONDS);
+                    false, true, java.util.List.of(), requestId, urgent || fromSuperior)).get(5, TimeUnit.SECONDS);
         } catch (Exception e) {
             LOG.log(Level.WARNING, "ask_chat: could not queue request " + requestId + " for " + targetName, e);
             return "error: could not queue the request for " + targetName + ": " + e.getClass().getSimpleName();
@@ -130,6 +135,21 @@ public final class AskChatTool {
         return "sent to " + targetName + " as " + (urgent ? "urgent request " : "request ") + requestId
                 + (urgent ? ", ahead of " + passed + " waiting message(s)" : "")
                 + "; its reply will arrive in this conversation as a new message when its turn ends" + elsewhere;
+    }
+
+    /** @return whether the sending conversation is the target's superior in their project's organization */
+    public static boolean isSuperiorOf(IIActorSystem system, String myProjectId, String myChatId, String targetName) {
+        String prefix = myProjectId + "/chat-";
+        if (!targetName.startsWith(prefix)) return false;
+        ActorRef<Organization> org = system.getActor(ChatUiActorSystem.organizationActorName(myProjectId));
+        if (org == null) return false;
+        String target = targetName.substring(prefix.length());
+        try {
+            return org.ask(o -> o.isSuperiorOf(myChatId, target)).get(5, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "ask_chat: could not read the organization of " + myProjectId, e);
+            return false;
+        }
     }
 
     /** Puts the target turn's reply, or the reason there is none, in the calling conversation's queue. */

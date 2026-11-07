@@ -113,7 +113,37 @@ public class ChatResource {
             if (chatName != null) chatNames.put(chatId, chatName);
         }
         body.put("chatNames", chatNames);
+        // The reporting lines, the liaison and the subordinate limit (ConversationReportingLines_261108_oo01).
+        body.put("organization", actorSystem.organizationJson(projectId).toMap());
         return Response.ok(body).build();
+    }
+
+    /**
+     * Sets the project's liaison, the conversation that talks with the person, and how many subordinates one
+     * superior may have ({@code ConversationReportingLines_261108_oo01}).
+     *
+     * @param body {@code {"liaison": "01", "maxSubordinates": 5}}; a field left out keeps its value
+     * @return {@code {"type":"ok"}}, or 400 with the reason and nothing changed
+     */
+    @POST
+    @Path("/{projectId}/organization")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response setOrganization(@PathParam("projectId") String projectId, Map<String, Object> body) {
+        Object liaison = body == null ? null : body.get("liaison");
+        Object max = body == null ? null : body.get("maxSubordinates");
+        Integer maxSubordinates;
+        try {
+            maxSubordinates = max == null || String.valueOf(max).isBlank() ? null : Integer.valueOf(String.valueOf(max).strip());
+        } catch (NumberFormatException e) {
+            return Response.status(400).entity(Map.of("type", "error", "message", "maxSubordinates must be a whole number")).build();
+        }
+        String outcome = actorSystem.setOrganizationSettings(projectId,
+                liaison == null || String.valueOf(liaison).isBlank() ? null : String.valueOf(liaison).strip(), maxSubordinates);
+        if (outcome.startsWith("error:")) {
+            return Response.status(400).entity(Map.of("type", "error", "message", outcome)).build();
+        }
+        return Response.ok(Map.of("type", "ok")).build();
     }
 
     /**
@@ -452,9 +482,12 @@ public class ChatResource {
         // (PromptOriginOnScreen_260915_oo01).
         Object saidSource = body != null ? body.get("source") : null;
         String source = saidSource == null ? "human" : String.valueOf(saidSource);
+        // What the person types to the liaison is a decision or a question the conversations wait on, so
+        // it goes into the urgent rank (ConversationReportingLines_261108_oo01).
+        boolean urgent = "screen".equals(source) && actorSystem.isLiaison(projectId, chatId);
         promptQueueRef.tell(q -> q.enqueue(text, model, "queue", emitter,
                 chatSessionIIAR.asChatSessionRef(), source, null, new CompletableFuture<TurnReply>(),
-                noThink, !hold, images));
+                noThink, !hold, images, null, urgent));
 
         return Response.ok(Map.of("type", "accepted")).build();
     }

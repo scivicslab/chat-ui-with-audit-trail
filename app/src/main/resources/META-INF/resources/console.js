@@ -1435,8 +1435,14 @@
             .then(function (both) {
                 var chatIds = both[0];
                 var chatNames = (both[1] && both[1].chatNames) || {};
+                var org = (both[1] && both[1].organization) || {};
+                var superiors = org.superiors || {};
                 if (projectId !== perspectiveProjectId) return;   // another project was chosen meanwhile
                 list.textContent = "";
+                var liaisonEl = document.getElementById("projectprop-liaison");
+                var maxEl = document.getElementById("projectprop-maxsub");
+                if (liaisonEl) liaisonEl.value = org.liaison || "01";
+                if (maxEl) maxEl.value = org.maxSubordinates || 5;
                 (chatIds || []).forEach(function (chatId) {
                     var li = document.createElement("li");
                     var id = document.createElement("span");
@@ -1458,6 +1464,12 @@
                     });
                     li.appendChild(nameInput);
                     li.appendChild(save);
+                    // Where the conversation stands in the organization (ConversationReportingLines_261108_oo01).
+                    var line = document.createElement("span");
+                    line.className = "projectprop-chat-superior";
+                    line.textContent = chatId === (org.liaison || "01") ? "liaison"
+                        : (superiors[chatId] ? "reports to chat-" + superiors[chatId] : "no superior");
+                    li.appendChild(line);
                     if (!(projectId === DEFAULT_PROJECT_ID && chatId === "01")) {
                         var del = document.createElement("button");
                         del.type = "button";
@@ -1472,6 +1484,28 @@
             })
             .catch(function () { /* leave the list as it was */ });
     }
+
+    // Saves the liaison and the subordinate limit (ConversationReportingLines_261108_oo01).
+    document.addEventListener("click", function (e) {
+        if (!e.target || e.target.id !== "projectprop-org-save") return;
+        var projectId = perspectiveProjectId;
+        var outcome = document.getElementById("projectprop-org-outcome");
+        if (!projectId) return;
+        fetch("api/projects/" + encodeURIComponent(projectId) + "/organization", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                liaison: document.getElementById("projectprop-liaison").value,
+                maxSubordinates: document.getElementById("projectprop-maxsub").value
+            })
+        })
+            .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+            .then(function (res) {
+                if (outcome) outcome.textContent = res.ok ? "saved" : (res.body.message || "not saved");
+                projectPropListChats();
+            })
+            .catch(function (err) { if (outcome) outcome.textContent = "error: " + err.message; });
+    });
 
     function projectPropSaveChatName(projectId, chatId, name) {
         var outcome = document.getElementById("projectprop-chats-outcome");

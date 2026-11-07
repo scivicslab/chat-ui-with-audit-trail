@@ -16,6 +16,7 @@ import com.scivicslab.chatui.agent.CreateChatTool;
 import com.scivicslab.chatui.agent.ProviderTools;
 import com.scivicslab.chatui.agent.TimekeeperTool;
 import com.scivicslab.chatui.agent.ChatNameTool;
+import com.scivicslab.chatui.agent.OrganizationTools;
 import com.scivicslab.chatui.agent.DeleteChatTool;
 import com.scivicslab.chatui.agent.GetChatStatusTool;
 import com.scivicslab.chatui.agent.ListChatModelsTool;
@@ -356,7 +357,7 @@ public class ChatSession extends Interpreter {
               Give the value to create_chat or set_chat_provider. Takes no parameters.
             """);
         m.put("create_chat", """
-            - create_chat(provider, model): add a new, empty conversation to your own project and return
+            - create_chat(provider, model, superior): add a new, empty conversation to your own project and return
               its id (for example "06"), which you can then pass as "chatId" to ask_chat, set_chat_model,
               get_request_messages and the other conversation tools. Both <parameter> tags are optional:
               "provider" is a value list_providers printed (default: openai-compat, a local LLM), and
@@ -366,7 +367,22 @@ public class ChatSession extends Interpreter {
               example, processing Wikipedia articles one by one) on openai-compat, where calls cost
               nothing and many run at once; put a conversation that checks other conversations' answers
               and asks for corrections on claude (Claude Code). Nothing else creates a conversation: a
-              "chatId" that does not exist is an error.
+              "chatId" that does not exist is an error. The new conversation reports to you; give the
+              optional "superior" <parameter> tag another conversation's id to put it under that one
+              instead, or "none" for no superior. A superior already holding the subordinate limit is
+              refused, naming its subordinates that still have room: put the new one under one of them.
+            """);
+        m.put("list_chats", """
+            - list_chats(): list the conversations of your project, one per line: id, name, superior,
+              number of subordinates, provider and model, busy or idle. You and the liaison (the one
+              conversation that talks with the person) are marked. Takes no parameters.
+            """);
+        m.put("set_superior", """
+            - set_superior(chatId, superiorChatId): make "superiorChatId" the superior of conversation
+              "chatId" of your project, or, with "none", leave it with no superior. A conversation reports
+              to its superior and sends it the questions it cannot decide. Refused, with nothing changed,
+              when it would make a loop, when "chatId" is the liaison, and when the superior already has
+              the subordinate limit. Requires "chatId" and "superiorChatId" <parameter> tags.
             """);
         m.put("set_chat_provider", """
             - set_chat_provider(chatId, provider): put another conversation of this project on a
@@ -1675,11 +1691,31 @@ public class ChatSession extends Interpreter {
         return catalog.isEmpty() ? "" : "\n\n" + catalog;
     }
 
-    /** Part 3 of the opening text: this project's instructions with their lead-in, or {@code ""} when there are none. */
+    /**
+     * Part 3 of the opening text: this project's instructions with their lead-in, then this conversation's
+     * place in the project's organization ({@code ConversationReportingLines_261108_oo01}); {@code ""} when
+     * there is neither. The position is read afresh on every turn, so a change of superior shows at once.
+     */
     String projectInstructionsPart() {
-        if (projectInstructions == null || projectInstructions.isBlank()) return "";
-        return "\n\nInstructions for this project, from its working directory. They govern"
-                + " the work you do here:\n\n" + projectInstructions;
+        StringBuilder sb = new StringBuilder();
+        if (projectInstructions != null && !projectInstructions.isBlank()) {
+            sb.append("\n\nInstructions for this project, from its working directory. They govern"
+                    + " the work you do here:\n\n").append(projectInstructions);
+        }
+        String position = positionText();
+        if (position != null) sb.append("\n\n").append(position);
+        return sb.toString();
+    }
+
+    /** @return this conversation's place in its project's organization, or {@code null} when it has none */
+    private String positionText() {
+        if (conversationControls == null || projectId == null || chatId == null) return null;
+        try {
+            return conversationControls.positionOf(projectId, chatId);
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "Could not read this conversation's place in the organization", e);
+            return null;
+        }
     }
 
     /** @return the skill catalog, or {@code ""} when no registry is wired or none could be read */
@@ -2603,8 +2639,11 @@ public class ChatSession extends Interpreter {
             case "set_chat_model" -> SetChatModelTool.set(system, conversationControls, projectId,
                     extractInput(args, "chatId"), extractInput(args, "model"));
             case "list_providers" -> ProviderTools.list(conversationControls);
-            case "create_chat" -> CreateChatTool.create(system, conversationControls, projectId,
-                    extractInput(args, "provider"), extractInput(args, "model"));
+            case "create_chat" -> CreateChatTool.create(system, conversationControls, projectId, chatId,
+                    extractInput(args, "provider"), extractInput(args, "model"), extractInput(args, "superior"));
+            case "list_chats" -> OrganizationTools.list(conversationControls, projectId, chatId);
+            case "set_superior" -> OrganizationTools.setSuperior(conversationControls, projectId, chatId,
+                    extractInput(args, "chatId"), extractInput(args, "superiorChatId"));
             case "set_chat_provider" -> ProviderTools.setChatProvider(conversationControls, projectId,
                     extractInput(args, "chatId"), extractInput(args, "provider"));
             case "set_chat_timekeeper" -> TimekeeperTool.set(conversationControls, projectId,

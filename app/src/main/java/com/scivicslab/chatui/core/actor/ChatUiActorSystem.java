@@ -629,6 +629,11 @@ public class ChatUiActorSystem implements ConversationControls {
             return ChatDeletion.refused(ChatDeletion.Kind.HAS_NESTED,
                     name + " has conversations under it; delete them first: " + String.join(", ", nested));
         }
+        List<String> subordinates = askOrDefault(organizationOf(projectId), o -> o.subordinatesOf(chatId), List.<String>of());
+        if (!subordinates.isEmpty()) {
+            return ChatDeletion.refused(ChatDeletion.Kind.HAS_NESTED, name + " has subordinates; give them another "
+                    + "superior with set_superior first: " + String.join(", ", subordinates.stream().map(c -> "chat-" + c).toList()));
+        }
         ChatSessionIIAR session = chatSessions.get(name);
         if (session != null && session.isBusyDirect()) {
             return ChatDeletion.refused(ChatDeletion.Kind.BUSY, name + " is answering");
@@ -653,6 +658,8 @@ public class ChatUiActorSystem implements ConversationControls {
         chats.remove(name);
         chatSessions.remove(name);
         chatLogBuffers.remove(name);
+        organizationOf(projectId).tell(o -> o.remove(chatId));
+        recordProjectProperties(projectId);
         LOG.info("Deleted conversation " + name);
         return new ChatDeletion(ChatDeletion.Kind.DELETED, "");
     }
@@ -1386,6 +1393,120 @@ public class ChatUiActorSystem implements ConversationControls {
         return applied == null ? "ok: name cleared" : "ok: name set to " + applied;
     }
 
+    // ── Organization (ConversationReportingLines_261108_oo01) ──────────────────────────────────────
+
+    /** The name of a project's organization actor, which {@code ask_chat} also looks up. */
+    public static String organizationActorName(String projectId) {
+        return projectId + "/organization";
+    }
+
+    /** @return the project's organization actor, created as the project's child the first time it is asked for */
+    public synchronized ActorRef<Organization> organizationOf(String projectId) {
+        String name = organizationActorName(projectId);
+        ActorRef<Organization> ref = actorSystem.getActor(name);
+        if (ref != null) return ref;
+        ActorRef<Project> projectRef = projects.get(projectId);
+        if (projectRef == null) throw new IllegalArgumentException("Unknown project: " + projectId);
+        return projectRef.createChild(name, new Organization());
+    }
+
+    /** @return the bare ids of the project's conversations, in id order */
+    private List<String> chatIdsOf(String projectId) {
+        String prefix = projectId + "/chat-";
+        return chats.keySet().stream().filter(n -> n.startsWith(prefix))
+                .map(n -> n.substring(prefix.length())).sorted().toList();
+    }
+
+    @Override
+    public String listChats(String projectId, String callerChatId) {
+        Organization snapshot = organizationSnapshot(projectId);
+        StringBuilder sb = new StringBuilder();
+        for (String id : chatIdsOf(projectId)) {
+            String name = getChatName(projectId, id);
+            String sup = snapshot.superiorOf(id);
+            ChatSessionIIAR session = chatSessions.get(chatActorName(projectId, id));
+            sb.append("chat-").append(id)
+              .append(name == null ? "" : " \"" + name + "\"")
+              .append(id.equals(callerChatId) ? " (you)" : "")
+              .append(id.equals(snapshot.liaison()) ? " (liaison)" : "")
+              .append("; superior: ").append(sup == null ? "none" : "chat-" + sup)
+              .append("; subordinates: ").append(snapshot.subordinatesOf(id).size());
+            if (session != null) {
+                sb.append("; ").append(session.getProviderIdDirect()).append(" ").append(session.getModelDirect())
+                  .append(session.isBusyDirect() ? "; busy" : "; idle");
+            }
+            sb.append('\n');
+        }
+        sb.append("Each superior may have at most ").append(snapshot.maxSubordinates()).append(" subordinates.");
+        return sb.toString();
+    }
+
+    /** A copy of the project's organization, read in one message, for building text from it. */
+    private Organization organizationSnapshot(String projectId) {
+        Organization copy = new Organization();
+        org.json.JSONObject json = askOrDefault(organizationOf(projectId), Organization::toJson, null);
+        if (json != null) copy.loadJson(json);
+        return copy;
+    }
+
+    @Override
+    public String setSuperior(String projectId, String chatId, String superiorChatId) {
+        List<String> present = chatIdsOf(projectId);
+        if (!present.contains(chatId)) return "error: no such conversation: " + chatActorName(projectId, chatId);
+        String sup = superiorChatId == null || superiorChatId.isBlank() ? null : superiorChatId;
+        if (sup != null && !present.contains(sup)) return "error: no such conversation: " + chatActorName(projectId, sup);
+        String refusal = askOrDefault(organizationOf(projectId), o -> o.setSuperior(chatId, sup), "the organization did not answer");
+        if (refusal != null) return "error: refused — " + refusal;
+        recordProjectProperties(projectId);
+        return sup == null ? "ok: chat-" + chatId + " has no superior now"
+                : "ok: chat-" + chatId + " now reports to chat-" + sup;
+    }
+
+    @Override
+    public String roomFor(String projectId, String superiorChatId) {
+        return askOrDefault(organizationOf(projectId), o -> o.roomFor(superiorChatId), null);
+    }
+
+    @Override
+    public String positionOf(String projectId, String chatId) {
+        return organizationSnapshot(projectId).positionText(projectId, chatId, c -> labelOf(projectId, c));
+    }
+
+    private String labelOf(String projectId, String chatId) {
+        String name = getChatName(projectId, chatId);
+        return "chat-" + chatId + (name == null ? "" : " \"" + name + "\"");
+    }
+
+    /**
+     * Sets the project's liaison and subordinate limit, either left {@code null} to keep it.
+     *
+     * @return {@code "ok: ..."} or {@code "error: ..."}
+     */
+    public String setOrganizationSettings(String projectId, String liaison, Integer maxSubordinates) {
+        if (!projects.containsKey(projectId)) return "error: unknown project: " + projectId;
+        if (liaison != null && !chatIdsOf(projectId).contains(liaison)) {
+            return "error: no such conversation: " + chatActorName(projectId, liaison);
+        }
+        String refusal = askOrDefault(organizationOf(projectId), o -> {
+            if (liaison != null) { String r = o.setLiaison(liaison); if (r != null) return r; }
+            return maxSubordinates == null ? null : o.setMaxSubordinates(maxSubordinates);
+        }, "the organization did not answer");
+        if (refusal != null) return "error: " + refusal;
+        recordProjectProperties(projectId);
+        return "ok";
+    }
+
+    /** @return whether the conversation is its project's liaison, the one that talks with the person */
+    public boolean isLiaison(String projectId, String chatId) {
+        if (!projects.containsKey(projectId)) return false;
+        return chatId.equals(askOrDefault(organizationOf(projectId), Organization::liaison, null));
+    }
+
+    /** @return the project's organization as JSON, for the Project tab */
+    public org.json.JSONObject organizationJson(String projectId) {
+        return askOrDefault(organizationOf(projectId), Organization::toJson, new org.json.JSONObject());
+    }
+
     /** @return the name a person reads for the conversation, or null when it has none */
     public String getChatName(String projectId, String chatId) {
         return nameOfChat(chatActorName(projectId, chatId));
@@ -1420,6 +1541,9 @@ public class ChatUiActorSystem implements ConversationControls {
             org.json.JSONObject o = new org.json.JSONObject();
             o.put("name", name == null ? org.json.JSONObject.NULL : name);
             o.put("workingDir", dir == null ? org.json.JSONObject.NULL : dir.toString());
+            // The organization travels in the same entry, for the same reason as the two above
+            // (ConversationReportingLines_261108_oo01).
+            o.put("organization", organizationOf(projectId).ask(Organization::toJson).get(5, TimeUnit.SECONDS));
             ioLogStore.record(sessionId, "agent", IoLogView.SETTINGS_LABEL, o.toString());
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Could not record the properties of " + projectId, e);
@@ -1445,6 +1569,14 @@ public class ChatUiActorSystem implements ConversationControls {
             if (name != null) {
                 ActorRef<Project> projectRef = projects.get(projectId);
                 if (projectRef != null) projectRef.tell(p -> p.setName(name));
+            }
+            org.json.JSONObject organization = o.optJSONObject("organization");
+            if (organization != null) {
+                List<String> present = chatIdsOf(projectId);
+                organizationOf(projectId).tell(org -> {
+                    org.loadJson(organization);
+                    org.retainOnly(present);
+                }).get(5, TimeUnit.SECONDS);
             }
             String dir = o.isNull("workingDir") ? null : o.getString("workingDir");
             if (dir != null && !dir.isBlank()) {

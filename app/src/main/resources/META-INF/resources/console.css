@@ -826,3 +826,7 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
 
 /* A turn's id and request id at the top of the opened turn (TurnAndRequestIds_261107_oo01). */
 .tr-turn-ids { font-size: 11px; color: var(--text-secondary, #888); padding: 4px 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* The organization in the Project tab (ConversationReportingLines_261108_oo01). */
+.projectprop-chat-superior { margin-left: 8px; font-size: 12px; color: var(--text-secondary, #888); }
+.projectprop-org { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 12px; }

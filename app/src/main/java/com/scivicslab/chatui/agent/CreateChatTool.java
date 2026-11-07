@@ -27,6 +27,16 @@ public final class CreateChatTool {
 
     private CreateChatTool() {}
 
+    /** @return the superior's bare id, {@code null} for none, or an {@code error: ...} string */
+    static String superiorIdOf(String myProjectId, String myChatId, String superior) {
+        if (superior == null || superior.isBlank()) return myChatId;
+        if (superior.strip().equalsIgnoreCase("none")) return null;
+        String name = ChatUiActorSystem.resolveChatName(myProjectId, superior.strip());
+        String prefix = myProjectId + "/chat-";
+        if (!name.startsWith(prefix)) return "error: refused — the superior must be a conversation of this project";
+        return name.substring(prefix.length());
+    }
+
     private static final Logger LOG = Logger.getLogger(CreateChatTool.class.getName());
 
     /**
@@ -40,7 +50,27 @@ public final class CreateChatTool {
      */
     public static String create(IIActorSystem system, ConversationControls controls, String myProjectId,
                                 String provider, String model) {
+        return create(system, controls, myProjectId, null, provider, model, "none");
+    }
+
+    /**
+     * As {@link #create(IIActorSystem, ConversationControls, String, String, String)}, and puts the new
+     * conversation under a superior ({@code ConversationReportingLines_261108_oo01}).
+     *
+     * @param myChatId the calling conversation's bare id
+     * @param superior the new conversation's superior: blank for the caller itself, {@code none} for no
+     *                 superior, or another conversation of this project. A superior already holding the
+     *                 limit is refused before anything is made.
+     */
+    public static String create(IIActorSystem system, ConversationControls controls, String myProjectId,
+                                String myChatId, String provider, String model, String superior) {
         if (controls == null) return "error: create_chat is not available here";
+        String sup = superiorIdOf(myProjectId, myChatId, superior);
+        if (sup != null && sup.startsWith("error:")) return sup;
+        if (sup != null) {
+            String full = controls.roomFor(myProjectId, sup);
+            if (full != null) return "error: refused — " + full + " (no conversation was created)";
+        }
         boolean providerGiven = provider != null && !provider.isBlank();
         boolean modelGiven = model != null && !model.isBlank();
         ConversationControls.ProviderOption option = null;
@@ -76,8 +106,17 @@ public final class CreateChatTool {
             controls.deleteChat(myProjectId, chatId);
             return "error: create_chat failed: " + e.getMessage() + " (no conversation was created)";
         }
+        String reportsTo = "";
+        if (sup != null) {
+            String placed = controls.setSuperior(myProjectId, chatId, sup);
+            if (placed.startsWith("error:")) {
+                controls.deleteChat(myProjectId, chatId);
+                return placed + " (no conversation was created)";
+            }
+            reportsTo = ", reporting to chat-" + sup;
+        }
         return "ok: created " + name + " (address it as \"" + chatId + "\") on "
                 + (option == null ? "the default provider" : option.value())
-                + ", model " + (modelGiven ? model : "the provider's default");
+                + ", model " + (modelGiven ? model : "the provider's default") + reportsTo;
     }
 }

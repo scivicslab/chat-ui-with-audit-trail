@@ -391,6 +391,15 @@
                                  and a Delete button (ConversationDeletion_261011_oo01). -->
                             <ul id="projectprop-chats" class="projectprop-chats"></ul>
                             <div id="projectprop-chats-outcome" class="projectprop-outcome"></div>
+                            <!-- The organization: which conversation talks with the person, and how many
+                                 subordinates one superior may have (ConversationReportingLines_261108_oo01).
+                                 Each conversation's superior is shown in the list above. -->
+                            <div class="projectprop-org">
+                                <label>Liaison (talks with the person): chat-<input type="text" id="projectprop-liaison" size="3"></label>
+                                <label>Subordinates per superior, at most: <input type="number" id="projectprop-maxsub" min="1" style="width:4em"></label>
+                                <button type="button" id="projectprop-org-save">Save</button>
+                                <span id="projectprop-org-outcome" class="projectprop-outcome"></span>
+                            </div>
                         </div>
                         <!-- Delete: not shown for project1, which every start creates again
                              (ProjectDeletion_261011_oo01). -->

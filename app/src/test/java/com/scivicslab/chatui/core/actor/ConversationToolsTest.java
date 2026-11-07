@@ -82,6 +82,14 @@ class ConversationToolsTest {
                                           com.scivicslab.chatui.agent.ToolSet toolSet) {
             providerCalls.add(projectId + "/" + chatId + "=" + kind + ":" + toolSet.id());
         }
+        final Organization organization = new Organization();
+        @Override public String listChats(String projectId, String callerChatId) { return ""; }
+        @Override public String setSuperior(String projectId, String chatId, String superiorChatId) {
+            String r = organization.setSuperior(chatId, superiorChatId);
+            return r == null ? "ok" : "error: refused — " + r;
+        }
+        @Override public String roomFor(String projectId, String superiorChatId) { return organization.roomFor(superiorChatId); }
+        @Override public String positionOf(String projectId, String chatId) { return null; }
         final List<String> nameCalls = new ArrayList<>();
         @Override public String setChatName(String projectId, String chatId, String name) {
             if (chatId.equals("99")) return "error: unknown conversation: " + projectId + "/chat-99";
@@ -646,6 +654,42 @@ class ConversationToolsTest {
         assertEquals(1, asker.prompts.size(), asker.prompts.toString());
         assertTrue(asker.prompts.get(0).contains("[reply to request project1/chat-01:s7:t3:r1, from project1/chat-02:t3]\nall done"),
                 asker.prompts.get(0));
+    }
+
+    /**
+     * A message from the target's superior goes ahead of the work already waiting in the target's queue,
+     * without the superior asking for urgency ({@code ConversationReportingLinesTests_261108_oo01}).
+     */
+    @Test
+    @org.junit.jupiter.api.Tag("ConversationReportingLinesTests_261108_oo01")
+    void aMessageFromTheSuperiorGoesAheadOfWaitingWork() throws Exception {
+        IIActorSystem system = new IIActorSystem("conversation-tools-superior-first");
+        FakeControls controls = new FakeControls();
+        Scripted boss = new Scripted(List.of("ok"), List.of());
+        Paced worker = new Paced(List.of("w1", "w2", "w3"), java.util.Set.of(1));
+        ChatSessionIIAR one = chat(system, "01", boss, controls);
+        ChatSessionIIAR two = chat(system, "02", worker, controls);
+        queueOf(one);
+        ActorRef<PromptQueue> queue2 = queueOf(two);
+        Organization org = new Organization();
+        org.setSuperior("02", "01");
+        system.actorOf(ChatUiActorSystem.organizationActorName("project1"), org);
+
+        queue2.ask(q -> q.enqueue("the long job", null, "queue", e -> {}, two.asChatSessionRef(), "human", null,
+                new CompletableFuture<>(), false, true, List.of(), null, false)).get(5, java.util.concurrent.TimeUnit.SECONDS);
+        waitUntil(() -> two.isBusyDirect());
+        queue2.ask(q -> q.enqueue("other waiting work", null, "queue", e -> {}, two.asChatSessionRef(), "human", null,
+                new CompletableFuture<>(), false, true, List.of(), null, false)).get(5, java.util.concurrent.TimeUnit.SECONDS);
+
+        String sent = AskChatTool.send(system, "project1", "01", "02", "decision: use plan B", "project1/chat-01:t1:r1");
+
+        assertTrue(sent.startsWith("sent to project1/chat-02 as request"), sent);
+        List<String> order = queue2.ask(q -> q.snapshot().stream().map(PromptQueue.QueueEntry::prompt).toList())
+                .get(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertEquals(2, order.size(), order.toString());
+        assertTrue(order.get(0).startsWith("[request project1/chat-01:t1:r1 from project1/chat-01, your superior]")
+                && order.get(0).endsWith("decision: use plan B"), order.toString());
+        assertEquals("other waiting work", order.get(1));
     }
 
     /**
