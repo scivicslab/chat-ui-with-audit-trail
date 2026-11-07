@@ -465,9 +465,21 @@ header h1[contenteditable]:focus {
     font-size: 12px;
     color: var(--text-secondary);
     display: flex;
-    gap: 16px;
+    flex-wrap: wrap;
+    gap: 4px 16px;
     align-items: center;
 }
+
+/* The turn and request ids take a line of their own at the bottom of the footer. */
+.footer-ids {
+    order: 1;
+    flex-basis: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 16px;
+    font-size: 11px;
+}
+.footer-ids span { overflow-wrap: anywhere; }
 
 .copy-md-btn {
     background: var(--bg-tertiary);

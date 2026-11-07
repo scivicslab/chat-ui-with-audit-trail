@@ -603,11 +603,16 @@
     // recorded, or null when the server has none: a footer filled with the time of the reload would
     // state something false.
     // Which turn wrote a line and which ask_chat request it is or answers, as the record keeps them
-    // (TurnAndRequestIds_261107_oo01). Shown whole, since they are copied into the Sessions tab.
+    // (TurnAndRequestIds_261107_oo01). Shown whole, since they are copied into the Sessions tab, on a
+    // line of their own under the rest of the footer: they are long and would crowd it.
     function appendIds(footer, turnId, requestId) {
-        if (turnId) footer.appendChild(textSpan("Turn: " + turnId, "The turn this line belongs to"));
-        if (requestId) footer.appendChild(textSpan("Request: " + requestId,
+        if (!turnId && !requestId) return;
+        var row = document.createElement("div");
+        row.className = "footer-ids";
+        if (turnId) row.appendChild(textSpan("Turn: " + turnId, "The turn this line belongs to"));
+        if (requestId) row.appendChild(textSpan("Request: " + requestId,
             "The ask_chat request this line is, or answers"));
+        footer.appendChild(row);
     }
 
     function appendMessage(role, text, images, origin, at, ids) {
