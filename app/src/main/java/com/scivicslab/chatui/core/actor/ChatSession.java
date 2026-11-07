@@ -2247,6 +2247,10 @@ public class ChatSession extends Interpreter {
             // never gets it back as something the model said — and no empty answer bubble.
             recordHistory("error", "Error: " + turnError);
             recordConversationError(question, turnError);
+            // The asker is told why there is no answer, not only that there is none.
+            String why = "its turn failed: " + turnError;
+            turnAnswer = new TurnReply(null, why, turnId());
+            if (activeResultKey != null) completedEndings.put(activeResultKey, why);
             turnEmitter.accept(ChatEvent.result(auditSessionId(), 0.0,
                     System.currentTimeMillis() - turnStartedAt, provider.getCurrentModel(), false)
                     .withTurn(turnId(), turnRequestId));

@@ -248,6 +248,12 @@ public class OpenAiCompatClient {
                 if (Thread.currentThread().isInterrupted()) { interrupted = true; break; }
                 SseDelta delta = parseSseDelta(iterator.next());
                 if (delta == null) continue;
+                // The server failed after it had answered 200 and started the stream: the failure
+                // comes as a chunk of its own, and read as content it is an empty answer.
+                if (delta.error() != null) {
+                    callback.onError("Server error (" + baseUrl + "): " + delta.error());
+                    return null;
+                }
                 // Reasoning first: while a thinking model reasons, this is the only field that
                 // moves, and the caller needs to see that the call is alive.
                 if (delta.reasoning() != null) callback.onReasoning(delta.reasoning());
@@ -501,15 +507,36 @@ public class OpenAiCompatClient {
      *                  carried none
      * @param reasoning reasoning text from {@code delta.reasoning_content}, or {@code null} when
      *                  the server does not separate reasoning or this chunk carried none
+     * @param error     the server's message when this chunk is {@code {"error":{...}}} — how vLLM
+     *                  and the GPU broker report a failure after the stream has started — or
+     *                  {@code null} for an ordinary chunk
      */
-    record SseDelta(String content, String reasoning, String finishReason) {}
+    record SseDelta(String content, String reasoning, String finishReason, String error) {}
 
     static SseDelta parseSseDelta(String line) {
         if (line == null || !line.startsWith("data: ")) return null;
         String data = line.substring(6).trim();
         if (data.equals("[DONE]")) return null;
+        String error = extractStreamError(data);
+        if (error != null) return new SseDelta(null, null, null, error);
         return new SseDelta(extractDeltaContent(data), extractDeltaReasoning(data),
-                extractFinishReason(data));
+                extractFinishReason(data), null);
+    }
+
+    /**
+     * Reads the message of an error chunk. An ordinary chunk always has {@code choices}, and text
+     * the model wrote is inside it, so a chunk with {@code choices} is never an error even when its
+     * content quotes one.
+     *
+     * @param json one SSE data payload
+     * @return the server's message, the whole payload when it gave none, or {@code null}
+     */
+    static String extractStreamError(String json) {
+        if (json.contains("\"choices\"")) return null;
+        int idx = json.indexOf("\"error\"");
+        if (idx < 0) return null;
+        String message = readStringField(json, "\"message\":", idx);
+        return message != null ? message : json;
     }
 
     /**

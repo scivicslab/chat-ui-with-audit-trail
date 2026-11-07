@@ -9,8 +9,8 @@ package com.scivicslab.chatui.core.actor;
  *
  * @param reply  the answer, or {@code null} when the turn left none (a prompt without a result key,
  *               a cancelled or failed turn, a prompt refused because the conversation was busy)
- * @param ending the line saying how the turn ended ({@code [ended: answered; ...]}), or {@code null}
- *               when there is no turn to describe
+ * @param ending the line saying how the turn ended ({@code [ended: answered; ...]}); when there is no
+ *               answer, why ({@code its turn failed: <error>}); {@code null} when there is nothing to say
  * @param turnId the id of the turn that wrote the answer ({@code TurnAndRequestIds_261107_oo01}), or
  *               {@code null} when there is no turn to name
  */

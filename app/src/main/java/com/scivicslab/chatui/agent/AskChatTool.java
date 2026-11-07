@@ -156,7 +156,8 @@ public final class AskChatTool {
     static String replyMessage(String targetName, String requestId, TurnReply reply, Throwable failure) {
         if (failure != null) return noReply(targetName, requestId, failure);
         if (reply == null || reply.reply() == null) {
-            return "[request " + requestId + " to " + targetName + " ended without a reply: its turn left no result]";
+            String why = reply != null && reply.ending() != null ? reply.ending() : "its turn left no result";
+            return "[request " + requestId + " to " + targetName + " ended without a reply: " + why + "]";
         }
         String from = reply.turnId() == null ? targetName : reply.turnId();
         return "[reply to request " + requestId + ", from " + from + "]\n" + reply.reply()
@@ -325,7 +326,10 @@ public final class AskChatTool {
             } catch (TimeoutException e) {
                 return Outcome.of("error: chat " + target + " did not respond within " + waitTimeoutSeconds + "s");
             }
-            if (turn == null || turn.reply() == null) return Outcome.of("error: no result from chat " + target);
+            if (turn == null || turn.reply() == null) {
+                return Outcome.of("error: no result from chat " + target
+                        + (turn != null && turn.ending() != null ? ": " + turn.ending() : ""));
+            }
             return new Outcome(turn.reply(), turn.ending());
         } catch (Exception e) {
             LOG.log(Level.WARNING, "ask_chat: call to " + target + " failed", e);
