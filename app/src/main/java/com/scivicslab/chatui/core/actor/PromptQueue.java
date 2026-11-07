@@ -171,10 +171,25 @@ public class PromptQueue {
                         String source, String resultKey,
                         CompletableFuture<TurnReply> done, boolean noThink, boolean auto,
                         List<String> images) {
+        enqueue(prompt, model, mode, emitter, chatSessionRef, source, resultKey, done, noThink, auto, images, null);
+    }
+
+    /**
+     * Enqueues a prompt that is a request from, or a reply to, another conversation's {@code ask_chat}.
+     *
+     * @param requestId the request id ({@code TurnAndRequestIds_261107_oo01}): for a request, its own
+     *                  id; for a reply, the id of the request it answers; {@code null} for any other prompt
+     */
+    public void enqueue(String prompt, String model, String mode,
+                        Consumer<ChatEvent> emitter,
+                        ActorRef<ChatSession> chatSessionRef,
+                        String source, String resultKey,
+                        CompletableFuture<TurnReply> done, boolean noThink, boolean auto,
+                        List<String> images, String requestId) {
 
         switch (mode) {
             case "cancel_and_send" -> {
-                QueueItem item = new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, auto, images);
+                QueueItem item = new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, auto, images, requestId);
                 queue.add(0, item);
                 // tellNow, not tell: the running turn blocks the ChatSession's own thread, so a
                 // queued cancel would be delivered only after that turn ended (ChatSession.cancel).
@@ -185,7 +200,7 @@ public class PromptQueue {
             }
             default -> {
                 // "queue" mode (default)
-                QueueItem item = new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, auto, images);
+                QueueItem item = new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, auto, images, requestId);
                 queue.add(item);
                 emitter.accept(ChatEvent.info(auto
                         ? "Queued. Your message will be sent when the current prompt finishes."
@@ -410,7 +425,7 @@ public class PromptQueue {
         if (item == null) return;
 
         chat.start(item.prompt(), item.model(), item.emitter(), chatSessionRef, item.done(), item.resultKey(),
-                item.noThink(), item.images(), item.source());
+                item.noThink(), item.images(), item.source(), item.requestId());
         com.scivicslab.pojoactor.action.ActionResult result = chat.runUntilEnd();
         if (!result.isSuccess()) {
             LOG.warning("Agent loop did not reach 'end': " + result.getResult());
@@ -465,10 +480,11 @@ public class PromptQueue {
             String resultKey,  // UUID for MCP result tracking, null for human prompts
             boolean noThink,
             boolean auto,      // false = paused: waits for advanceNow instead of auto-dispatch
-            List<String> images // data URLs attached to this prompt, or empty
+            List<String> images, // data URLs attached to this prompt, or empty
+            String requestId     // the ask_chat request this item is, or answers; null otherwise
     ) {
         QueueItem withAuto(boolean newAuto) {
-            return new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, newAuto, images);
+            return new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, newAuto, images, requestId);
         }
     }
 }

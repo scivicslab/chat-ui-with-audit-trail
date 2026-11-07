@@ -361,17 +361,33 @@ class ConversationToolsTest {
         ActorRef<PromptQueue> queue2 = two.createChild("project1/chat-02.queue", new PromptQueue());
         queue2.tellNow(q -> q.setSelf(queue2)).join();
 
-        String sent = AskChatTool.send(system, "project1", "01", "02", "question");
-        assertTrue(sent.startsWith("sent to project1/chat-02"), sent);
+        String sent = AskChatTool.send(system, "project1", "01", "02", "question", "project1/chat-01:s7:t3:r1");
+        assertTrue(sent.startsWith("sent to project1/chat-02 as request project1/chat-01:s7:t3:r1"), sent);
 
         long deadline = System.currentTimeMillis() + 20_000;
         while (caller.prompts.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(50);
         assertEquals(1, callee.prompts.size(), "the target got the prompt");
-        assertTrue(callee.prompts.get(0).endsWith("question"), callee.prompts.get(0));
+        assertTrue(callee.prompts.get(0).endsWith("[request project1/chat-01:s7:t3:r1 from project1/chat-01]\nquestion"),
+                callee.prompts.get(0));
         assertEquals(1, caller.prompts.size(), "the reply came to the caller as a new message");
         String reply = caller.prompts.get(0);
-        assertTrue(reply.contains("[reply from project1/chat-02 to your ask_chat]\nthe answer"), reply);
+        // chat-02 has no I/O log in this test, so its turn id has no session part.
+        assertTrue(reply.contains("[reply to request project1/chat-01:s7:t3:r1, from project1/chat-02:t1]\nthe answer"),
+                reply);
         assertTrue(reply.endsWith("[ended: answered; model calls: 1; tool calls: 0]"), reply);
+
+        // Both of chat-02's lines say which turn they belong to and which request they answer.
+        List<ChatSession.HistoryEntry> asked = two.asChatSessionRef().ask(ChatSession::historySnapshot)
+                .get(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertEquals(2, asked.size(), asked.toString());
+        for (ChatSession.HistoryEntry e : asked) {
+            assertEquals("project1/chat-02:t1", e.turnId(), e.toString());
+            assertEquals("project1/chat-01:s7:t3:r1", e.requestId(), e.toString());
+        }
+        // The reply, in chat-01, names the request it answers too.
+        List<ChatSession.HistoryEntry> asker = one.asChatSessionRef().ask(ChatSession::historySnapshot)
+                .get(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertEquals("project1/chat-01:s7:t3:r1", asker.get(0).requestId(), asker.toString());
 
         ActorRef<CallWatchdog> watchdog = two.createChild("watchdog-for-test", new CallWatchdog());
         String viaPlan = AskChatTool.askQualified(system, watchdog, "project1/chat-01", "project1/chat-02",
@@ -427,10 +443,34 @@ class ConversationToolsTest {
     }
 
     @Test
+    void askChatFromATurnNumbersItsRequestsFromThatTurn() {
+        IIActorSystem system = new IIActorSystem("conversation-tools-request-ids");
+        FakeControls controls = new FakeControls();
+        Scripted caller = new Scripted(List.of(
+                invoke("ask_chat", "chatId", "02", "prompt", "first"),
+                invoke("ask_chat", "chatId", "02", "prompt", "second"),
+                "done"), List.of());
+        ChatSessionIIAR one = chat(system, "01", caller, controls);
+        ChatSessionIIAR two = chat(system, "02", new Scripted(List.of("ok"), List.of()), controls);
+        ActorRef<PromptQueue> queue1 = one.createChild("project1/chat-01.queue", new PromptQueue());
+        queue1.tellNow(q -> q.setSelf(queue1)).join();
+        ActorRef<PromptQueue> queue2 = two.createChild("project1/chat-02.queue", new PromptQueue());
+        queue2.tellNow(q -> q.setSelf(queue2)).join();
+        ActorRef<ChatSession> ref = one.asChatSessionRef();
+        ref.tellNow(c -> {
+            c.start("go", null, e -> {}, ref, new CompletableFuture<>(), null, false);
+            c.runUntilEnd();
+        }).join();
+        // The model saw each ask_chat's result as the next prompt: numbered 1 and 2 within turn 1.
+        assertTrue(caller.prompts.get(1).contains("as request project1/chat-01:t1:r1;"), caller.prompts.get(1));
+        assertTrue(caller.prompts.get(2).contains("as request project1/chat-01:t1:r2;"), caller.prompts.get(2));
+    }
+
+    @Test
     void askChatToAConversationThatDoesNotExistIsRefusedAtOnce() {
         IIActorSystem system = new IIActorSystem("conversation-tools-ask-missing");
         chat(system, "01", new Scripted(List.of("unused"), List.of()), new FakeControls());
-        assertEquals("error: chat not found: 09", AskChatTool.send(system, "project1", "01", "09", "question"));
-        assertEquals("error: cannot ask_chat yourself", AskChatTool.send(system, "project1", "01", "01", "question"));
+        assertEquals("error: chat not found: 09", AskChatTool.send(system, "project1", "01", "09", "question", "project1/chat-01:t1:r1"));
+        assertEquals("error: cannot ask_chat yourself", AskChatTool.send(system, "project1", "01", "01", "question", "project1/chat-01:t1:r1"));
     }
 }

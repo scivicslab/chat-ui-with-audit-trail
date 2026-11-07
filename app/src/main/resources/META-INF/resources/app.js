@@ -574,6 +574,7 @@
             var id = String(event.sessionId);
             footer.appendChild(textSpan("Session: " + shorten(id, 12), id));
         }
+        appendIds(footer, event.turnId, event.requestId);
         // The model the server actually used. The dropdown is the fallback for a server that does
         // not report it with the result.
         var modelName = event.model || (at === undefined && modelSelect && modelSelect.value) || "";
@@ -600,7 +601,15 @@
     // is right for a line arriving live. A line restored from history passes the time the server
     // recorded, or null when the server has none: a footer filled with the time of the reload would
     // state something false.
-    function appendMessage(role, text, images, origin, at) {
+    // Which turn wrote a line and which ask_chat request it is or answers, as the record keeps them
+    // (TurnAndRequestIds_261107_oo01). Shown whole, since they are copied into the Sessions tab.
+    function appendIds(footer, turnId, requestId) {
+        if (turnId) footer.appendChild(textSpan("Turn: " + turnId, "The turn this line belongs to"));
+        if (requestId) footer.appendChild(textSpan("Request: " + requestId,
+            "The ask_chat request this line is, or answers"));
+    }
+
+    function appendMessage(role, text, images, origin, at, ids) {
         var div = document.createElement("div");
         div.className = "message " + role;
         if (role === "user" && origin && origin !== "screen") {
@@ -621,6 +630,7 @@
         if (role === "user") {
             var footer = newFooter(div);
             if (origin) footer.appendChild(originBadge(origin));
+            if (ids) appendIds(footer, ids.turnId, ids.requestId);
             if (at !== null) footer.appendChild(textSpan(formatTime(at === undefined ? new Date() : new Date(at))));
             footer.appendChild(copyButton(text, "Copy"));
             footer.appendChild(translateSelect(div, text, false));
@@ -1523,10 +1533,11 @@
                         // time, and gets none: the time of the reload would state something false.
                         // The session id is not kept, so it is not shown.
                         var div = appendMarkdownMessage(t.role, t.content);
-                        appendAnswerFooter(div, t.content, { durationMs: t.durationMs, model: t.model },
-                            t.at == null ? null : t.at);
+                        appendAnswerFooter(div, t.content, { durationMs: t.durationMs, model: t.model,
+                            turnId: t.turnId, requestId: t.requestId }, t.at == null ? null : t.at);
                     } else {
-                        appendMessage(t.role, t.content, null, t.origin, t.at == null ? null : t.at);
+                        appendMessage(t.role, t.content, null, t.origin, t.at == null ? null : t.at,
+                            { turnId: t.turnId, requestId: t.requestId });
                     }
                 });
             })

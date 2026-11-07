@@ -1,3 +1,31 @@
+# ターン ID・依頼 ID（090）と、配った仕事の最終報告を依頼元へ届ける（100）
+
+設計: `doc_SCIVICS003/.../040_design/090_TurnAndRequestIds_261107_oo01`、`100_ReportReachesTheAskerAfterDelegation_261107_oo01`。
+続く設計（未着手）: 110 急ぎの依頼と状況の報告、120 会話ごとの timekeeper アクターとターンの中断。
+
+## 段A: ID（090）
+
+- [x] A1. `ChatSession` にターン ID（`<会話>:s<セッション>:t<ターン>`）と、ターンごとの `ask_chat` の回数から作る依頼 ID（`<ターン ID>:r<回数>`）を持たせる。素の `startPrompt` の経路でもセッションとターン番号を持たせる
+- [x] A2. 待ち行列の項目に `requestId`（依頼ならその ID、返事なら答えている依頼の ID）を足し、`ChatSession.start` まで渡す。`ask_chat` の依頼では `resultKey` に依頼 ID を使う
+- [x] A3. `ask_chat` の結果・依頼の見出し `[request <ID> from <会話>]`・返事の見出し `[reply to request <ID>, from <ターン ID>]`・返事が無いときの1行を 090 のとおりにする。`TurnReply` にターン ID を足す
+- [~] A4. 会話の記録（`HistoryEntry`）に `turnId` と `requestId` を足し、記録から描く吹き出しの足元に出す。ブラウザでの確認は deploy の後。生の SSE で届く吹き出しには、まだ ID が出ない
+- [x] A5. `ask_chat` の道具の説明を新しい見出しに合わせる
+- [x] A6. 単体テスト → W206 の Job で `mvn test`: 全モジュール成功（app 442、plugin 17・11・42、失敗 0）
+
+## 段B: 最終報告（100）
+
+- [x] B0. 確かめた: 取り消しのときの `PromptQueue.clearAgentMessages` は、別の会話からの依頼を `done` を完了させずに取り除く。依頼元には返事が永久に届かない。段B で直す
+- [ ] B1. 元の依頼の表（`done`、まだ返っていない子の依頼、返事を送ったか）と、子の依頼から元の依頼への対応
+- [ ] B2. ターンの元の依頼を決める（依頼・子の返事・利用者）、子の依頼を送るときに数える、ターンの終わりに空なら `done` を完了させる
+- [ ] B3. 自発のターンの答えを続報 `[follow-up to request <ID>, from <ターン ID>]` として送る
+- [ ] B4. 単体テスト（監督役が2つに配り、返事が2通返ってから最終報告が依頼元に1通だけ届く／返事の無い子の依頼も数える）→ `mvn test`
+
+## 段C: deploy（確認を取ってから）・28010 で実機試験
+
+## Review
+
+---
+
 # ask_chat の返事を done に載せる・道具の説明を直す・会話を作るときにプロバイダとモデルを選ぶ
 
 設計: `doc_SCIVICS003/.../040_design/050_AskChatWithoutWaiting_261022_oo01`（返事の渡し方と道具の説明）。

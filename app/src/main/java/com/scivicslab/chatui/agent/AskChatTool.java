@@ -60,10 +60,11 @@ public final class AskChatTool {
      * @param target      the target as written by the caller — a bare id ({@code "02"}) for this
      *                    project, or a qualified one ({@code "project2/02"}) to cross into another
      * @param prompt      the instruction to send
-     * @return a line saying the prompt was sent, or an {@code error: ...} string
+     * @param requestId   this request's id, {@code <sending turn id>:r<n>} ({@code TurnAndRequestIds_261107_oo01})
+     * @return a line saying the prompt was sent and under which request id, or an {@code error: ...} string
      */
     public static String send(IIActorSystem system, String myProjectId, String myChatId,
-                              String target, String prompt) {
+                              String target, String prompt, String requestId) {
         if (target == null || target.isBlank()) return "error: chatId is required";
         if (prompt == null || prompt.isBlank()) return "error: prompt is required";
 
@@ -86,56 +87,63 @@ public final class AskChatTool {
         ActorRef<PromptQueue> myQueue = system.getActor(myName + ".queue");
         if (myQueue == null) return "error: the calling conversation " + myName + " has no queue";
 
-        String resultKey = UUID.randomUUID().toString();
+        // The request id is unique within this instance, so it also serves as the key the target
+        // stores its answer under.
+        String resultKey = requestId;
         CompletableFuture<TurnReply> done = new CompletableFuture<>();
         // done completes inside the target's actor, carrying the answer; the delivery runs elsewhere
         // so that the target's thread is not held while the caller's queue takes the message.
         done.whenCompleteAsync((reply, failure) ->
-                deliverReply(system, myName, myChat, myQueue, targetName, reply, failure));
+                deliverReply(system, myName, myChat, myQueue, targetName, requestId, reply, failure));
         Consumer<ChatEvent> targetWatchers = watchersOf(system, targetName);
-        targetQueue.tell(q -> q.enqueue(prompt, null, "queue", targetWatchers,
-                targetChat.asChatSessionRef(), ChatSession.ASK_CHAT_SOURCE_PREFIX + myName, resultKey, done));
+        String headed = "[request " + requestId + " from " + myName + "]\n" + prompt;
+        targetQueue.tell(q -> q.enqueue(headed, null, "queue", targetWatchers,
+                targetChat.asChatSessionRef(), ChatSession.ASK_CHAT_SOURCE_PREFIX + myName, resultKey, done,
+                false, true, java.util.List.of(), requestId));
         // The sender may have meant a conversation of the same name in another instance (project numbers
         // are local to an instance), so a delivery across projects says where it went.
         String elsewhere = targetName.startsWith(myProjectId + "/") ? "" : OtherInstances.sameNameNote(targetName);
-        return "sent to " + targetName + "; its reply will arrive in this conversation as a new message "
-                + "when its turn ends" + elsewhere;
+        return "sent to " + targetName + " as request " + requestId + "; its reply will arrive in this "
+                + "conversation as a new message when its turn ends" + elsewhere;
     }
 
     /** Puts the target turn's reply, or the reason there is none, in the calling conversation's queue. */
     private static void deliverReply(IIActorSystem system, String myName, ChatSessionIIAR myChat,
-                                     ActorRef<PromptQueue> myQueue, String targetName,
+                                     ActorRef<PromptQueue> myQueue, String targetName, String requestId,
                                      TurnReply reply, Throwable failure) {
-        String text = replyMessage(targetName, reply, failure);
+        String text = replyMessage(targetName, requestId, reply, failure);
         Consumer<ChatEvent> myWatchers = watchersOf(system, myName);
         myQueue.tell(q -> q.enqueue(text, null, "queue", myWatchers, myChat.asChatSessionRef(),
-                ChatSession.ASK_CHAT_REPLY_SOURCE_PREFIX + targetName, null, new CompletableFuture<>()));
+                ChatSession.ASK_CHAT_REPLY_SOURCE_PREFIX + targetName, null, new CompletableFuture<>(),
+                false, true, java.util.List.of(), requestId));
     }
 
     /**
      * Returns the message the calling conversation receives when the target's turn ends.
      *
      * @param targetName the target conversation's qualified name
+     * @param requestId  the id of the request being answered
      * @param reply      what {@code done} was completed with, or {@code null} if it failed
      * @param failure    what {@code done} failed with, or {@code null} if it completed
-     * @return {@code [reply from <target> to your ask_chat]} followed by the answer and the ending line,
-     *         or a {@code [ask_chat to <target> ended without a reply: ...]} line saying why there is none
+     * @return {@code [reply to request <id>, from <turn id>]} followed by the answer and the ending line,
+     *         or a {@code [request <id> to <target> ended without a reply: ...]} line saying why there is none
      */
-    static String replyMessage(String targetName, TurnReply reply, Throwable failure) {
-        if (failure != null) return noReply(targetName, failure);
+    static String replyMessage(String targetName, String requestId, TurnReply reply, Throwable failure) {
+        if (failure != null) return noReply(targetName, requestId, failure);
         if (reply == null || reply.reply() == null) {
-            return "[ask_chat to " + targetName + " ended without a reply: its turn left no result]";
+            return "[request " + requestId + " to " + targetName + " ended without a reply: its turn left no result]";
         }
-        return "[reply from " + targetName + " to your ask_chat]\n" + reply.reply()
+        String from = reply.turnId() == null ? targetName : reply.turnId();
+        return "[reply to request " + requestId + ", from " + from + "]\n" + reply.reply()
                 + (reply.ending() == null ? "" : "\n\n" + reply.ending());
     }
 
-    private static String noReply(String targetName, Throwable failure) {
+    private static String noReply(String targetName, String requestId, Throwable failure) {
         Throwable cause = failure instanceof java.util.concurrent.CompletionException && failure.getCause() != null
                 ? failure.getCause() : failure;
-        LOG.log(Level.WARNING, "ask_chat to " + targetName + " ended without a reply", cause);
-        return "[ask_chat to " + targetName + " ended without a reply: " + cause.getClass().getSimpleName()
-                + ": " + cause.getMessage() + "]";
+        LOG.log(Level.WARNING, "request " + requestId + " to " + targetName + " ended without a reply", cause);
+        return "[request " + requestId + " to " + targetName + " ended without a reply: "
+                + cause.getClass().getSimpleName() + ": " + cause.getMessage() + "]";
     }
 
     /** What a conversation says goes to whoever is watching it; nothing when no SSE actor is registered (unit tests). */

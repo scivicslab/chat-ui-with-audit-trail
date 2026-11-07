@@ -272,8 +272,11 @@ public class ChatSession extends Interpreter {
             - ask_chat(chatId, prompt): send an instruction to another conversation (e.g. "02" for
               one in your own project, or "project2/02" to reach one in another project). Requires
               "chatId" and "prompt" <parameter> tags. It does NOT wait: the result only says the
-              instruction was sent. The reply reaches you only AFTER YOU END YOUR TURN: it comes as
-              a new message starting with "[reply from <chat> to your ask_chat]", followed by one
+              instruction was sent, and under which request id, e.g. "project1/chat-01:s40:t5:r2"
+              (your conversation, session, turn, and the number of this ask_chat in your turn). The
+              reply reaches you only AFTER YOU END YOUR TURN: it comes as a new message starting
+              with "[reply to request <request id>, from <the turn that wrote it>]" — match the id
+              against the one you were given to tell which request it answers — followed by one
               line, [ended: answered; model calls: N; tool calls: M], saying how its turn ended:
               "answered", or "step-limit" when it ran out of steps (then the reply is only a notice,
               not an answer). If its turn left no reply, the message says so and why. So once you
@@ -426,6 +429,15 @@ public class ChatSession extends Interpreter {
     private final Map<String, ConversationTool> pluginTools = new LinkedHashMap<>();
     /** This turn's number, for turn{N}/step{M}/... I/O-log labels. Set in start(). */
     private int ioTurnNo;
+
+    /**
+     * The {@code ask_chat} request the current turn's prompt is, or answers, or {@code null}
+     * ({@code TurnAndRequestIds_261107_oo01}).
+     */
+    private String turnRequestId;
+
+    /** How many times the current turn has called {@code ask_chat}; numbers its request ids from 1. */
+    private int askCount;
     private List<ToolCall> pendingCalls;
     private String finalAnswer;
     private int stepCount;
@@ -1143,10 +1155,14 @@ public class ChatSession extends Interpreter {
         }
 
         busy = true;
-        recordHistory("user", prompt);
         // Open (lazily) the conversation's I/O-log session and number this turn for the Sessions tab.
         final long ioSession = (ioLog != null) ? ioLog.ensureSession(myChatName()) : -1;
         final int ioTurnNo = ++ioTurn;
+        this.ioSession = ioSession;
+        this.ioTurnNo = ioTurnNo;
+        this.turnRequestId = null;
+        this.askCount = 0;
+        recordHistory("user", prompt);
         if (resultKey != null) {
             pendingResultKeys.remove(resultKey);
             activeResultKey = resultKey;
@@ -1221,7 +1237,7 @@ public class ChatSession extends Interpreter {
         // and the question would wait behind it (AskChatWithoutWaiting_261022_oo01).
         TurnReply reply = activeResultKey == null
                 ? TurnReply.NONE
-                : new TurnReply(completedResults.get(activeResultKey), completedEndings.get(activeResultKey));
+                : new TurnReply(completedResults.get(activeResultKey), completedEndings.get(activeResultKey), turnId());
         busy = false;
         activeResultKey = null;
 
@@ -1283,6 +1299,19 @@ public class ChatSession extends Interpreter {
     public void start(String prompt, String model, Consumer<ChatEvent> emitter,
                        ActorRef<ChatSession> self, CompletableFuture<TurnReply> done, String resultKey,
                        boolean noThink, List<String> images, String source) {
+        start(prompt, model, emitter, self, done, resultKey, noThink, images, source, null);
+    }
+
+    /**
+     * Starts a turn whose prompt is a request from, or a reply to, another conversation's
+     * {@code ask_chat} ({@code TurnAndRequestIds_261107_oo01}).
+     *
+     * @param requestId the request the prompt is, or answers; {@code null} for any other prompt.
+     *                  Kept on the user's line and on this turn's answer in the record.
+     */
+    public void start(String prompt, String model, Consumer<ChatEvent> emitter,
+                       ActorRef<ChatSession> self, CompletableFuture<TurnReply> done, String resultKey,
+                       boolean noThink, List<String> images, String source, String requestId) {
         if (busy) {
             emitter.accept(ChatEvent.error("Already processing a prompt. Please wait or cancel."));
             done.complete(TurnReply.NONE);
@@ -1295,7 +1324,11 @@ public class ChatSession extends Interpreter {
         }
 
         busy = true;
-        recordHistory("user", prompt, originOf(source));
+        this.ioSession = (ioLog != null) ? ioLog.ensureSession(myChatName()) : -1;
+        this.ioTurnNo = ++ioTurn;
+        this.turnRequestId = requestId;
+        this.askCount = 0;
+        recordHistory("user", prompt, originOf(source), null, null);
         if (resultKey != null) {
             pendingResultKeys.remove(resultKey);
             activeResultKey = resultKey;
@@ -1310,8 +1343,6 @@ public class ChatSession extends Interpreter {
         this.turnDone = done;
         // Either side may ask for it: the conversation's own setting, or this one prompt.
         this.turnNoThink = noThink || noThinkAlways;
-        this.ioSession = (ioLog != null) ? ioLog.ensureSession(myChatName()) : -1;
-        this.ioTurnNo = ++ioTurn;
         this.turnStartedAt = System.currentTimeMillis();
         this.pendingCalls = null;
         this.finalAnswer = null;
@@ -2388,7 +2419,7 @@ public class ChatSession extends Interpreter {
             case "list_references" -> ReferenceLinkTool.list(extractInput(args, "id"),
                     extractInput(args, "direction"), extractInput(args, "relation"));
             case "ask_chat" -> AskChatTool.send(system, projectId, chatId,
-                    extractInput(args, "chatId"), extractInput(args, "prompt"));
+                    extractInput(args, "chatId"), extractInput(args, "prompt"), nextRequestId());
             case "set_workflow" -> SetWorkflowTool.setWorkflow(system, projectId,
                     extractInput(args, "chatId"), extractInput(args, "yaml"));
             case "load_skill" -> LoadSkillTool.load(skillRegistryRef, extractInput(args, "name"));
@@ -2530,8 +2561,12 @@ public class ChatSession extends Interpreter {
      * @param thinking  the accumulated reasoning text
      */
     public void recordAutonomousTurn(long ioSession, String assistant, String thinking) {
+        // A turn of its own, numbered like any other, so its line in the record carries its own id.
+        this.ioSession = ioSession;
+        this.ioTurnNo = ++ioTurn;
+        this.askCount = 0;
         recordHistory("assistant", assistant);
-        recordTurnIo(ioSession, ++ioTurn, "(autonomous continuation)", assistant, thinking);
+        recordTurnIo(ioSession, ioTurnNo, "(autonomous continuation)", assistant, thinking);
     }
 
     /**
@@ -2578,6 +2613,24 @@ public class ChatSession extends Interpreter {
     }
 
     /**
+     * Returns the current turn's id, {@code <conversation>:s<session>:t<turn>}
+     * ({@code TurnAndRequestIds_261107_oo01}); without an I/O log, {@code <conversation>:t<turn>}.
+     */
+    public String turnId() {
+        return turnIdOf(myChatName(), ioSession, ioTurnNo);
+    }
+
+    /** @return a turn id made of its three parts, the session left out when there is none */
+    static String turnIdOf(String conversation, long session, int turn) {
+        return conversation + (session >= 0 ? ":s" + session : "") + ":t" + turn;
+    }
+
+    /** @return the id of the next {@code ask_chat} request this turn sends, {@code <turn id>:r<n>} */
+    public String nextRequestId() {
+        return turnId() + ":r" + (++askCount);
+    }
+
+    /**
      * @param origin where a user line's prompt came from, or {@code null} for every other line
      */
     public void recordHistory(String role, String content, String origin) {
@@ -2610,7 +2663,8 @@ public class ChatSession extends Interpreter {
      */
     public void recordHistory(String role, String content, String origin, String model, Long durationMs) {
         if (content == null || content.isBlank()) return;
-        conversationHistory.addLast(new HistoryEntry(role, content, origin, System.currentTimeMillis(), model, durationMs));
+        conversationHistory.addLast(new HistoryEntry(role, content, origin, System.currentTimeMillis(), model, durationMs,
+                busy ? turnId() : null, busy ? turnRequestId : null));
         while (conversationHistory.size() > MAX_HISTORY) conversationHistory.removeFirst();
         historySnapshot.set(List.copyOf(conversationHistory));
     }
@@ -2934,7 +2988,12 @@ public class ChatSession extends Interpreter {
      * @param model   for an assistant line, the model that wrote it; {@code null} when not known
      * @param durationMs for an assistant line, how long the turn took; {@code null} when not known
      */
-    public record HistoryEntry(String role, String content, String origin, Long at, String model, Long durationMs) {
+    public record HistoryEntry(String role, String content, String origin, Long at, String model, Long durationMs,
+                               String turnId, String requestId) {
+        public HistoryEntry(String role, String content, String origin, Long at, String model, Long durationMs) {
+            this(role, content, origin, at, model, durationMs, null, null);
+        }
+
         public HistoryEntry(String role, String content, String origin) {
             this(role, content, origin, null, null, null);
         }
