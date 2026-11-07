@@ -643,6 +643,58 @@ class ConversationToolsTest {
                 asker.prompts.get(0));
     }
 
+    /**
+     * The message that resumes a paused turn is queued as urgent, so that it comes before work that
+     * waited, but it is not an urgent request: a turn is not paused for it. Counting it made a slow model
+     * pause every resumed turn for the next resume message, and the pausing never stopped.
+     */
+    @Test
+    void aResumeMessageAtTheFrontDoesNotPauseTheRunningTurn() throws Exception {
+        IIActorSystem system = new IIActorSystem("conversation-tools-timekeeper-resume-not-urgent");
+        FakeControls controls = new FakeControls();
+        Scripted asker = new Scripted(List.of("thanks"), List.of());
+        Paced worker = new Paced(List.of("all done", "nothing left"), java.util.Set.of(1));
+        ChatSessionIIAR one = chat(system, "01", asker, controls);
+        ChatSessionIIAR two = chat(system, "02", worker, controls);
+        queueOf(one);
+        ActorRef<PromptQueue> queue2 = queueOf(two);
+        Timekeeper keeper = new Timekeeper("project1/chat-02", two, queue2, e -> {}, 0, Long.MAX_VALUE);
+
+        AskChatTool.send(system, "project1", "01", "02", "do the long job", "project1/chat-01:s7:t3:r1");
+        waitUntil(() -> two.isBusyDirect());
+        queue2.ask(q -> q.enqueue("[resume paused turn project1/chat-02:t0]\ngo on", null, "queue", e -> {},
+                two.asChatSessionRef(), ChatSession.RESUME_SOURCE, null, new CompletableFuture<>(), false, true,
+                List.of(), null, true)).get(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertEquals(null, queue2.ask(PromptQueue::frontUrgentQueuedAt).get(5, java.util.concurrent.TimeUnit.SECONDS),
+                "a resume message is not an urgent request");
+        keeper.tick(System.currentTimeMillis() + 1);
+
+        waitUntil(() -> !asker.prompts.isEmpty());
+        assertTrue(asker.prompts.get(0).contains("[reply to request project1/chat-01:s7:t3:r1, from project1/chat-02:t1]\nall done"),
+                "the running turn finished without a pause: " + asker.prompts);
+    }
+
+    @Test
+    void anUrgentRequestBehindAResumeMessageStillCounts() throws Exception {
+        IIActorSystem system = new IIActorSystem("conversation-tools-timekeeper-urgent-behind-resume");
+        FakeControls controls = new FakeControls();
+        Paced worker = new Paced(List.of("done", "a", "b"), java.util.Set.of(1));
+        ChatSessionIIAR two = chat(system, "02", worker, controls);
+        ActorRef<PromptQueue> queue2 = queueOf(two);
+        queue2.ask(q -> q.enqueue("first", null, "queue", e -> {}, two.asChatSessionRef(), "human", null,
+                new CompletableFuture<>(), false, true, List.of(), null, false)).get(5, java.util.concurrent.TimeUnit.SECONDS);
+        waitUntil(() -> two.isBusyDirect());
+        queue2.ask(q -> q.enqueue("[resume paused turn project1/chat-02:t0]\ngo on", null, "queue", e -> {},
+                two.asChatSessionRef(), ChatSession.RESUME_SOURCE, null, new CompletableFuture<>(), false, true,
+                List.of(), null, true)).get(5, java.util.concurrent.TimeUnit.SECONDS);
+        long before = System.currentTimeMillis();
+        queue2.ask(q -> q.enqueue("[urgent request x from y]\nhow far?", null, "queue", e -> {}, two.asChatSessionRef(),
+                "agent:ask_chat:project1/chat-09", null, new CompletableFuture<>(), false, true, List.of(), null, true))
+                .get(5, java.util.concurrent.TimeUnit.SECONDS);
+        Long since = queue2.ask(PromptQueue::frontUrgentQueuedAt).get(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertTrue(since != null && since >= before, "the urgent request's own time counts: " + since);
+    }
+
     /** A request with no reply past the limit is reported to the conversation that sent it, once. */
     @Test
     void theTimekeeperTellsItsConversationOnceAboutARequestWithNoReply() throws Exception {

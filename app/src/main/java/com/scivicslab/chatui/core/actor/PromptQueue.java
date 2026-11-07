@@ -286,13 +286,22 @@ public class PromptQueue {
     }
 
     /**
-     * @return when the item at the front entered the queue, if it is urgent; {@code null} when the
-     *         queue is empty or its front item is not urgent
-     *         ({@code TimekeeperPausesATurnForAnUrgentRequest_261107_oo01})
+     * Returns when the first urgent request among the urgent items at the front entered the queue, for
+     * the timekeeper to decide whether to pause the running turn
+     * ({@code TimekeeperPausesATurnForAnUrgentRequest_261107_oo01}).
+     *
+     * <p>A message that resumes a paused turn is queued as urgent so that it comes before other waiting
+     * work, but it is not a request anyone waits on, and it is skipped. Counted, it paused every resumed
+     * turn that took longer than the limit, which queued another resume message, without end.</p>
+     *
+     * @return that request's queueing time, or {@code null} when no urgent request is at the front
      */
     public Long frontUrgentQueuedAt() {
-        if (queue.isEmpty() || !queue.get(0).urgent()) return null;
-        return queue.get(0).queuedAt();
+        for (QueueItem item : queue) {
+            if (!item.urgent()) return null;
+            if (!ChatSession.RESUME_SOURCE.equals(item.source())) return item.queuedAt();
+        }
+        return null;
     }
 
     /**
