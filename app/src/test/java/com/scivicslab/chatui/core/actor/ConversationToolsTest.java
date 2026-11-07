@@ -466,9 +466,11 @@ class ConversationToolsTest {
         assertTrue(caller.prompts.get(2).contains("as request project1/chat-01:t1:r2;"), caller.prompts.get(2));
     }
 
+    /** Gives a conversation its queue, wired both ways as {@code ChatUiActorSystem.createChat} does. */
     private static ActorRef<PromptQueue> queueOf(ChatSessionIIAR chat) {
         ActorRef<PromptQueue> q = chat.createChild(chat.getName().replace(".chat", ".queue"), new PromptQueue());
         q.tellNow(x -> x.setSelf(q)).join();
+        chat.tellNow(a -> ((ChatSession) a).setPromptQueueName(q.getName())).join();
         return q;
     }
 
@@ -573,6 +575,85 @@ class ConversationToolsTest {
         assertEquals(1, caller.prompts.size(), "the reply went ahead of the held item and was sent");
         assertTrue(caller.prompts.get(0).contains("[reply to request project1/chat-01:s7:t3:r1, from project1/chat-02:t1]\nabout half done"),
                 caller.prompts.get(0));
+    }
+
+    /** Answers one scripted line per prompt; the prompts whose number is in {@code slow} take 3 seconds. */
+    private static final class Paced extends Scripted {
+        final java.util.Set<Integer> slow;
+        Paced(List<String> replies, java.util.Set<Integer> slow) { super(replies, List.of()); this.slow = slow; }
+        @Override
+        public void sendPrompt(String prompt, String m, Consumer<ChatEvent> emitter, ProviderContext ctx) {
+            if (slow.contains(prompts.size() + 1)) {
+                try { Thread.sleep(3_000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            }
+            super.sendPrompt(prompt, m, emitter, ctx);
+        }
+    }
+
+    private static void waitUntil(java.util.function.BooleanSupplier done) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 20_000;
+        while (!done.getAsBoolean() && System.currentTimeMillis() < deadline) Thread.sleep(50);
+    }
+
+    /**
+     * chat-02 is working on chat-01's request when an urgent request arrives. Its timekeeper pauses the
+     * turn, the urgent request is answered, and a resumed turn finishes the work; chat-01's one reply
+     * comes from that resumed turn ({@code TimekeeperPausesATurnForAnUrgentRequest_261107_oo01}).
+     */
+    @Test
+    void theTimekeeperPausesATurnForAnUrgentRequestAndTheWorkResumesAfterIt() throws Exception {
+        IIActorSystem system = new IIActorSystem("conversation-tools-timekeeper-pause");
+        FakeControls controls = new FakeControls();
+        Scripted asker = new Scripted(List.of("thanks"), List.of());
+        Paced worker = new Paced(List.of("unfinished", "about half done", "all done"), java.util.Set.of(1));
+        ChatSessionIIAR one = chat(system, "01", asker, controls);
+        ChatSessionIIAR two = chat(system, "02", worker, controls);
+        queueOf(one);
+        ActorRef<PromptQueue> queue2 = queueOf(two);
+        Timekeeper keeper = new Timekeeper("project1/chat-02", two, queue2, e -> {}, 0, Long.MAX_VALUE);
+
+        AskChatTool.send(system, "project1", "01", "02", "do the long job", "project1/chat-01:s7:t3:r1");
+        waitUntil(() -> two.isBusyDirect());
+        queue2.ask(q -> q.enqueue("[urgent request x from y]\nhow far?", null, "queue", e -> {}, two.asChatSessionRef(),
+                "agent:ask_chat:project1/chat-09", null, new CompletableFuture<>(), false, true, List.of(), null, true))
+                .get(5, java.util.concurrent.TimeUnit.SECONDS);
+        // A moment past the item's queueing time: the limit is "waited longer than", here 0 ms.
+        keeper.tick(System.currentTimeMillis() + 1);
+
+        waitUntil(() -> !asker.prompts.isEmpty());
+        assertEquals(3, worker.prompts.size(), worker.prompts.toString());
+        assertTrue(worker.prompts.get(1).endsWith("how far?"), "the urgent request came next: " + worker.prompts);
+        assertTrue(worker.prompts.get(2).contains("[resume paused turn project1/chat-02:t1]"), worker.prompts.get(2));
+        assertEquals(1, asker.prompts.size(), asker.prompts.toString());
+        assertTrue(asker.prompts.get(0).contains("[reply to request project1/chat-01:s7:t3:r1, from project1/chat-02:t3]\nall done"),
+                asker.prompts.get(0));
+    }
+
+    /** A request with no reply past the limit is reported to the conversation that sent it, once. */
+    @Test
+    void theTimekeeperTellsItsConversationOnceAboutARequestWithNoReply() throws Exception {
+        IIActorSystem system = new IIActorSystem("conversation-tools-timekeeper-warn");
+        FakeControls controls = new FakeControls();
+        Scripted asker = new Scripted(List.of("thanks"), List.of());
+        Scripted supervisor = new Scripted(List.of(
+                invoke("ask_chat", "chatId", "03", "prompt", "slow job"), "handed out", "noted", "report"), List.of());
+        Paced slow = new Paced(List.of("done at last"), java.util.Set.of(1));
+        ChatSessionIIAR one = chat(system, "01", asker, controls);
+        ChatSessionIIAR two = chat(system, "02", supervisor, controls);
+        ChatSessionIIAR three = chat(system, "03", slow, controls);
+        queueOf(one);
+        ActorRef<PromptQueue> queue2 = queueOf(two);
+        queueOf(three);
+        Timekeeper keeper = new Timekeeper("project1/chat-02", two, queue2, e -> {}, Long.MAX_VALUE, 0);
+
+        AskChatTool.send(system, "project1", "01", "02", "get it done", "project1/chat-01:s7:t3:r1");
+        waitUntil(() -> !two.outstandingChildrenDirect().isEmpty() && !two.isBusyDirect());
+        keeper.tick(System.currentTimeMillis() + 1);
+        keeper.tick(System.currentTimeMillis() + 2);
+        waitUntil(() -> !asker.prompts.isEmpty());
+
+        long notices = supervisor.prompts.stream().filter(p -> p.contains("[no reply yet to request project1/chat-02:t1:r1 sent to project1/chat-03")).count();
+        assertEquals(1, notices, supervisor.prompts.toString());
     }
 
     @Test

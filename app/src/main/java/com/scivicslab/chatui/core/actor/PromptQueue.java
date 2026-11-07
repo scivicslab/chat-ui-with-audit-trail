@@ -286,6 +286,16 @@ public class PromptQueue {
     }
 
     /**
+     * @return when the item at the front entered the queue, if it is urgent; {@code null} when the
+     *         queue is empty or its front item is not urgent
+     *         ({@code TimekeeperPausesATurnForAnUrgentRequest_261107_oo01})
+     */
+    public Long frontUrgentQueuedAt() {
+        if (queue.isEmpty() || !queue.get(0).urgent()) return null;
+        return queue.get(0).queuedAt();
+    }
+
+    /**
      * Returns the current number of items in the queue.
      */
     public int getQueueSize() {

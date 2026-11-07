@@ -1,7 +1,9 @@
 package com.scivicslab.chatui.core.actor;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -35,8 +37,15 @@ public final class OpenRequests {
         }
     }
 
+    /**
+     * A child request still out: its id, the conversation it went to, and when it was sent
+     * ({@code TimekeeperPausesATurnForAnUrgentRequest_261107_oo01}).
+     */
+    public record Outstanding(String requestId, String target, long sentAt) {}
+
     private final Map<String, Original> originals = new HashMap<>();
     private final Map<String, String> originalOfChild = new HashMap<>();
+    private final Map<String, Outstanding> outstandingChildren = new HashMap<>();
     private String last;
 
     /**
@@ -61,6 +70,7 @@ public final class OpenRequests {
      *         not sent for any original request still open
      */
     public String replyArrived(String childRequestId) {
+        outstandingChildren.remove(childRequestId);
         String original = originalOfChild.remove(childRequestId);
         if (original == null) return null;
         Original o = originals.get(original);
@@ -76,10 +86,36 @@ public final class OpenRequests {
      * @param childRequestId the id of the request sent
      */
     public void childSent(String original, String childRequestId) {
+        childSent(original, childRequestId, null, System.currentTimeMillis());
+    }
+
+    /**
+     * As {@link #childSent(String, String)}, keeping where the request went and when.
+     *
+     * @param target the qualified name of the conversation the request went to
+     * @param sentAt when it was sent, in milliseconds since the epoch
+     */
+    public void childSent(String original, String childRequestId, String target, long sentAt) {
         Original o = originals.get(original);
         if (o == null || o.answered) return;
         o.outstanding.add(childRequestId);
         originalOfChild.put(childRequestId, original);
+        outstandingChildren.put(childRequestId, new Outstanding(childRequestId, target, sentAt));
+    }
+
+    /** @return the child requests still out, oldest first */
+    public List<Outstanding> outstandingChildren() {
+        List<Outstanding> all = new ArrayList<>(outstandingChildren.values());
+        all.sort((a, b) -> Long.compare(a.sentAt(), b.sentAt()));
+        return all;
+    }
+
+    /**
+     * @param original the original request's id
+     * @return whether the request is still open (received, and either not yet answered or the last one)
+     */
+    public boolean isOpen(String original) {
+        return original != null && originals.containsKey(original);
     }
 
     /**

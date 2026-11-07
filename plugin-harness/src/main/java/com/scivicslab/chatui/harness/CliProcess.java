@@ -141,7 +141,12 @@ public class CliProcess {
                     String logLine = line;
                     logger.info(() -> "stdout: " + logLine);
                     for (StreamEvent event : parser.parse(line)) {
-                        if ("result".equals(event.type()) && event.sessionId() != null) {
+                        // Kept from the init event too, not only from a turn's result: a turn that is
+                        // interrupted before its result would otherwise leave no session to resume, and
+                        // the next prompt would start a new session without the interrupted steps
+                        // (TimekeeperPausesATurnForAnUrgentRequest_261107_oo01).
+                        if (("result".equals(event.type()) || "system".equals(event.type()))
+                                && event.sessionId() != null) {
                             lastSessionId = event.sessionId();
                         }
                         routeEvent(event);

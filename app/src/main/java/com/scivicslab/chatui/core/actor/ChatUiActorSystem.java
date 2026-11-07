@@ -186,6 +186,7 @@ public class ChatUiActorSystem implements ConversationControls {
 
     private ActorRef<Housekeeper> housekeeperRef;
     private ActorRef<AutonomousTurnWatcher> autonomousTurnWatcherRef;
+    private ActorRef<TimekeeperTicker> timekeeperTickerRef;
     private ActorRef<CallWatchdog> callWatchdogRef;
     private ActorRef<CollaborationGraph> collaborationGraphRef;
     private ActorRef<SkillRegistry> skillRegistryRef;
@@ -391,6 +392,7 @@ public class ChatUiActorSystem implements ConversationControls {
 
         startActivityWatcher();
         startAutonomousTurnWatcher();
+        startTimekeeperTicker();
     }
 
     /**
@@ -421,6 +423,40 @@ public class ChatUiActorSystem implements ConversationControls {
                 new AutonomousTurnWatcher(chatSessions::values));
         autonomousTurnWatcherRef.tell(w -> w.bind(autonomousTurnWatcherRef));
         autonomousTurnWatcherRef.tell(AutonomousTurnWatcher::startWatching);
+    }
+
+    /**
+     * Starts having every conversation's timekeeper check, every half minute
+     * ({@code TimekeeperPausesATurnForAnUrgentRequest_261107_oo01}). Under the housekeeper, like the
+     * autonomous-turn watcher.
+     */
+    private void startTimekeeperTicker() {
+        timekeeperTickerRef = housekeeperRef.createChild("timekeepers", new TimekeeperTicker(() -> {
+            List<ActorRef<Timekeeper>> all = new ArrayList<>();
+            for (String name : chatSessions.keySet()) {
+                ActorRef<Timekeeper> t = actorSystem.getActor(name + ".timekeeper");
+                if (t != null) all.add(t);
+            }
+            return all;
+        }));
+        timekeeperTickerRef.tell(t -> t.bind(timekeeperTickerRef));
+        timekeeperTickerRef.tell(TimekeeperTicker::start);
+    }
+
+    /** Stops the timekeepers' schedule before the actor system goes away. */
+    @PreDestroy
+    void stopTimekeeperTicker() {
+        if (timekeeperTickerRef != null) timekeeperTickerRef.tell(TimekeeperTicker::stop).join();
+    }
+
+    /** @return a timekeeper limit in minutes from its configuration key, or the default */
+    private static long minutesSetting(String key, long fallback) {
+        try {
+            return configValue(key).map(String::trim).filter(v -> !v.isEmpty()).map(Long::parseLong).orElse(fallback);
+        } catch (NumberFormatException e) {
+            LOG.warning("Ignoring " + key + ": not a number of minutes");
+            return fallback;
+        }
     }
 
     /** Stops the autonomous-turn schedule before the actor system goes away. */
@@ -1110,7 +1146,17 @@ public class ChatUiActorSystem implements ConversationControls {
         promptQueueRef.tell(q -> q.setLogging(actorSystem, conversationSquadLogActorName));
 
         // SseConnection — plain createChild, same as PromptQueue (ChatResourceDesign_260823_oo01).
-        conversationSquadRef.createChild(conversationSquadRef.getName() + ".sse", new SseConnection(objectMapper));
+        ActorRef<SseConnection> sseRef =
+                conversationSquadRef.createChild(conversationSquadRef.getName() + ".sse", new SseConnection(objectMapper));
+
+        // Timekeeper — this conversation's watch over time, deleted with it
+        // (TimekeeperPausesATurnForAnUrgentRequest_261107_oo01).
+        conversationSquadRef.createChild(conversationSquadRef.getName() + ".timekeeper",
+                new Timekeeper(qualifiedName, chatSessionIIAR, promptQueueRef, event -> sseRef.tell(c -> c.emit(event)),
+                        TimeUnit.MINUTES.toMillis(minutesSetting("chat-ui.timekeeper.urgent-wait-minutes",
+                                Timekeeper.DEFAULT_URGENT_WAIT_MINUTES)),
+                        TimeUnit.MINUTES.toMillis(minutesSetting("chat-ui.timekeeper.child-reply-warn-minutes",
+                                Timekeeper.DEFAULT_CHILD_REPLY_WARN_MINUTES))));
 
         restoreConversation(qualifiedName, chatSessionIIAR, providerRef);
 

@@ -12,13 +12,13 @@
 
 ## 段E: timekeeper（120）
 
-- [ ] E0. Claude Code: 中断したターンの途中の段が `--resume` したセッションに残るかを確かめる
-- [ ] E1. `<会話>.timekeeper` の子アクターと 30 秒ごとの見回り。会話を消すと消える
-- [ ] E2. 急ぎの依頼が `urgentWaitMinutes` を過ぎて待つとターンを中断し、`[resume interrupted turn …]` を急ぎの項目の直後に入れる。中断したターンは元の依頼に答えない。続けるターンが元の依頼を受け継ぐ
-- [ ] E3. 中断したターンの途中の段を残す（local LLM は `collapseTurn` を飛ばす。Claude Code は E0 の結果しだい）
-- [ ] E4. 子の依頼に `childReplyWarnMinutes` を過ぎても返事が無いとき、1回だけ知らせる
-- [ ] E5. 設定 `urgentWaitMinutes`（10）、`childReplyWarnMinutes`（30）を会話の設定の記録に残す
-- [ ] E6. 単体テスト → W206 で `mvn test`
+- [x] E0. 確かめた: 中断したターンの途中の段は `--resume` したセッションに残る（CLI が実行したコマンドと終了コード 137 を答えた）。最初のターンで中断されるとセッションの番号が記録されていない穴があり、`init` の事件からも記録するよう直した
+- [x] E1. `<会話>.timekeeper` の子アクターと 30 秒ごとの見回り。会話を消すと消える
+- [x] E2. 急ぎの依頼が `urgentWaitMinutes` を過ぎて待つとターンを中断し、`[resume interrupted turn …]` を急ぎの項目の直後に入れる。中断したターンは元の依頼に答えない。続けるターンが元の依頼を受け継ぐ
+- [x] E3. 中断したターンの途中経過（`turnTranscript`）を、そのターンの答えとして履歴に入れる（`collapseTurn` を飛ばすだけでは、間に入る急ぎのターンのまとめで消える）
+- [x] E4. 子の依頼に `childReplyWarnMinutes` を過ぎても返事が無いとき、1回だけ知らせる
+- [x] E5. 設定は会話ごとでなくインスタンスの設定の値 `chat-ui.timekeeper.urgent-wait-minutes`（10）・`chat-ui.timekeeper.child-reply-warn-minutes`（30）にした。120 も合わせて直した
+- [x] E6. 単体テスト2件（中断して急ぎに答え再開したターンが元の依頼に答える／返事の無い子の依頼を1回だけ知らせる）→ W206 で全モジュール成功（app 454、plugin 17・11・42、失敗 0）
 
 ## 段F: deploy（確認を取ってから）・28010 で実機試験
 

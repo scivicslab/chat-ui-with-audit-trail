@@ -460,6 +460,28 @@ public class ChatSession extends Interpreter {
 
     /** The current turn's answer, its ending line and its id, once {@link #finish} has it. */
     private TurnReply turnAnswer;
+
+    /**
+     * What the current turn has done so far, step by step: what the model wrote and what each tool
+     * returned. Becomes the turn's answer in the provider's history if the turn is paused, so the
+     * turn that resumes the work can read it ({@code TimekeeperPausesATurnForAnUrgentRequest_261107_oo01}).
+     */
+    private final StringBuilder turnTranscript = new StringBuilder();
+
+    /**
+     * Set by {@link #pauseForUrgent} from the timekeeper's thread while a turn runs: the turn is to
+     * stop so that an urgent request can be answered, and the work is to go on afterwards.
+     */
+    private volatile boolean pauseRequested;
+
+    /**
+     * The child requests still out, published after every change so the timekeeper can read them
+     * while a turn holds this actor's thread (as {@link #isBusy()} is read).
+     */
+    private volatile List<OpenRequests.Outstanding> outstandingSnapshot = List.of();
+
+    /** Source of the message that resumes a paused turn. */
+    public static final String RESUME_SOURCE = "agent:resume";
     private List<ToolCall> pendingCalls;
     private String finalAnswer;
     private int stepCount;
@@ -1186,6 +1208,8 @@ public class ChatSession extends Interpreter {
         this.askCount = 0;
         this.turnOriginal = null;
         this.turnAnswer = null;
+        this.turnTranscript.setLength(0);
+        this.pauseRequested = false;
         recordHistory("user", prompt);
         if (resultKey != null) {
             pendingResultKeys.remove(resultKey);
@@ -1266,10 +1290,17 @@ public class ChatSession extends Interpreter {
         // requests sent for it is still out; until then the asker's done stays open, and the answer
         // of the turn that finishes the work goes in it (ReportReachesTheAskerAfterDelegation_261107_oo01).
         CompletableFuture<TurnReply> originalDone = null;
+        boolean paused = pauseRequested;
         if (turnOriginal != null) {
             originalDone = openRequests.doneOf(turnOriginal);
-            openRequests.turnEnded(turnOriginal, turnAnswer != null ? turnAnswer : new TurnReply(null, null, turnId()));
+            // A paused turn has not finished the work: the request waits for the turn that resumes it.
+            if (!paused) {
+                openRequests.turnEnded(turnOriginal, turnAnswer != null ? turnAnswer : new TurnReply(null, null, turnId()));
+            }
         }
+        if (paused) queueResume(emitter, self);
+        pauseRequested = false;
+        publishOutstanding();
         busy = false;
         activeResultKey = null;
 
@@ -1366,9 +1397,15 @@ public class ChatSession extends Interpreter {
             this.turnOriginal = requestId;
         } else if (requestId != null && source != null && source.startsWith(ASK_CHAT_REPLY_SOURCE_PREFIX)) {
             this.turnOriginal = openRequests.replyArrived(requestId);
+        } else if (RESUME_SOURCE.equals(source)) {
+            // Goes on with the work of a paused turn, for the same original request.
+            this.turnOriginal = openRequests.isOpen(requestId) ? requestId : null;
         } else {
             this.turnOriginal = null;
         }
+        this.turnTranscript.setLength(0);
+        this.pauseRequested = false;
+        publishOutstanding();
         recordHistory("user", prompt, originOf(source), null, null);
         if (resultKey != null) {
             pendingResultKeys.remove(resultKey);
@@ -1821,6 +1858,10 @@ public class ChatSession extends Interpreter {
         List<ToolCall> calls = TextToolCallParser.parse(text);
         answerStream.finish(!calls.isEmpty());
         recordStepIo(promptToSend, sentBody.get(), text, thinkingBuf.toString(), calls);
+        // The first step's prompt is the question itself, already in the history; later steps'
+        // prompts are what the tools returned.
+        if (stepCount > 1) turnTranscript.append("Tool result:\n").append(promptToSend).append("\n\n");
+        turnTranscript.append("You wrote:\n").append(text).append("\n\n");
         return new LlmStepOutcome(text, calls);
     }
 
@@ -2224,7 +2265,17 @@ public class ChatSession extends Interpreter {
             String restore = requestMessagesToRestore;
             requestMessagesToRestore = null;
             if (restore != null) providerRef().tell(p -> p.replaceRequestMessages(restore));
-            providerRef().tell(p -> p.collapseTurn(question, finalAnswer));
+            if (pauseRequested && finalAnswer == null) {
+                // Paused, not finished: what the turn did so far stands as its answer in the history,
+                // so the turn that resumes the work reads it, and the urgent request's turn in between
+                // does not wipe it out when its own steps are collapsed.
+                String progress = "[This turn was paused before it finished, so that an urgent request could "
+                        + "be answered. What it had done so far:]\n\n" + turnTranscript;
+                providerRef().tell(p -> p.collapseTurn(question, progress));
+                recordHistory("assistant", "(paused for an urgent request; the work resumes after it)");
+            } else {
+                providerRef().tell(p -> p.collapseTurn(question, finalAnswer));
+            }
         } catch (Exception e) {
             logger.log(Level.WARNING, "Could not collapse this turn's provider history", e);
         }
@@ -2469,7 +2520,12 @@ public class ChatSession extends Interpreter {
                         : AskChatTool.send(system, projectId, chatId,
                                 extractInput(args, "chatId"), extractInput(args, "prompt"), requestId);
                 // Sent for the request this turn works for: that request waits for its reply.
-                if (turnOriginal != null && sent.startsWith("sent to ")) openRequests.childSent(turnOriginal, requestId);
+                if (turnOriginal != null && sent.startsWith("sent to ")) {
+                    openRequests.childSent(turnOriginal, requestId,
+                            ChatUiActorSystem.resolveChatName(projectId, extractInput(args, "chatId")),
+                            System.currentTimeMillis());
+                    publishOutstanding();
+                }
                 yield sent;
             }
             case "set_workflow" -> SetWorkflowTool.setWorkflow(system, projectId,
@@ -2672,6 +2728,44 @@ public class ChatSession extends Interpreter {
      */
     public void recordHistory(String role, String content) {
         recordHistory(role, content, null);
+    }
+
+    /**
+     * Stops the running turn so that an urgent request waiting at the front of the queue is answered
+     * next, and has the work go on after it ({@code TimekeeperPausesATurnForAnUrgentRequest_261107_oo01}).
+     * Called by this conversation's timekeeper with {@code tellNow}, because a running turn holds
+     * this actor's thread. Does nothing when no turn is running.
+     */
+    public void pauseForUrgent() {
+        if (!busy || pauseRequested) return;
+        pauseRequested = true;
+        logToConversationSquad("INFO", "paused " + turnId() + " for an urgent request");
+        cancel();
+    }
+
+    /**
+     * Puts the message that resumes the paused turn into this conversation's queue, right after the
+     * urgent items, carrying the paused turn's original request.
+     */
+    private void queueResume(Consumer<ChatEvent> emitter, ActorRef<ChatSession> self) {
+        ActorRef<PromptQueue> queue = getPromptQueue();
+        if (queue == null) return;
+        String text = "[resume paused turn " + turnId() + "]\nYour previous turn was paused so that an urgent "
+                + "request could be answered. Continue the work it was doing; what it had done so far is in "
+                + "your previous answer.";
+        String original = turnOriginal;
+        queue.tell(q -> q.enqueue(text, null, "queue", emitter, self, RESUME_SOURCE, null,
+                new CompletableFuture<>(), false, true, List.of(), original, true));
+    }
+
+    /** Publishes the child requests still out for the timekeeper to read. */
+    private void publishOutstanding() {
+        outstandingSnapshot = List.copyOf(openRequests.outstandingChildren());
+    }
+
+    /** @return the child requests still out; readable from any thread */
+    public List<OpenRequests.Outstanding> outstandingChildren() {
+        return outstandingSnapshot;
     }
 
     /**

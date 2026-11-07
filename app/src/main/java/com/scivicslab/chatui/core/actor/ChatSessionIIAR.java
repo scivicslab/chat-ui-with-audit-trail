@@ -137,6 +137,11 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      */
     public boolean isBusyDirect() { return chatSession().isBusy(); }
 
+    /** The child requests still out, read without waiting for a running turn, as {@link #isBusyDirect()} is. */
+    public java.util.List<OpenRequests.Outstanding> outstandingChildrenDirect() {
+        return chatSession().outstandingChildren();
+    }
+
     /**
      * Whether the provider treats {@code input} as one of its commands, asked without going through
      * the actor's mailbox. It is a read of the line alone, so it can be answered while a turn is
