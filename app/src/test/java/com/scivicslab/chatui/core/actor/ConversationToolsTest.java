@@ -594,9 +594,12 @@ class ConversationToolsTest {
     /** Answers one scripted line per prompt; the prompts whose number is in {@code slow} take 3 seconds. */
     private static final class Paced extends Scripted {
         final java.util.Set<Integer> slow;
+        /** The prompts of the calls that have begun; a slow call's prompt is here before its reply is recorded. */
+        final List<String> entered = new java.util.concurrent.CopyOnWriteArrayList<>();
         Paced(List<String> replies, java.util.Set<Integer> slow) { super(replies, List.of()); this.slow = slow; }
         @Override
         public void sendPrompt(String prompt, String m, Consumer<ChatEvent> emitter, ProviderContext ctx) {
+            entered.add(prompt);
             if (slow.contains(prompts.size() + 1)) {
                 try { Thread.sleep(3_000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
             }
@@ -637,10 +640,49 @@ class ConversationToolsTest {
         waitUntil(() -> !asker.prompts.isEmpty());
         assertEquals(3, worker.prompts.size(), worker.prompts.toString());
         assertTrue(worker.prompts.get(1).endsWith("how far?"), "the urgent request came next: " + worker.prompts);
-        assertTrue(worker.prompts.get(2).contains("[resume paused turn project1/chat-02:t1]"), worker.prompts.get(2));
+        assertTrue(worker.prompts.get(2).contains("[resume paused turn project1/chat-02:t1, for request project1/chat-01:s7:t3:r1]"),
+                worker.prompts.get(2));
+        assertTrue(worker.prompts.get(2).endsWith("do the long job"), "the resume message repeats the work: " + worker.prompts.get(2));
         assertEquals(1, asker.prompts.size(), asker.prompts.toString());
         assertTrue(asker.prompts.get(0).contains("[reply to request project1/chat-01:s7:t3:r1, from project1/chat-02:t3]\nall done"),
                 asker.prompts.get(0));
+    }
+
+    /**
+     * A turn answering an urgent request is itself paused for a second urgent request. Its resume message
+     * names that first urgent request and repeats it, so the resumed turn answers it and not the long job
+     * that was paused before it.
+     */
+    @Test
+    void aPausedUrgentTurnResumesWithItsOwnQuestion() throws Exception {
+        IIActorSystem system = new IIActorSystem("conversation-tools-timekeeper-urgent-paused");
+        FakeControls controls = new FakeControls();
+        Paced worker = new Paced(List.of("x1", "x2", "x3", "x4", "x5", "x6"), java.util.Set.of(1, 2));
+        ChatSessionIIAR two = chat(system, "02", worker, controls);
+        ActorRef<PromptQueue> queue2 = queueOf(two);
+        Timekeeper keeper = new Timekeeper("project1/chat-02", two, queue2, e -> {}, 0, Long.MAX_VALUE);
+
+        queue2.ask(q -> q.enqueue("do the long job", null, "queue", e -> {}, two.asChatSessionRef(), "human", null,
+                new CompletableFuture<>(), false, true, List.of(), null, false)).get(5, java.util.concurrent.TimeUnit.SECONDS);
+        waitUntil(() -> two.isBusyDirect());
+        queue2.ask(q -> q.enqueue("[urgent request q-A from project1/chat-09]\nhow far is the job?", null, "queue", e -> {},
+                two.asChatSessionRef(), "agent:ask_chat:project1/chat-09", null, new CompletableFuture<>(), false, true,
+                List.of(), "q-A", true)).get(5, java.util.concurrent.TimeUnit.SECONDS);
+        keeper.tick(System.currentTimeMillis() + 1);
+        // The urgent request's turn has begun its slow model call.
+        waitUntil(() -> worker.entered.stream().anyMatch(p -> p.endsWith("how far is the job?")));
+        queue2.ask(q -> q.enqueue("[urgent request q-B from project1/chat-08]\nanother question", null, "queue", e -> {},
+                two.asChatSessionRef(), "agent:ask_chat:project1/chat-08", null, new CompletableFuture<>(), false, true,
+                List.of(), "q-B", true)).get(5, java.util.concurrent.TimeUnit.SECONDS);
+        keeper.tick(System.currentTimeMillis() + 1);
+
+        waitUntil(() -> worker.prompts.size() >= 5);
+        assertTrue(worker.prompts.get(1).endsWith("how far is the job?"), worker.prompts.toString());
+        String resumedUrgent = worker.prompts.stream()
+                .filter(p -> p.contains(", for request q-A]")).findFirst().orElse(null);
+        assertTrue(resumedUrgent != null, "a resume message carries q-A: " + worker.prompts);
+        assertTrue(resumedUrgent.endsWith("how far is the job?"), resumedUrgent);
+        assertTrue(!resumedUrgent.contains("do the long job"), resumedUrgent);
     }
 
     /**

@@ -475,6 +475,16 @@ public class ChatSession extends Interpreter {
     /** The original request the current turn works for, or {@code null}. */
     private String turnOriginal;
 
+    /**
+     * The message the current turn's work was asked for in: the turn's own prompt, or, for a turn that
+     * resumes a paused one, the message the paused turn was working for. The resume message repeats it, so
+     * the model continues that work and not another one in the history.
+     */
+    private String turnTask;
+
+    /** The work of each paused turn, by the original request its resume message carries ("" for none). */
+    private final Map<String, String> pausedTasks = new LinkedHashMap<>();
+
     /** The current turn's answer, its ending line and its id, once {@link #finish} has it. */
     private TurnReply turnAnswer;
 
@@ -1433,6 +1443,8 @@ public class ChatSession extends Interpreter {
             activeResultKey = resultKey;
         }
 
+        String carried = RESUME_SOURCE.equals(source) ? pausedTasks.remove(requestId == null ? "" : requestId) : null;
+        this.turnTask = carried != null ? carried : prompt;
         this.question = prompt;
         this.pendingPrompt = prompt;
         this.pendingImages = (images == null) ? List.of() : images;
@@ -2807,10 +2819,14 @@ public class ChatSession extends Interpreter {
     private void queueResume(Consumer<ChatEvent> emitter, ActorRef<ChatSession> self) {
         ActorRef<PromptQueue> queue = getPromptQueue();
         if (queue == null) return;
-        String text = "[resume paused turn " + turnId() + "]\nYour previous turn was paused so that an urgent "
-                + "request could be answered. Continue the work it was doing; what it had done so far is in "
-                + "your previous answer.";
         String original = turnOriginal;
+        // The work is repeated here: the history also holds the urgent request and every other message, and a
+        // model told only to "continue" may continue the wrong one.
+        pausedTasks.put(original == null ? "" : original, turnTask);
+        String text = "[resume paused turn " + turnId() + (original == null ? "" : ", for request " + original)
+                + "]\nYour previous turn was paused so that an urgent request could be answered. Continue the work "
+                + "it was doing for the message below, and answer that message only; what it had done so far is in "
+                + "your previous answer.\n\n" + turnTask;
         queue.tell(q -> q.enqueue(text, null, "queue", emitter, self, RESUME_SOURCE, null,
                 new CompletableFuture<>(), false, true, List.of(), original, true));
     }
