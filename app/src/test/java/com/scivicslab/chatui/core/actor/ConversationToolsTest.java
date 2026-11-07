@@ -64,9 +64,23 @@ class ConversationToolsTest {
         final List<String> setCalls = new ArrayList<>();
         final List<String> created = new ArrayList<>();
         final List<String> deleted = new ArrayList<>();
+        final List<String> providerCalls = new ArrayList<>();
+        /** The id createChat hands out; "02" makes the new conversation one that exists in the test's actor system. */
+        String createdId = "06";
         @Override public String createChat(String projectId) {
             created.add(projectId);
-            return "06";
+            return createdId;
+        }
+        @Override public List<ProviderOption> providerOptions() {
+            return List.of(
+                    new ProviderOption("openai-compat", "openai-compat", com.scivicslab.chatui.agent.ToolSet.FULL, "Local LLM"),
+                    new ProviderOption("claude", "claude", com.scivicslab.chatui.agent.ToolSet.HARNESS, "Claude Code"),
+                    new ProviderOption("claude:full", "claude", com.scivicslab.chatui.agent.ToolSet.FULL,
+                            "Claude Code (harness tools off)"));
+        }
+        @Override public void setProvider(String projectId, String chatId, String kind,
+                                          com.scivicslab.chatui.agent.ToolSet toolSet) {
+            providerCalls.add(projectId + "/" + chatId + "=" + kind + ":" + toolSet.id());
         }
         @Override public ChatUiActorSystem.ChatDeletion deleteChat(String projectId, String chatId) {
             deleted.add(projectId + "/" + chatId);
@@ -180,6 +194,68 @@ class ConversationToolsTest {
         String result = callFromChat01(invoke("create_chat"), MODELS, controls);
         assertTrue(result.contains("ok: created project1/chat-06"), result);
         assertEquals(List.of("project1"), controls.created);
+    }
+
+    @Test
+    void listProvidersNamesEachProviderByTheValueToPassOn() {
+        String result = callFromChat01(invoke("list_providers"), MODELS, new FakeControls());
+        assertTrue(result.contains("openai-compat (Local LLM)\nclaude (Claude Code)\n"
+                + "claude:full (Claude Code (harness tools off))"), result);
+    }
+
+    @Test
+    void createChatPutsTheNewConversationOnTheProviderAndModelAskedFor() {
+        FakeControls controls = new FakeControls();
+        controls.createdId = "02";
+        String result = callFromChat01(invoke("create_chat", "provider", "Claude", "model", "qwen-tensorfold"),
+                MODELS, controls);
+        assertTrue(result.contains("ok: created project1/chat-02 (address it as \"02\") on claude, model qwen-tensorfold"),
+                result);
+        assertEquals(List.of("project1/02=claude:harness"), controls.providerCalls);
+        assertEquals(List.of("project1/02=qwen-tensorfold"), controls.setCalls);
+        assertTrue(controls.deleted.isEmpty());
+    }
+
+    @Test
+    void createChatRefusesAnUnknownProviderBeforeMakingAnything() {
+        FakeControls controls = new FakeControls();
+        String result = callFromChat01(invoke("create_chat", "provider", "gpt"), MODELS, controls);
+        assertTrue(result.contains("error: unknown provider 'gpt'; choose one of: openai-compat, claude, claude:full"),
+                result);
+        assertTrue(controls.created.isEmpty());
+        assertTrue(controls.providerCalls.isEmpty());
+    }
+
+    @Test
+    void createChatWithAnUnknownModelLeavesNoConversationBehind() {
+        FakeControls controls = new FakeControls();
+        controls.createdId = "02";
+        String result = callFromChat01(invoke("create_chat", "model", "gpt-9"), MODELS, controls);
+        assertTrue(result.contains("error: 'gpt-9' is not one of the models of the default provider; available:\n"
+                + "gemma\nqwen-tensorfold\n(no conversation was created)"), result);
+        assertEquals(List.of("project1/02"), controls.deleted);
+        assertTrue(controls.setCalls.isEmpty());
+    }
+
+    @Test
+    void setChatProviderPutsAConversationOfTheCallersProjectOnAnotherProvider() {
+        FakeControls controls = new FakeControls();
+        String result = callFromChat01(invoke("set_chat_provider", "chatId", "02", "provider", "claude:full"),
+                MODELS, controls);
+        assertTrue(result.contains("ok: project1/chat-02 is now on claude:full"), result);
+        assertEquals(List.of("project1/02=claude:full"), controls.providerCalls);
+    }
+
+    @Test
+    void setChatProviderRefusesAnotherProjectAndAnUnknownProvider() {
+        FakeControls controls = new FakeControls();
+        String other = callFromChat01(invoke("set_chat_provider", "chatId", "project2/02", "provider", "claude"),
+                MODELS, controls);
+        assertTrue(other.contains("error: refused — project2/02 belongs to another project"), other);
+        String unknown = callFromChat01(invoke("set_chat_provider", "chatId", "02", "provider", "codex"),
+                MODELS, controls);
+        assertTrue(unknown.contains("error: unknown provider 'codex'"), unknown);
+        assertTrue(controls.providerCalls.isEmpty());
     }
 
     @Test

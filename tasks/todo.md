@@ -16,9 +16,9 @@
 
 ## 段2: 会話を作るときにプロバイダとモデルを選ぶ
 
-- [ ] 9. 設計文書 080 を書いて確認を取る
-- [ ] 10. `create_chat(provider, model)`、`list_providers`、`set_chat_provider` を実装し、単体テストを書く
-- [ ] 11. `mvn test`
+- [x] 9. 設計文書 080 を書いて確認を取る（doc_SCIVICS003 ca6ca3e）
+- [x] 10. `create_chat(provider, model)`、`list_providers`、`set_chat_provider` を実装し、単体テストを書く（`ConversationToolsTest` に 6 件）
+- [x] 11. `mvn test`: W206 の Job で全モジュール成功（app 441、plugin 17・11・42、失敗 0）
 
 ## 段3: deploy（確認を取ってから）
 

@@ -13,6 +13,7 @@ import com.scivicslab.chatui.agent.ChatInspection;
 import com.scivicslab.chatui.agent.GetChatLogTool;
 import com.scivicslab.chatui.agent.RequestMessagesTools;
 import com.scivicslab.chatui.agent.CreateChatTool;
+import com.scivicslab.chatui.agent.ProviderTools;
 import com.scivicslab.chatui.agent.DeleteChatTool;
 import com.scivicslab.chatui.agent.GetChatStatusTool;
 import com.scivicslab.chatui.agent.ListChatModelsTool;
@@ -319,11 +320,30 @@ public class ChatSession extends Interpreter {
               list. The change takes effect after that conversation's current turn. A conversation of
               another project is refused.
             """);
+        m.put("list_providers", """
+            - list_providers(): list the providers a conversation of this instance can be put on, one
+              per line as value (label), e.g. "openai-compat (Local LLM)" or "claude (Claude Code)".
+              Give the value to create_chat or set_chat_provider. Takes no parameters.
+            """);
         m.put("create_chat", """
-            - create_chat(): add a new, empty conversation to your own project and return its id (for
-              example "06"), which you can then pass as "chatId" to ask_chat, set_chat_model,
-              get_request_messages and the other conversation tools. Takes no parameters. Nothing else
-              creates a conversation: a "chatId" that does not exist is an error.
+            - create_chat(provider, model): add a new, empty conversation to your own project and return
+              its id (for example "06"), which you can then pass as "chatId" to ask_chat, set_chat_model,
+              get_request_messages and the other conversation tools. Both <parameter> tags are optional:
+              "provider" is a value list_providers printed (default: openai-compat, a local LLM), and
+              "model" is one of that provider's models (default: the provider's own default). A wrong
+              provider or model is refused with the names you can use, and no conversation is left
+              behind. Choose by the work: put workers that repeat the same kind of job many times (for
+              example, processing Wikipedia articles one by one) on openai-compat, where calls cost
+              nothing and many run at once; put a conversation that checks other conversations' answers
+              and asks for corrections on claude (Claude Code). Nothing else creates a conversation: a
+              "chatId" that does not exist is an error.
+            """);
+        m.put("set_chat_provider", """
+            - set_chat_provider(chatId, provider): put another conversation of this project on a
+              different provider. Requires TWO <parameter> tags: "chatId" and "provider", a value
+              list_providers printed. Its model becomes that provider's default; call set_chat_model
+              after it for another. The change takes effect after that conversation's current turn. A
+              conversation of another project is refused.
             """);
         m.put("delete_chat", """
             - delete_chat(chatId): delete a conversation of your own project, for example one you made with
@@ -2379,7 +2399,11 @@ public class ChatSession extends Interpreter {
             case "list_chat_models" -> ListChatModelsTool.list(system, projectId, extractInput(args, "chatId"));
             case "set_chat_model" -> SetChatModelTool.set(system, conversationControls, projectId,
                     extractInput(args, "chatId"), extractInput(args, "model"));
-            case "create_chat" -> CreateChatTool.create(conversationControls, projectId);
+            case "list_providers" -> ProviderTools.list(conversationControls);
+            case "create_chat" -> CreateChatTool.create(system, conversationControls, projectId,
+                    extractInput(args, "provider"), extractInput(args, "model"));
+            case "set_chat_provider" -> ProviderTools.setChatProvider(conversationControls, projectId,
+                    extractInput(args, "chatId"), extractInput(args, "provider"));
             case "delete_chat" -> DeleteChatTool.delete(conversationControls, projectId, myChatName(),
                     extractInput(args, "chatId"));
             case "get_chat_log" -> GetChatLogTool.get(conversationControls, projectId,

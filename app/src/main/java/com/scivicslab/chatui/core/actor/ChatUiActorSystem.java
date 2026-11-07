@@ -1491,8 +1491,24 @@ public class ChatUiActorSystem implements ConversationControls {
      * @param toolSet   the conversation's tool set from now on
      * @throws IllegalArgumentException for an unknown kind, or a tool set the kind cannot take
      */
+    @Override
     public synchronized void setProvider(String projectId, String chatId, String kind, ToolSet toolSet) {
         setProvider(projectId, chatId, kind, toolSet, true);
+    }
+
+    /**
+     * The providers a conversation can be put on, as the screen's provider dropdown lists them
+     * ({@code GET /api/plugins}'s {@code providerChoices}).
+     */
+    @Override
+    public List<ConversationControls.ProviderOption> providerOptions() {
+        List<ConversationControls.ProviderOption> options = new ArrayList<>();
+        for (com.scivicslab.chatui.plugin.ProviderChoice c : pluginRegistry.choices()) {
+            ToolSet defaultToolSet = pluginRegistry.factory(c.kind()).map(LlmProviderFactory::defaultToolSet)
+                    .orElse(c.toolSet());
+            options.add(new ConversationControls.ProviderOption(c.value(defaultToolSet), c.kind(), c.toolSet(), c.label()));
+        }
+        return options;
     }
 
     /**

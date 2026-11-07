@@ -1,12 +1,14 @@
 package com.scivicslab.chatui.core.actor;
 
+import com.scivicslab.chatui.agent.ToolSet;
 import com.scivicslab.chatui.logging.RecentEntriesAccumulator;
 
 import java.util.List;
 
 /**
- * The four things the conversation tools {@code set_chat_model}, {@code get_chat_log},
- * {@code create_chat} and {@code delete_chat} need from the actor system, and nothing else.
+ * What the conversation tools {@code set_chat_model}, {@code get_chat_log}, {@code create_chat},
+ * {@code delete_chat}, {@code list_providers} and {@code set_chat_provider} need from the actor
+ * system, and nothing else.
  *
  * <p>A conversation's tools are handed an {@code IIActorSystem}, which can reach another
  * conversation's actors but not the actor system's settings record or its log buffers.
@@ -37,4 +39,28 @@ public interface ConversationControls {
 
     /** Deletes a conversation, or refuses and changes nothing; see {@link ChatUiActorSystem#deleteChat}. */
     ChatUiActorSystem.ChatDeletion deleteChat(String projectId, String chatId);
+
+    /**
+     * One provider a conversation can be put on, with the tool set it comes with, as the screen's
+     * provider dropdown offers it ({@code ProviderAndModelChosenAtCreateChat_261107_oo01}).
+     *
+     * @param value   what a caller names it by: the kind alone when the tool set is the kind's
+     *                default ({@code claude}), else {@code kind:toolset} ({@code claude:full})
+     * @param kind    the provider kind ({@code openai-compat}, {@code claude}, {@code codex})
+     * @param toolSet the tool set the conversation gets with it
+     * @param label   the name the screen shows for it
+     */
+    record ProviderOption(String value, String kind, ToolSet toolSet, String label) {}
+
+    /** @return the providers this instance can put a conversation on, in the order the screen lists them */
+    List<ProviderOption> providerOptions();
+
+    /**
+     * Puts a conversation on another provider and tool set, and records it with the conversation's
+     * other settings, so a restart puts the conversation back on it. A turn already running finishes
+     * on the old provider.
+     *
+     * @throws IllegalArgumentException for an unknown conversation or kind, or a tool set the kind cannot take
+     */
+    void setProvider(String projectId, String chatId, String kind, ToolSet toolSet);
 }
