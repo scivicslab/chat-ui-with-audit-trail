@@ -52,7 +52,8 @@ public final class ListChatModelsTool {
         String targetName = ChatUiActorSystem.resolveChatName(myProjectId, target);
         IIActorRef<?> iiar = system.getIIActor(targetName + ".chat");
         if (!(iiar instanceof ChatSessionIIAR chat)) {
-            throw new IllegalArgumentException("error: chat not found: " + target);
+            throw new IllegalArgumentException("error: chat not found: " + target
+                    + OtherInstances.notFoundHint(targetName));
         }
         return chat.<List<LlmProvider.ModelEntry>>ask(interp -> ((ChatSession) interp).getAvailableModels())
                 .get(TIMEOUT_SECONDS, TimeUnit.SECONDS);

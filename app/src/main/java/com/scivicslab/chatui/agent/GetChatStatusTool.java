@@ -27,7 +27,9 @@ public final class GetChatStatusTool {
         if (target == null || target.isBlank()) return "error: chatId is required";
         String targetName = ChatUiActorSystem.resolveChatName(myProjectId, target);
         IIActorRef<?> iiar = system.getIIActor(targetName + ".chat");
-        if (!(iiar instanceof ChatSessionIIAR chat)) return "error: chat not found: " + target;
+        if (!(iiar instanceof ChatSessionIIAR chat)) {
+            return "error: chat not found: " + target + OtherInstances.notFoundHint(targetName);
+        }
 
         Map<String, Object> status = new LinkedHashMap<>();
         status.put("chat", targetName);

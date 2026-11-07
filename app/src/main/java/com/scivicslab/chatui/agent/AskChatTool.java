@@ -72,10 +72,10 @@ public final class AskChatTool {
         }
         IIActorRef<?> targetActor = system.getIIActor(targetName + ".chat");
         if (!(targetActor instanceof ChatSessionIIAR targetChat)) {
-            return "error: chat not found: " + target;
+            return "error: chat not found: " + target + OtherInstances.notFoundHint(targetName);
         }
         ActorRef<PromptQueue> targetQueue = system.getActor(targetName + ".queue");
-        if (targetQueue == null) return "error: chat not found: " + target;
+        if (targetQueue == null) return "error: chat not found: " + target + OtherInstances.notFoundHint(targetName);
         IIActorRef<?> myActor = system.getIIActor(myName + ".chat");
         if (!(myActor instanceof ChatSessionIIAR myChat)) {
             return "error: the calling conversation " + myName + " is not registered";
@@ -92,8 +92,11 @@ public final class AskChatTool {
         Consumer<ChatEvent> targetWatchers = watchersOf(system, targetName);
         targetQueue.tell(q -> q.enqueue(prompt, null, "queue", targetWatchers,
                 targetChat.asChatSessionRef(), ChatSession.ASK_CHAT_SOURCE_PREFIX + myName, resultKey, done));
+        // The sender may have meant a conversation of the same name in another instance (project numbers
+        // are local to an instance), so a delivery across projects says where it went.
+        String elsewhere = targetName.startsWith(myProjectId + "/") ? "" : OtherInstances.sameNameNote(targetName);
         return "sent to " + targetName + "; its reply will arrive in this conversation as a new message "
-                + "when its turn ends";
+                + "when its turn ends" + elsewhere;
     }
 
     /** Puts the target turn's reply, or the reason there is none, in the calling conversation's queue. */

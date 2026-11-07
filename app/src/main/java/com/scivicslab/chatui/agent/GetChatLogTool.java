@@ -29,7 +29,7 @@ public final class GetChatLogTool {
         String projectId = targetName.substring(0, targetName.indexOf('/'));
         String chatId = targetName.substring(targetName.indexOf("/chat-") + "/chat-".length());
         List<RecentEntriesAccumulator.Entry> entries = controls.getChatLogEntries(projectId, chatId);
-        if (entries == null) return "error: chat not found: " + target;
+        if (entries == null) return "error: chat not found: " + target + OtherInstances.notFoundHint(targetName);
         return ChatInspection.formatLog(entries, count);
     }
 }

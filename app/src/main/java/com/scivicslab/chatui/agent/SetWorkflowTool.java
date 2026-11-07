@@ -56,7 +56,7 @@ public final class SetWorkflowTool {
 
         IIActorRef<?> targetIIActor = system.getIIActor(targetName + ".chat");
         if (!(targetIIActor instanceof ChatSessionIIAR targetChatSessionIIAR)) {
-            return "error: chat not found: " + target;
+            return "error: chat not found: " + target + OtherInstances.notFoundHint(targetName);
         }
 
         try {
