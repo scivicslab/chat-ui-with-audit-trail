@@ -520,6 +520,61 @@ class ConversationToolsTest {
         assertEquals(TurnReply.NONE, done.get(5, java.util.concurrent.TimeUnit.SECONDS));
     }
 
+    /** Urgent items go ahead of the waiting ones that are not, and keep their own order. */
+    @Test
+    void anUrgentItemGoesAheadOfTheWaitingOnesAndBehindEarlierUrgentOnes() throws Exception {
+        IIActorSystem system = new IIActorSystem("conversation-tools-urgent-order");
+        ChatSessionIIAR two = chat(system, "02", new Scripted(List.of("unused"), List.of()), new FakeControls());
+        ActorRef<PromptQueue> queue = queueOf(two);
+        java.util.function.BiFunction<String, Boolean, Integer> put = (text, urgent) -> {
+            try {
+                // Held (auto off), so nothing is dispatched while the order is checked.
+                return queue.ask(q -> q.enqueue(text, null, "queue", e -> {}, two.asChatSessionRef(), "human", null,
+                        new CompletableFuture<>(), false, false, List.of(), null, urgent))
+                        .get(5, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        };
+        assertEquals(0, put.apply("C", false));
+        assertEquals(0, put.apply("D", false));
+        assertEquals(2, put.apply("A", true), "A passed C and D");
+        assertEquals(2, put.apply("B", true), "B passed C and D, and stayed behind A");
+        List<PromptQueue.QueueEntry> order = queue.ask(PromptQueue::snapshot).get(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertEquals(List.of("A", "B", "C", "D"), order.stream().map(PromptQueue.QueueEntry::prompt).toList());
+        assertEquals(List.of(true, true, false, false), order.stream().map(PromptQueue.QueueEntry::urgent).toList());
+    }
+
+    /**
+     * An urgent request reads its heading, the result says how many items it passed, and its reply
+     * also goes in ahead: here, ahead of a held item that would otherwise keep it from being sent.
+     */
+    @Test
+    void anUrgentRequestAndItsReplyBothGoAhead() throws Exception {
+        IIActorSystem system = new IIActorSystem("conversation-tools-urgent-reply");
+        FakeControls controls = new FakeControls();
+        Scripted caller = new Scripted(List.of("thanks"), List.of());
+        Scripted callee = new Scripted(List.of("about half done"), List.of());
+        ChatSessionIIAR one = chat(system, "01", caller, controls);
+        ChatSessionIIAR two = chat(system, "02", callee, controls);
+        ActorRef<PromptQueue> queue1 = queueOf(one);
+        queueOf(two);
+        queue1.ask(q -> q.enqueue("held", null, "queue", e -> {}, one.asChatSessionRef(), "human", null,
+                new CompletableFuture<>(), false, false, List.of(), null, false)).get(5, java.util.concurrent.TimeUnit.SECONDS);
+
+        String sent = AskChatTool.sendUrgent(system, "project1", "01", "02", "how far are you?", "project1/chat-01:s7:t3:r1");
+        assertTrue(sent.startsWith("sent to project1/chat-02 as urgent request project1/chat-01:s7:t3:r1, ahead of 0 waiting"),
+                sent);
+
+        long deadline = System.currentTimeMillis() + 20_000;
+        while (caller.prompts.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(50);
+        assertTrue(callee.prompts.get(0).endsWith("[urgent request project1/chat-01:s7:t3:r1 from project1/chat-01]\nhow far are you?"),
+                callee.prompts.get(0));
+        assertEquals(1, caller.prompts.size(), "the reply went ahead of the held item and was sent");
+        assertTrue(caller.prompts.get(0).contains("[reply to request project1/chat-01:s7:t3:r1, from project1/chat-02:t1]\nabout half done"),
+                caller.prompts.get(0));
+    }
+
     @Test
     void askChatToAConversationThatDoesNotExistIsRefusedAtOnce() {
         IIActorSystem system = new IIActorSystem("conversation-tools-ask-missing");

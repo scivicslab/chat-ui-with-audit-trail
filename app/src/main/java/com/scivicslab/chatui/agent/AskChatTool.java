@@ -65,6 +65,23 @@ public final class AskChatTool {
      */
     public static String send(IIActorSystem system, String myProjectId, String myChatId,
                               String target, String prompt, String requestId) {
+        return send(system, myProjectId, myChatId, target, prompt, requestId, false);
+    }
+
+    /**
+     * The {@code ask_chat_urgent} tool: as {@link #send}, but the request goes into the target's
+     * queue ahead of every waiting item that is not urgent, and so does its reply in this
+     * conversation's queue ({@code UrgentRequestAndStatusReport_261107_oo01}).
+     *
+     * @return a line saying the request was sent, under which id, and how many waiting items it passed
+     */
+    public static String sendUrgent(IIActorSystem system, String myProjectId, String myChatId,
+                                    String target, String prompt, String requestId) {
+        return send(system, myProjectId, myChatId, target, prompt, requestId, true);
+    }
+
+    private static String send(IIActorSystem system, String myProjectId, String myChatId,
+                               String target, String prompt, String requestId, boolean urgent) {
         if (target == null || target.isBlank()) return "error: chatId is required";
         if (prompt == null || prompt.isBlank()) return "error: prompt is required";
 
@@ -94,28 +111,37 @@ public final class AskChatTool {
         // done completes inside the target's actor, carrying the answer; the delivery runs elsewhere
         // so that the target's thread is not held while the caller's queue takes the message.
         done.whenCompleteAsync((reply, failure) ->
-                deliverReply(system, myName, myChat, myQueue, targetName, requestId, reply, failure));
+                deliverReply(system, myName, myChat, myQueue, targetName, requestId, urgent, reply, failure));
         Consumer<ChatEvent> targetWatchers = watchersOf(system, targetName);
-        String headed = "[request " + requestId + " from " + myName + "]\n" + prompt;
-        targetQueue.tell(q -> q.enqueue(headed, null, "queue", targetWatchers,
-                targetChat.asChatSessionRef(), ChatSession.ASK_CHAT_SOURCE_PREFIX + myName, resultKey, done,
-                false, true, java.util.List.of(), requestId));
+        String headed = "[" + (urgent ? "urgent request " : "request ") + requestId + " from " + myName + "]\n" + prompt;
+        int passed;
+        try {
+            // Asked rather than told: the result says how many waiting items an urgent request passed.
+            // The queue is its own actor, so this does not wait for the target's turn.
+            passed = targetQueue.ask(q -> q.enqueue(headed, null, "queue", targetWatchers,
+                    targetChat.asChatSessionRef(), ChatSession.ASK_CHAT_SOURCE_PREFIX + myName, resultKey, done,
+                    false, true, java.util.List.of(), requestId, urgent)).get(5, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "ask_chat: could not queue request " + requestId + " for " + targetName, e);
+            return "error: could not queue the request for " + targetName + ": " + e.getClass().getSimpleName();
+        }
         // The sender may have meant a conversation of the same name in another instance (project numbers
         // are local to an instance), so a delivery across projects says where it went.
         String elsewhere = targetName.startsWith(myProjectId + "/") ? "" : OtherInstances.sameNameNote(targetName);
-        return "sent to " + targetName + " as request " + requestId + "; its reply will arrive in this "
-                + "conversation as a new message when its turn ends" + elsewhere;
+        return "sent to " + targetName + " as " + (urgent ? "urgent request " : "request ") + requestId
+                + (urgent ? ", ahead of " + passed + " waiting message(s)" : "")
+                + "; its reply will arrive in this conversation as a new message when its turn ends" + elsewhere;
     }
 
     /** Puts the target turn's reply, or the reason there is none, in the calling conversation's queue. */
     private static void deliverReply(IIActorSystem system, String myName, ChatSessionIIAR myChat,
                                      ActorRef<PromptQueue> myQueue, String targetName, String requestId,
-                                     TurnReply reply, Throwable failure) {
+                                     boolean urgent, TurnReply reply, Throwable failure) {
         String text = replyMessage(targetName, requestId, reply, failure);
         Consumer<ChatEvent> myWatchers = watchersOf(system, myName);
         myQueue.tell(q -> q.enqueue(text, null, "queue", myWatchers, myChat.asChatSessionRef(),
                 ChatSession.ASK_CHAT_REPLY_SOURCE_PREFIX + targetName, null, new CompletableFuture<>(),
-                false, true, java.util.List.of(), requestId));
+                false, true, java.util.List.of(), requestId, urgent));
     }
 
     /**

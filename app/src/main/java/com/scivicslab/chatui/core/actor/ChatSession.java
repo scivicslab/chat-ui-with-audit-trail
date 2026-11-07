@@ -286,6 +286,16 @@ public class ChatSession extends Interpreter {
               this to direct or review another ConversationSquad's work; get_chat_log is for
               checking once whether the other conversation is stuck.
             """);
+        m.put("ask_chat_urgent", """
+            - ask_chat_urgent(chatId, prompt): as ask_chat, but the request goes into the other
+              conversation's queue ahead of every waiting message that is not urgent, and its reply
+              comes back to you the same way. It does not interrupt a turn the other conversation
+              is running; it is answered next. Requires "chatId" and "prompt" <parameter> tags.
+              Use it when someone asks you how the work you handed out is going: send each
+              conversation you gave work to an urgent request asking, in one paragraph, how far it
+              has got — saying it should answer only that and keep the work it is doing — then end
+              your turn. When every answer is back, sum up how far each one has got.
+            """);
         m.put("set_workflow", """
             - set_workflow(chatId, yaml): replace another ConversationSquad's agent-loop workflow
               with the given Turing-workflow YAML text (not a file path). Requires TWO <parameter>
@@ -2451,10 +2461,13 @@ public class ChatSession extends Interpreter {
             case "search_docs" -> DocSearchTool.search(extractInput(args, "query"), 0);
             case "list_references" -> ReferenceLinkTool.list(extractInput(args, "id"),
                     extractInput(args, "direction"), extractInput(args, "relation"));
-            case "ask_chat" -> {
+            case "ask_chat", "ask_chat_urgent" -> {
                 String requestId = nextRequestId();
-                String sent = AskChatTool.send(system, projectId, chatId,
-                        extractInput(args, "chatId"), extractInput(args, "prompt"), requestId);
+                String sent = "ask_chat_urgent".equals(tc.name())
+                        ? AskChatTool.sendUrgent(system, projectId, chatId,
+                                extractInput(args, "chatId"), extractInput(args, "prompt"), requestId)
+                        : AskChatTool.send(system, projectId, chatId,
+                                extractInput(args, "chatId"), extractInput(args, "prompt"), requestId);
                 // Sent for the request this turn works for: that request waits for its reply.
                 if (turnOriginal != null && sent.startsWith("sent to ")) openRequests.childSent(turnOriginal, requestId);
                 yield sent;

@@ -186,10 +186,28 @@ public class PromptQueue {
                         String source, String resultKey,
                         CompletableFuture<TurnReply> done, boolean noThink, boolean auto,
                         List<String> images, String requestId) {
+        enqueue(prompt, model, mode, emitter, chatSessionRef, source, resultKey, done, noThink, auto, images,
+                requestId, false);
+    }
 
+    /**
+     * Enqueues a prompt, urgent or not ({@code UrgentRequestAndStatusReport_261107_oo01}).
+     *
+     * @param urgent {@code true} to put it ahead of every waiting item that is not urgent: at the end
+     *               of the run of urgent items at the front, so urgent items keep their order too
+     * @return how many waiting items it was put ahead of
+     */
+    public int enqueue(String prompt, String model, String mode,
+                       Consumer<ChatEvent> emitter,
+                       ActorRef<ChatSession> chatSessionRef,
+                       String source, String resultKey,
+                       CompletableFuture<TurnReply> done, boolean noThink, boolean auto,
+                       List<String> images, String requestId, boolean urgent) {
+        int passed = 0;
         switch (mode) {
             case "cancel_and_send" -> {
-                QueueItem item = new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, auto, images, requestId);
+                QueueItem item = new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, auto, images,
+                        requestId, urgent, System.currentTimeMillis());
                 queue.add(0, item);
                 // tellNow, not tell: the running turn blocks the ChatSession's own thread, so a
                 // queued cancel would be delivered only after that turn ended (ChatSession.cancel).
@@ -200,8 +218,16 @@ public class PromptQueue {
             }
             default -> {
                 // "queue" mode (default)
-                QueueItem item = new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, auto, images, requestId);
-                queue.add(item);
+                QueueItem item = new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, auto, images,
+                        requestId, urgent, System.currentTimeMillis());
+                if (urgent) {
+                    int at = 0;
+                    while (at < queue.size() && queue.get(at).urgent()) at++;
+                    passed = queue.size() - at;
+                    queue.add(at, item);
+                } else {
+                    queue.add(item);
+                }
                 emitter.accept(ChatEvent.info(auto
                         ? "Queued. Your message will be sent when the current prompt finishes."
                         : "Held in the queue. Turn its Auto on, or advance the queue, to send it."));
@@ -214,6 +240,7 @@ public class PromptQueue {
         emitter.accept(ChatEvent.queueChanged());
 
         requestDispatch(chatSessionRef, false);
+        return passed;
     }
 
     /**
@@ -278,7 +305,7 @@ public class PromptQueue {
      * deliberately left out (not JSON-serializable, and irrelevant to the browser view).
      */
     public List<QueueEntry> snapshot() {
-        return queue.stream().map(i -> new QueueEntry(i.prompt(), i.source(), i.auto())).toList();
+        return queue.stream().map(i -> new QueueEntry(i.prompt(), i.source(), i.auto(), i.urgent())).toList();
     }
 
     /**
@@ -351,7 +378,11 @@ public class PromptQueue {
      * @param source who queued it — {@code "human"} or {@code "agent:xxx"}
      * @param auto   whether this item auto-dispatches once it's at the front and idle
      */
-    public record QueueEntry(String prompt, String source, boolean auto) {}
+    public record QueueEntry(String prompt, String source, boolean auto, boolean urgent) {
+        public QueueEntry(String prompt, String source, boolean auto) {
+            this(prompt, source, auto, false);
+        }
+    }
 
     // ---- What this conversation has already sent (QueueChecklistView_260913_oo01) ----
 
@@ -455,7 +486,7 @@ public class PromptQueue {
         if (queue.isEmpty()) return null;
         if (respectAuto && !queue.get(0).auto()) return null;
         QueueItem item = queue.remove(0);
-        sent.add(new QueueEntry(item.prompt(), item.source(), item.auto()));
+        sent.add(new QueueEntry(item.prompt(), item.source(), item.auto(), item.urgent()));
         trimSent();
         // Show the prompt in the pane now that it is actually being sent. The browser used to draw
         // only what it had typed itself, so a prompt from the REST API, from an MCP agent or from
@@ -494,10 +525,13 @@ public class PromptQueue {
             boolean noThink,
             boolean auto,      // false = paused: waits for advanceNow instead of auto-dispatch
             List<String> images, // data URLs attached to this prompt, or empty
-            String requestId     // the ask_chat request this item is, or answers; null otherwise
+            String requestId,    // the ask_chat request this item is, or answers; null otherwise
+            boolean urgent,      // goes ahead of every waiting item that is not urgent
+            long queuedAt        // when it entered the queue, in milliseconds since the epoch
     ) {
         QueueItem withAuto(boolean newAuto) {
-            return new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, newAuto, images, requestId);
+            return new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, newAuto, images, requestId,
+                    urgent, queuedAt);
         }
     }
 }

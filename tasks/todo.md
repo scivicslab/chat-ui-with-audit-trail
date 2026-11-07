@@ -1,3 +1,31 @@
+# 急ぎの依頼（110）と timekeeper（120）
+
+設計: `doc_SCIVICS003/.../040_design/110_UrgentRequestAndStatusReport_261107_oo01`、`120_TimekeeperPausesATurnForAnUrgentRequest_261107_oo01`。
+
+## 段D: 急ぎの依頼（110）
+
+- [x] D1. 待ち行列の項目に `urgent` と `queuedAt` を足す。急ぎの項目は、先頭から続く急ぎの項目の並びの末尾に入れる
+- [x] D2. `ask_chat_urgent(chatId, prompt)`: 見出し `[urgent request <ID> from <会話>]`、結果に追い越した数。返事も急ぎで入れる。子の依頼として数える
+- [x] D3. 道具の説明（状況を尋ねられたときの監督役のふるまい）
+- [~] D4. Queue の欄に急ぎの印。ブラウザでの確認は deploy の後
+- [x] D5. 単体テスト2件 → W206 で `mvn test`: 全モジュール成功（app 452、plugin 17・11・42、失敗 0）
+
+## 段E: timekeeper（120）
+
+- [ ] E0. Claude Code: 中断したターンの途中の段が `--resume` したセッションに残るかを確かめる
+- [ ] E1. `<会話>.timekeeper` の子アクターと 30 秒ごとの見回り。会話を消すと消える
+- [ ] E2. 急ぎの依頼が `urgentWaitMinutes` を過ぎて待つとターンを中断し、`[resume interrupted turn …]` を急ぎの項目の直後に入れる。中断したターンは元の依頼に答えない。続けるターンが元の依頼を受け継ぐ
+- [ ] E3. 中断したターンの途中の段を残す（local LLM は `collapseTurn` を飛ばす。Claude Code は E0 の結果しだい）
+- [ ] E4. 子の依頼に `childReplyWarnMinutes` を過ぎても返事が無いとき、1回だけ知らせる
+- [ ] E5. 設定 `urgentWaitMinutes`（10）、`childReplyWarnMinutes`（30）を会話の設定の記録に残す
+- [ ] E6. 単体テスト → W206 で `mvn test`
+
+## 段F: deploy（確認を取ってから）・28010 で実機試験
+
+## Review
+
+---
+
 # ターン ID・依頼 ID（090）と、配った仕事の最終報告を依頼元へ届ける（100）
 
 設計: `doc_SCIVICS003/.../040_design/090_TurnAndRequestIds_261107_oo01`、`100_ReportReachesTheAskerAfterDelegation_261107_oo01`。
