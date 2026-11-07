@@ -76,7 +76,7 @@ class ConversationDeletionTest {
         ChatSessionIIAR session = system.getChatSession(projectId, "02");
         system.getPromptQueue(projectId, "02").ask(q -> {
             q.enqueue("later", null, "queue", e -> { }, session.asChatSessionRef(), "human", null,
-                    new java.util.concurrent.CompletableFuture<Void>(), false, false);
+                    new java.util.concurrent.CompletableFuture<TurnReply>(), false, false);
             return null;
         }).get();
 

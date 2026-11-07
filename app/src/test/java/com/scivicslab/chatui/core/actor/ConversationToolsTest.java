@@ -29,7 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ConversationToolsTest {
 
     /** Says one scripted thing per prompt; the first reply is the tool call under test. */
-    private static final class Scripted implements LlmProvider {
+    private static class Scripted implements LlmProvider {
         final List<String> prompts = new ArrayList<>();
         final List<String> replies;
         final List<ModelEntry> models;
@@ -301,6 +301,53 @@ class ConversationToolsTest {
         String viaPlan = AskChatTool.askQualified(system, watchdog, "project1/chat-01", "project1/chat-02",
                 "question", 30);
         assertEquals("the answer", viaPlan);
+    }
+
+    /** Answers each prompt after a pause: a short one for the asked prompt, a long one for the next. */
+    private static final class Slow extends Scripted {
+        Slow() { super(List.of("the answer", "the next turn's answer"), List.of()); }
+        @Override
+        public void sendPrompt(String prompt, String m, Consumer<ChatEvent> emitter, ProviderContext ctx) {
+            try {
+                Thread.sleep(prompts.isEmpty() ? 1_000 : 8_000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            super.sendPrompt(prompt, m, emitter, ctx);
+        }
+    }
+
+    /**
+     * The asked conversation has another prompt queued behind the asked one, so it starts that
+     * prompt's turn as soon as the asked turn ends, and the turn holds its actor for 8 seconds. The
+     * reply must still come back at once: it travels in {@code done}, not in a question put to that
+     * actor afterwards, which would wait behind the whole next turn
+     * ({@code AskChatWithoutWaiting_261022_oo01}).
+     */
+    @Test
+    void theReplyArrivesWhileTheAskedConversationRunsItsNextQueuedTurn() throws Exception {
+        IIActorSystem system = new IIActorSystem("conversation-tools-ask-next-turn");
+        FakeControls controls = new FakeControls();
+        Scripted caller = new Scripted(List.of("unused"), List.of());
+        Slow callee = new Slow();
+        chat(system, "01", caller, controls);
+        ChatSessionIIAR two = chat(system, "02", callee, controls);
+        ActorRef<PromptQueue> queue2 = two.createChild("project1/chat-02.queue", new PromptQueue());
+        queue2.tellNow(q -> q.setSelf(queue2)).join();
+        ActorRef<CallWatchdog> watchdog = two.createChild("watchdog-for-next-turn", new CallWatchdog());
+
+        CompletableFuture<String> asked = CompletableFuture.supplyAsync(() -> AskChatTool.askQualified(
+                system, watchdog, "project1/chat-01", "project1/chat-02", "question", 30));
+        long deadline = System.currentTimeMillis() + 5_000;
+        while (callee.prompts.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(20);
+        // While the asked turn is still answering, another prompt joins chat-02's queue.
+        queue2.tell(q -> q.enqueue("next", null, "queue", e -> {}, two.asChatSessionRef(), "human"));
+
+        long started = System.currentTimeMillis();
+        String reply = asked.get(30, java.util.concurrent.TimeUnit.SECONDS);
+        long waited = System.currentTimeMillis() - started;
+        assertEquals("the answer", reply);
+        assertTrue(waited < 4_000, "the reply did not wait for the next turn; waited " + waited + " ms");
     }
 
     @Test

@@ -112,7 +112,7 @@ public class PromptQueue {
                         ActorRef<ChatSession> chatSessionRef,
                         String source, String resultKey) {
 
-        CompletableFuture<Void> done = new CompletableFuture<>();
+        CompletableFuture<TurnReply> done = new CompletableFuture<>();
         enqueue(prompt, model, mode, emitter, chatSessionRef, source, resultKey, done);
     }
 
@@ -122,13 +122,13 @@ public class PromptQueue {
      * <p>Use this overload when the caller needs to block until the prompt completes
      * (e.g. MCP {@code tools/call} handler waiting for the LLM result).</p>
      *
-     * @param done externally created future that is completed when ChatSession finishes the prompt
+     * @param done externally created future that ChatSession completes with the turn's {@link TurnReply} when it finishes the prompt
      */
     public void enqueue(String prompt, String model, String mode,
                         Consumer<ChatEvent> emitter,
                         ActorRef<ChatSession> chatSessionRef,
                         String source, String resultKey,
-                        CompletableFuture<Void> done) {
+                        CompletableFuture<TurnReply> done) {
         enqueue(prompt, model, mode, emitter, chatSessionRef, source, resultKey, done, false);
     }
 
@@ -136,7 +136,7 @@ public class PromptQueue {
                         Consumer<ChatEvent> emitter,
                         ActorRef<ChatSession> chatSessionRef,
                         String source, String resultKey,
-                        CompletableFuture<Void> done, boolean noThink) {
+                        CompletableFuture<TurnReply> done, boolean noThink) {
         enqueue(prompt, model, mode, emitter, chatSessionRef, source, resultKey, done, noThink, true);
     }
 
@@ -153,7 +153,7 @@ public class PromptQueue {
                         Consumer<ChatEvent> emitter,
                         ActorRef<ChatSession> chatSessionRef,
                         String source, String resultKey,
-                        CompletableFuture<Void> done, boolean noThink, boolean auto) {
+                        CompletableFuture<TurnReply> done, boolean noThink, boolean auto) {
         enqueue(prompt, model, mode, emitter, chatSessionRef, source, resultKey, done, noThink, auto, List.of());
     }
 
@@ -169,7 +169,7 @@ public class PromptQueue {
                         Consumer<ChatEvent> emitter,
                         ActorRef<ChatSession> chatSessionRef,
                         String source, String resultKey,
-                        CompletableFuture<Void> done, boolean noThink, boolean auto,
+                        CompletableFuture<TurnReply> done, boolean noThink, boolean auto,
                         List<String> images) {
 
         switch (mode) {
@@ -460,7 +460,7 @@ public class PromptQueue {
             String prompt,
             String model,
             Consumer<ChatEvent> emitter,
-            CompletableFuture<Void> done,
+            CompletableFuture<TurnReply> done,
             String source,     // "human" | "agent:xxx" (e.g. "agent:localhost:28900")
             String resultKey,  // UUID for MCP result tracking, null for human prompts
             boolean noThink,

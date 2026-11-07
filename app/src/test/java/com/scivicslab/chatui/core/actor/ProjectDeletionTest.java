@@ -90,7 +90,7 @@ class ProjectDeletionTest {
         // Held, so it stays in the queue without a model being called.
         system.getPromptQueue(projectId, "01").ask(q -> {
             q.enqueue("later", null, "queue", e -> { }, session.asChatSessionRef(), "human", null,
-                    new java.util.concurrent.CompletableFuture<Void>(), false, false);
+                    new java.util.concurrent.CompletableFuture<TurnReply>(), false, false);
             return null;
         }).get();
 

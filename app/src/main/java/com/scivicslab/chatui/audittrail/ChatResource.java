@@ -4,6 +4,7 @@ import com.scivicslab.chatui.agent.ToolSet;
 import com.scivicslab.chatui.core.actor.ChatSession;
 import com.scivicslab.chatui.core.actor.ChatSessionIIAR;
 import com.scivicslab.chatui.core.actor.ChatUiActorSystem;
+import com.scivicslab.chatui.core.actor.TurnReply;
 import com.scivicslab.chatui.core.actor.PromptQueue;
 import com.scivicslab.chatui.core.actor.SseConnection;
 import com.scivicslab.chatui.core.provider.LlmProvider;
@@ -452,7 +453,7 @@ public class ChatResource {
         Object saidSource = body != null ? body.get("source") : null;
         String source = saidSource == null ? "human" : String.valueOf(saidSource);
         promptQueueRef.tell(q -> q.enqueue(text, model, "queue", emitter,
-                chatSessionIIAR.asChatSessionRef(), source, null, new CompletableFuture<Void>(),
+                chatSessionIIAR.asChatSessionRef(), source, null, new CompletableFuture<TurnReply>(),
                 noThink, !hold, images));
 
         return Response.ok(Map.of("type", "accepted")).build();

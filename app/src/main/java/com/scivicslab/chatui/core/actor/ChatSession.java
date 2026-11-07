@@ -271,14 +271,16 @@ public class ChatSession extends Interpreter {
             - ask_chat(chatId, prompt): send an instruction to another conversation (e.g. "02" for
               one in your own project, or "project2/02" to reach one in another project). Requires
               "chatId" and "prompt" <parameter> tags. It does NOT wait: the result only says the
-              instruction was sent, and you can end your turn. When that conversation's turn ends,
-              its reply comes to you as a new message starting with
-              "[reply from <chat> to your ask_chat]", followed by one line,
-              [ended: answered; model calls: N; tool calls: M], saying how its turn ended:
+              instruction was sent. The reply reaches you only AFTER YOU END YOUR TURN: it comes as
+              a new message starting with "[reply from <chat> to your ask_chat]", followed by one
+              line, [ended: answered; model calls: N; tool calls: M], saying how its turn ended:
               "answered", or "step-limit" when it ran out of steps (then the reply is only a notice,
-              not an answer). If its turn left no reply, the message says so and why. Use this to
-              direct or review another ConversationSquad's work; get_chat_log shows what it is doing
-              meanwhile.
+              not an answer). If its turn left no reply, the message says so and why. So once you
+              have sent your instructions, end your turn and wait; do not call get_chat_log or
+              get_chat_status over and over to look for the reply, since it cannot arrive while
+              your turn goes on. Several replies wait in order and come to you one per turn. Use
+              this to direct or review another ConversationSquad's work; get_chat_log is for
+              checking once whether the other conversation is stuck.
             """);
         m.put("set_workflow", """
             - set_workflow(chatId, yaml): replace another ConversationSquad's agent-loop workflow
@@ -382,7 +384,7 @@ public class ChatSession extends Interpreter {
     private String turnModel;
     private Consumer<ChatEvent> turnEmitter;
     private ActorRef<ChatSession> turnSelf;
-    private CompletableFuture<Void> turnDone;
+    private CompletableFuture<TurnReply> turnDone;
     private boolean turnNoThink;
     /**
      * Whether this conversation asks its model to skip the thinking phase, whatever one prompt
@@ -1063,10 +1065,10 @@ public class ChatSession extends Interpreter {
      * @param model  the model to use, or {@code null}/blank to keep the provider's current model
      * @param emitter callback that receives {@link ChatEvent}s as the response streams in
      * @param self   this actor's own reference, used to queue completion back onto the actor thread
-     * @param done   completed once the prompt has finished processing (success or error)
+     * @param done   completed with the turn's {@link TurnReply} once the prompt has finished processing (success or error)
      */
     public void startPrompt(String prompt, String model, Consumer<ChatEvent> emitter,
-                            ActorRef<ChatSession> self, CompletableFuture<Void> done) {
+                            ActorRef<ChatSession> self, CompletableFuture<TurnReply> done) {
         startPrompt(prompt, model, emitter, self, done, null, false);
     }
 
@@ -1079,12 +1081,12 @@ public class ChatSession extends Interpreter {
      * @param model     the model to use, or {@code null}/blank to keep the provider's current model
      * @param emitter   callback that receives {@link ChatEvent}s as the response streams in
      * @param self      this actor's own reference, used to queue completion back onto the actor thread
-     * @param done      completed once the prompt has finished processing (success or error)
+     * @param done      completed with the turn's {@link TurnReply} once the prompt has finished processing (success or error)
      * @param resultKey UUID under which the accumulated response is stored for later retrieval via
      *                  {@link #getCompletedResult(String)}, or {@code null} for human-typed prompts
      */
     public void startPrompt(String prompt, String model, Consumer<ChatEvent> emitter,
-                            ActorRef<ChatSession> self, CompletableFuture<Void> done,
+                            ActorRef<ChatSession> self, CompletableFuture<TurnReply> done,
                             String resultKey) {
         startPrompt(prompt, model, emitter, self, done, resultKey, false);
     }
@@ -1100,23 +1102,23 @@ public class ChatSession extends Interpreter {
      * @param model     the model to use, or {@code null}/blank to keep the provider's current model
      * @param emitter   callback that receives {@link ChatEvent}s as the response streams in
      * @param self      this actor's own reference, used to queue completion back onto the actor thread
-     * @param done      completed once the prompt has finished processing (success or error)
+     * @param done      completed with the turn's {@link TurnReply} once the prompt has finished processing (success or error)
      * @param resultKey UUID under which the accumulated response is stored for later retrieval via
      *                  {@link #getCompletedResult(String)}, or {@code null} for human-typed prompts
      * @param noThink   whether to ask the provider to skip its reasoning/thinking phase
      */
     public void startPrompt(String prompt, String model, Consumer<ChatEvent> emitter,
-                            ActorRef<ChatSession> self, CompletableFuture<Void> done,
+                            ActorRef<ChatSession> self, CompletableFuture<TurnReply> done,
                             String resultKey, boolean noThink) {
         if (busy) {
             emitter.accept(ChatEvent.error("Already processing a prompt. Please wait or cancel."));
-            done.complete(null);
+            done.complete(TurnReply.NONE);
             return;
         }
         if (!isAuthenticated()) {
             emitter.accept(ChatEvent.error(
                     "No authentication configured. Please provide an API key."));
-            done.complete(null);
+            done.complete(TurnReply.NONE);
             return;
         }
 
@@ -1190,10 +1192,16 @@ public class ChatSession extends Interpreter {
      * Called when LLM processing finishes; queued back onto the actor via {@code self.tell()}.
      *
      * @param emitter callback that receives the final {@link ChatEvent} status update
-     * @param done    completed to signal the prompt has finished processing
+     * @param done    completed with the turn's answer and ending line, or {@link TurnReply#NONE} when it left none
      * @param self    this actor's own reference, forwarded to {@code PromptQueue} to dispatch the next prompt
      */
-    public void onPromptComplete(Consumer<ChatEvent> emitter, CompletableFuture<Void> done, ActorRef<ChatSession> self) {
+    public void onPromptComplete(Consumer<ChatEvent> emitter, CompletableFuture<TurnReply> done, ActorRef<ChatSession> self) {
+        // The answer goes out in done itself. Whoever waits on done must not have to ask this actor
+        // for it afterwards: by then this actor may already be running the next queued prompt's turn,
+        // and the question would wait behind it (AskChatWithoutWaiting_261022_oo01).
+        TurnReply reply = activeResultKey == null
+                ? TurnReply.NONE
+                : new TurnReply(completedResults.get(activeResultKey), completedEndings.get(activeResultKey));
         busy = false;
         activeResultKey = null;
 
@@ -1203,7 +1211,7 @@ public class ChatSession extends Interpreter {
         }
 
         emitter.accept(ChatEvent.status(provider.getCurrentModel(), provider.getSessionId(), false));
-        done.complete(null);
+        done.complete(reply);
     }
 
     // ---- Agent loop (ChatSessionAgentLoop_260823_oo01) ----
@@ -1221,14 +1229,14 @@ public class ChatSession extends Interpreter {
      * @param model     the model to use, or {@code null}/blank to keep the provider's current model
      * @param emitter   callback that receives {@link ChatEvent}s as the turn streams
      * @param self      this actor's own reference, used for hand-offs (e.g. {@code onPromptComplete})
-     * @param done      completed once the turn has finished processing (success or error)
+     * @param done      completed with the turn's {@link TurnReply} once the turn has finished processing (success or error)
      * @param resultKey UUID under which the final answer is stored for later retrieval via
      *                  {@link #getCompletedResult(String)}, or {@code null} for human-typed prompts
      * @param noThink   whether to ask the provider to skip its reasoning/thinking phase for
      *                  every LLM call in this turn (see {@link #stepExpectingAction()})
      */
     public void start(String prompt, String model, Consumer<ChatEvent> emitter,
-                       ActorRef<ChatSession> self, CompletableFuture<Void> done, String resultKey,
+                       ActorRef<ChatSession> self, CompletableFuture<TurnReply> done, String resultKey,
                        boolean noThink) {
         start(prompt, model, emitter, self, done, resultKey, noThink, List.of());
     }
@@ -1240,7 +1248,7 @@ public class ChatSession extends Interpreter {
      *               provider only on this turn's first LLM call — see {@link #pendingImages}
      */
     public void start(String prompt, String model, Consumer<ChatEvent> emitter,
-                       ActorRef<ChatSession> self, CompletableFuture<Void> done, String resultKey,
+                       ActorRef<ChatSession> self, CompletableFuture<TurnReply> done, String resultKey,
                        boolean noThink, List<String> images) {
         start(prompt, model, emitter, self, done, resultKey, noThink, images, null);
     }
@@ -1253,16 +1261,16 @@ public class ChatSession extends Interpreter {
      *               prompt from a workflow's ({@code PromptOriginOnScreen_260915_oo01})
      */
     public void start(String prompt, String model, Consumer<ChatEvent> emitter,
-                       ActorRef<ChatSession> self, CompletableFuture<Void> done, String resultKey,
+                       ActorRef<ChatSession> self, CompletableFuture<TurnReply> done, String resultKey,
                        boolean noThink, List<String> images, String source) {
         if (busy) {
             emitter.accept(ChatEvent.error("Already processing a prompt. Please wait or cancel."));
-            done.complete(null);
+            done.complete(TurnReply.NONE);
             return;
         }
         if (!isAuthenticated()) {
             emitter.accept(ChatEvent.error("No authentication configured. Please provide an API key."));
-            done.complete(null);
+            done.complete(TurnReply.NONE);
             return;
         }
 

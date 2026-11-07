@@ -663,7 +663,7 @@ public class ChatSessionIIAR extends InterpreterIIAR {
         promptQueue.tell(q -> q.enqueue(
                 prompt, model, "queue",
                 (ChatEvent event) -> {}, self(), "agent:workflow", resultKey,
-                new CompletableFuture<Void>(), noThink));
+                new CompletableFuture<TurnReply>(), noThink));
         return new ActionResult(true, resultKey);
     }
 

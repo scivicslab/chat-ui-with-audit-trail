@@ -1,3 +1,33 @@
+# ask_chat の返事を done に載せる・道具の説明を直す・会話を作るときにプロバイダとモデルを選ぶ
+
+設計: `doc_SCIVICS003/.../040_design/050_AskChatWithoutWaiting_261022_oo01`（返事の渡し方と道具の説明）。
+プロバイダとモデルの選択は、新しい設計文書 `040_design/080_...` を先に書いてから実装する。
+
+## 段1: 返事を done に載せる（050 の設計）
+
+- [x] 1. 返事と終わり方の1行の組を表す型を作る（`TurnReply`、record）
+- [x] 2. `done` の型を `CompletableFuture<Void>` から `CompletableFuture<TurnReply>` に変える（`PromptQueue.enqueue` の重ね定義、待ち行列の項目、`ChatSession.start` の重ね定義、`onPromptComplete`）
+- [x] 3. 返事と終わり方の1行を `done` に入れて完了させる。`finish` でなく、2つの経路（エージェントループと素の `startPrompt`）が共に通る `onPromptComplete` で入れた。返事の無いターンは `TurnReply.NONE`
+- [x] 4. `AskChatTool.deliverReply` と `askQualified` が `done` の値から返事を取る。`getCompletedResult` への問い合わせをやめる
+- [x] 5. `resultKey` と `completedResults` は残す。`ChatSessionIIAR` のワークフローの `sendPrompt`/`getResult` が結果の状態を読むのに使っている
+- [x] 6. 単体テスト `ConversationToolsTest.theReplyArrivesWhileTheAskedConversationRunsItsNextQueuedTurn`: 前のコードで赤（`error: ask_chat failed: TimeoutException: null`）、直して緑（1.03 秒）。W206 の Job で実行
+- [x] 7. `ask_chat` の道具の説明を 050 のとおりに直す
+- [x] 8. `rm -rf target` → `mvn test`: W206 の Job で全モジュール成功（app 435、plugin 17・11・42、失敗 0）
+
+## 段2: 会話を作るときにプロバイダとモデルを選ぶ
+
+- [ ] 9. 設計文書 080 を書いて確認を取る
+- [ ] 10. `create_chat(provider, model)`、`list_providers`、`set_chat_provider` を実装し、単体テストを書く
+- [ ] 11. `mvn test`
+
+## 段3: deploy（確認を取ってから）
+
+- [ ] 12. deploy の前に確認を取る。稼働中の 28014 は勝手に再起動しない
+
+## Review
+
+---
+
 # audit trail の使い方チュートリアル（5 段）
 
 置き場所: `doc_SCIVICS003/docs/chat-ui-with-audit-trail/050_tutorials/`（`010_ThreeStartupConfigurations_260912_oo01` の次）

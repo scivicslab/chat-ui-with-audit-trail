@@ -6,6 +6,7 @@ import com.scivicslab.chatui.core.actor.ChatSessionIIAR;
 import com.scivicslab.chatui.core.actor.ChatUiActorSystem;
 import com.scivicslab.chatui.core.actor.PromptQueue;
 import com.scivicslab.chatui.core.actor.SseConnection;
+import com.scivicslab.chatui.core.actor.TurnReply;
 import com.scivicslab.chatui.core.rest.ChatEvent;
 import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorRef;
@@ -26,10 +27,12 @@ import java.util.logging.Logger;
  * step ({@link #askQualified}) wait for it (graph-engineering scenarios — see
  * {@code AskChatToolAndWatchdog_260827_oo01}).
  *
- * <p>Waits on {@link ChatSession}'s own turn-completion signal (the {@code CompletableFuture<Void>
- * done} that {@code PromptQueue.enqueue}/{@code ChatSession.start} already thread through and
- * complete reliably in {@code onPromptComplete}) rather than polling — a real {@code Future}, timed
- * out the ordinary way. Consults {@link CallWatchdog} before waiting, so a call that would create a
+ * <p>Both read the reply from {@link ChatSession}'s own turn-completion signal: the
+ * {@code CompletableFuture<TurnReply> done} that {@code PromptQueue.enqueue}/{@code ChatSession.start}
+ * thread through, and that the conversation completes in {@code onPromptComplete} with the turn's
+ * answer and ending line. Neither asks the conversation for the answer afterwards: by then it may be
+ * running its next queued prompt, and the question would wait behind that whole turn.
+ * {@link #askQualified} consults {@link CallWatchdog} before waiting, so a call that would create a
  * circular wait is refused immediately instead of blocking until it times out.</p>
  */
 public final class AskChatTool {
@@ -84,11 +87,11 @@ public final class AskChatTool {
         if (myQueue == null) return "error: the calling conversation " + myName + " has no queue";
 
         String resultKey = UUID.randomUUID().toString();
-        CompletableFuture<Void> done = new CompletableFuture<>();
-        // done completes inside the target's actor; reading its result from that same thread would
-        // wait on the actor that is running it, so the reply is fetched and delivered elsewhere.
-        done.whenCompleteAsync((ignored, failure) ->
-                deliverReply(system, myName, myChat, myQueue, targetName, targetChat, resultKey, failure));
+        CompletableFuture<TurnReply> done = new CompletableFuture<>();
+        // done completes inside the target's actor, carrying the answer; the delivery runs elsewhere
+        // so that the target's thread is not held while the caller's queue takes the message.
+        done.whenCompleteAsync((reply, failure) ->
+                deliverReply(system, myName, myChat, myQueue, targetName, reply, failure));
         Consumer<ChatEvent> targetWatchers = watchersOf(system, targetName);
         targetQueue.tell(q -> q.enqueue(prompt, null, "queue", targetWatchers,
                 targetChat.asChatSessionRef(), ChatSession.ASK_CHAT_SOURCE_PREFIX + myName, resultKey, done));
@@ -102,28 +105,29 @@ public final class AskChatTool {
     /** Puts the target turn's reply, or the reason there is none, in the calling conversation's queue. */
     private static void deliverReply(IIActorSystem system, String myName, ChatSessionIIAR myChat,
                                      ActorRef<PromptQueue> myQueue, String targetName,
-                                     ChatSessionIIAR targetChat, String resultKey, Throwable failure) {
-        String message;
-        if (failure != null) {
-            message = noReply(targetName, failure);
-        } else {
-            try {
-                String reply = targetChat.ask(interp -> ((ChatSession) interp).getCompletedResult(resultKey))
-                        .get(30, TimeUnit.SECONDS);
-                String ending = targetChat.<String>ask(interp -> ((ChatSession) interp).getCompletedEnding(resultKey))
-                        .get(30, TimeUnit.SECONDS);
-                message = reply == null
-                        ? "[ask_chat to " + targetName + " ended without a reply: its turn left no result]"
-                        : "[reply from " + targetName + " to your ask_chat]\n" + reply
-                          + (ending == null ? "" : "\n\n" + ending);
-            } catch (Exception e) {
-                message = noReply(targetName, e);
-            }
-        }
-        String text = message;
+                                     TurnReply reply, Throwable failure) {
+        String text = replyMessage(targetName, reply, failure);
         Consumer<ChatEvent> myWatchers = watchersOf(system, myName);
         myQueue.tell(q -> q.enqueue(text, null, "queue", myWatchers, myChat.asChatSessionRef(),
                 ChatSession.ASK_CHAT_REPLY_SOURCE_PREFIX + targetName, null, new CompletableFuture<>()));
+    }
+
+    /**
+     * Returns the message the calling conversation receives when the target's turn ends.
+     *
+     * @param targetName the target conversation's qualified name
+     * @param reply      what {@code done} was completed with, or {@code null} if it failed
+     * @param failure    what {@code done} failed with, or {@code null} if it completed
+     * @return {@code [reply from <target> to your ask_chat]} followed by the answer and the ending line,
+     *         or a {@code [ask_chat to <target> ended without a reply: ...]} line saying why there is none
+     */
+    static String replyMessage(String targetName, TurnReply reply, Throwable failure) {
+        if (failure != null) return noReply(targetName, failure);
+        if (reply == null || reply.reply() == null) {
+            return "[ask_chat to " + targetName + " ended without a reply: its turn left no result]";
+        }
+        return "[reply from " + targetName + " to your ask_chat]\n" + reply.reply()
+                + (reply.ending() == null ? "" : "\n\n" + reply.ending());
     }
 
     private static String noReply(String targetName, Throwable failure) {
@@ -210,25 +214,20 @@ public final class AskChatTool {
         }
 
         try {
-            CompletableFuture<Void> done = new CompletableFuture<>();
+            CompletableFuture<TurnReply> done = new CompletableFuture<>();
             String resultKey = UUID.randomUUID().toString();
             targetQueueRef.tell(q -> q.enqueue(prompt, null, "queue",
                     toWatchers,
                     targetChatSessionIIAR.asChatSessionRef(), ChatSession.ASK_CHAT_SOURCE_PREFIX + myName, resultKey,
                     done));
+            TurnReply turn;
             try {
-                done.get(waitTimeoutSeconds, TimeUnit.SECONDS);
+                turn = done.get(waitTimeoutSeconds, TimeUnit.SECONDS);
             } catch (TimeoutException e) {
                 return Outcome.of("error: chat " + target + " did not respond within " + waitTimeoutSeconds + "s");
             }
-            String reply = targetChatSessionIIAR
-                    .ask(interp -> ((ChatSession) interp).getCompletedResult(resultKey))
-                    .get(5, TimeUnit.SECONDS);
-            if (reply == null) return Outcome.of("error: no result from chat " + target);
-            String ending = targetChatSessionIIAR
-                    .<String>ask(interp -> ((ChatSession) interp).getCompletedEnding(resultKey))
-                    .get(5, TimeUnit.SECONDS);
-            return new Outcome(reply, ending);
+            if (turn == null || turn.reply() == null) return Outcome.of("error: no result from chat " + target);
+            return new Outcome(turn.reply(), turn.ending());
         } catch (Exception e) {
             LOG.log(Level.WARNING, "ask_chat: call to " + target + " failed", e);
             return Outcome.of("error: ask_chat failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());

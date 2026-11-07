@@ -116,7 +116,7 @@ class PromptQueueDispatchTest {
         List<String> images = List.of("data:image/png;base64,QUJD");
         List<ChatEvent> emitted = Collections.synchronizedList(new ArrayList<>());
         r.queueRef().tellNow(q -> q.enqueue("what is this?", null, "queue", emitted::add, r.chatRef(),
-                "human", null, new java.util.concurrent.CompletableFuture<Void>(), false, true, images)).join();
+                "human", null, new java.util.concurrent.CompletableFuture<TurnReply>(), false, true, images)).join();
 
         waitUntil(() -> !r.provider().receivedImages.isEmpty(), 2000);
         assertEquals(images, r.provider().receivedImages.get(0));
