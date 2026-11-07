@@ -2207,6 +2207,15 @@
                 .then(function (r) { return r.json(); })
                 .then(function (t) {
                     body.textContent = "";
+                    // The ids the chat pane shows under this turn's bubbles, so the two can be
+                    // matched (TurnAndRequestIds_261107_oo01).
+                    if (t.turnId || t.requestId) {
+                        var ids = document.createElement("div"); ids.className = "tr-turn-ids";
+                        ids.textContent = [t.turnId ? "Turn: " + t.turnId : "",
+                                           t.requestId ? "Request: " + t.requestId : ""]
+                            .filter(Boolean).join("    ");
+                        body.appendChild(ids);
+                    }
                     ioTurnMessages(t).forEach(function (m) {
                         body.appendChild(ioMsgEl(m, sessionId));
                     });

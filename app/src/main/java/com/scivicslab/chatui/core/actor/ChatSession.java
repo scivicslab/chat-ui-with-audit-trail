@@ -1419,6 +1419,7 @@ public class ChatSession extends Interpreter {
         // The prompt is already on the screen (the queue echoed it at dispatch); this puts the turn's
         // id and request id under it (TurnAndRequestIds_261107_oo01).
         emitter.accept(ChatEvent.turn(turnId(), requestId));
+        recordTurnIds(requestId);
         if (resultKey != null) {
             pendingResultKeys.remove(resultKey);
             activeResultKey = resultKey;
@@ -1903,6 +1904,30 @@ public class ChatSession extends Interpreter {
      * @param askedQuestion the prompt the human sent for this turn
      * @param givenAnswer   the confirmed final answer
      */
+    /**
+     * Records the turn's id and the request it is or answers ({@code turnN/ids}), so that an id seen
+     * in a bubble or a reply header can be searched for in the I/O log and leads to this turn
+     * ({@code TurnAndRequestIds_261107_oo01}). Written when the turn starts, so a turn that fails
+     * or is paused has it too.
+     *
+     * @param requestId the request this turn is or answers, or {@code null}
+     */
+    private void recordTurnIds(String requestId) {
+        if (ioLog == null || ioSession < 0) return;
+        try {
+            ioLog.record(ioSession, "agent", "turn" + ioTurnNo + "/ids",
+                    TURN_ID_MARKER + " " + turnId()
+                            + (requestId == null ? "" : "\n" + REQUEST_ID_MARKER + " " + requestId));
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "I/O log turn id record failed", e);
+        }
+    }
+
+    /** Marks the turn id in a {@code turnN/ids} entry. */
+    static final String TURN_ID_MARKER = "TURN_ID:";
+    /** Marks the request id in a {@code turnN/ids} entry. */
+    static final String REQUEST_ID_MARKER = "REQUEST_ID:";
+
     /** The failed-turn counterpart of {@link #recordConversationIo}: the question and the error. */
     private void recordConversationError(String askedQuestion, String error) {
         if (ioLog == null || ioSession < 0) return;

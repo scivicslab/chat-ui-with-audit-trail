@@ -823,3 +823,6 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
 #ms-list { padding: 0 8px; }
 .ms-class { color: var(--text-secondary, #8a8a8a); font-weight: normal; margin-left: 6px; }
 .ms-actors { color: var(--text-secondary, #8a8a8a); margin: 2px 0 0 0; font-size: 0.9em; word-break: break-all; }
+
+/* A turn's id and request id at the top of the opened turn (TurnAndRequestIds_261107_oo01). */
+.tr-turn-ids { font-size: 11px; color: var(--text-secondary, #888); padding: 4px 8px; white-space: pre-wrap; overflow-wrap: anywhere; }

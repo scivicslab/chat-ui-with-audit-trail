@@ -53,7 +53,16 @@ public class IoLogView {
                             int obsChars, int promptTokens, int completionTokens, boolean finalAnswer) {}
 
     /** One conversation turn: the user's prompt and the ordered trace steps for that turn. */
-    public record TraceTurn(int turn, String userPrompt, List<TraceStep> steps) {}
+    /**
+     * @param turnId    the turn's id from its {@code turnN/ids} entry, or {@code null} for a turn
+     *                  recorded before that entry existed
+     * @param requestId the request the turn is or answers, or {@code null} when it is neither
+     */
+    public record TraceTurn(int turn, String userPrompt, List<TraceStep> steps, String turnId, String requestId) {
+        public TraceTurn(int turn, String userPrompt, List<TraceStep> steps) {
+            this(turn, userPrompt, steps, null, null);
+        }
+    }
 
     /**
      * One turn as a list of them shows it: its number and what the person asked.
@@ -129,7 +138,7 @@ public class IoLogView {
      */
     public TraceTurn traceTurn(long sessionId, int turn) {
         List<LogEntry> ofTurn = allLogs(sessionId).stream()
-                .filter(e -> stepTurnOf(nz(e.getLabel())) == turn)
+                .filter(e -> anyTurnOf(nz(e.getLabel())) == turn)
                 .toList();
         List<TraceTurn> turns = traceOf(ofTurn);
         return turns.isEmpty() ? null : turns.get(0);
@@ -287,6 +296,8 @@ public class IoLogView {
     private static final java.util.regex.Pattern CONVERSATION_LABEL =
             java.util.regex.Pattern.compile("turn(\\d+)/conversation");
     /** Any label a turn writes, whatever comes after the turn number. */
+    private static final java.util.regex.Pattern IDS_LABEL =
+            java.util.regex.Pattern.compile("turn(\\d+)/ids");
     private static final java.util.regex.Pattern ANY_TURN_LABEL =
             java.util.regex.Pattern.compile("turn(\\d+)/.+");
 
@@ -467,6 +478,13 @@ public class IoLogView {
                 ? "\u2026" + flat.substring(flat.length() - QUESTION_TAIL_CHARS) : flat;
     }
 
+    /** @return the turn any label of a turn names ({@code turn7/step1/llm}, {@code turn7/ids},
+     *  {@code turn7/conversation}, …), or {@code -1} */
+    static int anyTurnOf(String label) {
+        java.util.regex.Matcher m = ANY_TURN_LABEL.matcher(label);
+        return m.matches() ? Integer.parseInt(m.group(1)) : -1;
+    }
+
     /** @return the turn a step label names, e.g. 7 for {@code turn7/step1/llm}, or {@code -1}.
      *  Distinct from {@link #turnNumberOf}, which reads the {@code /conversation} label instead. */
     static int stepTurnOf(String label) {
@@ -480,7 +498,13 @@ public class IoLogView {
                 .toList();
         Map<Integer, List<TraceStep>> byTurn = new java.util.LinkedHashMap<>();
         Map<Integer, String> userPrompts = new java.util.HashMap<>();
+        Map<Integer, String[]> ids = new java.util.HashMap<>();
         for (LogEntry e : ordered) {
+            java.util.regex.Matcher idm = IDS_LABEL.matcher(nz(e.getLabel()));
+            if (idm.matches()) {
+                ids.put(Integer.parseInt(idm.group(1)), parseIds(nz(e.getMessage())));
+                continue;
+            }
             java.util.regex.Matcher m = TURN_LABEL.matcher(nz(e.getLabel()));
             if (!m.find()) continue;
             int turn = Integer.parseInt(m.group(1));
@@ -507,9 +531,24 @@ public class IoLogView {
             byTurn.computeIfAbsent(turn, k -> new java.util.ArrayList<>()).add(step);
         }
         return byTurn.entrySet().stream()
-                .map(en -> new TraceTurn(en.getKey(), userPrompts.getOrDefault(en.getKey(), ""), en.getValue()))
+                .map(en -> {
+                    String[] id = ids.getOrDefault(en.getKey(), new String[2]);
+                    return new TraceTurn(en.getKey(), userPrompts.getOrDefault(en.getKey(), ""), en.getValue(),
+                            id[0], id[1]);
+                })
                 .sorted(Comparator.comparingInt(TraceTurn::turn))
                 .toList();
+    }
+
+    /** @return the turn id and the request id of a {@code turnN/ids} entry; either may be {@code null} */
+    static String[] parseIds(String message) {
+        String turnId = null;
+        String requestId = null;
+        for (String line : message.split("\n")) {
+            if (line.startsWith("TURN_ID: ")) turnId = line.substring(9).strip();
+            else if (line.startsWith("REQUEST_ID: ")) requestId = line.substring(12).strip();
+        }
+        return new String[] {turnId, requestId};
     }
 
     static String extractReasons(String toolCallsText) {
