@@ -1870,9 +1870,6 @@ public class ChatSession extends Interpreter {
         List<ToolCall> calls = TextToolCallParser.parse(text);
         answerStream.finish(!calls.isEmpty());
         recordStepIo(promptToSend, sentBody.get(), text, thinkingBuf.toString(), calls);
-        // The first step's prompt is the question itself, already in the history; later steps'
-        // prompts are what the tools returned.
-        if (stepCount > 1) turnTranscript.append("Tool result:\n").append(promptToSend).append("\n\n");
         turnTranscript.append("You wrote:\n").append(text).append("\n\n");
         return new LlmStepOutcome(text, calls);
     }
@@ -2191,6 +2188,10 @@ public class ChatSession extends Interpreter {
         }
         pendingCalls = null;
         pendingPrompt = observations.toString().stripTrailing();
+        // Kept as soon as the tools have run, not when the next step sends them: a turn paused right
+        // after a tool finishes has no next step, and what the tool did would be lost
+        // (TimekeeperPausesATurnForAnUrgentRequest_261107_oo01).
+        turnTranscript.append(observations);
         return new ActionResult(true, "observed");
     }
 

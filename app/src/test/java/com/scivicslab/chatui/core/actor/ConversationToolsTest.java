@@ -727,6 +727,52 @@ class ConversationToolsTest {
         assertTrue(none.contains("error: give urgentWaitMinutes, childReplyWarnMinutes, or both"), none);
     }
 
+    /** Keeps what the end of each turn put into the history, so a test can read a paused turn's progress. */
+    private static final class Collapsing extends Scripted {
+        final List<String> collapsedAnswers = new java.util.concurrent.CopyOnWriteArrayList<>();
+        Collapsing(List<String> replies) { super(replies, List.of()); }
+        @Override public void collapseTurn(String question, String answer) { collapsedAnswers.add(answer); }
+    }
+
+    /** Answers complete_messages after 3 seconds, so a tool call can still be running when a pause is asked for. */
+    private static final class SlowOneShot extends Scripted {
+        SlowOneShot() { super(List.of("unused"), List.of()); }
+        @Override public OneShotReply completeFromMessages(String json, String m, Boolean noThink) {
+            try { Thread.sleep(3_000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            return new OneShotReply("STEP-A-DONE", json, null);
+        }
+    }
+
+    /**
+     * A turn paused while a tool is running keeps that tool's result in its progress: the pause takes
+     * effect before the next step, which is where the result used to be picked up.
+     */
+    @Test
+    void aTurnPausedWhileAToolRunsKeepsThatToolsResult() throws Exception {
+        IIActorSystem system = new IIActorSystem("conversation-tools-pause-during-tool");
+        FakeControls controls = new FakeControls();
+        Collapsing worker = new Collapsing(List.of(
+                invoke("complete_messages", "chatId", "03", "messages", "[{\"role\":\"user\",\"content\":\"go\"}]"),
+                "never reached"));
+        ChatSessionIIAR two = chat(system, "02", worker, controls);
+        chat(system, "03", new SlowOneShot(), controls);
+        queueOf(two);
+        ActorRef<ChatSession> ref = two.asChatSessionRef();
+        CompletableFuture<Void> turn = CompletableFuture.runAsync(() -> ref.tellNow(c -> {
+            c.start("do step A", null, e -> {}, ref, new CompletableFuture<>(), null, false);
+            c.runUntilEnd();
+        }).join());
+        waitUntil(() -> worker.prompts.size() == 1);
+        Thread.sleep(500);                      // the tool is now running in chat-03
+        ref.tellNow(ChatSession::pauseForUrgent).join();
+        turn.get(20, java.util.concurrent.TimeUnit.SECONDS);
+
+        assertEquals(1, worker.prompts.size(), "no step after the tool: " + worker.prompts);
+        String progress = worker.collapsedAnswers.get(worker.collapsedAnswers.size() - 1);
+        assertTrue(progress.contains("paused before it finished"), progress);
+        assertTrue(progress.contains("Tool result (complete_messages)") && progress.contains("STEP-A-DONE"), progress);
+    }
+
     @Test
     void askChatToAConversationThatDoesNotExistIsRefusedAtOnce() {
         IIActorSystem system = new IIActorSystem("conversation-tools-ask-missing");
