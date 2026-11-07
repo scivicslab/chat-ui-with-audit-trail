@@ -735,6 +735,14 @@ class ConversationToolsTest {
                 .get(5, java.util.concurrent.TimeUnit.SECONDS);
         Long since = queue2.ask(PromptQueue::frontUrgentQueuedAt).get(5, java.util.concurrent.TimeUnit.SECONDS);
         assertTrue(since != null && since >= before, "the urgent request's own time counts: " + since);
+        // The urgent request went ahead of the resume message, which stays ahead of ordinary work.
+        queue2.ask(q -> q.enqueue("ordinary", null, "queue", e -> {}, two.asChatSessionRef(), "human", null,
+                new CompletableFuture<>(), false, true, List.of(), null, false)).get(5, java.util.concurrent.TimeUnit.SECONDS);
+        List<String> order = queue2.ask(q -> q.snapshot().stream().map(PromptQueue.QueueEntry::prompt).toList())
+                .get(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertEquals(3, order.size(), order.toString());
+        assertTrue(order.get(0).endsWith("how far?") && order.get(1).startsWith("[resume paused turn")
+                && order.get(2).equals("ordinary"), order.toString());
     }
 
     /** A request with no reply past the limit is reported to the conversation that sent it, once. */

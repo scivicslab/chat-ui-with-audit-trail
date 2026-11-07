@@ -193,8 +193,11 @@ public class PromptQueue {
     /**
      * Enqueues a prompt, urgent or not ({@code UrgentRequestAndStatusReport_261107_oo01}).
      *
-     * @param urgent {@code true} to put it ahead of every waiting item that is not urgent: at the end
-     *               of the run of urgent items at the front, so urgent items keep their order too
+     * @param urgent {@code true} to put it ahead of every waiting item that is not urgent. Waiting items
+     *               are kept in three ranks, each in the order it arrived: urgent requests, then the messages
+     *               that resume a paused turn, then everything else. An urgent request thus does not wait
+     *               behind resumed work, which would only be paused again for it
+     *               ({@code TimekeeperPausesATurnForAnUrgentRequest_261107_oo01})
      * @return how many waiting items it was put ahead of
      */
     public int enqueue(String prompt, String model, String mode,
@@ -221,8 +224,9 @@ public class PromptQueue {
                 QueueItem item = new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, auto, images,
                         requestId, urgent, System.currentTimeMillis());
                 if (urgent) {
+                    int rank = rankOf(item);
                     int at = 0;
-                    while (at < queue.size() && queue.get(at).urgent()) at++;
+                    while (at < queue.size() && rankOf(queue.get(at)) <= rank) at++;
                     passed = queue.size() - at;
                     queue.add(at, item);
                 } else {
@@ -283,6 +287,12 @@ public class PromptQueue {
      */
     public void advance(ActorRef<ChatSession> chatSessionRef) {
         requestDispatch(chatSessionRef, true);
+    }
+
+    /** @return 0 for an urgent request, 1 for a message resuming a paused turn, 2 for anything else */
+    private static int rankOf(QueueItem item) {
+        if (!item.urgent()) return 2;
+        return ChatSession.RESUME_SOURCE.equals(item.source()) ? 1 : 0;
     }
 
     /**
