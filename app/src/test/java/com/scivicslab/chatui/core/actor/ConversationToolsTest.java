@@ -656,6 +656,46 @@ class ConversationToolsTest {
         assertEquals(1, notices, supervisor.prompts.toString());
     }
 
+    /** What watchers see live carries the ids too: a "turn" event at the start, and the result at the end. */
+    @Test
+    void theTurnAndResultEventsCarryTheTurnAndRequestIds() {
+        IIActorSystem system = new IIActorSystem("conversation-tools-live-ids");
+        ChatSessionIIAR two = chat(system, "02", new Scripted(List.of("an answer"), List.of()), new FakeControls());
+        List<ChatEvent> events = new java.util.concurrent.CopyOnWriteArrayList<>();
+        ActorRef<ChatSession> ref = two.asChatSessionRef();
+        ref.tellNow(c -> {
+            c.start("[request project1/chat-01:t4:r1 from project1/chat-01]\nquestion", null, events::add, ref,
+                    new CompletableFuture<>(), "project1/chat-01:t4:r1", false, List.of(),
+                    "agent:ask_chat:project1/chat-01", "project1/chat-01:t4:r1");
+            c.runUntilEnd();
+        }).join();
+        ChatEvent turn = events.stream().filter(e -> "turn".equals(e.type())).findFirst().orElseThrow();
+        assertEquals("project1/chat-02:t1", turn.turnId());
+        assertEquals("project1/chat-01:t4:r1", turn.requestId());
+        ChatEvent result = events.stream().filter(e -> "result".equals(e.type())).findFirst().orElseThrow();
+        assertEquals("project1/chat-02:t1", result.turnId());
+        assertEquals("project1/chat-01:t4:r1", result.requestId());
+    }
+
+    /**
+     * A request a job's workflow step sends, from outside any turn, is named <sender>:q<n>. Its prompt is sent as
+     * the step built it; the id is kept in the record.
+     */
+    @Test
+    void aRequestFromOutsideAnyTurnGetsAnIdOfItsOwn() throws Exception {
+        IIActorSystem system = new IIActorSystem("conversation-tools-outside-turn");
+        Scripted callee = new Scripted(List.of("done"), List.of());
+        ChatSessionIIAR two = chat(system, "02", callee, new FakeControls());
+        queueOf(two);
+        ActorRef<CallWatchdog> watchdog = two.createChild("watchdog-outside-turn", new CallWatchdog());
+        assertEquals("done", AskChatTool.askQualified(system, watchdog, "job-7", "project1/chat-02", "go", 30));
+        assertTrue(callee.prompts.get(0).endsWith("go") && !callee.prompts.get(0).contains("[request "),
+                callee.prompts.get(0));
+        List<ChatSession.HistoryEntry> asked = two.asChatSessionRef().ask(ChatSession::historySnapshot)
+                .get(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertTrue(asked.get(0).requestId().matches("job-7:q\\d+"), asked.toString());
+    }
+
     @Test
     void askChatToAConversationThatDoesNotExistIsRefusedAtOnce() {
         IIActorSystem system = new IIActorSystem("conversation-tools-ask-missing");

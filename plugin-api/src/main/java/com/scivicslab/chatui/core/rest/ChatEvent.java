@@ -57,8 +57,39 @@ public record ChatEvent(
      * {@code api}, {@code chat <name>} or {@code workflow <name>}
      * ({@code PromptOriginOnScreen_260915_oo01}). {@code null} on every other kind of event.
      */
-    String origin
+    String origin,
+    /** The turn the event belongs to ({@code TurnAndRequestIds_261107_oo01}); on {@code turn} and {@code result}. */
+    String turnId,
+    /** The {@code ask_chat} request the turn's prompt is, or answers; on {@code turn} and {@code result}. */
+    String requestId
 ) {
+
+    /** Every event made before turn and request ids existed: neither is set. */
+    public ChatEvent(String type, String content, String sessionId, Double costUsd, Long durationMs, String model,
+                     Boolean busy, String promptId, String promptType, List<String> options, String logLevel,
+                     String loggerName, Long timestamp, List<String> images, String toolName, String toolUseId,
+                     Boolean isError, String origin) {
+        this(type, content, sessionId, costUsd, durationMs, model, busy, promptId, promptType, options, logLevel,
+                loggerName, timestamp, images, toolName, toolUseId, isError, origin, null, null);
+    }
+
+    /**
+     * Says which turn has just started and which {@code ask_chat} request its prompt is, or answers, so the
+     * screen can put both under the prompt it has just drawn ({@code TurnAndRequestIds_261107_oo01}).
+     *
+     * @param turnId    the turn's id
+     * @param requestId the request, or {@code null}
+     */
+    public static ChatEvent turn(String turnId, String requestId) {
+        return new ChatEvent("turn", null, null, null, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, turnId, requestId);
+    }
+
+    /** @return this event with the turn and request ids it belongs to */
+    public ChatEvent withTurn(String turnId, String requestId) {
+        return new ChatEvent(type, content, sessionId, costUsd, durationMs, model, busy, promptId, promptType, options,
+                logLevel, loggerName, timestamp, images, toolName, toolUseId, isError, origin, turnId, requestId);
+    }
 
     /**
      * Creates a delta event carrying a partial text chunk from the LLM.

@@ -12,7 +12,6 @@ import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 
-import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -223,7 +222,35 @@ public final class AskChatTool {
     public static String askQualified(IIActorSystem system, ActorRef<CallWatchdog> watchdog,
                                        String myName, String targetName, String prompt,
                                        Integer timeoutSeconds) {
-        return askWithEnding(system, watchdog, myName, targetName, prompt, timeoutSeconds).reply();
+        return askQualified(system, watchdog, myName, targetName, prompt, timeoutSeconds, outsideTurnRequestId(myName));
+    }
+
+    /**
+     * As {@link #askQualified(IIActorSystem, ActorRef, String, String, String, Integer)}, under a request id the
+     * caller made — a conversation's turn names its requests {@code <turn id>:r<n>}
+     * ({@code TurnAndRequestIds_261107_oo01}).
+     *
+     * @param requestId the request's id
+     */
+    public static String askQualified(IIActorSystem system, ActorRef<CallWatchdog> watchdog,
+                                       String myName, String targetName, String prompt,
+                                       Integer timeoutSeconds, String requestId) {
+        return askWithEnding(system, watchdog, myName, targetName, prompt, timeoutSeconds, requestId).reply();
+    }
+
+    /**
+     * Numbers requests sent from outside any conversation's turn (a job's workflow step). Seeded with the
+     * time the process started, so a number is not given out again after a restart.
+     */
+    private static final java.util.concurrent.atomic.AtomicLong OUTSIDE_TURN_REQUESTS =
+            new java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis());
+
+    /**
+     * @param myName the sender's name, e.g. a job's actor name
+     * @return a request id for a request sent from outside any turn, {@code <sender>:q<n>}
+     */
+    static String outsideTurnRequestId(String myName) {
+        return myName + ":q" + OUTSIDE_TURN_REQUESTS.incrementAndGet();
     }
 
     /**
@@ -241,6 +268,12 @@ public final class AskChatTool {
     static Outcome askWithEnding(IIActorSystem system, ActorRef<CallWatchdog> watchdog,
                                   String myName, String targetName, String prompt,
                                   Integer timeoutSeconds) {
+        return askWithEnding(system, watchdog, myName, targetName, prompt, timeoutSeconds, outsideTurnRequestId(myName));
+    }
+
+    static Outcome askWithEnding(IIActorSystem system, ActorRef<CallWatchdog> watchdog,
+                                  String myName, String targetName, String prompt,
+                                  Integer timeoutSeconds, String requestId) {
         int waitTimeoutSeconds = (timeoutSeconds != null && timeoutSeconds > 0)
                 ? timeoutSeconds : DEFAULT_WAIT_TIMEOUT_SECONDS;
         String target = targetName;
@@ -277,11 +310,15 @@ public final class AskChatTool {
 
         try {
             CompletableFuture<TurnReply> done = new CompletableFuture<>();
-            String resultKey = UUID.randomUUID().toString();
+            // The request id is unique within this instance, so it also serves as the result key. The
+            // prompt goes as it is: a workflow step built it for the model, and the step gets the reply
+            // from done, so no model needs the id in the text. The id is kept on the queue item, and so
+            // in the record and on the screen (TurnAndRequestIds_261107_oo01).
+            String resultKey = requestId;
             targetQueueRef.tell(q -> q.enqueue(prompt, null, "queue",
                     toWatchers,
                     targetChatSessionIIAR.asChatSessionRef(), ChatSession.ASK_CHAT_SOURCE_PREFIX + myName, resultKey,
-                    done));
+                    done, false, true, java.util.List.of(), requestId));
             TurnReply turn;
             try {
                 turn = done.get(waitTimeoutSeconds, TimeUnit.SECONDS);

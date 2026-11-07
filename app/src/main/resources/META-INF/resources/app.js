@@ -58,6 +58,7 @@
     var manualInputHeight = null; // set once the human drags the handle; autoResize() then floors to it
     var eventSource = null;
     var streamingEl = null;   // the live assistant bubble currently receiving deltas
+    var lastUserDiv = null;   // the prompt just drawn, until its "turn" event puts the turn and request ids under it
     var streamingMarkdown = "";  // its markdown source, kept for the footer's copy button
     var thinkingEl = null;    // the live "thinking" trace bubble, if any
     var answerEl = null;      // the provisional answer bubble of the running step, if any
@@ -1136,9 +1137,18 @@
                 setBusy(false);
                 break;
             case "user":
-                appendMessage("user", event.content || "", event.images, event.origin);
+                lastUserDiv = appendMessage("user", event.content || "", event.images, event.origin);
                 scrollToBottom();
                 refreshQueue(); // the item just moved from pending to sent (QueueChecklistView_260913_oo01)
+                break;
+            case "turn":
+                // The turn the prompt just drawn has started: its id, and the ask_chat request the
+                // prompt is or answers, go under it (TurnAndRequestIds_261107_oo01).
+                if (lastUserDiv) {
+                    var userFooter = lastUserDiv.querySelector(".message-footer") || newFooter(lastUserDiv);
+                    appendIds(userFooter, event.turnId, event.requestId);
+                    lastUserDiv = null;
+                }
                 break;
             case "mcp_user":
                 // Kept for an emitter that still sends this kind; a prompt from elsewhere now

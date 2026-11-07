@@ -1407,6 +1407,9 @@ public class ChatSession extends Interpreter {
         this.pauseRequested = false;
         publishOutstanding();
         recordHistory("user", prompt, originOf(source), null, null);
+        // The prompt is already on the screen (the queue echoed it at dispatch); this puts the turn's
+        // id and request id under it (TurnAndRequestIds_261107_oo01).
+        emitter.accept(ChatEvent.turn(turnId(), requestId));
         if (resultKey != null) {
             pendingResultKeys.remove(resultKey);
             activeResultKey = resultKey;
@@ -2235,7 +2238,8 @@ public class ChatSession extends Interpreter {
             recordHistory("error", "Error: " + turnError);
             recordConversationError(question, turnError);
             turnEmitter.accept(ChatEvent.result(auditSessionId(), 0.0,
-                    System.currentTimeMillis() - turnStartedAt, provider.getCurrentModel(), false));
+                    System.currentTimeMillis() - turnStartedAt, provider.getCurrentModel(), false)
+                    .withTurn(turnId(), turnRequestId));
         }
         if (!cancelled && finalAnswer != null) {
             String answer = finalAnswer;
@@ -2255,7 +2259,8 @@ public class ChatSession extends Interpreter {
             // Cost stays 0: a local model bills nothing, and the browser hides the field unless it
             // is above zero, rather than showing a made-up figure.
             turnEmitter.accept(ChatEvent.result(auditSessionId(), 0.0,
-                    System.currentTimeMillis() - turnStartedAt, provider.getCurrentModel(), false));
+                    System.currentTimeMillis() - turnStartedAt, provider.getCurrentModel(), false)
+                    .withTurn(turnId(), turnRequestId));
         }
         // The turn's step-by-step messages — each carrying that step's whole observation — are of
         // no further use once the answer exists, and they crowd out earlier turns in the provider's
@@ -2316,7 +2321,7 @@ public class ChatSession extends Interpreter {
         }
         String prompt = (instruction == null || instruction.isBlank()) ? pendingPrompt : instruction;
         String reply = AskChatTool.askQualified(system, watchdogRef, myChatName(), workerChatId, prompt,
-                WORKER_WAIT_TIMEOUT_SECONDS);
+                WORKER_WAIT_TIMEOUT_SECONDS, nextRequestId());
         recordWorkerRequestIo(workerChatId, prompt, reply);
         if (reply == null || reply.startsWith("error:")) {
             lastCollaborationError = reply != null ? reply : "no reply from worker";
@@ -2381,7 +2386,7 @@ public class ChatSession extends Interpreter {
         }
         String prompt = "Please revise your previous answer to address this feedback:\n" + redoNote;
         String reply = AskChatTool.askQualified(system, watchdogRef, myChatName(), workerChatId, prompt,
-                WORKER_WAIT_TIMEOUT_SECONDS);
+                WORKER_WAIT_TIMEOUT_SECONDS, nextRequestId());
         recordWorkerRequestIo(workerChatId, prompt, reply);
         if (reply == null || reply.startsWith("error:")) {
             lastCollaborationError = reply != null ? reply : "no reply from worker";
