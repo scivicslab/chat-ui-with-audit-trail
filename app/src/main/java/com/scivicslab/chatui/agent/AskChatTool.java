@@ -193,27 +193,30 @@ public final class AskChatTool {
     }
 
     /**
-     * Sends the answer of a turn the provider started by itself, after the request it went on with
-     * had been answered, to that request's asker as a follow-up
-     * ({@code ReportReachesTheAskerAfterDelegation_261107_oo01}). Queued like a reply, under the same
-     * request id, with the heading {@code [follow-up to request <id>, from <turn id>]}.
+     * Sends the answer of a turn a reminder started to the asker of the request the reminder names, as a
+     * follow-up ({@code ReplyDecisionAndPromisedReport_261108_oo01}). Queued like a reply, under the same
+     * request id, with the heading {@code [follow-up to request <id>, from <turn id>, reminder <n>]}, so the
+     * asker records a decision on it as on any reply.
      *
      * @param system    the actor system both conversations live in
-     * @param myName    the qualified name of the conversation that went on
-     * @param askerName the qualified name of the conversation that sent the request
+     * @param myName    the qualified name of the conversation that was reminded
+     * @param askerName the qualified name of the conversation waiting for the report
      * @param requestId the request the follow-up is about
-     * @param turn      the answer of the turn that went on, and that turn's id
+     * @param turn      the answer of the turn the reminder started, and that turn's id
+     * @param reminder  which reminder it was for the request, counting from 1
      */
     public static void followUp(IIActorSystem system, String myName, String askerName, String requestId,
-                                TurnReply turn) {
+                                TurnReply turn, int reminder) {
         IIActorRef<?> askerActor = system.getIIActor(askerName + ".chat");
         ActorRef<PromptQueue> askerQueue = system.getActor(askerName + ".queue");
         if (!(askerActor instanceof ChatSessionIIAR askerChat) || askerQueue == null) {
             LOG.warning("follow-up to request " + requestId + " not sent: " + askerName + " is gone");
             return;
         }
+        String body = turn.reply() != null ? turn.reply()
+                : "its turn left no answer" + (turn.ending() == null ? "" : ": " + turn.ending());
         String text = "[follow-up to request " + requestId + ", from "
-                + (turn.turnId() == null ? myName : turn.turnId()) + "]\n" + turn.reply();
+                + (turn.turnId() == null ? myName : turn.turnId()) + ", reminder " + reminder + "]\n" + body;
         Consumer<ChatEvent> watchers = watchersOf(system, askerName);
         askerQueue.tell(q -> q.enqueue(text, null, "queue", watchers, askerChat.asChatSessionRef(),
                 ChatSession.ASK_CHAT_REPLY_SOURCE_PREFIX + myName, null, new CompletableFuture<>(),

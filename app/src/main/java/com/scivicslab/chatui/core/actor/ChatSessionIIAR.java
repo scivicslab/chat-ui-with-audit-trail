@@ -352,6 +352,11 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      * @param arg unused
      * @return success while constructed prompts remain queued
      */
+    @Action("replyLeftUndecided")
+    public ActionResult replyLeftUndecidedAction(String arg) {
+        return chatSession().replyLeftUndecided();
+    }
+
     @Action("hasMoreConstructedPrompts")
     public ActionResult hasMoreConstructedPromptsAction(String arg) {
         return chatSession().hasMoreConstructedPrompts();

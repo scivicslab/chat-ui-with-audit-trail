@@ -24,6 +24,9 @@ import com.scivicslab.chatui.core.rest.ChatEvent;
  * answered next, and the paused work goes on after it.</li>
  * <li>When a request the conversation sent has had no reply for longer than {@link #childReplyWarnMillis}, it puts
  * one notice saying so into the conversation's queue. What to do about it is the conversation's model's call.</li>
+ * <li>When a report the conversation promised was registered with {@code expect_report} and its time has come,
+ * it puts one reminder into the conversation's queue, naming the request; the answer of the turn the reminder
+ * starts goes to the asker as a follow-up ({@code ReplyDecisionAndPromisedReport_261108_oo01}).</li>
  * </ul>
  *
  * <p>It reads the conversation's state without waiting for a running turn ({@link ChatSessionIIAR#isBusyDirect},
@@ -50,6 +53,7 @@ public class Timekeeper {
     private long urgentWaitMillis;
     private long childReplyWarnMillis;
     private final Set<String> warned = new HashSet<>();
+    private final PromisedReports promised = new PromisedReports();
 
     /**
      * @param conversation         the conversation's qualified name
@@ -92,6 +96,19 @@ public class Timekeeper {
     }
 
     /**
+     * Registers a report this conversation promised, to be asked for once after {@code minutes}
+     * ({@code ReplyDecisionAndPromisedReport_261108_oo01}).
+     *
+     * @param requestId the request the report was promised for, or {@code null} for a promise made to the person
+     * @param asker     the qualified name of the conversation waiting for it, or {@code null} for the person
+     * @param minutes   how long to wait before asking, in minutes
+     * @return which reminder this will be for the request, counting from 1
+     */
+    public int expectReport(String requestId, String asker, long minutes) {
+        return promised.expect(requestId, asker, System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(minutes));
+    }
+
+    /**
      * One check, at {@code now}.
      *
      * @param now the current time, in milliseconds since the epoch
@@ -115,8 +132,27 @@ public class Timekeeper {
                             new CompletableFuture<>(), false, true, List.of(), null, false));
                 }
             }
+            for (PromisedReports.Reminder r : promised.due(now)) {
+                String text = reminderText(r);
+                String source = ChatSession.REMINDER_SOURCE_PREFIX + r.number() + ":"
+                        + (r.toScreen() ? ChatSession.REMINDER_TO_SCREEN : r.asker());
+                LOG.info(conversation + ": reminder " + r.number() + " for request " + r.requestId());
+                queue.tell(q -> q.enqueue(text, null, "queue", watchers, chat.asChatSessionRef(), source, null,
+                        new CompletableFuture<>(), false, true, List.of(), r.requestId(), false));
+            }
         } catch (Exception e) {
             LOG.log(Level.WARNING, conversation + ": timekeeper check failed", e);
         }
+    }
+
+    /** The reminder the conversation reads: which request, who waits, and what to write. */
+    static String reminderText(PromisedReports.Reminder r) {
+        String ask = " If the report is ready, write it, even if you wrote it before. If not, say how far you have got "
+                + "and how long it will take.";
+        if (r.toScreen()) {
+            return "[reminder " + r.number() + "]\nYou told the person you would report later." + ask;
+        }
+        return "[reminder " + r.number() + " for request " + r.requestId() + " from " + r.asker() + "]\nYou told "
+                + r.asker() + " you would report later on this request." + ask;
     }
 }

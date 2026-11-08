@@ -374,7 +374,8 @@ class ConversationToolsTest {
     void askChatSendsWithoutWaitingAndTheReplyArrivesInTheCallersQueue() throws Exception {
         IIActorSystem system = new IIActorSystem("conversation-tools-ask");
         FakeControls controls = new FakeControls();
-        Scripted caller = new Scripted(List.of("thanks"), List.of());
+        // The reply's turn records its decision first (ReplyDecisionAndPromisedReport_261108_oo01).
+        Scripted caller = new Scripted(List.of(invoke("accept_reply"), "thanks"), List.of());
         Scripted callee = new Scripted(List.of("the answer"), List.of());
         ChatSessionIIAR one = chat(system, "01", caller, controls);
         ChatSessionIIAR two = chat(system, "02", callee, controls);
@@ -387,11 +388,11 @@ class ConversationToolsTest {
         assertTrue(sent.startsWith("sent to project1/chat-02 as request project1/chat-01:s7:t3:r1"), sent);
 
         long deadline = System.currentTimeMillis() + 20_000;
-        while (caller.prompts.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(50);
+        while (caller.prompts.size() < 2 && System.currentTimeMillis() < deadline) Thread.sleep(50);
         assertEquals(1, callee.prompts.size(), "the target got the prompt");
         assertTrue(callee.prompts.get(0).endsWith("[request project1/chat-01:s7:t3:r1 from project1/chat-01]\nquestion"),
                 callee.prompts.get(0));
-        assertEquals(1, caller.prompts.size(), "the reply came to the caller as a new message");
+        assertEquals(2, caller.prompts.size(), "the reply came to the caller as a new message, then accept_reply's result");
         String reply = caller.prompts.get(0);
         // chat-02 has no I/O log in this test, so its turn id has no session part.
         assertTrue(reply.contains("[reply to request project1/chat-01:s7:t3:r1, from project1/chat-02:t1]\nthe answer"),
@@ -507,12 +508,15 @@ class ConversationToolsTest {
     void theAskerGetsOneReplyCarryingTheAnswerOfEveryTurnForItsRequest() throws Exception {
         IIActorSystem system = new IIActorSystem("conversation-tools-delegation");
         FakeControls controls = new FakeControls();
-        Scripted asker = new Scripted(List.of("thanks"), List.of());
+        Scripted asker = new Scripted(List.of(invoke("accept_reply"), "thanks"), List.of());
+        // Each turn a reply starts records its decision first (ReplyDecisionAndPromisedReport_261108_oo01).
         Scripted supervisor = new Scripted(List.of(
                 invoke("ask_chat", "chatId", "03", "prompt", "job A"),
                 invoke("ask_chat", "chatId", "04", "prompt", "job B"),
                 "sent both",
+                invoke("accept_reply"),
                 "one back",
+                invoke("accept_reply"),
                 "final report"), List.of());
         ChatSessionIIAR one = chat(system, "01", asker, controls);
         ChatSessionIIAR two = chat(system, "02", supervisor, controls);
@@ -523,16 +527,84 @@ class ConversationToolsTest {
         AskChatTool.send(system, "project1", "01", "02", "do the work", "project1/chat-01:s7:t3:r1");
 
         long deadline = System.currentTimeMillis() + 20_000;
-        while (supervisor.prompts.size() < 5 && System.currentTimeMillis() < deadline) Thread.sleep(50);
-        while (asker.prompts.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(50);
+        while (supervisor.prompts.size() < 7 && System.currentTimeMillis() < deadline) Thread.sleep(50);
+        while (asker.prompts.size() < 2 && System.currentTimeMillis() < deadline) Thread.sleep(50);
         Thread.sleep(500);
-        assertEquals(5, supervisor.prompts.size(), "the supervisor answered both replies: " + supervisor.prompts);
-        assertEquals(1, asker.prompts.size(), "one reply only: " + asker.prompts);
+        assertEquals(7, supervisor.prompts.size(), "the supervisor answered both replies: " + supervisor.prompts);
+        assertEquals(1, asker.prompts.stream().filter(p -> p.contains("[reply to request ")).count(),
+                "one reply only: " + asker.prompts);
         String reply = asker.prompts.get(0);
         assertTrue(reply.contains("[reply to request project1/chat-01:s7:t3:r1, from project1/chat-02:t3]\n"
                 + "[answer of turn project1/chat-02:t1]\nsent both\n\n"
                 + "[answer of turn project1/chat-02:t2]\none back\n\n"
                 + "[answer of turn project1/chat-02:t3]\nfinal report"), reply);
+    }
+
+    /**
+     * chat-01 asks chat-02, and chat-02's reply starts a turn of chat-01's in which the model only writes
+     * text. The agent loop does not end that turn: it asks, in the same turn, for a decision on the reply
+     * ({@code ReplyDecisionAndPromisedReport_261108_oo01}). It asks once; the second answer ends the turn.
+     */
+    @Test
+    @org.junit.jupiter.api.Tag("ReplyDecisionAndPromisedReportTests_261108_oo01")
+    void aReplyTurnThatRecordsNoDecisionIsAskedForOneInTheSameTurn() throws Exception {
+        IIActorSystem system = new IIActorSystem("conversation-tools-undecided");
+        FakeControls controls = new FakeControls();
+        Scripted asker = new Scripted(List.of("noted"), List.of());
+        ChatSessionIIAR one = chat(system, "01", asker, controls);
+        ChatSessionIIAR two = chat(system, "02", new Scripted(List.of("I will report later"), List.of()), controls);
+        queueOf(one);
+        queueOf(two);
+
+        AskChatTool.send(system, "project1", "01", "02", "run the tests", "project1/chat-01:t1:r1");
+
+        long deadline = System.currentTimeMillis() + 20_000;
+        while (asker.prompts.size() < 2 && System.currentTimeMillis() < deadline) Thread.sleep(50);
+        Thread.sleep(500);
+        assertEquals(2, asker.prompts.size(), "asked once for a decision, then the turn ended: " + asker.prompts);
+        assertTrue(asker.prompts.get(1).contains("This turn began with project1/chat-02's reply to request "
+                + "project1/chat-01:t1:r1, and you have recorded no decision on it."), asker.prompts.get(1));
+    }
+
+    /**
+     * chat-02 promises a report; chat-01 registers it with expect_report on chat-02's timekeeper. When the
+     * time comes, the timekeeper reminds chat-02, and the answer of the turn the reminder starts reaches
+     * chat-01 as a follow-up to the same request, numbered ({@code ReplyDecisionAndPromisedReport_261108_oo01}).
+     */
+    @Test
+    @org.junit.jupiter.api.Tag("ReplyDecisionAndPromisedReportTests_261108_oo01")
+    void aPromisedReportIsRemindedAndItsAnswerReachesTheAskerAsAFollowUp() throws Exception {
+        IIActorSystem system = new IIActorSystem("conversation-tools-promised-report");
+        FakeControls controls = new FakeControls();
+        String request = "project1/chat-01:t1:r1";
+        Scripted asker = new Scripted(List.of(
+                invoke("expect_report", "chatId", "02", "requestId", request, "minutes", "1"),
+                "registered",
+                invoke("accept_reply", "requestId", request),
+                "done"), List.of());
+        Scripted promiser = new Scripted(List.of("I will report later", "REPORT: all green"), List.of());
+        ChatSessionIIAR one = chat(system, "01", asker, controls);
+        ChatSessionIIAR two = chat(system, "02", promiser, controls);
+        queueOf(one);
+        ActorRef<PromptQueue> queue2 = queueOf(two);
+        ActorRef<Timekeeper> keeper = system.actorOf("project1/chat-02.timekeeper",
+                new Timekeeper("project1/chat-02", two, queue2, e -> {}, 600_000, 1_800_000));
+
+        AskChatTool.send(system, "project1", "01", "02", "run the tests", request);
+        long deadline = System.currentTimeMillis() + 20_000;
+        while (asker.prompts.size() < 2 && System.currentTimeMillis() < deadline) Thread.sleep(50);
+        assertTrue(asker.prompts.get(1).contains("reminder 1"), "the tool said which reminder: " + asker.prompts.get(1));
+
+        keeper.tell(k -> k.tick(System.currentTimeMillis() + 120_000));
+        while (asker.prompts.size() < 4 && System.currentTimeMillis() < deadline) Thread.sleep(50);
+        Thread.sleep(500);
+
+        assertTrue(promiser.prompts.get(1).contains("[reminder 1 for request " + request + " from project1/chat-01]"),
+                promiser.prompts.get(1));
+        assertTrue(asker.prompts.get(2).contains("[follow-up to request " + request + ", from project1/chat-02:t2, reminder 1]\n"
+                + "REPORT: all green"), asker.prompts.get(2));
+        assertEquals(4, asker.prompts.size(), "the follow-up was accepted, and nothing more was asked: " + asker.prompts);
+        assertTrue(asker.prompts.stream().noneMatch(p -> p.contains("recorded no decision")), asker.prompts.toString());
     }
 
     @Test
@@ -581,7 +653,7 @@ class ConversationToolsTest {
     void anUrgentRequestAndItsReplyBothGoAhead() throws Exception {
         IIActorSystem system = new IIActorSystem("conversation-tools-urgent-reply");
         FakeControls controls = new FakeControls();
-        Scripted caller = new Scripted(List.of("thanks"), List.of());
+        Scripted caller = new Scripted(List.of(invoke("accept_reply"), "thanks"), List.of());
         Scripted callee = new Scripted(List.of("about half done"), List.of());
         ChatSessionIIAR one = chat(system, "01", caller, controls);
         ChatSessionIIAR two = chat(system, "02", callee, controls);
@@ -595,10 +667,10 @@ class ConversationToolsTest {
                 sent);
 
         long deadline = System.currentTimeMillis() + 20_000;
-        while (caller.prompts.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(50);
+        while (caller.prompts.size() < 2 && System.currentTimeMillis() < deadline) Thread.sleep(50);
         assertTrue(callee.prompts.get(0).endsWith("[urgent request project1/chat-01:s7:t3:r1 from project1/chat-01]\nhow far are you?"),
                 callee.prompts.get(0));
-        assertEquals(1, caller.prompts.size(), "the reply went ahead of the held item and was sent");
+        assertEquals(2, caller.prompts.size(), "the reply went ahead of the held item and was sent, then accept_reply's result");
         assertTrue(caller.prompts.get(0).contains("[reply to request project1/chat-01:s7:t3:r1, from project1/chat-02:t1]\nabout half done"),
                 caller.prompts.get(0));
     }
@@ -633,7 +705,7 @@ class ConversationToolsTest {
     void theTimekeeperPausesATurnForAnUrgentRequestAndTheWorkResumesAfterIt() throws Exception {
         IIActorSystem system = new IIActorSystem("conversation-tools-timekeeper-pause");
         FakeControls controls = new FakeControls();
-        Scripted asker = new Scripted(List.of("thanks"), List.of());
+        Scripted asker = new Scripted(List.of(invoke("accept_reply"), "thanks"), List.of());
         Paced worker = new Paced(List.of("unfinished", "about half done", "all done"), java.util.Set.of(1));
         ChatSessionIIAR one = chat(system, "01", asker, controls);
         ChatSessionIIAR two = chat(system, "02", worker, controls);
@@ -649,13 +721,13 @@ class ConversationToolsTest {
         // A moment past the item's queueing time: the limit is "waited longer than", here 0 ms.
         keeper.tick(System.currentTimeMillis() + 1);
 
-        waitUntil(() -> !asker.prompts.isEmpty());
+        waitUntil(() -> asker.prompts.size() >= 2);
         assertEquals(3, worker.prompts.size(), worker.prompts.toString());
         assertTrue(worker.prompts.get(1).endsWith("how far?"), "the urgent request came next: " + worker.prompts);
         assertTrue(worker.prompts.get(2).contains("[resume paused turn project1/chat-02:t1, for request project1/chat-01:s7:t3:r1]"),
                 worker.prompts.get(2));
         assertTrue(worker.prompts.get(2).endsWith("do the long job"), "the resume message repeats the work: " + worker.prompts.get(2));
-        assertEquals(1, asker.prompts.size(), asker.prompts.toString());
+        assertEquals(2, asker.prompts.size(), "the reply, then accept_reply's result: " + asker.prompts);
         assertTrue(asker.prompts.get(0).contains("[reply to request project1/chat-01:s7:t3:r1, from project1/chat-02:t3]\nall done"),
                 asker.prompts.get(0));
     }
@@ -742,7 +814,7 @@ class ConversationToolsTest {
     void aResumeMessageAtTheFrontDoesNotPauseTheRunningTurn() throws Exception {
         IIActorSystem system = new IIActorSystem("conversation-tools-timekeeper-resume-not-urgent");
         FakeControls controls = new FakeControls();
-        Scripted asker = new Scripted(List.of("thanks"), List.of());
+        Scripted asker = new Scripted(List.of(invoke("accept_reply"), "thanks"), List.of());
         Paced worker = new Paced(List.of("all done", "nothing left"), java.util.Set.of(1));
         ChatSessionIIAR one = chat(system, "01", asker, controls);
         ChatSessionIIAR two = chat(system, "02", worker, controls);

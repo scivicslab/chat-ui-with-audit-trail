@@ -54,6 +54,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -307,6 +308,23 @@ public class ChatSession extends Interpreter {
               without a reply before it is told (default 30). Requires a "chatId" <parameter> tag and
               at least one of the other two, in whole minutes; one left out keeps its value.
             """);
+        m.put("accept_reply", """
+            - accept_reply(requestId): record that the reply to your request "requestId" is enough:
+              the work is done, or you need nothing more from it. When a turn of yours begins with a
+              reply ([reply to request …] or [follow-up to request …]), record one decision on it
+              before you end the turn: accept_reply, expect_report, or ask_chat to the one that
+              replied. Requires a "requestId" <parameter> tag.
+            """);
+        m.put("expect_report", """
+            - expect_report(chatId, requestId, minutes): when a reply says a report will come later
+              (for example "I will report later" or "not finished yet, about 20 more minutes"),
+              register it with that conversation's timekeeper. After "minutes" it is reminded once,
+              and the answer it writes then comes to you as [follow-up to request …, reminder N].
+              If that says "not yet" again, register again. Requires "chatId", "requestId" and
+              "minutes" (whole minutes) <parameter> tags. If you yourself told the person you would
+              report later, give your own id as "chatId" and leave out "requestId": you are
+              reminded, and your answer goes to your screen.
+            """);
         m.put("set_chat_name", """
             - set_chat_name(chatId, name): give a conversation of this project, your own included, the
               name a person reads beside its id, saying what it is for (for example "worker 1-3:
@@ -525,6 +543,42 @@ public class ChatSession extends Interpreter {
 
     /** Source of the message that resumes a paused turn. */
     public static final String RESUME_SOURCE = "agent:resume";
+
+    /**
+     * Source of a reminder the timekeeper puts in, followed by the reminder's number, a colon, and the
+     * conversation waiting for the report or {@link #REMINDER_TO_SCREEN}
+     * ({@code ReplyDecisionAndPromisedReport_261108_oo01}).
+     */
+    public static final String REMINDER_SOURCE_PREFIX = "agent:reminder:";
+
+    /** What a reminder's source names when the report was promised to the person. */
+    public static final String REMINDER_TO_SCREEN = "screen";
+
+    /** Who waits for the answer of a turn a reminder starts, and which reminder it was. */
+    private record FollowUpTo(String asker, int number) {}
+
+    /**
+     * The reminders whose turn has started and not yet ended, by request id. Kept across a pause, so the
+     * turn that resumes the reminder's work still sends its answer as the follow-up.
+     */
+    private final Map<String, FollowUpTo> reminders = new HashMap<>();
+
+    /** The request id of the reminder this turn answers, or {@code null}. */
+    private String turnReminder;
+
+    /**
+     * The reply this turn began with that has had no decision yet: its request id, and the conversation that
+     * sent it. {@code null} when the turn did not begin with a reply, or a decision was recorded
+     * ({@code ReplyDecisionAndPromisedReport_261108_oo01}).
+     */
+    private String undecidedRequest;
+    private String undecidedReplier;
+
+    /** Whether this turn has already been asked once for a decision on its reply. */
+    private boolean decisionAsked;
+
+    /** The text the model wrote before it was asked for a decision, kept for the turn's answer. */
+    private String answerBeforeDecision;
     private List<ToolCall> pendingCalls;
     private String finalAnswer;
     private int stepCount;
@@ -1342,6 +1396,16 @@ public class ChatSession extends Interpreter {
                 openRequests.turnEnded(turnOriginal, turnAnswer != null ? turnAnswer : new TurnReply(null, null, turnId()));
             }
         }
+        // The answer of a turn a reminder started goes to whoever waits for the report, as a follow-up
+        // to the same request (ReplyDecisionAndPromisedReport_261108_oo01).
+        if (turnReminder != null && !paused) {
+            FollowUpTo to = reminders.remove(turnReminder);
+            if (to != null && !REMINDER_TO_SCREEN.equals(to.asker())) {
+                AskChatTool.followUp(system, myChatName(), to.asker(), turnReminder,
+                        turnAnswer != null ? turnAnswer : new TurnReply(null, null, turnId()), to.number());
+            }
+        }
+        turnReminder = null;
         if (paused) queueResume(emitter, self);
         pauseRequested = false;
         publishOutstanding();
@@ -1459,6 +1523,19 @@ public class ChatSession extends Interpreter {
             pendingResultKeys.remove(resultKey);
             activeResultKey = resultKey;
         }
+
+        // A reply this conversation must decide on (ReplyDecisionAndPromisedReport_261108_oo01).
+        boolean isReply = requestId != null && source != null && source.startsWith(ASK_CHAT_REPLY_SOURCE_PREFIX);
+        this.undecidedRequest = isReply ? requestId : null;
+        this.undecidedReplier = isReply ? source.substring(ASK_CHAT_REPLY_SOURCE_PREFIX.length()) : null;
+        this.decisionAsked = false;
+        this.answerBeforeDecision = null;
+        // A reminder's answer goes to whoever waits for the report; so does the answer of the turn that
+        // resumes a paused reminder's work.
+        FollowUpTo reminder = reminderOf(source);
+        if (reminder != null && requestId != null) reminders.put(requestId, reminder);
+        this.turnReminder = requestId != null && reminders.containsKey(requestId)
+                && (reminder != null || RESUME_SOURCE.equals(source)) ? requestId : null;
 
         String carried = RESUME_SOURCE.equals(source) ? pausedTasks.remove(requestId == null ? "" : requestId) : null;
         this.turnTask = carried != null ? carried : prompt;
@@ -2337,6 +2414,10 @@ public class ChatSession extends Interpreter {
                     System.currentTimeMillis() - turnStartedAt, provider.getCurrentModel(), false)
                     .withTurn(turnId(), turnRequestId));
         }
+        if (!cancelled && finalAnswer != null && answerBeforeDecision != null && !answerBeforeDecision.isBlank()) {
+            finalAnswer = answerBeforeDecision + "\n\n" + finalAnswer;
+        }
+        answerBeforeDecision = null;
         if (!cancelled && finalAnswer != null) {
             String answer = finalAnswer;
             long answeredIn = System.currentTimeMillis() - turnStartedAt;
@@ -2587,6 +2668,105 @@ public class ChatSession extends Interpreter {
         recordStepIo(prompt, verdict, null, List.of());
     }
 
+    /**
+     * The {@code accept_reply} tool: records that the reply this turn began with is enough
+     * ({@code ReplyDecisionAndPromisedReport_261108_oo01}).
+     *
+     * @param requestId the request the reply answers; blank means the one this turn began with
+     */
+    private String acceptReply(String requestId) {
+        if (undecidedRequest != null && (requestId.isBlank() || requestId.equals(undecidedRequest))) {
+            String accepted = undecidedRequest;
+            undecidedRequest = null;
+            undecidedReplier = null;
+            return "ok: the reply to request " + accepted + " is accepted";
+        }
+        return "ok: noted; no reply in this turn was waiting for a decision"
+                + (requestId.isBlank() ? "" : " on request " + requestId);
+    }
+
+    /**
+     * The {@code expect_report} tool: registers, with the timekeeper of the conversation that promised a
+     * report, that it is to be reminded after {@code minutes}. The answer of the turn the reminder starts
+     * comes back to this conversation as a follow-up to the request. Registering this conversation itself,
+     * with no request, is a promise made to the person: the reminder's answer stays on this conversation's
+     * screen ({@code ReplyDecisionAndPromisedReport_261108_oo01}).
+     */
+    private String expectReport(String chatId, String requestId, String minutesText) {
+        long minutes;
+        try {
+            minutes = Long.parseLong(minutesText.trim());
+        } catch (NumberFormatException e) {
+            minutes = -1;
+        }
+        if (minutes <= 0) return "error: minutes must be a whole number above 0";
+        String target = chatId.isBlank() ? myChatName() : ChatUiActorSystem.resolveChatName(projectId, chatId);
+        boolean self = target.equals(myChatName());
+        if (!self && requestId.isBlank()) {
+            return "error: give requestId, the request whose report " + target + " promised";
+        }
+        ActorRef<Timekeeper> keeper = system == null ? null : system.getActor(target + ".timekeeper");
+        if (keeper == null) return "error: no conversation " + target + " with a timekeeper";
+        String request = self ? null : requestId;
+        String asker = self ? null : myChatName();
+        long wait = minutes;
+        int number;
+        try {
+            number = keeper.ask(k -> k.expectReport(request, asker, wait)).get(5, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            return "error: could not reach " + target + "'s timekeeper: " + e.getMessage();
+        }
+        if (undecidedRequest != null && (requestId.isBlank() || requestId.equals(undecidedRequest))) {
+            undecidedRequest = null;
+            undecidedReplier = null;
+        }
+        if (self) {
+            return "ok: your timekeeper will remind you in " + minutes + " minutes (reminder " + number
+                    + ") of the report you promised the person";
+        }
+        return "ok: " + target + "'s timekeeper will remind it in " + minutes + " minutes (reminder " + number
+                + ") to report on request " + requestId + "; its answer will come to you as a follow-up";
+    }
+
+    /**
+     * Agent-loop action {@code think-undecided}: when this turn began with a reply, the model wrote its
+     * answer without recording a decision on it, and has not been asked yet, keeps the answer and sends the
+     * model a note asking for one, in the same turn. Fails otherwise, so the loop goes on to
+     * {@code think-final} ({@code ReplyDecisionAndPromisedReport_261108_oo01}).
+     *
+     * @return {@code success=true} when the note was queued as the next step's prompt
+     */
+    public ActionResult replyLeftUndecided() {
+        if (undecidedRequest == null) return new ActionResult(false, "no reply waiting for a decision");
+        if (decisionAsked) {
+            logToConversationSquad("WARNING", "turn" + ioTurnNo + ": no decision was recorded on the reply to request "
+                    + undecidedRequest + " from " + undecidedReplier);
+            return new ActionResult(false, "asked once already");
+        }
+        decisionAsked = true;
+        answerBeforeDecision = finalAnswer;
+        String note = "This turn began with " + undecidedReplier + "'s reply to request " + undecidedRequest
+                + ", and you have recorded no decision on it. Call accept_reply if it is done, expect_report if a "
+                + "report is still to come, or ask_chat to " + undecidedReplier + " to ask for a fix or a question.";
+        pendingPrompt = note;
+        turnTranscript.append(note).append("\n\n");
+        turnEmitter.accept(ChatEvent.thinking("\n→ " + note + "\n"));
+        return new ActionResult(true, "asked for a decision");
+    }
+
+    /** @return who waits for a reminder's answer, read from the reminder's source, or {@code null} */
+    private static FollowUpTo reminderOf(String source) {
+        if (source == null || !source.startsWith(REMINDER_SOURCE_PREFIX)) return null;
+        String rest = source.substring(REMINDER_SOURCE_PREFIX.length());
+        int colon = rest.indexOf(':');
+        if (colon < 0) return null;
+        try {
+            return new FollowUpTo(rest.substring(colon + 1), Integer.parseInt(rest.substring(0, colon)));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
     /** Dispatches one tool call to its implementation and returns the raw (untruncated) observation. */
     private String executeTool(ToolCall tc) {
         return executeTool(tc, false);
@@ -2620,6 +2800,12 @@ public class ChatSession extends Interpreter {
                                 extractInput(args, "chatId"), extractInput(args, "prompt"), requestId)
                         : AskChatTool.send(system, projectId, chatId,
                                 extractInput(args, "chatId"), extractInput(args, "prompt"), requestId);
+                // A request back to the conversation whose reply this turn decides on is a decision.
+                if (sent.startsWith("sent to ") && undecidedReplier != null && undecidedReplier.equals(
+                        ChatUiActorSystem.resolveChatName(projectId, extractInput(args, "chatId")))) {
+                    undecidedRequest = null;
+                    undecidedReplier = null;
+                }
                 // Sent for the request this turn works for: that request waits for its reply.
                 if (turnOriginal != null && sent.startsWith("sent to ")) {
                     openRequests.childSent(turnOriginal, requestId,
@@ -2650,6 +2836,9 @@ public class ChatSession extends Interpreter {
             case "set_chat_timekeeper" -> TimekeeperTool.set(conversationControls, projectId,
                     extractInput(args, "chatId"), extractInput(args, "urgentWaitMinutes"),
                     extractInput(args, "childReplyWarnMinutes"));
+            case "accept_reply" -> acceptReply(extractInput(args, "requestId"));
+            case "expect_report" -> expectReport(extractInput(args, "chatId"), extractInput(args, "requestId"),
+                    extractInput(args, "minutes"));
             case "set_chat_name" -> ChatNameTool.set(conversationControls, projectId,
                     extractInput(args, "chatId"), extractInput(args, "name"));
             case "delete_chat" -> DeleteChatTool.delete(conversationControls, projectId, myChatName(),
@@ -2784,16 +2973,9 @@ public class ChatSession extends Interpreter {
         this.askCount = 0;
         recordHistory("assistant", assistant);
         recordTurnIo(ioSession, ioTurnNo, "(autonomous continuation)", assistant, thinking);
-        // The provider went on by itself after the last request's turn, so this is more work on that
-        // request: its answer if the request is still waiting, else a follow-up to the same asker.
-        String original = openRequests.last();
-        if (original != null) {
-            TurnReply r = new TurnReply(assistant, null, turnId());
-            if (openRequests.turnEnded(original, r) == null) {
-                String asker = openRequests.askerIfAnswered(original);
-                if (asker != null) AskChatTool.followUp(system, myChatName(), asker, original, r);
-            }
-        }
+        // Which request this turn works for is known only inside the provider, so its answer stays on the
+        // screen and in the record. A report reaches the asker through a reminder, which names the request
+        // (ReplyDecisionAndPromisedReport_261108_oo01).
     }
 
     /**

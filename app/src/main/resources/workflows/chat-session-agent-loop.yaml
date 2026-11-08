@@ -68,6 +68,20 @@ steps:
         method: hasMoreConstructedPrompts
         execution: direct
 
+  - states: ["think", "think"]
+    label: think-undecided
+    note: |
+      The turn began with a reply to a request this conversation sent, and the model wrote its answer
+      without recording a decision on it (accept_reply, expect_report, or ask_chat to the one that
+      replied). replyLeftUndecided keeps the answer and queues a note asking for a decision, so the
+      next think-action sends it in the same turn. It succeeds once per turn; otherwise it fails and
+      the scan goes on to think-final. No LLM call here: it reads only how the turn began and which
+      tools it called (ReplyDecisionAndPromisedReport_261108_oo01).
+    actions:
+      - actor: this
+        method: replyLeftUndecided
+        execution: direct
+
   - states: ["think", "end"]
     label: think-final
     note: |
