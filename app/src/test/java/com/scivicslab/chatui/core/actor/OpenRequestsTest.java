@@ -127,4 +127,53 @@ class OpenRequestsTest {
         assertNull(open.replyArrived("b:t1:r2"));
         assertTrue(open.last() == null);
     }
+    /** The report a returned child request promised makes the child request count as out again. */
+    @Test
+    void aReturnedChildRequestCanBeReopenedAndTheAnswerWaitsForItsReport() {
+        OpenRequests open = new OpenRequests();
+        CompletableFuture<TurnReply> done = new CompletableFuture<>();
+        open.received("a:t1:r1", "a", done);
+        open.childSent("a:t1:r1", "b:t1:r1");
+        assertNull(open.turnEnded("a:t1:r1", answer("asked b", "m:t1")));
+        assertEquals("a:t1:r1", open.replyArrived("b:t1:r1"), "b said it would report later");
+
+        assertEquals(OpenRequests.Reopening.REOPENED, open.reopen("b:t1:r1", "b", 1_000L));
+        assertNull(open.turnEnded("a:t1:r1", answer("waiting for b", "m:t2")), "the request waits for b's report");
+        assertFalse(done.isDone());
+        assertEquals(1, open.outstanding("a:t1:r1"));
+        assertEquals(1_000L, open.outstandingChildren().get(0).sentAt(), "the no-reply timer counts from the reopening");
+
+        assertEquals("a:t1:r1", open.replyArrived("b:t1:r1"), "the follow-up passes through like a reply");
+        assertSame(done, open.turnEnded("a:t1:r1", answer("final", "m:t3")));
+        assertTrue(done.join().reply().contains("[answer of turn m:t2]\nwaiting for b"), done.join().reply());
+        assertTrue(done.join().reply().endsWith("[answer of turn m:t3]\nfinal"), done.join().reply());
+    }
+
+    @Test
+    void aChildRequestOfARequestAlreadyAnsweredIsNotReopened() {
+        OpenRequests open = new OpenRequests();
+        CompletableFuture<TurnReply> done = new CompletableFuture<>();
+        open.received("a:t1:r1", "a", done);
+        open.childSent("a:t1:r1", "b:t1:r1");
+        open.replyArrived("b:t1:r1");
+        assertSame(done, open.turnEnded("a:t1:r1", answer("answered at once", "m:t1")));
+
+        assertEquals(OpenRequests.Reopening.ALREADY_ANSWERED, open.reopen("b:t1:r1", "b", 1_000L));
+        assertEquals(OpenRequests.Reopening.NOT_SENT_FOR_A_REQUEST, open.reopen("x:t9:r9", "x", 1_000L));
+    }
+
+    @Test
+    void aChildRequestStillOutIsNotReopenedAndAnOpenedOneCanBeClosed() {
+        OpenRequests open = new OpenRequests();
+        open.received("a:t1:r1", "a", new CompletableFuture<>());
+        open.childSent("a:t1:r1", "b:t1:r1");
+        assertEquals(OpenRequests.Reopening.STILL_OUT, open.reopen("b:t1:r1", "b", 1_000L));
+
+        open.replyArrived("b:t1:r1");
+        open.reopen("b:t1:r1", "b", 1_000L);
+        assertEquals(1, open.outstanding("a:t1:r1"));
+        assertTrue(open.close("b:t1:r1"), "giving up on the report closes it");
+        assertEquals(0, open.outstanding("a:t1:r1"));
+        assertFalse(open.close("b:t1:r1"), "closing twice is a no-op");
+    }
 }

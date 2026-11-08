@@ -2717,6 +2717,15 @@ public class ChatSession extends Interpreter {
      * @param requestId the request the reply answers; blank means the one this turn began with
      */
     private String acceptReply(String requestId) {
+        // A request counted as out again after a promised report is let go: its original request no longer waits.
+        if (!requestId.isBlank() && openRequests.close(requestId)) {
+            publishOutstanding();
+            if (undecidedRequest != null && requestId.equals(undecidedRequest)) {
+                undecidedRequest = null;
+                undecidedReplier = null;
+            }
+            return "ok: request " + requestId + " no longer holds the request you received open";
+        }
         if (undecidedRequest != null && (requestId.isBlank() || requestId.equals(undecidedRequest))) {
             String accepted = undecidedRequest;
             undecidedRequest = null;
@@ -2767,7 +2776,32 @@ public class ChatSession extends Interpreter {
                     + ") of the report you promised the person";
         }
         return "ok: " + target + "'s timekeeper will remind it in " + minutes + " minutes (reminder " + number
-                + ") to report on request " + requestId + "; its answer will come to you as a follow-up";
+                + ") to report on request " + requestId + "; its answer will come to you as a follow-up"
+                + reopenAfterPromise(requestId, target);
+    }
+
+    /**
+     * When the request {@code expect_report} names is one this conversation sent, counts it as not yet returned
+     * again, so the request this conversation received for that work stays open until the report arrives
+     * ({@code ReplyDecisionAndPromisedReport_261108_oo01}).
+     *
+     * @return the sentence to add to the tool's result, or {@code ""} when the request is not one this
+     *         conversation sent
+     */
+    private String reopenAfterPromise(String requestId, String target) {
+        if (!requestId.startsWith(myChatName() + ":")) return "";
+        OpenRequests.Reopening result = openRequests.reopen(requestId, target, System.currentTimeMillis());
+        switch (result) {
+            case REOPENED:
+                publishOutstanding();
+                return "; the request you received for this work stays open until that report arrives, and your reply to "
+                        + "it will then carry the report (accept_reply on the follow-up, or on request " + requestId
+                        + " to stop waiting)";
+            case ALREADY_ANSWERED:
+                return "; the request you received for this work was already answered, so nothing is held open";
+            default:
+                return "";
+        }
     }
 
     /**

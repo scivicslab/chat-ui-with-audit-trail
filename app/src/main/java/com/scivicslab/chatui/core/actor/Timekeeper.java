@@ -123,7 +123,10 @@ public class Timekeeper {
                     chat.asChatSessionRef().tellNow(ChatSession::pauseForUrgent);
                 }
             }
-            for (OpenRequests.Outstanding o : chat.outstandingChildrenDirect()) {
+            List<OpenRequests.Outstanding> out = chat.outstandingChildrenDirect();
+            // A request that came back and was reopened is warned about again, counting from its reopening.
+            warned.removeIf(id -> out.stream().noneMatch(o -> o.requestId().equals(id)));
+            for (OpenRequests.Outstanding o : out) {
                 if (now - o.sentAt() > childReplyWarnMillis && warned.add(o.requestId())) {
                     String text = "[no reply yet to request " + o.requestId() + " sent to " + o.target() + ", "
                             + (now - o.sentAt()) / 60_000 + " minutes]\nDecide whether to ask it how far it has got "

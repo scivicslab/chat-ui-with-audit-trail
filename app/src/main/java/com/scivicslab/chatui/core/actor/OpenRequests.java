@@ -50,6 +50,12 @@ public final class OpenRequests {
 
     private final Map<String, Original> originals = new HashMap<>();
     private final Map<String, String> originalOfChild = new HashMap<>();
+    /**
+     * The original request each child request was sent for, kept after the reply came back (unlike
+     * {@link #originalOfChild}), so that a child request can be reopened when its reply promised a report
+     * ({@code ReplyDecisionAndPromisedReport_261108_oo01}).
+     */
+    private final Map<String, String> originalOfSent = new HashMap<>();
     private final Map<String, Outstanding> outstandingChildren = new HashMap<>();
     private String last;
 
@@ -105,7 +111,52 @@ public final class OpenRequests {
         if (o == null || o.answered) return;
         o.outstanding.add(childRequestId);
         originalOfChild.put(childRequestId, original);
+        originalOfSent.put(childRequestId, original);
         outstandingChildren.put(childRequestId, new Outstanding(childRequestId, target, sentAt));
+    }
+
+    /** What {@link #reopen} did, or why it did not. */
+    public enum Reopening {
+        /** The child request counts as out again; its original request waits for the report. */
+        REOPENED,
+        /** The original request was already answered: nothing is held open, the report arrives as a message of its own. */
+        ALREADY_ANSWERED,
+        /** The request was not sent for a request this conversation received. */
+        NOT_SENT_FOR_A_REQUEST,
+        /** The child request has not had its reply yet, so there is nothing to reopen. */
+        STILL_OUT
+    }
+
+    /**
+     * Counts a child request whose reply has come back as not yet returned again, because the reply said a
+     * report would follow. The original request it was sent for then stays open until the report arrives
+     * (through {@link #replyArrived}, like any reply), and the no-reply timer counts from {@code now}
+     * ({@code ReplyDecisionAndPromisedReport_261108_oo01}).
+     *
+     * @param childRequestId the id of the request sent
+     * @param target         the qualified name of the conversation the request went to
+     * @param now            the time of the reopening, in milliseconds since the epoch
+     */
+    public Reopening reopen(String childRequestId, String target, long now) {
+        if (outstandingChildren.containsKey(childRequestId)) return Reopening.STILL_OUT;
+        String original = originalOfSent.get(childRequestId);
+        if (original == null) return Reopening.NOT_SENT_FOR_A_REQUEST;
+        Original o = originals.get(original);
+        if (o == null || o.answered) return Reopening.ALREADY_ANSWERED;
+        childSent(original, childRequestId, target, now);
+        return Reopening.REOPENED;
+    }
+
+    /**
+     * Gives up on a child request still counted as out, so that its original request no longer waits for it
+     * (for example a reopened one whose report is no longer wanted).
+     *
+     * @return whether the child request was out
+     */
+    public boolean close(String childRequestId) {
+        if (!outstandingChildren.containsKey(childRequestId)) return false;
+        replyArrived(childRequestId);
+        return true;
     }
 
     /** @return the child requests still out, oldest first */

@@ -1003,6 +1003,51 @@ class ConversationToolsTest {
                 && order.get(2).equals("ordinary"), order.toString());
     }
 
+    /**
+     * chat-01 asks chat-49, which asks chat-51; chat-51 answers "I will report later." and chat-49 calls
+     * expect_report on that reply. The request chat-49 received stays open, so chat-01 gets one reply, written
+     * after chat-51's reported result arrived, and never has to call expect_report itself
+     * (ReplyDecisionAndPromisedReport_261108_oo01).
+     */
+    @Test
+    @org.junit.jupiter.api.Tag("ReplyDecisionAndPromisedReportTests_261108_oo01")
+    void aReportExpectedFromTheWorkerKeepsTheManagersRequestOpenUntilItArrives() throws Exception {
+        IIActorSystem system = new IIActorSystem("conversation-tools-reopened-request");
+        FakeControls controls = new FakeControls();
+        String task = "project1/chat-01:t1:r1";
+        String toWorker = "project1/chat-49:t1:r1";
+        Scripted liaison = new Scripted(List.of(invoke("accept_reply", "requestId", task), "done"), List.of());
+        Scripted manager = new Scripted(List.of(
+                invoke("ask_chat", "chatId", "51", "prompt", "check it"),
+                "asked chat-51",
+                invoke("expect_report", "chatId", "51", "requestId", toWorker, "minutes", "1"),
+                "waiting for chat-51",
+                invoke("accept_reply", "requestId", toWorker),
+                "FINAL: chat-51 reports Result 42"), List.of());
+        Scripted worker = new Scripted(List.of("I will report later.", "Result 42"), List.of());
+        ChatSessionIIAR one = chat(system, "01", liaison, controls);
+        ChatSessionIIAR two = chat(system, "49", manager, controls);
+        ChatSessionIIAR three = chat(system, "51", worker, controls);
+        queueOf(one);
+        queueOf(two);
+        ActorRef<PromptQueue> queue3 = queueOf(three);
+        Timekeeper keeper = new Timekeeper("project1/chat-51", three, queue3, e -> {}, 600_000, 1_800_000);
+        system.actorOf("project1/chat-51.timekeeper", keeper);
+
+        AskChatTool.send(system, "project1", "01", "49", "run the check", task);
+        waitUntil(() -> manager.prompts.size() >= 4);
+        keeper.tick(System.currentTimeMillis() + 120_000);
+        waitUntil(() -> manager.prompts.size() >= 6 && liaison.prompts.size() >= 2);
+        Thread.sleep(300);
+
+        long replies = liaison.prompts.stream().filter(p -> p.contains("[reply to request " + task)).count();
+        assertEquals(1, replies, "chat-01 gets one reply: " + liaison.prompts);
+        assertTrue(liaison.prompts.get(0).contains("Result 42"), "and it carries the reported result: " + liaison.prompts.get(0));
+        assertEquals(2, liaison.prompts.size(), "chat-01 only accepted that reply; it never needed expect_report: " + liaison.prompts);
+        assertTrue(manager.prompts.get(4).contains("[follow-up to request " + toWorker + ", from project1/chat-51:t2, reminder 1]"),
+                manager.prompts.get(4));
+    }
+
     /** A request with no reply past the limit is reported to the conversation that sent it, once. */
     @Test
     void theTimekeeperTellsItsConversationOnceAboutARequestWithNoReply() throws Exception {
