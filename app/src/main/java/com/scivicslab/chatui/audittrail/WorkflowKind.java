@@ -14,7 +14,7 @@ import java.util.Set;
  * which it is. What it does does: an agent loop is entered at the state {@code think}, which
  * {@code ChatSession.start()} moves to; a prompt construction hands the conversation the request it
  * built, by one of the three actions that put a prompt in the conversation's send queue. A file
- * that does neither is a job's workflow.</p>
+ * that does neither is a project workflow: one run of it is a job.</p>
  */
 public enum WorkflowKind {
 
@@ -22,8 +22,8 @@ public enum WorkflowKind {
     AGENT_LOOP,
     /** Called by an agent loop before each request, to build that request. */
     PROMPT_CONSTRUCTION,
-    /** Run by a {@code PlanRunner} actor the project makes for one job. */
-    JOB;
+    /** A project workflow, run by a {@code PlanRunner} actor the project makes for one job. */
+    PROJECT_WORKFLOW;
 
     /** The actions that put a prompt in the conversation's send queue; only a prompt construction calls them. */
     private static final Set<String> QUEUE_A_PROMPT =
@@ -31,16 +31,16 @@ public enum WorkflowKind {
 
     /**
      * @param yaml a workflow's text
-     * @return its kind; {@link #JOB} for text that cannot be read, which the job's own check then refuses
+     * @return its kind; {@link #PROJECT_WORKFLOW} for text that cannot be read, which the job's own check then refuses
      */
     public static WorkflowKind of(String yaml) {
         Object parsed;
         try {
             parsed = new Yaml().load(yaml);
         } catch (RuntimeException e) {
-            return JOB;
+            return PROJECT_WORKFLOW;
         }
-        if (!(parsed instanceof Map<?, ?> map) || !(map.get("steps") instanceof List<?> steps)) return JOB;
+        if (!(parsed instanceof Map<?, ?> map) || !(map.get("steps") instanceof List<?> steps)) return PROJECT_WORKFLOW;
         boolean queuesAPrompt = false;
         for (Object step : steps) {
             if (!(step instanceof Map<?, ?> s)) continue;
@@ -56,6 +56,6 @@ public enum WorkflowKind {
                 }
             }
         }
-        return queuesAPrompt ? PROMPT_CONSTRUCTION : JOB;
+        return queuesAPrompt ? PROMPT_CONSTRUCTION : PROJECT_WORKFLOW;
     }
 }

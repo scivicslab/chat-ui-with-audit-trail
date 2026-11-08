@@ -34,7 +34,7 @@ class WorkflowKindTest {
             assertEquals(WorkflowKind.PROMPT_CONSTRUCTION, kindOfBundled(construction), construction);
         }
         for (String job : List.of("fill-frame", "polish", "research")) {
-            assertEquals(WorkflowKind.JOB, kindOfBundled(job), job);
+            assertEquals(WorkflowKind.PROJECT_WORKFLOW, kindOfBundled(job), job);
         }
     }
 
@@ -53,6 +53,6 @@ class WorkflowKindTest {
     @Test
     @DisplayName("読めない YAML はジョブのワークフローとして扱い、起動時の検査に任せる")
     void unreadableTextIsLeftToTheJobsOwnCheck() {
-        assertEquals(WorkflowKind.JOB, WorkflowKind.of("steps: [unclosed"));
+        assertEquals(WorkflowKind.PROJECT_WORKFLOW, WorkflowKind.of("steps: [unclosed"));
     }
 }

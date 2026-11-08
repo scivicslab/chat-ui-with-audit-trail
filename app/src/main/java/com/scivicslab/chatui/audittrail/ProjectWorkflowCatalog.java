@@ -154,13 +154,13 @@ public final class ProjectWorkflowCatalog {
      * ({@code WorkflowKinds_261021_oo01}).
      *
      * @param query as for {@link #list}
-     * @return the matching job workflows, in the order {@link #list} gives
+     * @return the matching project workflows, in the order {@link #list} gives
      */
     public List<Entry> listJobs(String query) {
         List<Entry> jobs = new ArrayList<>();
         for (Entry entry : list(query)) {
             Document doc = read(entry.name());
-            if (doc != null && WorkflowKind.of(doc.yaml()) == WorkflowKind.JOB) jobs.add(entry);
+            if (doc != null && WorkflowKind.of(doc.yaml()) == WorkflowKind.PROJECT_WORKFLOW) jobs.add(entry);
         }
         return List.copyOf(jobs);
     }
