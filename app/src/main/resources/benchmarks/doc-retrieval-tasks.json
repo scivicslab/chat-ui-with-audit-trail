@@ -35,11 +35,11 @@
     },
     {
       "id": "workflow-entry-state",
-      "question": "set_workflow で会話に別のワークフローを入れるとき、その最初の状態の名前は何でなければなりませんか。またそれはなぜですか。",
+      "question": "set_agent_loop で ConversationSquad アクターに別の Agent Loop を入れるとき、その最初の状態の名前は何でなければなりませんか。またそれはなぜですか。",
       "answer_docs": [
         "WorkflowReloadReset_260828_oo01"
       ],
-      "answer_key": "最初の状態の名前は \"think\" でなければならない。理由は ChatSession.start() が、どのワークフローが入っていても無条件に transitionTo(\"think\") を呼ぶため。名前と理由の両方に触れていること。"
+      "answer_key": "最初の状態の名前は \"think\" でなければならない。理由は ChatSession.start() が、どの Agent Loop が入っていても無条件に transitionTo(\"think\") を呼ぶため。名前と理由の両方に触れていること。"
     },
     {
       "id": "benchmark-skeleton",
