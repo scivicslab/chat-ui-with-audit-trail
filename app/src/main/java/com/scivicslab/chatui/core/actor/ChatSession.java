@@ -1330,8 +1330,9 @@ public class ChatSession extends Interpreter {
                 ? TurnReply.NONE
                 : new TurnReply(completedResults.get(activeResultKey), completedEndings.get(activeResultKey), turnId());
         // A turn that works for a request this conversation received answers it only when none of the
-        // requests sent for it is still out; until then the asker's done stays open, and the answer
-        // of the turn that finishes the work goes in it (ReportReachesTheAskerAfterDelegation_261107_oo01).
+        // requests sent for it is still out; until then the asker's done stays open, and the answers
+        // of every turn that worked for the request go in it, each under its turn's id
+        // (ReportReachesTheAskerAfterDelegation_261107_oo01).
         CompletableFuture<TurnReply> originalDone = null;
         boolean paused = pauseRequested;
         if (turnOriginal != null) {

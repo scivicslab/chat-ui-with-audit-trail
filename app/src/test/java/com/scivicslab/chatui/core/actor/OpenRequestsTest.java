@@ -41,8 +41,45 @@ class OpenRequestsTest {
 
         assertEquals("a:t1:r1", open.replyArrived("b:t1:r2"));
         open.turnEnded("a:t1:r1", answer("final report", "b:t3"));
-        assertEquals("final report", done.join().reply());
+        assertEquals("[answer of turn b:t1]\nsent both\n\n[answer of turn b:t2]\none back\n\n"
+                + "[answer of turn b:t3]\nfinal report", done.join().reply());
         assertEquals("b:t3", done.join().turnId());
+    }
+
+    @Test
+    void aReportWrittenWhileARequestWasStillOutIsNotLost() {
+        // chat-38's case: the full report came in a turn that ended with one request still out, and
+        // the turn that saw the last reply return only said the report had been sent.
+        OpenRequests open = new OpenRequests();
+        CompletableFuture<TurnReply> done = new CompletableFuture<>();
+        open.received("a:t1:r1", "a", done);
+        open.childSent("a:t1:r1", "b:t1:r1");
+        open.childSent("a:t1:r1", "b:t1:r2");
+        open.replyArrived("b:t1:r1");
+        assertNull(open.turnEnded("a:t1:r1", answer("FULL REPORT", "b:t10")));
+
+        open.replyArrived("b:t1:r2");
+        open.turnEnded("a:t1:r1", new TurnReply("the report has been sent", "[ended: answered]", "b:t13"));
+
+        TurnReply r = done.join();
+        assertTrue(r.reply().contains("[answer of turn b:t10]\nFULL REPORT"), r.reply());
+        assertTrue(r.reply().endsWith("[answer of turn b:t13]\nthe report has been sent"), r.reply());
+        assertEquals("[ended: answered]", r.ending());
+    }
+
+    @Test
+    void aFailedLastTurnStillDeliversTheEarlierAnswers() {
+        OpenRequests open = new OpenRequests();
+        CompletableFuture<TurnReply> done = new CompletableFuture<>();
+        open.received("a:t1:r1", "a", done);
+        open.childSent("a:t1:r1", "b:t1:r1");
+        open.turnEnded("a:t1:r1", answer("REPORT", "b:t1"));
+        open.replyArrived("b:t1:r1");
+        open.turnEnded("a:t1:r1", new TurnReply(null, "its turn failed: timeout", "b:t2"));
+
+        TurnReply r = done.join();
+        assertEquals("[answer of turn b:t1]\nREPORT", r.reply());
+        assertEquals("its turn failed: timeout", r.ending());
     }
 
     @Test
@@ -57,7 +94,7 @@ class OpenRequestsTest {
         assertNull(open.turnEnded(original, answer("asked for a fix", "b:t2")));
         assertEquals(original, open.replyArrived("b:t2:r1"));
         open.turnEnded(original, answer("fixed and checked", "b:t3"));
-        assertEquals("fixed and checked", done.join().reply());
+        assertTrue(done.join().reply().endsWith("[answer of turn b:t3]\nfixed and checked"), done.join().reply());
     }
 
     @Test

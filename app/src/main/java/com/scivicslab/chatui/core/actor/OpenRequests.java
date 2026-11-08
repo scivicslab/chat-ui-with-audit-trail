@@ -15,8 +15,11 @@ import java.util.concurrent.CompletableFuture;
  *
  * <p>A request a conversation receives is an <em>original request</em>. Requests its turns send
  * while working on it are its <em>child requests</em>; so are requests sent by turns that the replies
- * to those child requests start. The original request is answered by the first turn that ends with
- * none of its child requests still out. One request gets one reply. After that reply, the original
+ * to those child requests start. The original request is answered when the first turn that ends with
+ * none of its child requests still out ends. One request gets one reply, and it carries the answer of
+ * every turn that worked for the request, each under its turn's id: a report written in a turn that
+ * ended while a child request was still out is not dropped for the answer of the turn that saw the
+ * last reply come back, which may only say that the report was written. After that reply, the original
  * request is kept only as long as it is the last one, so that a turn the provider starts by itself
  * afterwards can still send its answer to the same asker as a follow-up.</p>
  *
@@ -29,6 +32,8 @@ public final class OpenRequests {
         final String asker;
         final CompletableFuture<TurnReply> done;
         final Set<String> outstanding = new LinkedHashSet<>();
+        /** The answers of the turns that ended while a child request was still out, oldest first. */
+        final List<TurnReply> earlier = new ArrayList<>();
         boolean answered;
 
         Original(String asker, CompletableFuture<TurnReply> done) {
@@ -128,9 +133,13 @@ public final class OpenRequests {
      */
     public CompletableFuture<TurnReply> turnEnded(String original, TurnReply reply) {
         Original o = originals.get(original);
-        if (o == null || o.answered || !o.outstanding.isEmpty()) return null;
+        if (o == null || o.answered) return null;
+        if (!o.outstanding.isEmpty()) {
+            if (reply != null && reply.reply() != null && !reply.reply().isBlank()) o.earlier.add(reply);
+            return null;
+        }
         o.answered = true;
-        o.done.complete(reply);
+        o.done.complete(withEarlierAnswers(o.earlier, reply));
         if (!original.equals(last)) originals.remove(original);
         return o.done;
     }
@@ -162,6 +171,23 @@ public final class OpenRequests {
     public int outstanding(String original) {
         Original o = originals.get(original);
         return o == null ? -1 : o.outstanding.size();
+    }
+
+    /**
+     * The reply to send: the last turn's reply alone when no earlier turn left an answer, else every
+     * answer under its turn's id, oldest first, with the last turn's ending line and id.
+     */
+    static TurnReply withEarlierAnswers(List<TurnReply> earlier, TurnReply last) {
+        if (earlier.isEmpty()) return last;
+        StringBuilder text = new StringBuilder();
+        for (TurnReply r : earlier) appendAnswer(text, r);
+        if (last.reply() != null && !last.reply().isBlank()) appendAnswer(text, last);
+        return new TurnReply(text.toString(), last.ending(), last.turnId());
+    }
+
+    private static void appendAnswer(StringBuilder text, TurnReply r) {
+        if (!text.isEmpty()) text.append("\n\n");
+        text.append("[answer of turn ").append(r.turnId()).append("]\n").append(r.reply());
     }
 
     private void forgetLastIfAnswered() {

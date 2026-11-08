@@ -497,12 +497,14 @@ class ConversationToolsTest {
     }
 
     /**
-     * chat-02 is asked by chat-01, hands the work to chat-03 and chat-04, and writes its report in the
-     * turn after both replies are back. chat-01 gets exactly one reply, and it is that report
+     * chat-02 is asked by chat-01, hands the work to chat-03 and chat-04, and answers in three turns:
+     * after sending both requests, after the first reply, and after the second. chat-01 gets exactly
+     * one reply, sent when both replies are back, and it carries all three answers, each under its
+     * turn, so a report written before the last reply came back is not lost
      * ({@code ReportReachesTheAskerAfterDelegation_261107_oo01}).
      */
     @Test
-    void theAskerGetsOneReplyAndItIsTheReportWrittenAfterEveryChildRequestReturned() throws Exception {
+    void theAskerGetsOneReplyCarryingTheAnswerOfEveryTurnForItsRequest() throws Exception {
         IIActorSystem system = new IIActorSystem("conversation-tools-delegation");
         FakeControls controls = new FakeControls();
         Scripted asker = new Scripted(List.of("thanks"), List.of());
@@ -527,8 +529,10 @@ class ConversationToolsTest {
         assertEquals(5, supervisor.prompts.size(), "the supervisor answered both replies: " + supervisor.prompts);
         assertEquals(1, asker.prompts.size(), "one reply only: " + asker.prompts);
         String reply = asker.prompts.get(0);
-        assertTrue(reply.contains("[reply to request project1/chat-01:s7:t3:r1, from project1/chat-02:t3]\nfinal report"),
-                reply);
+        assertTrue(reply.contains("[reply to request project1/chat-01:s7:t3:r1, from project1/chat-02:t3]\n"
+                + "[answer of turn project1/chat-02:t1]\nsent both\n\n"
+                + "[answer of turn project1/chat-02:t2]\none back\n\n"
+                + "[answer of turn project1/chat-02:t3]\nfinal report"), reply);
     }
 
     @Test
