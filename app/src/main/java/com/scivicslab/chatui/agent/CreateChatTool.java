@@ -14,6 +14,10 @@ import java.util.logging.Logger;
  * provider and model the caller names, so a supervising conversation can put its workers on a local
  * LLM and another supervisor on Claude Code ({@code ProviderAndModelChosenAtCreateChat_261107_oo01}).
  *
+ * <p>With no provider named, the conversation is made on {@link #DEFAULT_PROVIDER} (Claude Code): the usual
+ * team is a few Claude Code conversations, and a local LLM is named for many workers that repeat one job. An
+ * instance that has no such provider refuses, naming the providers it has, rather than making a local LLM one.</p>
+ *
  * <p>The id is allocated by the actor system, as {@code POST /api/projects/{p}/chats} does, so two
  * callers never get the same one. The conversation is made in the caller's own project only, as
  * {@code set_chat_model} changes only that project's conversations.</p>
@@ -26,6 +30,9 @@ import java.util.logging.Logger;
 public final class CreateChatTool {
 
     private CreateChatTool() {}
+
+    /** The provider a conversation is made on when {@code create_chat} names none. */
+    public static final String DEFAULT_PROVIDER = "claude";
 
     /** @return the superior's bare id, {@code null} for none, or an {@code error: ...} string */
     static String superiorIdOf(String myProjectId, String myChatId, String superior) {
@@ -44,7 +51,7 @@ public final class CreateChatTool {
      * @param controls    the window onto the actor system
      * @param myProjectId the calling conversation's project id
      * @param provider    the provider's value as {@code list_providers} printed it, or {@code null}/blank
-     *                    for the default ({@code openai-compat} with every tool)
+     *                    for the default ({@link #DEFAULT_PROVIDER})
      * @param model       one of the models the provider offers, or {@code null}/blank for its default
      * @return {@code ok: ...} naming the new conversation, its provider and model, or an {@code error: ...} string
      */
@@ -73,10 +80,13 @@ public final class CreateChatTool {
         }
         boolean providerGiven = provider != null && !provider.isBlank();
         boolean modelGiven = model != null && !model.isBlank();
-        ConversationControls.ProviderOption option = null;
-        if (providerGiven) {
-            option = ProviderTools.find(controls, provider);
-            if (option == null) return ProviderTools.unknownProvider(controls, provider);
+        ConversationControls.ProviderOption option = ProviderTools.find(controls, providerGiven ? provider : DEFAULT_PROVIDER);
+        if (option == null) {
+            if (providerGiven) return ProviderTools.unknownProvider(controls, provider);
+            return "error: refused — this instance has no " + DEFAULT_PROVIDER + " provider, which create_chat uses "
+                    + "when no provider is named; name one of: "
+                    + controls.providerOptions().stream().map(ConversationControls.ProviderOption::value)
+                            .collect(java.util.stream.Collectors.joining(", ")) + " (no conversation was created)";
         }
         String chatId;
         try {
@@ -89,14 +99,13 @@ public final class CreateChatTool {
         }
         String name = ChatUiActorSystem.chatActorName(myProjectId, chatId);
         try {
-            if (option != null) controls.setProvider(myProjectId, chatId, option.kind(), option.toolSet());
+            controls.setProvider(myProjectId, chatId, option.kind(), option.toolSet());
             if (modelGiven) {
                 List<LlmProvider.ModelEntry> available = ListChatModelsTool.modelsOf(system, myProjectId, chatId);
                 String refusal = ChatInspection.refusalFor(model, available);
                 if (refusal != null) {
                     controls.deleteChat(myProjectId, chatId);
-                    return refusal.replace("this conversation's models", "the models of "
-                            + (option == null ? "the default provider" : option.value()))
+                    return refusal.replace("this conversation's models", "the models of " + option.value())
                             + "\n(no conversation was created)";
                 }
                 controls.setModel(myProjectId, chatId, model);
@@ -115,8 +124,7 @@ public final class CreateChatTool {
             }
             reportsTo = ", reporting to chat-" + sup;
         }
-        return "ok: created " + name + " (address it as \"" + chatId + "\") on "
-                + (option == null ? "the default provider" : option.value())
+        return "ok: created " + name + " (address it as \"" + chatId + "\") on " + option.value()
                 + ", model " + (modelGiven ? model : "the provider's default") + reportsTo;
     }
 }

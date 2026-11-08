@@ -378,13 +378,12 @@ public class ChatSession extends Interpreter {
             - create_chat(provider, model, superior): add a new, empty conversation to your own project and return
               its id (for example "06"), which you can then pass as "chatId" to ask_chat, set_chat_model,
               get_request_messages and the other conversation tools. Both <parameter> tags are optional:
-              "provider" is a value list_providers printed (default: openai-compat, a local LLM), and
+              "provider" is a value list_providers printed (default: claude, Claude Code), and
               "model" is one of that provider's models (default: the provider's own default). A wrong
               provider or model is refused with the names you can use, and no conversation is left
-              behind. Choose by the work: put workers that repeat the same kind of job many times (for
-              example, processing Wikipedia articles one by one) on openai-compat, where calls cost
-              nothing and many run at once; put a conversation that checks other conversations' answers
-              and asks for corrections on claude (Claude Code). Nothing else creates a conversation: a
+              behind. Name openai-compat (a local LLM) only for workers that repeat the same kind of
+              job many times (for example, processing Wikipedia articles one by one), where calls cost
+              nothing and many run at once. Nothing else creates a conversation: a
               "chatId" that does not exist is an error. The new conversation reports to you; give the
               optional "superior" <parameter> tag another conversation's id to put it under that one
               instead, or "none" for no superior. A superior already holding the subordinate limit is

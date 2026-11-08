@@ -71,13 +71,13 @@ class ConversationToolsTest {
             created.add(projectId);
             return createdId;
         }
-        @Override public List<ProviderOption> providerOptions() {
-            return List.of(
-                    new ProviderOption("openai-compat", "openai-compat", com.scivicslab.chatui.agent.ToolSet.FULL, "Local LLM"),
-                    new ProviderOption("claude", "claude", com.scivicslab.chatui.agent.ToolSet.HARNESS, "Claude Code"),
-                    new ProviderOption("claude:full", "claude", com.scivicslab.chatui.agent.ToolSet.FULL,
-                            "Claude Code (harness tools off)"));
-        }
+        /** The providers this fake instance offers; a test replaces it to leave one out. */
+        List<ProviderOption> options = List.of(
+                new ProviderOption("openai-compat", "openai-compat", com.scivicslab.chatui.agent.ToolSet.FULL, "Local LLM"),
+                new ProviderOption("claude", "claude", com.scivicslab.chatui.agent.ToolSet.HARNESS, "Claude Code"),
+                new ProviderOption("claude:full", "claude", com.scivicslab.chatui.agent.ToolSet.FULL,
+                        "Claude Code (harness tools off)"));
+        @Override public List<ProviderOption> providerOptions() { return options; }
         @Override public void setProvider(String projectId, String chatId, String kind,
                                           com.scivicslab.chatui.agent.ToolSet toolSet) {
             providerCalls.add(projectId + "/" + chatId + "=" + kind + ":" + toolSet.id());
@@ -219,6 +219,26 @@ class ConversationToolsTest {
     }
 
     @Test
+    void createChatWithNoProviderPutsTheNewConversationOnClaudeCode() {
+        FakeControls controls = new FakeControls();
+        controls.createdId = "02";
+        String result = callFromChat01(invoke("create_chat"), MODELS, controls);
+        assertTrue(result.contains("ok: created project1/chat-02 (address it as \"02\") on claude,"), result);
+        assertEquals(List.of("project1/02=claude:harness"), controls.providerCalls);
+    }
+
+    @Test
+    void createChatWithNoProviderRefusesWhenClaudeIsNotConfiguredAndMakesNothing() {
+        FakeControls controls = new FakeControls();
+        controls.options = List.of(controls.options.get(0));
+        String result = callFromChat01(invoke("create_chat"), MODELS, controls);
+        assertTrue(result.contains("error: refused — this instance has no claude provider, which create_chat uses "
+                + "when no provider is named; name one of: openai-compat"), result);
+        assertTrue(controls.created.isEmpty());
+        assertTrue(controls.providerCalls.isEmpty());
+    }
+
+    @Test
     void listProvidersNamesEachProviderByTheValueToPassOn() {
         String result = callFromChat01(invoke("list_providers"), MODELS, new FakeControls());
         assertTrue(result.contains("openai-compat (Local LLM)\nclaude (Claude Code)\n"
@@ -253,7 +273,7 @@ class ConversationToolsTest {
         FakeControls controls = new FakeControls();
         controls.createdId = "02";
         String result = callFromChat01(invoke("create_chat", "model", "gpt-9"), MODELS, controls);
-        assertTrue(result.contains("error: 'gpt-9' is not one of the models of the default provider; available:\n"
+        assertTrue(result.contains("error: 'gpt-9' is not one of the models of claude; available:\n"
                 + "gemma\nqwen-tensorfold\n(no conversation was created)"), result);
         assertEquals(List.of("project1/02"), controls.deleted);
         assertTrue(controls.setCalls.isEmpty());

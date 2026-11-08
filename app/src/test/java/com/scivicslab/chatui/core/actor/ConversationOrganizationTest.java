@@ -34,7 +34,7 @@ class ConversationOrganizationTest {
     void createChatPutsTheNewConversationUnderItsCreator() {
         ChatUiActorSystem system = started();
 
-        String made = CreateChatTool.create(null, system, "project1", "01", null, null, "");
+        String made = CreateChatTool.create(null, system, "project1", "01", "openai-compat", null, "");
 
         assertTrue(made.startsWith("ok: created project1/chat-02") && made.endsWith("reporting to chat-01"), made);
         String list = OrganizationTools.list(system, "project1", "01");
@@ -47,14 +47,14 @@ class ConversationOrganizationTest {
     void aFullSuperiorGetsNoNewConversation() {
         ChatUiActorSystem system = started();
         assertEquals("ok", system.setOrganizationSettings("project1", null, 2));
-        CreateChatTool.create(null, system, "project1", "01", null, null, "");
-        CreateChatTool.create(null, system, "project1", "01", null, null, "");
+        CreateChatTool.create(null, system, "project1", "01", "openai-compat", null, "");
+        CreateChatTool.create(null, system, "project1", "01", "openai-compat", null, "");
 
-        String refused = CreateChatTool.create(null, system, "project1", "01", null, null, "");
+        String refused = CreateChatTool.create(null, system, "project1", "01", "openai-compat", null, "");
 
         assertTrue(refused.contains("chat-01 already has 2 subordinates") && refused.contains("no conversation was created"), refused);
         assertFalse(system.getChatNames().contains("project1/chat-04"), "nothing was left behind");
-        String deeper = CreateChatTool.create(null, system, "project1", "01", null, null, "02");
+        String deeper = CreateChatTool.create(null, system, "project1", "01", "openai-compat", null, "02");
         assertTrue(deeper.endsWith("reporting to chat-02"), "under a subordinate with room: " + deeper);
     }
 
