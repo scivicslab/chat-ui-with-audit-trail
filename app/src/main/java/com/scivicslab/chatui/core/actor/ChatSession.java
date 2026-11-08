@@ -378,15 +378,17 @@ public class ChatSession extends Interpreter {
               Give the value to create_chat or set_chat_provider. Takes no parameters.
             """);
         m.put("create_chat", """
-            - create_chat(provider, model, superior): add a new, empty conversation to your own project and return
+            - create_chat(provider, model, superior, role): add a new, empty conversation to your own project and return
               its id (for example "06"), which you can then pass as "chatId" to ask_chat, set_chat_model,
-              get_request_messages and the other conversation tools. Both <parameter> tags are optional:
+              get_request_messages and the other conversation tools. All <parameter> tags are optional:
               "provider" is a value list_providers printed (default: claude, Claude Code), and
               "model" is one of that provider's models (default: the provider's own default). A wrong
               provider or model is refused with the names you can use, and no conversation is left
               behind. Name openai-compat (a local LLM) only for workers that repeat the same kind of
               job many times (for example, processing Wikipedia articles one by one), where calls cost
-              nothing and many run at once. Nothing else creates a conversation: a
+              nothing and many run at once. Instead of provider and model you may give "role" (manager, worker or
+              repeater): the role decides the provider, model, name and timekeeper limits, and a role given
+              together with a provider or model is refused. Nothing else creates a conversation: a
               "chatId" that does not exist is an error. The new conversation reports to you; give the
               optional "superior" <parameter> tag another conversation's id to put it under that one
               instead, or "none" for no superior. A superior already holding the subordinate limit is
@@ -2918,7 +2920,8 @@ public class ChatSession extends Interpreter {
                     extractInput(args, "chatId"), extractInput(args, "model"));
             case "list_providers" -> ProviderTools.list(conversationControls);
             case "create_chat" -> CreateChatTool.create(system, conversationControls, projectId, chatId,
-                    extractInput(args, "provider"), extractInput(args, "model"), extractInput(args, "superior"));
+                    extractInput(args, "provider"), extractInput(args, "model"), extractInput(args, "superior"),
+                    extractInput(args, "role"));
             case "list_chats" -> OrganizationTools.list(conversationControls, projectId, chatId);
             case "set_superior" -> OrganizationTools.setSuperior(conversationControls, projectId, chatId,
                     extractInput(args, "chatId"), extractInput(args, "superiorChatId"));
@@ -3568,6 +3571,9 @@ public class ChatSession extends Interpreter {
         // (TimekeeperPausesATurnForAnUrgentRequest_261107_oo01).
         if (isResume(source)) return "timekeeper resume";
         if (Timekeeper.SOURCE.equals(source)) return "timekeeper notice";
+        // A project workflow's job telling this conversation something, e.g. the team it built
+        // (TeamBuiltByProjectWorkflow_261108_oo01).
+        if (source.startsWith("job:")) return "job " + source.substring("job:".length());
         if (source.startsWith(ASK_CHAT_REPLY_SOURCE_PREFIX)) {
             return "reply from chat " + source.substring(ASK_CHAT_REPLY_SOURCE_PREFIX.length());
         }

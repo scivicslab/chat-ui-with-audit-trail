@@ -32,6 +32,7 @@ import io.quarkus.runtime.Startup;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.io.IOException;
@@ -240,6 +241,9 @@ public class ChatUiActorSystem implements ConversationControls {
     /** The name a workflow calls the plugin loader by. */
     public static final String WORKFLOW_LOADER = "loader";
 
+    /** The name plugin code finds the project's conversations by ({@link TeamDesk}). */
+    public static final String WORKFLOW_CONVERSATIONS = "conversations";
+
     /** The name a job's workflow reads and writes files through ({@link ScopedFiles}). */
     public static final String WORKFLOW_FILES = com.scivicslab.turingworkflow.plugins.rstframe.FileGate.ACTOR;
 
@@ -357,6 +361,12 @@ public class ChatUiActorSystem implements ConversationControls {
         ChatsIIAR chatsActor = new ChatsIIAR(WORKFLOW_CHATS, new Chats(actorSystem, callWatchdogRef, this::changeProviderForPlan), actorSystem);
         adopt(HOUSEKEEPER, chatsActor);
         actorSystem.addIIActor(chatsActor);
+        // What the plugin code of a job's workflow may do to the project's conversations
+        // (TeamBuiltByProjectWorkflow_261108_oo01): a narrow desk, not this whole class. It has no workflow actions, so
+        // no workflow calls it; the team builder a job makes with loader.createChild finds it by this name.
+        TeamDeskIIAR conversations = new TeamDeskIIAR(WORKFLOW_CONVERSATIONS, new SystemTeamDesk(this), actorSystem);
+        adopt(HOUSEKEEPER, conversations);
+        actorSystem.addIIActor(conversations);
         LOG.info("File access: write root " + fileScope.writeRoot()
                 + ", readable " + fileScope.describeReadRoots());
         SkillRegistry registry = new SkillRegistry(skillRootPaths);
@@ -1470,6 +1480,85 @@ public class ChatUiActorSystem implements ConversationControls {
     @Override
     public String positionOf(String projectId, String chatId) {
         return organizationSnapshot(projectId).positionText(projectId, chatId, c -> labelOf(projectId, c));
+    }
+
+    // ── What the team desk needs (TeamBuiltByProjectWorkflow_261108_oo01) ──────────────────────────────
+
+    /** @return the bare id of the project's liaison */
+    public String liaisonIdOf(String projectId) {
+        return organizationSnapshot(projectId).liaison();
+    }
+
+    /** @return how many subordinates one superior of the project may have */
+    public int subordinateLimitOf(String projectId) {
+        return organizationSnapshot(projectId).maxSubordinates();
+    }
+
+    /** @return how many more subordinates the conversation can take before it reaches the project's limit */
+    public int roomLeftUnder(String projectId, String chatId) {
+        Organization snapshot = organizationSnapshot(projectId);
+        return Math.max(0, snapshot.maxSubordinates() - snapshot.subordinatesOf(chatId).size());
+    }
+
+    /**
+     * @return the names of the models the conversation's provider lists now; empty when it lists none, or the
+     *         conversation does not exist
+     */
+    public List<String> modelNamesOf(String projectId, String chatId) {
+        ChatSessionIIAR session = chatSessions.get(chatActorName(projectId, chatId));
+        if (session == null) return List.of();
+        try {
+            return session.ask(a -> ((ChatSession) a).getAvailableModels()).get(60, TimeUnit.SECONDS).stream()
+                    .map(m -> m.name()).toList();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return List.of();
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "could not read the models of " + chatActorName(projectId, chatId), e);
+            return List.of();
+        }
+    }
+
+    @Override
+    public String rolesText(String projectId) {
+        return rolesTextOf(projectId);
+    }
+
+    /**
+     * @return the text of the project's own role table, {@code <working directory>/team/team-roles.yaml}, or {@code ""}
+     *         when the project has none
+     */
+    public String rolesTextOf(String projectId) {
+        ActorRef<Project> project = projects.get(projectId);
+        if (project == null) throw new IllegalArgumentException("Unknown project: " + projectId);
+        Path dir = askOrDefault(project, Project::getWorkingDir, null);
+        if (dir == null) return "";
+        Path file = dir.resolve("team").resolve("team-roles.yaml");
+        try {
+            return Files.isRegularFile(file) ? Files.readString(file) : "";
+        } catch (IOException e) {
+            throw new IllegalStateException("could not read " + file + ": " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Puts one message in the conversation's queue, as the timekeeper puts its notices: it is not a request, so it has
+     * no request id and nobody waits for an answer.
+     *
+     * @param source where the message comes from, e.g. {@code job:project1/job-02}
+     * @return {@code null} when queued, otherwise why not
+     */
+    public String notifyConversation(String projectId, String chatId, String source, String text) {
+        String name = chatActorName(projectId, chatId);
+        ChatSessionIIAR session = chatSessions.get(name);
+        ActorRef<PromptQueue> queue = actorSystem.getActor(name + ".queue");
+        if (session == null || queue == null) return "error: no such conversation: " + name;
+        ActorRef<SseConnection> sse = actorSystem.getActor(name + ".sse");
+        java.util.function.Consumer<com.scivicslab.chatui.core.rest.ChatEvent> watchers =
+                sse == null ? event -> { } : event -> sse.tell(c -> c.emit(event));
+        queue.tell(q -> q.enqueue(text, null, "queue", watchers, session.asChatSessionRef(), source, null,
+                new java.util.concurrent.CompletableFuture<>(), false, true, List.of(), null, false));
+        return null;
     }
 
     private String labelOf(String projectId, String chatId) {

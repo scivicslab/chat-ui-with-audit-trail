@@ -56,6 +56,14 @@ public interface ConversationControls {
     List<ProviderOption> providerOptions();
 
     /**
+     * @return the text of the project's own role table ({@code team/team-roles.yaml} in its working directory), or
+     *         {@code ""} when it has none ({@code TeamBuiltByProjectWorkflow_261108_oo01})
+     */
+    default String rolesText(String projectId) {
+        return "";
+    }
+
+    /**
      * Puts a conversation on another provider and tool set, and records it with the conversation's
      * other settings, so a restart puts the conversation back on it. A turn already running finishes
      * on the old provider.

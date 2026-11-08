@@ -1,6 +1,7 @@
 package com.scivicslab.chatui.agent;
 
 import com.scivicslab.chatui.core.actor.ChatUiActorSystem;
+import com.scivicslab.chatui.core.actor.TeamRoles;
 import com.scivicslab.chatui.core.actor.ConversationControls;
 import com.scivicslab.chatui.core.provider.LlmProvider;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
@@ -71,7 +72,39 @@ public final class CreateChatTool {
      */
     public static String create(IIActorSystem system, ConversationControls controls, String myProjectId,
                                 String myChatId, String provider, String model, String superior) {
+        return create(system, controls, myProjectId, myChatId, provider, model, superior, null);
+    }
+
+    /**
+     * As above, and with a role: the provider, model, name and timekeeper limits of the new conversation come from the
+     * role table ({@code TeamBuiltByProjectWorkflow_261108_oo01}), so the caller cannot choose them. A role given with a
+     * provider or a model is refused, and so is a role the table does not define.
+     *
+     * @param role {@code manager}, {@code worker} or {@code repeater}; blank for none
+     */
+    public static String create(IIActorSystem system, ConversationControls controls, String myProjectId,
+                                String myChatId, String provider, String model, String superior, String role) {
         if (controls == null) return "error: create_chat is not available here";
+        TeamRoles.Role roleSettings = null;
+        String roleName = role == null ? "" : role.strip();
+        if (!roleName.isEmpty()) {
+            if ((provider != null && !provider.isBlank()) || (model != null && !model.isBlank())) {
+                return "error: refused — a role decides the provider and the model; give the role or the provider and "
+                        + "model, not both (no conversation was created)";
+            }
+            try {
+                TeamRoles roles = TeamRoles.of(controls.rolesText(myProjectId));
+                if (!TeamRoles.NAMES.contains(roleName)) {
+                    return "error: unknown role '" + roleName + "'; choose one of: " + String.join(", ", TeamRoles.NAMES)
+                            + " (no conversation was created)";
+                }
+                roleSettings = roles.role(roleName);
+            } catch (IllegalArgumentException | IllegalStateException e) {
+                return "error: " + e.getMessage() + " (no conversation was created)";
+            }
+            provider = roleSettings.provider();
+            model = roleSettings.model();
+        }
         String sup = superiorIdOf(myProjectId, myChatId, superior);
         if (sup != null && sup.startsWith("error:")) return sup;
         if (sup != null) {
@@ -124,7 +157,21 @@ public final class CreateChatTool {
             }
             reportsTo = ", reporting to chat-" + sup;
         }
+        String asRole = "";
+        if (roleSettings != null) {
+            try {
+                String named = controls.setChatName(myProjectId, chatId, roleName + " chat-" + chatId);
+                if (named.startsWith("error:")) throw new IllegalStateException(named);
+                controls.setTimekeeperLimits(myProjectId, chatId, roleSettings.urgentWaitMinutes(),
+                        roleSettings.childReplyWarnMinutes());
+            } catch (RuntimeException e) {
+                LOG.log(Level.WARNING, "create_chat: could not give " + name + " its role", e);
+                controls.deleteChat(myProjectId, chatId);
+                return "error: create_chat failed: " + e.getMessage() + " (no conversation was created)";
+            }
+            asRole = ", as " + roleName;
+        }
         return "ok: created " + name + " (address it as \"" + chatId + "\") on " + option.value()
-                + ", model " + (modelGiven ? model : "the provider's default") + reportsTo;
+                + ", model " + (modelGiven ? model : "the provider's default") + reportsTo + asRole;
     }
 }

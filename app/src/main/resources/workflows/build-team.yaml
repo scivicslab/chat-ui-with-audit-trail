@@ -1,0 +1,139 @@
+name: build-team
+description: |
+  Builds a team of ConversationSquad actors in one go (TeamBuiltByProjectWorkflow_261108_oo01): middle managers
+  under the liaison, each with its workers. Every ConversationSquad actor is made on the provider and model its role
+  says in team-roles.yaml (managers and workers on claude, model opus; repeaters, for jobs repeated many times, on
+  the local LLM); a project may keep its own table at team/team-roles.yaml in its working directory, and any input
+  below overrides the table for this run only. The team is made whole or not at all: when a step fails, what was made
+  is deleted, subordinates first, and the job fails with the reason. When it is built, the liaison gets one message
+  listing the tree, and the job's result is the same list.
+
+  Run this as a project job (Run tab or REST); it is started by a person, not by a conversation.
+  The first state must be named "0".
+params:
+  managers:
+    label: "Managers"
+    description: "How many middle managers to put under the liaison (at least 1)"
+    type: int
+    default: 1
+  workersPerManager:
+    label: "Workers per manager"
+    description: "Workers on the worker role under each manager"
+    type: int
+    default: 3
+  repeatersPerManager:
+    label: "Repeaters per manager"
+    description: "Workers on the repeater role (a local LLM, for jobs repeated many times) under each manager"
+    type: int
+    default: 0
+  work:
+    label: "What the team is for"
+    description: "A few words (at most 40 characters); every name says it, e.g. 'Wikipedia summaries / worker 1-2'. Empty uses the job's name."
+    type: text
+    default: ""
+  managerProvider:
+    label: "Manager provider (this run only)"
+    description: "Overrides the manager role's provider; empty keeps team-roles.yaml. With no model named, the provider's own default model is used."
+    type: text
+    default: ""
+  managerModel:
+    label: "Manager model (this run only)"
+    description: "Overrides the manager role's model, e.g. sonnet; empty keeps team-roles.yaml"
+    type: text
+    default: ""
+  workerProvider:
+    label: "Worker provider (this run only)"
+    description: "Overrides the worker role's provider; empty keeps team-roles.yaml"
+    type: text
+    default: ""
+  workerModel:
+    label: "Worker model (this run only)"
+    description: "Overrides the worker role's model, e.g. sonnet; empty keeps team-roles.yaml"
+    type: text
+    default: ""
+  repeaterProvider:
+    label: "Repeater provider (this run only)"
+    description: "Overrides the repeater role's provider; empty keeps team-roles.yaml"
+    type: text
+    default: ""
+  repeaterModel:
+    label: "Repeater model (this run only)"
+    description: "Overrides the repeater role's model; empty keeps team-roles.yaml"
+    type: text
+    default: ""
+steps:
+  - states: ["0", "1"]
+    label: add-team-builder
+    note: The team builder is the job's own child, so a job running at the same time makes its own.
+    actions:
+      - actor: loader
+        method: createChild
+        arguments: ['jexl:self', "./team", "com.scivicslab.chatui.core.actor.TeamBuilderIIAR"]
+
+  - states: ["1", "2"]
+    label: check
+    note: Decides the team from the inputs and makes nothing. Fails with the reason when the inputs cannot make a team.
+    actions:
+      - actor: ./team
+        method: check
+        arguments:
+          owner: 'jexl:self'
+          managers: 'jexl:state.getString("managers")'
+          workersPerManager: 'jexl:state.getString("workersPerManager")'
+          repeatersPerManager: 'jexl:state.getString("repeatersPerManager")'
+          work: 'jexl:state.getString("work")'
+          managerProvider: 'jexl:state.getString("managerProvider")'
+          managerModel: 'jexl:state.getString("managerModel")'
+          workerProvider: 'jexl:state.getString("workerProvider")'
+          workerModel: 'jexl:state.getString("workerModel")'
+          repeaterProvider: 'jexl:state.getString("repeaterProvider")'
+          repeaterModel: 'jexl:state.getString("repeaterModel")'
+        execution: direct
+
+  - states: ["1", "failed"]
+    label: could-not-plan
+    actions: [{actor: this, method: doNothing, arguments: ["the team could not be planned"], execution: direct}]
+
+  - states: ["2", "3"]
+    label: build
+    note: Makes every ConversationSquad actor of the plan, or none. A failure has already deleted what was made.
+    actions:
+      - actor: ./team
+        method: build
+        arguments: []
+        execution: direct
+
+  - states: ["2", "failed"]
+    label: could-not-build
+    actions: [{actor: this, method: doNothing, arguments: ["the team could not be built"], execution: direct}]
+
+  - states: ["3", "end"]
+    label: report
+    note: The result is the tree that was built. The same tree goes to the liaison as one message from this job.
+    actions:
+      - actor: ./team
+        method: report
+        arguments: {owner: 'jexl:self'}
+        execution: direct
+      - actor: this
+        method: putJson
+        arguments: {path: report, value: "jexl:result"}
+        execution: direct
+      - actor: loader
+        method: removeChild
+        arguments: ['jexl:self', "./team"]
+      - actor: this
+        method: finish
+        arguments: ["report"]
+        execution: direct
+
+  - states: ["failed", "end"]
+    label: report-failure
+    actions:
+      - actor: loader
+        method: removeChild
+        arguments: ['jexl:self', "./team"]
+      - actor: this
+        method: reportFailure
+        arguments: []
+        execution: direct

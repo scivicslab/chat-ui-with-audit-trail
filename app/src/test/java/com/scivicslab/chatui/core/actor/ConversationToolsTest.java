@@ -278,6 +278,46 @@ class ConversationToolsTest {
         assertEquals(1, caller.prompts.get(1).split("Tool result \\(create_chat\\)", -1).length - 1, caller.prompts.get(1));
     }
 
+    private static final List<LlmProvider.ModelEntry> ROLE_MODELS = List.of(
+            new LlmProvider.ModelEntry("opus", "fake", null),
+            new LlmProvider.ModelEntry("google/gemma-4-26B-A4B-it", "fake", null));
+
+    @Test
+    @org.junit.jupiter.api.Tag("TeamBuiltByProjectWorkflowTests_261109_oo01")
+    void createChatWithARoleTakesProviderModelNameAndLimitsFromTheRoleTable() {
+        FakeControls controls = new FakeControls();
+        controls.createdId = "02";
+        String result = callFromChat01(invoke("create_chat", "role", "worker"), ROLE_MODELS, controls);
+        assertTrue(result.contains("ok: created project1/chat-02 (address it as \"02\") on claude, model opus"), result);
+        assertTrue(result.contains(", as worker"), result);
+        assertEquals(List.of("project1/02=claude:harness"), controls.providerCalls);
+        assertEquals(List.of("project1/02=opus"), controls.setCalls);
+        assertEquals(List.of("project1/02=worker chat-02"), controls.nameCalls);
+        assertEquals(List.of("project1/02=10,30"), controls.timekeeperCalls);
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("TeamBuiltByProjectWorkflowTests_261109_oo01")
+    void aRepeaterRoleIsOnTheLocalLlmItsTableNames() {
+        FakeControls controls = new FakeControls();
+        controls.createdId = "02";
+        String result = callFromChat01(invoke("create_chat", "role", "repeater"), ROLE_MODELS, controls);
+        assertTrue(result.contains("on openai-compat, model google/gemma-4-26B-A4B-it"), result);
+        assertEquals(List.of("project1/02=google/gemma-4-26B-A4B-it"), controls.setCalls);
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("TeamBuiltByProjectWorkflowTests_261109_oo01")
+    void aRoleGivenWithAProviderOrModelOrAnUnknownRoleIsRefusedAndNothingIsMade() {
+        FakeControls controls = new FakeControls();
+        String both = callFromChat01(invoke("create_chat", "role", "worker", "model", "sonnet"), ROLE_MODELS, controls);
+        assertTrue(both.contains("a role decides the provider and the model"), both);
+        FakeControls other = new FakeControls();
+        String unknown = callFromChat01(invoke("create_chat", "role", "general"), ROLE_MODELS, other);
+        assertTrue(unknown.contains("unknown role 'general'; choose one of: manager, worker, repeater"), unknown);
+        assertTrue(controls.created.isEmpty() && other.created.isEmpty());
+    }
+
     @Test
     void listProvidersNamesEachProviderByTheValueToPassOn() {
         String result = callFromChat01(invoke("list_providers"), MODELS, new FakeControls());

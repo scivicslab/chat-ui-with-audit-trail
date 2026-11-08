@@ -1,0 +1,20 @@
+# The roles of a team of ConversationSquad actors (TeamBuiltByProjectWorkflow_261108_oo01).
+# A project may put its own copy at <working directory>/team/team-roles.yaml; that one is used instead.
+# "model" is a name list_chat_models prints for the provider; empty means the provider's own default model.
+roles:
+  manager:
+    provider: claude
+    model: opus
+    urgentWaitMinutes: 10
+    childReplyWarnMinutes: 30
+  worker:
+    provider: claude
+    model: opus
+    urgentWaitMinutes: 10
+    childReplyWarnMinutes: 30
+  # A local LLM, for workers that repeat one kind of job many times.
+  repeater:
+    provider: openai-compat
+    model: google/gemma-4-26B-A4B-it
+    urgentWaitMinutes: 10
+    childReplyWarnMinutes: 30
