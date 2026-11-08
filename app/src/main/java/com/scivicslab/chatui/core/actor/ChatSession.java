@@ -21,7 +21,7 @@ import com.scivicslab.chatui.agent.DeleteChatTool;
 import com.scivicslab.chatui.agent.GetChatStatusTool;
 import com.scivicslab.chatui.agent.ListChatModelsTool;
 import com.scivicslab.chatui.agent.SetChatModelTool;
-import com.scivicslab.chatui.agent.SetWorkflowTool;
+import com.scivicslab.chatui.agent.SetAgentLoopTool;
 import com.scivicslab.chatui.agent.TextToolCallParser;
 import com.scivicslab.chatui.agent.ToolCall;
 import com.scivicslab.chatui.agent.ToolSet;
@@ -172,7 +172,7 @@ public class ChatSession extends Interpreter {
     /**
      * Steps allowed when the workflow's step-limit transition names no number
      * ({@code TurnResourceLimits_260830_oo01}). Not the limit itself: the limit is what the
-     * workflow says. This value exists so that a workflow installed by {@code set_workflow} that
+     * workflow says. This value exists so that an agent loop installed by {@code set_agent_loop} that
      * forgot its step-limit transition still stops, instead of running to
      * {@code Interpreter.runUntilEnd}'s 10000-iteration backstop.
      */
@@ -332,11 +332,11 @@ public class ChatSession extends Interpreter {
               id. A blank name clears it; at most 80 characters. Requires "chatId" and "name"
               <parameter> tags.
             """);
-        m.put("set_workflow", """
-            - set_workflow(chatId, yaml): replace another ConversationSquad's agent-loop workflow
-              with the given Turing-workflow YAML text (not a file path). Requires TWO <parameter>
-              tags: "chatId" and "yaml". Use this to author a workflow for another ConversationSquad to run,
-              then use ask_chat to actually kick off a turn under it.
+        m.put("set_agent_loop", """
+            - set_agent_loop(chatId, yaml): replace another ConversationSquad's agent loop — the
+              Turing workflow that runs each of its turns — with the given YAML text (not a file
+              path). Requires TWO <parameter> tags: "chatId" and "yaml". Use this to author an agent
+              loop for another ConversationSquad to run, then use ask_chat to start a turn under it.
             """);
         m.put("load_skill", """
             - load_skill(name): read one of the skills listed after this tool list in full — its
@@ -347,8 +347,8 @@ public class ChatSession extends Interpreter {
         m.put("set_collaborator", """
             - set_collaborator(chatId, role, collaboratorChatId): record that, for ConversationSquad "chatId",
               the ConversationSquad playing role "role" (e.g. "worker") is "collaboratorChatId". Requires THREE
-              <parameter> tags: "chatId", "role", "collaboratorChatId". A workflow installed via
-              set_workflow can then resolve that role instead of a hardcoded chat id, and you can
+              <parameter> tags: "chatId", "role", "collaboratorChatId". An agent loop installed via
+              set_agent_loop can then resolve that role instead of a hardcoded chat id, and you can
               reassign it again later by calling this a second time.
             """);
         m.put("get_chat_status", """
@@ -2815,7 +2815,7 @@ public class ChatSession extends Interpreter {
                 }
                 yield sent;
             }
-            case "set_workflow" -> SetWorkflowTool.setWorkflow(system, projectId,
+            case "set_agent_loop" -> SetAgentLoopTool.setAgentLoop(system, projectId,
                     extractInput(args, "chatId"), extractInput(args, "yaml"));
             case "load_skill" -> LoadSkillTool.load(skillRegistryRef, extractInput(args, "name"));
             case "set_collaborator" -> SetCollaboratorTool.setCollaborator(collaborationGraphRef,

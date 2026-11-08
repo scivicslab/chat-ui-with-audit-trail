@@ -101,7 +101,7 @@ public class ChatSessionIIAR extends InterpreterIIAR {
 
     /**
      * Replaces this conversation's agent loop with another workflow, the same way the
-     * {@code set_workflow} tool does — reset first, then read
+     * {@code set_agent_loop} tool does — reset first, then read
      * ({@code WorkflowReloadReset_260828_oo01}). Used to select a variant from outside the
      * conversation ({@code DocRetrievalAgentLoop_260830_oo01}).
      *

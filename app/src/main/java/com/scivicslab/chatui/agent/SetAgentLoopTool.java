@@ -13,8 +13,9 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * The {@code set_workflow} tool: replaces another ConversationSquad's agent-loop workflow with the
- * given YAML, so one ConversationSquad can author a workflow for another to run (graph-engineering scenarios —
+ * The {@code set_agent_loop} tool: replaces another ConversationSquad's agent loop — the workflow that
+ * runs each of its turns — with the given YAML, so one ConversationSquad can author an agent loop for
+ * another to run (graph-engineering scenarios —
  * see {@code WorkerBabysitterOrchestration_260828_oo01}).
  *
  * <p>Takes the YAML as a string, not a file name — {@code write}-tool output lands under the OS
@@ -24,11 +25,11 @@ import java.util.logging.Logger;
  * {@code Interpreter.reset()} before {@code readYaml(...)} — {@code readYaml} alone does not reset
  * the interpreter's current state, only its step table ({@code WorkflowReloadReset_260828_oo01}).</p>
  */
-public final class SetWorkflowTool {
+public final class SetAgentLoopTool {
 
-    private SetWorkflowTool() {}
+    private SetAgentLoopTool() {}
 
-    private static final Logger LOG = Logger.getLogger(SetWorkflowTool.class.getName());
+    private static final Logger LOG = Logger.getLogger(SetAgentLoopTool.class.getName());
 
     /** Generous: this waits behind the target's own mailbox, so it can queue behind a running turn. */
     private static final int TIMEOUT_SECONDS = 60;
@@ -38,19 +39,19 @@ public final class SetWorkflowTool {
      * @param myProjectId the calling conversation's project id
      * @param target      the target as written by the caller — a bare id ({@code "02"}) for this
      *                    project, or a qualified one ({@code "project2/02"}) to cross into another
-     * @param yaml        the new workflow's YAML text
+     * @param yaml        the new agent loop's YAML text
      * @return {@code "ok: ..."} on success, or an {@code error: ...} string
      */
-    public static String setWorkflow(IIActorSystem system, String myProjectId, String target, String yaml) {
+    public static String setAgentLoop(IIActorSystem system, String myProjectId, String target, String yaml) {
         if (target == null || target.isBlank()) return "error: chatId is required";
         if (yaml == null || yaml.isBlank()) return "error: yaml is required";
 
         String targetName = ChatUiActorSystem.resolveChatName(myProjectId, target);
         if (!targetName.startsWith(myProjectId + "/")) {
-            // set_workflow rewrites how the target runs its own work, so crossing a project needs
+            // set_agent_loop rewrites how the target runs its own work, so crossing a project needs
             // the target project's consent. The gateway that grants it is not designed yet, so
             // refuse for now rather than silently reaching in (ProjectNamespacePrefix_260829_oo01).
-            return "error: refused — " + target + " belongs to another project; set_workflow across"
+            return "error: refused — " + target + " belongs to another project; set_agent_loop across"
                     + " projects must go through that project's gateway (not implemented yet)";
         }
 
@@ -66,10 +67,10 @@ public final class SetWorkflowTool {
                 chat.readYaml(new ByteArrayInputStream(yaml.getBytes(StandardCharsets.UTF_8)));
                 return null;
             }).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            return "ok: workflow installed on chat " + target;
+            return "ok: agent loop installed on chat " + target;
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "set_workflow: failed for " + target, e);
-            return "error: set_workflow failed: " + e.getMessage();
+            LOG.log(Level.WARNING, "set_agent_loop: failed for " + target, e);
+            return "error: set_agent_loop failed: " + e.getMessage();
         }
     }
 }

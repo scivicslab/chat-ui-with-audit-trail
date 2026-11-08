@@ -90,7 +90,7 @@ class ChatSessionToolSetTest {
         RecordingProvider p = runTurn(ToolSet.FULL);
         String first = p.prompts.get(0);
         for (String name : List.of("read", "calc", "search_docs", "list_references", "write", "ask_chat",
-                "set_workflow", "load_skill", "set_collaborator")) {
+                "set_agent_loop", "load_skill", "set_collaborator")) {
             assertTrue(first.contains("- " + name + "("), "full prompt lists " + name);
         }
         assertFalse(first.contains("run_plan"), "run_plan is gone; workflows run as project jobs");
@@ -106,7 +106,7 @@ class ChatSessionToolSetTest {
     void firstStepPrompt_harnessToolSet_dropsOnlyWhatTheHarnessDuplicatesAndRefusesRead() {
         RecordingProvider p = runTurn(ToolSet.HARNESS, "I am a harness.\n\n");
         String first = p.prompts.get(0);
-        for (String name : List.of("search_docs", "list_references", "ask_chat", "set_workflow",
+        for (String name : List.of("search_docs", "list_references", "ask_chat", "set_agent_loop",
                 "load_skill", "set_collaborator")) {
             assertTrue(first.contains("- " + name + "("), "harness prompt lists " + name);
         }

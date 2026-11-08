@@ -14,7 +14,7 @@ import java.util.logging.Logger;
  * conversation that asked for it ({@code BabysitterRealisticE2eScenario_260828_oo01}
  * "chat-01のworkflowは、chat-01自身のagent loopとしてではなく、別アクター（PlanRunner）として動かす").
  *
- * <p>A conversation cannot install a plan on itself: {@code set_workflow} asks the target actor and
+ * <p>A conversation cannot install a plan on itself: {@code set_agent_loop} asks the target actor and
  * waits for the answer, so aimed at itself the message would sit in its own mailbox while its only
  * thread is blocked waiting for it. Running the plan in a separate actor avoids that, and — because
  * it is an actor rather than a plain object — leaves it reachable while it runs, so

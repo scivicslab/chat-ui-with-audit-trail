@@ -875,7 +875,7 @@ public class ChatUiActorSystem implements ConversationControls {
     }
 
     /**
-     * Resolves the target of a cross-conversation tool call ({@code ask_chat}/{@code set_workflow})
+     * Resolves the target of a cross-conversation tool call ({@code ask_chat}/{@code set_agent_loop})
      * into a qualified conversation name. A bare id ({@code "02"}) names a conversation in the
      * caller's own project; a qualified one ({@code "project2/02"}) names one in another project,
      * so crossing a project boundary is visible in the argument itself

@@ -13,7 +13,7 @@ import java.util.logging.Logger;
  * The {@code set_chat_model} tool: puts another conversation on a different model, so one
  * conversation can choose which local model does a job it hands to another.
  *
- * <p>Refuses a conversation of another project, as {@code set_workflow} and {@code set_collaborator}
+ * <p>Refuses a conversation of another project, as {@code set_agent_loop} and {@code set_collaborator}
  * do: it changes how that conversation runs. Refuses a name its provider does not list, with the list
  * in the answer. The change lands after the conversation's current turn, because it is delivered to
  * the provider's own actor.</p>

@@ -39,7 +39,7 @@ public final class SetCollaboratorTool {
         String myProjectId = myChatName.substring(0, myChatName.indexOf('/'));
         String targetName = ChatUiActorSystem.resolveChatName(myProjectId, target);
         if (!targetName.startsWith(myProjectId + "/")) {
-            // Same reasoning as set_workflow: this rewrites who the target will hand work to.
+            // Same reasoning as set_agent_loop: this rewrites who the target will hand work to.
             return "error: refused — " + target + " belongs to another project; set_collaborator"
                     + " across projects must go through that project's gateway (not implemented yet)";
         }
