@@ -78,27 +78,27 @@ class StepAnswerStreamTest {
 
     @Test
     void proseBeforeACallIsTakenBackAndMovedToTheTrace() {
-        stream.accept("Let me check. ");
+        stream.accept("Let me check.\n");
         stream.accept("<invoke name=\"calc\">");
         stream.accept("<parameter name=\"expression\">1+1</parameter></invoke>");
         stream.finish(true);
 
         assertEquals("", provisional());
-        assertEquals("Let me check. <invoke name=\"calc\"><parameter name=\"expression\">1+1</parameter></invoke>",
+        assertEquals("Let me check.\n<invoke name=\"calc\"><parameter name=\"expression\">1+1</parameter></invoke>",
                 trace());
         assertEquals(1, events.stream().filter(e -> e.type().equals("answer_retract")).count());
     }
 
     @Test
     void aMarkerSplitAcrossChunksIsNeverShown() {
-        stream.accept("Checking <inv");
+        stream.accept("Checking\n<inv");
         // The "<inv" could be the start of "<invoke", so it is held back, not shown.
-        assertEquals("Checking ", provisional());
+        assertEquals("Checking\n", provisional());
         stream.accept("oke name=\"calc\">");
         stream.finish(true);
 
         assertEquals("", provisional());
-        assertEquals("Checking <invoke name=\"calc\">", trace());
+        assertEquals("Checking\n<invoke name=\"calc\">", trace());
     }
 
     @Test
@@ -124,12 +124,46 @@ class StepAnswerStreamTest {
         for (String marker : new String[] {"<function_calls>", "<tool_call>", "<function=calc>"}) {
             events.clear();
             StepAnswerStream s = new StepAnswerStream(events::add);
-            s.accept("Thinking aloud. ");
+            s.accept("Thinking aloud.\n");
             s.accept(marker);
             s.finish(true);
             assertEquals("", provisional(), marker);
-            assertEquals("Thinking aloud. " + marker, trace(), marker);
+            assertEquals("Thinking aloud.\n" + marker, trace(), marker);
         }
+    }
+
+    /**
+     * A block quoted in a fence or in the middle of a line is not a call to the parser, so the pane must
+     * not take the answer back for it (2026-11-08: a report that quoted call blocks).
+     */
+    @Test
+    void aQuotedBlockInsideAFenceDoesNotTakeTheAnswerBack() {
+        stream.accept("The model wrote:\n```\n<invoke name=\"ask_chat\">\n</invoke>\n```\nand that is all.");
+        stream.finish(false);
+
+        assertEquals("The model wrote:\n```\n<invoke name=\"ask_chat\">\n</invoke>\n```\nand that is all.", provisional());
+        assertTrue(!types().contains("answer_retract") && !types().contains("thinking"), types());
+    }
+
+    @Test
+    void aQuotedBlockInTheMiddleOfALineDoesNotTakeTheAnswerBack() {
+        stream.accept("It wrote ");
+        stream.accept("<invoke name=\"ask_chat\"><parameter name=\"chatId\">50</parameter></invoke> twice.");
+        stream.finish(false);
+
+        assertEquals("It wrote <invoke name=\"ask_chat\"><parameter name=\"chatId\">50</parameter></invoke> twice.",
+                provisional());
+        assertTrue(!types().contains("answer_retract") && !types().contains("thinking"), types());
+    }
+
+    @Test
+    void aBlockAfterAFencedExampleStillTakesTheAnswerBack() {
+        stream.accept("Example:\n```\n<invoke name=\"ask_chat\">\n</invoke>\n```\n");
+        stream.accept("<invoke name=\"calc\">");
+        stream.finish(true);
+
+        assertEquals("", provisional());
+        assertTrue(types().contains("answer_retract"), types());
     }
 
     @Test

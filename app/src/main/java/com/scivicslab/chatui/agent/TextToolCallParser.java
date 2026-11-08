@@ -48,9 +48,17 @@ public final class TextToolCallParser {
 
     private TextToolCallParser() {}
 
-    // Each <invoke name="TOOL"> ... </invoke> block (DOTALL so it spans newlines).
+    // Where an <invoke name="TOOL"> call begins: at the start of a line (spaces allowed), optionally
+    // behind <function_calls>, the way a model writes one. The same tag in the middle of a sentence, in
+    // backticks or in a table row is prose quoting the spelling, not a call, as for the function=
+    // spelling below (2026-11-08: a report that quoted call blocks was run as calls and lost).
+    private static final String INVOKE_START =
+            "^[ \\t]*(?:<function_calls>\\s*)?<invoke\\s+name=\"([^\"]+)\"\\s*>";
+    // Each <invoke name="TOOL"> ... </invoke> block that starts a line (DOTALL so it spans newlines).
     private static final Pattern INVOKE =
-            Pattern.compile("<invoke\\s+name=\"([^\"]+)\"\\s*>(.*?)</invoke>", Pattern.DOTALL);
+            Pattern.compile(INVOKE_START + "(.*?)</invoke>", Pattern.DOTALL | Pattern.MULTILINE);
+    // The start of a call, whether or not its </invoke> was written.
+    private static final Pattern INVOKE_OPEN = Pattern.compile(INVOKE_START, Pattern.MULTILINE);
     // A <parameter name="KEY">VALUE</parameter> pair; VALUE ends at </parameter>, the next <parameter,
     // <reason>, or </invoke> — tolerating a missing close tag.
     private static final Pattern PARAM = Pattern.compile(
@@ -78,11 +86,14 @@ public final class TextToolCallParser {
     // Stray special tokens the model leaks into values, e.g. <|"|>.
     private static final Pattern JUNK_TOKEN = Pattern.compile("<\\|[^>]*\\|>");
 
-    /** True when {@code content} contains at least one textual tool-call block, in either spelling. */
+    /**
+     * True when {@code content} contains at least one textual tool-call block, in either spelling.
+     * A block inside a fenced code block, or not at the start of a line, is a quotation and does not count.
+     */
     public static boolean looksLikeTextToolCall(String content) {
         if (content == null) return false;
-        return (content.contains("<invoke ") && content.contains("name="))
-                || FUNCTION.matcher(withoutCodeFences(content)).find();
+        String visible = withoutCodeFences(content);
+        return INVOKE_OPEN.matcher(visible).find() || FUNCTION.matcher(visible).find();
     }
 
     /**
@@ -96,7 +107,7 @@ public final class TextToolCallParser {
         List<ToolCall> calls = new ArrayList<>();
         if (!looksLikeTextToolCall(content)) return calls;
 
-        Matcher inv = INVOKE.matcher(content);
+        Matcher inv = INVOKE.matcher(withoutCodeFences(content));
         int idx = 0;
         while (inv.find()) {
             String name = inv.group(1).trim();
@@ -171,7 +182,7 @@ public final class TextToolCallParser {
         if (content == null) return "";
         String out = content.replaceAll("(?s)<function_calls>.*?</function_calls>", "");
         // Some outputs omit the wrapper and emit a bare <invoke>…</invoke>; drop those too.
-        out = out.replaceAll("(?s)<invoke\\s+name=\"[^\"]+\"\\s*>.*?</invoke>", "");
+        out = out.replaceAll("(?ms)^[ \\t]*<invoke\\s+name=\"[^\"]+\"\\s*>.*?</invoke>", "");
         // The <tool_call><function=…> spelling, with or without the <tool_call> wrapper.
         out = out.replaceAll("(?ms)^[ \\t]*<tool_call>.*?</tool_call>", "");
         out = out.replaceAll("(?ms)^[ \\t]*<function=[^>\\s]+\\s*>.*?</function>", "");

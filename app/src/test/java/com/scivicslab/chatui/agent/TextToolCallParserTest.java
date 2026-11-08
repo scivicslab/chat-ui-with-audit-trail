@@ -94,6 +94,57 @@ class TextToolCallParserTest {
         assertTrue(TextToolCallParser.parse(text).isEmpty());
     }
 
+    /**
+     * The measured failure of 2026-11-08: a report that quoted a call block was run as a call, with
+     * no chatId, and the report was lost. The invoke spelling is read as the function= spelling is:
+     * code fences are ignored, and only a block that starts a line is a call.
+     */
+    @Test
+    void anInvokeBlockInsideAFencedCodeBlockIsAQuoteNotACall() {
+        String text = "The model wrote:\n```\n<invoke name=\"ask_chat\">\n<parameter name=\"chatId\">50</parameter>\n</invoke>\n```\nand that is all.";
+        assertFalse(TextToolCallParser.looksLikeTextToolCall(text));
+        assertTrue(TextToolCallParser.parse(text).isEmpty());
+    }
+
+    @Test
+    void anInvokeBlockInTheMiddleOfALineIsAQuoteNotACall() {
+        String inProse = "It wrote <invoke name=\"ask_chat\"><parameter name=\"chatId\">50</parameter></invoke> twice.";
+        String inBackticks = "The block `<invoke name=\"calc\"><parameter name=\"expression\">1+1</parameter></invoke>` is a call.";
+        for (String prose : List.of(inProse, inBackticks, inProse + "\n" + inBackticks)) {
+            assertFalse(TextToolCallParser.looksLikeTextToolCall(prose), prose);
+            assertTrue(TextToolCallParser.parse(prose).isEmpty(), prose);
+        }
+    }
+
+    @Test
+    void anInvokeBlockThatStartsALineIsStillACall() {
+        String afterProse = "I will look it up.\n\n<invoke name=\"web_search\">\n<parameter name=\"query\">x</parameter>\n</invoke>";
+        assertEquals(1, TextToolCallParser.parse(afterProse).size());
+        String indented = "  <invoke name=\"read\">\n  <parameter name=\"path\">a</parameter>\n  </invoke>";
+        assertEquals(1, TextToolCallParser.parse(indented).size());
+        String wrapped = "<function_calls><invoke name=\"read\"><parameter name=\"path\">a</parameter></invoke></function_calls>";
+        assertEquals(1, TextToolCallParser.parse(wrapped).size());
+        String twoMessages = "<invoke name=\"a\"><parameter name=\"x\">1</parameter></invoke>done.\n\n"
+                + "<invoke name=\"b\"><parameter name=\"x\">2</parameter></invoke>";
+        assertEquals(2, TextToolCallParser.parse(twoMessages).size());
+    }
+
+    @Test
+    void aFencedExampleDoesNotHideARealCallOutsideTheFence() {
+        String text = "Example:\n```\n<invoke name=\"ask_chat\">\n</invoke>\n```\n<invoke name=\"calc\">\n<parameter name=\"expression\">1+1</parameter>\n</invoke>";
+        List<ToolCall> calls = TextToolCallParser.parse(text);
+        assertEquals(1, calls.size());
+        assertEquals("calc", calls.get(0).name());
+    }
+
+    @Test
+    void stripLeavesAQuotedInvokeBlockAlone() {
+        String prose = "It wrote `<invoke name=\"ask_chat\"><parameter name=\"chatId\">50</parameter></invoke>` in a sentence.";
+        assertEquals(prose, TextToolCallParser.stripToolCallBlocks(prose));
+        String text = "Let me check.\n<invoke name=\"calc\">\n<parameter name=\"expression\">1+1</parameter>\n</invoke>";
+        assertEquals("Let me check.", TextToolCallParser.stripToolCallBlocks(text));
+    }
+
     @Test
     void stripLeavesQuotedSpellingAlone() {
         String prose = "It wrote `<tool_call><function=read>…</function></tool_call>` in the middle of a line.";

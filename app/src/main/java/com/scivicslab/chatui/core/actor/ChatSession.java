@@ -207,6 +207,9 @@ public class ChatSession extends Interpreter {
             <reason>one concise sentence on why you need this now</reason>
             </invoke>
 
+            When an answer shows a call block as an example, write its angle brackets as square \
+            brackets, e.g. [invoke name="calc"] ... [/invoke], so that it is not run.
+
             Available tools:
             """;
 

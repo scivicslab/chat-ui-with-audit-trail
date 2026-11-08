@@ -113,4 +113,21 @@ class ChatSessionPromptWorkflowTest {
         assertEquals(parts + "\n\nhello", provider.receivedPrompts.get(0));
         assertTrue(parts.contains("Available tools:"), "the tool instructions are part 1");
     }
+    /**
+     * The model is told how to show a call block as an example without it being run: with square
+     * brackets instead of angle brackets (2026-11-08: a report that quoted call blocks was run as calls).
+     */
+    @Test
+    void toolInstructions_tellTheModelToQuoteACallBlockWithSquareBrackets() {
+        RecordingProvider provider = new RecordingProvider();
+        IIActorSystem system = new IIActorSystem("chat-session-quote-rule-test");
+        ChatSessionIIAR iiar = new ChatSessionIIAR("chat", provider, Optional.empty(), null, system);
+        system.addIIActor(iiar);
+
+        String text = iiar.asChatSessionRef().ask(c -> c.toolInstructionsText()).join();
+
+        int rule = text.indexOf("square brackets");
+        assertTrue(rule > 0, "the quoting rule is in the shared text: " + text);
+        assertTrue(rule < text.indexOf("Available tools:"), "and comes before the tool list");
+    }
 }

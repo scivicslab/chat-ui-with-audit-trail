@@ -76,13 +76,42 @@ final class StepAnswerStream {
         shown = 0;
     }
 
+    /**
+     * @return where the first tool call begins, or -1. Read as {@code TextToolCallParser} reads: a
+     *         marker counts only at the start of a line (spaces allowed) and outside a fenced code
+     *         block, so a quoted block does not take the answer back. A fence still open when the text
+     *         ends is treated as open here; the parser, which removes only closed fences, settles it
+     *         in {@link #finish}.
+     */
     private int firstMarker() {
         int best = -1;
         for (String marker : MARKERS) {
-            int i = text.indexOf(marker, shown);
-            if (i >= 0 && (best < 0 || i < best)) best = i;
+            for (int i = text.indexOf(marker, shown); i >= 0; i = text.indexOf(marker, i + 1)) {
+                if (best >= 0 && i >= best) break;
+                if (startsALine(i) && !insideFence(i)) {
+                    best = i;
+                    break;
+                }
+            }
         }
         return best;
+    }
+
+    /** @return whether only spaces and tabs lie between the start of the line and {@code at} */
+    private boolean startsALine(int at) {
+        for (int k = at - 1; k >= 0; k--) {
+            char c = text.charAt(k);
+            if (c == '\n') return true;
+            if (c != ' ' && c != '\t') return false;
+        }
+        return true;
+    }
+
+    /** @return whether {@code at} lies after an odd number of code fences, i.e. inside one */
+    private boolean insideFence(int at) {
+        int fences = 0;
+        for (int k = text.indexOf("```"); k >= 0 && k < at; k = text.indexOf("```", k + 3)) fences++;
+        return fences % 2 == 1;
     }
 
     /** How many trailing characters could still grow into a marker. */
