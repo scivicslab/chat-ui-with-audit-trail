@@ -516,8 +516,17 @@ public class ChatSession extends Interpreter {
      */
     private String turnTask;
 
-    /** The work of each paused turn, by the original request its resume message carries ("" for none). */
-    private final Map<String, String> pausedTasks = new LinkedHashMap<>();
+    /**
+     * What a paused turn knew about why it was running, kept whole until the turn that resumes it starts:
+     * the message it worked for, the reply it had not yet decided on, and where a reminder's answer goes
+     * ({@code ReplyDecisionAndPromisedReport_261108_oo01}). Anything a turn carries for its purpose belongs
+     * here, so a pause loses none of it.
+     */
+    private record PausedTurn(String task, String undecidedRequest, String undecidedReplier,
+                              String reminderRequest, FollowUpTo followUp) {}
+
+    /** The paused turns, by the paused turn's id, which its resume message's source names. */
+    private final Map<String, PausedTurn> pausedTurns = new LinkedHashMap<>();
 
     /** The current turn's answer, its ending line and its id, once {@link #finish} has it. */
     private TurnReply turnAnswer;
@@ -557,14 +566,9 @@ public class ChatSession extends Interpreter {
     /** Who waits for the answer of a turn a reminder starts, and which reminder it was. */
     private record FollowUpTo(String asker, int number) {}
 
-    /**
-     * The reminders whose turn has started and not yet ended, by request id. Kept across a pause, so the
-     * turn that resumes the reminder's work still sends its answer as the follow-up.
-     */
-    private final Map<String, FollowUpTo> reminders = new HashMap<>();
-
-    /** The request id of the reminder this turn answers, or {@code null}. */
+    /** The request id of the reminder this turn answers, and who waits for its answer; {@code null} if none. */
     private String turnReminder;
+    private FollowUpTo turnFollowUp;
 
     /**
      * The reply this turn began with that has had no decision yet: its request id, and the conversation that
@@ -1398,15 +1402,15 @@ public class ChatSession extends Interpreter {
         }
         // The answer of a turn a reminder started goes to whoever waits for the report, as a follow-up
         // to the same request (ReplyDecisionAndPromisedReport_261108_oo01).
-        if (turnReminder != null && !paused) {
-            FollowUpTo to = reminders.remove(turnReminder);
-            if (to != null && !REMINDER_TO_SCREEN.equals(to.asker())) {
-                AskChatTool.followUp(system, myChatName(), to.asker(), turnReminder,
-                        turnAnswer != null ? turnAnswer : new TurnReply(null, null, turnId()), to.number());
-            }
+        if (turnReminder != null && turnFollowUp != null && !paused
+                && !REMINDER_TO_SCREEN.equals(turnFollowUp.asker())) {
+            AskChatTool.followUp(system, myChatName(), turnFollowUp.asker(), turnReminder,
+                    turnAnswer != null ? turnAnswer : new TurnReply(null, null, turnId()), turnFollowUp.number());
         }
-        turnReminder = null;
+        // Kept with the paused turn first, then cleared.
         if (paused) queueResume(emitter, self);
+        turnReminder = null;
+        turnFollowUp = null;
         pauseRequested = false;
         publishOutstanding();
         busy = false;
@@ -1505,7 +1509,7 @@ public class ChatSession extends Interpreter {
             this.turnOriginal = requestId;
         } else if (requestId != null && source != null && source.startsWith(ASK_CHAT_REPLY_SOURCE_PREFIX)) {
             this.turnOriginal = openRequests.replyArrived(requestId);
-        } else if (RESUME_SOURCE.equals(source)) {
+        } else if (isResume(source)) {
             // Goes on with the work of a paused turn, for the same original request.
             this.turnOriginal = openRequests.isOpen(requestId) ? requestId : null;
         } else {
@@ -1524,21 +1528,22 @@ public class ChatSession extends Interpreter {
             activeResultKey = resultKey;
         }
 
+        // A turn that resumes a paused one takes over everything the paused turn knew about its purpose.
+        PausedTurn resumed = isResume(source) ? pausedTurns.remove(pausedTurnIdOf(source)) : null;
         // A reply this conversation must decide on (ReplyDecisionAndPromisedReport_261108_oo01).
         boolean isReply = requestId != null && source != null && source.startsWith(ASK_CHAT_REPLY_SOURCE_PREFIX);
-        this.undecidedRequest = isReply ? requestId : null;
-        this.undecidedReplier = isReply ? source.substring(ASK_CHAT_REPLY_SOURCE_PREFIX.length()) : null;
+        this.undecidedRequest = resumed != null ? resumed.undecidedRequest() : isReply ? requestId : null;
+        this.undecidedReplier = resumed != null ? resumed.undecidedReplier()
+                : isReply ? source.substring(ASK_CHAT_REPLY_SOURCE_PREFIX.length()) : null;
         this.decisionAsked = false;
         this.answerBeforeDecision = null;
-        // A reminder's answer goes to whoever waits for the report; so does the answer of the turn that
-        // resumes a paused reminder's work.
+        // A reminder's answer goes to whoever waits for the report.
         FollowUpTo reminder = reminderOf(source);
-        if (reminder != null && requestId != null) reminders.put(requestId, reminder);
-        this.turnReminder = requestId != null && reminders.containsKey(requestId)
-                && (reminder != null || RESUME_SOURCE.equals(source)) ? requestId : null;
+        boolean isReminder = reminder != null && requestId != null;
+        this.turnReminder = isReminder ? requestId : resumed != null ? resumed.reminderRequest() : null;
+        this.turnFollowUp = isReminder ? reminder : resumed != null ? resumed.followUp() : null;
 
-        String carried = RESUME_SOURCE.equals(source) ? pausedTasks.remove(requestId == null ? "" : requestId) : null;
-        this.turnTask = carried != null ? carried : prompt;
+        this.turnTask = resumed != null && resumed.task() != null ? resumed.task() : prompt;
         this.question = prompt;
         this.pendingPrompt = prompt;
         this.pendingImages = (images == null) ? List.of() : images;
@@ -2737,6 +2742,8 @@ public class ChatSession extends Interpreter {
      * @return {@code success=true} when the note was queued as the next step's prompt
      */
     public ActionResult replyLeftUndecided() {
+        // A turn being paused or cancelled is not ending: the decision, if still owed, is asked for when it resumes.
+        if (cancelled || pauseRequested) return new ActionResult(false, "paused or cancelled");
         if (undecidedRequest == null) return new ActionResult(false, "no reply waiting for a decision");
         if (decisionAsked) {
             logToConversationSquad("WARNING", "turn" + ioTurnNo + ": no decision was recorded on the reply to request "
@@ -2752,6 +2759,19 @@ public class ChatSession extends Interpreter {
         turnTranscript.append(note).append("\n\n");
         turnEmitter.accept(ChatEvent.thinking("\n→ " + note + "\n"));
         return new ActionResult(true, "asked for a decision");
+    }
+
+    /**
+     * @param source a queued message's source
+     * @return whether it resumes a paused turn: {@link #RESUME_SOURCE}, alone or followed by the paused turn's id
+     */
+    public static boolean isResume(String source) {
+        return source != null && (source.equals(RESUME_SOURCE) || source.startsWith(RESUME_SOURCE + ":"));
+    }
+
+    /** @return the paused turn's id a resume message's source names, or {@code ""} when it names none */
+    private static String pausedTurnIdOf(String source) {
+        return source.length() > RESUME_SOURCE.length() ? source.substring(RESUME_SOURCE.length() + 1) : "";
     }
 
     /** @return who waits for a reminder's answer, read from the reminder's source, or {@code null} */
@@ -3043,13 +3063,15 @@ public class ChatSession extends Interpreter {
         if (queue == null) return;
         String original = turnOriginal;
         // The work is repeated here: the history also holds the urgent request and every other message, and a
-        // model told only to "continue" may continue the wrong one.
-        pausedTasks.put(original == null ? "" : original, turnTask);
+        // model told only to "continue" may continue the wrong one. Everything else the turn knew about its
+        // purpose is kept under its own id, which the resume message's source names.
+        String pausedId = turnId();
+        pausedTurns.put(pausedId, new PausedTurn(turnTask, undecidedRequest, undecidedReplier, turnReminder, turnFollowUp));
         String text = "[resume paused turn " + turnId() + (original == null ? "" : ", for request " + original)
                 + "]\nYour previous turn was paused so that an urgent request could be answered. Continue the work "
                 + "it was doing for the message below, and answer that message only; what it had done so far is in "
                 + "your previous answer.\n\n" + turnTask;
-        queue.tell(q -> q.enqueue(text, null, "queue", emitter, self, RESUME_SOURCE, null,
+        queue.tell(q -> q.enqueue(text, null, "queue", emitter, self, RESUME_SOURCE + ":" + pausedId, null,
                 new CompletableFuture<>(), false, true, List.of(), original, true));
     }
 
@@ -3473,7 +3495,7 @@ public class ChatSession extends Interpreter {
         if ("agent:workflow".equals(source)) return "workflow";
         // Put into the queue by this conversation itself, not by a person or another conversation
         // (TimekeeperPausesATurnForAnUrgentRequest_261107_oo01).
-        if (RESUME_SOURCE.equals(source)) return "timekeeper resume";
+        if (isResume(source)) return "timekeeper resume";
         if (Timekeeper.SOURCE.equals(source)) return "timekeeper notice";
         if (source.startsWith(ASK_CHAT_REPLY_SOURCE_PREFIX)) {
             return "reply from chat " + source.substring(ASK_CHAT_REPLY_SOURCE_PREFIX.length());

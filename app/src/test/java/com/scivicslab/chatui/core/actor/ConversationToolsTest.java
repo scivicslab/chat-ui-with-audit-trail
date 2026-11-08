@@ -607,6 +607,84 @@ class ConversationToolsTest {
         assertTrue(asker.prompts.stream().noneMatch(p -> p.contains("recorded no decision")), asker.prompts.toString());
     }
 
+    /**
+     * A turn that began with chat-02's reply is paused for an urgent request before it records a decision.
+     * The turn that resumes it still owes that decision, and is asked for it
+     * ({@code ReplyDecisionAndPromisedReport_261108_oo01}).
+     */
+    @Test
+    @org.junit.jupiter.api.Tag("ReplyDecisionAndPromisedReportTests_261108_oo01")
+    void aReplyTurnPausedBeforeItsDecisionIsAskedForItWhenItResumes() throws Exception {
+        IIActorSystem system = new IIActorSystem("conversation-tools-undecided-paused");
+        FakeControls controls = new FakeControls();
+        Paced asker = new Paced(List.of("noted-1", "urgent answer", "noted-3", "noted-4"), java.util.Set.of(1));
+        ChatSessionIIAR one = chat(system, "01", asker, controls);
+        ChatSessionIIAR two = chat(system, "02", new Scripted(List.of("I will report later"), List.of()), controls);
+        ActorRef<PromptQueue> queue1 = queueOf(one);
+        queueOf(two);
+        Timekeeper keeper = new Timekeeper("project1/chat-01", one, queue1, e -> {}, 0, Long.MAX_VALUE);
+
+        AskChatTool.send(system, "project1", "01", "02", "run the tests", "project1/chat-01:t1:r1");
+        waitUntil(() -> asker.entered.size() == 1);
+        queue1.ask(q -> q.enqueue("[urgent request x from y]\nhow far?", null, "queue", e -> {}, one.asChatSessionRef(),
+                "agent:ask_chat:project1/chat-09", null, new CompletableFuture<>(), false, true, List.of(), null, true))
+                .get(5, java.util.concurrent.TimeUnit.SECONDS);
+        keeper.tick(System.currentTimeMillis() + 1);
+
+        waitUntil(() -> asker.prompts.size() >= 4);
+        Thread.sleep(500);
+        assertEquals(4, asker.prompts.size(), asker.prompts.toString());
+        assertTrue(asker.prompts.get(1).endsWith("how far?"), "the urgent request came next, not a decision note: "
+                + asker.prompts.get(1));
+        assertTrue(asker.prompts.get(2).contains("[resume paused turn "), asker.prompts.get(2));
+        assertTrue(asker.prompts.get(3).contains("This turn began with project1/chat-02's reply to request "
+                + "project1/chat-01:t1:r1, and you have recorded no decision on it."), asker.prompts.get(3));
+    }
+
+    /**
+     * The turn a reminder starts is paused for an urgent request. The turn that resumes it writes the
+     * report, and the report still reaches the asker as the reminder's follow-up
+     * ({@code ReplyDecisionAndPromisedReport_261108_oo01}).
+     */
+    @Test
+    @org.junit.jupiter.api.Tag("ReplyDecisionAndPromisedReportTests_261108_oo01")
+    void aReminderTurnPausedForAnUrgentRequestStillSendsItsFollowUp() throws Exception {
+        IIActorSystem system = new IIActorSystem("conversation-tools-reminder-paused");
+        FakeControls controls = new FakeControls();
+        String request = "project1/chat-01:t1:r1";
+        Scripted asker = new Scripted(List.of(
+                invoke("expect_report", "chatId", "02", "requestId", request, "minutes", "1"),
+                "registered",
+                invoke("accept_reply", "requestId", request),
+                "done"), List.of());
+        Paced promiser = new Paced(List.of("I will report later", "REPORT part", "urgent answer", "REPORT: all green"),
+                java.util.Set.of(2));
+        ChatSessionIIAR one = chat(system, "01", asker, controls);
+        ChatSessionIIAR two = chat(system, "02", promiser, controls);
+        queueOf(one);
+        ActorRef<PromptQueue> queue2 = queueOf(two);
+        Timekeeper keeper = new Timekeeper("project1/chat-02", two, queue2, e -> {}, 0, Long.MAX_VALUE);
+        system.actorOf("project1/chat-02.timekeeper", keeper);
+
+        AskChatTool.send(system, "project1", "01", "02", "run the tests", request);
+        waitUntil(() -> asker.prompts.size() >= 2);
+        keeper.tick(System.currentTimeMillis() + 120_000);
+        waitUntil(() -> promiser.entered.size() == 2);
+        queue2.ask(q -> q.enqueue("[urgent request x from y]\nhow far?", null, "queue", e -> {}, two.asChatSessionRef(),
+                "agent:ask_chat:project1/chat-09", null, new CompletableFuture<>(), false, true, List.of(), null, true))
+                .get(5, java.util.concurrent.TimeUnit.SECONDS);
+        keeper.tick(System.currentTimeMillis() + 1);
+
+        waitUntil(() -> asker.prompts.size() >= 4);
+        Thread.sleep(500);
+        assertEquals(4, promiser.prompts.size(), promiser.prompts.toString());
+        assertTrue(promiser.prompts.get(3).contains("[resume paused turn "), promiser.prompts.get(3));
+        assertTrue(asker.prompts.size() >= 3, asker.prompts.toString());
+        String followUp = asker.prompts.get(2);
+        assertTrue(followUp.contains("[follow-up to request " + request + ", from project1/chat-02:")
+                && followUp.contains(", reminder 1]\nREPORT: all green"), followUp);
+    }
+
     @Test
     void anItemRemovedFromTheQueueTellsItsAskerThereWillBeNoReply() throws Exception {
         IIActorSystem system = new IIActorSystem("conversation-tools-removed-item");

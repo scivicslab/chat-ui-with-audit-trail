@@ -292,7 +292,7 @@ public class PromptQueue {
     /** @return 0 for an urgent request, 1 for a message resuming a paused turn, 2 for anything else */
     private static int rankOf(QueueItem item) {
         if (!item.urgent()) return 2;
-        return ChatSession.RESUME_SOURCE.equals(item.source()) ? 1 : 0;
+        return ChatSession.isResume(item.source()) ? 1 : 0;
     }
 
     /**
@@ -309,7 +309,7 @@ public class PromptQueue {
     public Long frontUrgentQueuedAt() {
         for (QueueItem item : queue) {
             if (!item.urgent()) return null;
-            if (!ChatSession.RESUME_SOURCE.equals(item.source())) return item.queuedAt();
+            if (!ChatSession.isResume(item.source())) return item.queuedAt();
         }
         return null;
     }
