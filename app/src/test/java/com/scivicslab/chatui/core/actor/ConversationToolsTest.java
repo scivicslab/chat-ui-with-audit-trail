@@ -238,6 +238,46 @@ class ConversationToolsTest {
         assertTrue(controls.providerCalls.isEmpty());
     }
 
+    /**
+     * Streams a response, then the harness's retraction of it, then the retry's response, as the Claude Code
+     * provider does when the CLI withdraws a response and asks the model to answer again
+     * (CliHarnessProvider_260912_oo01). Every later prompt is answered with "done".
+     */
+    private static final class Retracting extends Scripted {
+        Retracting() { super(List.of("done"), List.of()); }
+        @Override
+        public void sendPrompt(String prompt, String m, Consumer<ChatEvent> emitter, ProviderContext ctx) {
+            prompts.add(prompt);
+            if (prompts.size() == 1) {
+                emitter.accept(ChatEvent.delta(invoke("create_chat", "reason", "first draft")));
+                emitter.accept(new ChatEvent("retraction", "u-a", null, null, null, null, null, null, null, null,
+                        null, null, null, null, null, null, null, null));
+                emitter.accept(ChatEvent.delta("Retrying.\n\n" + invoke("create_chat", "reason", "second draft")));
+            } else {
+                emitter.accept(ChatEvent.delta("done"));
+            }
+            emitter.accept(ChatEvent.result(null, 0, 0));
+        }
+    }
+
+    @Test
+    void aWithdrawnResponseIsNotParsedForToolCalls() {
+        FakeControls controls = new FakeControls();
+        IIActorSystem system = new IIActorSystem("conversation-tools-retraction");
+        Retracting caller = new Retracting();
+        ChatSessionIIAR one = chat(system, "01", caller, controls);
+        ActorRef<ChatSession> ref = one.asChatSessionRef();
+        ref.tellNow(c -> {
+            c.start("go", null, e -> {}, ref, new CompletableFuture<>(), null, false);
+            c.runUntilEnd();
+        }).join();
+
+        assertEquals(List.of("project1"), controls.created,
+                "only the retried response's call ran: one conversation was made, not two");
+        assertEquals(2, caller.prompts.size(), "one tool result went back to the model");
+        assertEquals(1, caller.prompts.get(1).split("Tool result \\(create_chat\\)", -1).length - 1, caller.prompts.get(1));
+    }
+
     @Test
     void listProvidersNamesEachProviderByTheValueToPassOn() {
         String result = callFromChat01(invoke("list_providers"), MODELS, new FakeControls());

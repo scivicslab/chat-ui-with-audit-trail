@@ -312,6 +312,7 @@ public class ClaudeCodeProvider implements LlmProvider {
             case "thinking" -> emitter.accept(ChatEvent.thinking(
                     event.hasContent() ? event.content() : "Thinking..."));
             case "tool_use" -> emitter.accept(ChatEvent.toolUse(event.toolUseId(), event.toolName(), event.content()));
+            case "retraction" -> emitter.accept(ChatEvent.retraction(event.content()));
             case "tool_result" -> {
                 // ExitPlanMode is surfaced as a prompt from its tool_use block; the CLI then
                 // auto-denies the tool with this result, which is not an error of the turn.

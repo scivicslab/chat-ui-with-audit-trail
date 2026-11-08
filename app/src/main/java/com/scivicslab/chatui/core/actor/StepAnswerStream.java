@@ -69,6 +69,33 @@ final class StepAnswerStream {
         }
     }
 
+    /**
+     * Forgets the text received from {@code offset} on: the harness withdrew that response and the model
+     * answers again. If the pane was shown any of it, the provisional answer is taken back and the text
+     * before {@code offset} is shown again.
+     *
+     * @param offset how much of the step's text stays; the same count of characters the caller keeps
+     */
+    void discardFrom(int offset) {
+        if (offset < 0 || offset >= text.length()) return;
+        boolean showed = shown > offset;
+        text.setLength(offset);
+        toolCall = markerFrom(0) >= 0;
+        if (showed) {
+            emitter.accept(ChatEvent.answerRetract());
+            shown = 0;
+            if (!toolCall && offset > 0) {
+                int safe = offset - heldBack();
+                if (safe > 0) {
+                    emitter.accept(ChatEvent.answerDelta(text.substring(0, safe)));
+                    shown = safe;
+                }
+            }
+        } else if (shown > offset) {
+            shown = offset;
+        }
+    }
+
     private void becomeToolCall() {
         toolCall = true;
         if (shown > 0) emitter.accept(ChatEvent.answerRetract());
@@ -84,9 +111,13 @@ final class StepAnswerStream {
      *         in {@link #finish}.
      */
     private int firstMarker() {
+        return markerFrom(shown);
+    }
+
+    private int markerFrom(int from) {
         int best = -1;
         for (String marker : MARKERS) {
-            for (int i = text.indexOf(marker, shown); i >= 0; i = text.indexOf(marker, i + 1)) {
+            for (int i = text.indexOf(marker, from); i >= 0; i = text.indexOf(marker, i + 1)) {
                 if (best >= 0 && i >= best) break;
                 if (startsALine(i) && !insideFence(i)) {
                     best = i;

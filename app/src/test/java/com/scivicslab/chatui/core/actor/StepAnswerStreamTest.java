@@ -186,6 +186,40 @@ class StepAnswerStreamTest {
         assertEquals("", provisional());
     }
 
+    /** The harness withdrew the response and the model answers again: what was shown of it is taken back. */
+    @Test
+    void aWithdrawnResponseShownAsAnAnswerIsTakenBackAndTheRetryIsShown() {
+        stream.accept("Some prose that looked like the answer.");
+        assertEquals("Some prose that looked like the answer.", provisional());
+        stream.discardFrom(0);
+        stream.accept("The retried answer.");
+        stream.finish(false);
+
+        assertEquals("The retried answer.", provisional());
+        assertEquals(1, events.stream().filter(e -> e.type().equals("answer_retract")).count());
+    }
+
+    @Test
+    void aWithdrawnCallIsForgottenSoTheRetryCanBeAnAnswer() {
+        stream.accept("<invoke name=\"calc\">");
+        stream.discardFrom(0);
+        stream.accept("Plain answer.");
+        stream.finish(false);
+
+        assertEquals("Plain answer.", provisional());
+    }
+
+    @Test
+    void onlyTheTextAfterTheOffsetIsWithdrawn() {
+        stream.accept("Earlier response. ");
+        stream.accept("Withdrawn response.");
+        stream.discardFrom("Earlier response. ".length());
+        stream.accept("Retry.");
+        stream.finish(false);
+
+        assertEquals("Earlier response. Retry.", provisional());
+    }
+
     @Test
     void emptyChunksAreIgnored() {
         stream.accept(null);

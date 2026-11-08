@@ -1938,6 +1938,11 @@ public class ChatSession extends Interpreter {
         // Tool calls the provider's own harness makes inside this one sendPrompt, keyed by
         // tool_use id until their result arrives (CliHarnessProvider_260912_oo01).
         Map<String, ChatEvent> harnessToolUses = new LinkedHashMap<>();
+        // Where the response the harness is streaming now begins in assistantBuf: the start of the call, or
+        // right after the last harness tool result. A harness that withdraws a response and asks the model
+        // to answer again (a "retraction") withdraws the text from here on, and only the answer to the
+        // retry is parsed for tool calls (CliHarnessProvider_260912_oo01).
+        int[] responseStart = {0};
         ActorRef<LlmProvider> providerRef = providerRef();
 
         // The ConversationSquad log used to receive nothing between here and recordStepIo() below, so a step
@@ -1983,8 +1988,16 @@ public class ChatSession extends Interpreter {
                     // text is a failed turn, not an empty answer (TurnErrorInConversation_260913_oo01).
                     turnError = event.content() == null ? "unknown error" : event.content();
                     turnEmitter.accept(event);
+                } else if ("retraction".equals(event.type())) {
+                    String dropped = assistantBuf.substring(responseStart[0]);
+                    assistantBuf.setLength(responseStart[0]);
+                    answerStream.discardFrom(responseStart[0]);
+                    recordRetraction(event, dropped);
+                    turnEmitter.accept(ChatEvent.thinking("\n→ the harness withdrew its last response ("
+                            + dropped.length() + " chars) and asked the model to answer again\n"));
                 } else if ("tool_result".equals(event.type())) {
                     ChatEvent use = harnessToolUses.remove(event.toolUseId());
+                    if (use != null) responseStart[0] = assistantBuf.length();
                     String observation = (event.isError() != null && event.isError())
                             ? "error: " + (event.content() == null ? "" : event.content())
                             : (event.content() == null ? "" : event.content());
@@ -2375,6 +2388,28 @@ public class ChatSession extends Interpreter {
             logToConversationSquad("INFO", "turn" + ioTurnNo + "/step" + stepCount + "/tool: " + tc.name());
         } catch (Exception e) {
             logger.log(Level.WARNING, "I/O log tool record failed", e);
+        }
+    }
+
+    /**
+     * Records a response the provider's harness withdrew ({@code turn{N}/step{M}/retraction}): the text it had
+     * streamed, whole and untouched, and the ids of the messages it named. The step's own {@code llm} entry
+     * holds only the answer to the retry, which is what was parsed for tool calls.
+     *
+     * @param event   the retraction event
+     * @param dropped the text streamed for the withdrawn response
+     */
+    private void recordRetraction(ChatEvent event, String dropped) {
+        if (ioLog == null || ioSession < 0) return;
+        try {
+            String m = "RETRACTED: the harness withdrew this response and asked the model to answer again\n"
+                    + "MESSAGES: " + (event.content() == null ? "(none named)" : event.content())
+                    + "\nTEXT:\n" + dropped;
+            ioLog.record(ioSession, "agent", "turn" + ioTurnNo + "/step" + stepCount + "/retraction", m);
+            logToConversationSquad("INFO", "turn" + ioTurnNo + "/step" + stepCount + "/retraction: "
+                    + dropped.length() + " chars dropped");
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "I/O log retraction record failed", e);
         }
     }
 

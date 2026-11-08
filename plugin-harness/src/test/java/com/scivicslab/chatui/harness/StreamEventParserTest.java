@@ -121,4 +121,39 @@ class StreamEventParserTest {
         assertNull(parser.parse("not json").get(0).sessionId());
         assertEquals("error", parser.parse("not json").get(0).type());
     }
+    // The retry line is modelled on the CLI's own session record (a meta line naming the withdrawn messages in
+    // retractedMessageUuids, with the retry notice as its text); the raw stream line itself could not be
+    // provoked (CliHarnessProvider_260912_oo01).
+    @Test
+    void parse_retryNoticeNamingWithdrawnMessages_yieldsARetractionNotAToolResult() {
+        String line = """
+                {"type":"user","isMeta":true,"turnCompanion":true,"retractedMessageUuids":["u-a0","u-a"],
+                 "message":{"role":"user","content":[{"type":"text","text":"The previous response failed to produce a valid tool call. Please retry the tool call now."}]},
+                 "session_id":"s1"}""".replace("\n", "");
+        List<StreamEvent> events = parser.parse(line);
+        assertEquals(1, events.size(), events.toString());
+        assertEquals("retraction", events.get(0).type());
+        assertEquals("u-a0,u-a", events.get(0).content());
+    }
+
+    @Test
+    void parse_retryNoticeWithoutNames_isStillARetraction() {
+        String asBlocks = """
+                {"type":"user","message":{"role":"user","content":[{"type":"text","text":"The previous response failed to produce a valid tool call. Please retry the tool call now."}]}}""";
+        String asString = """
+                {"type":"user","message":{"role":"user","content":"The previous response failed to produce a valid tool call. Please retry the tool call now."}}""";
+        for (String line : List.of(asBlocks, asString)) {
+            List<StreamEvent> events = parser.parse(line);
+            assertEquals(1, events.size(), line);
+            assertEquals("retraction", events.get(0).type(), line);
+            assertNull(events.get(0).content(), line);
+        }
+    }
+
+    @Test
+    void parse_otherUserTextLines_areNotRetractions() {
+        String line = """
+                {"type":"user","message":{"role":"user","content":[{"type":"text","text":"A reminder from the system."}]}}""";
+        for (StreamEvent e : parser.parse(line)) assertFalse("retraction".equals(e.type()), e.toString());
+    }
 }

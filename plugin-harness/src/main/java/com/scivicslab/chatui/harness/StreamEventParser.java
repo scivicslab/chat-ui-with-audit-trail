@@ -167,6 +167,9 @@ public class StreamEventParser {
     private List<StreamEvent> parseUser(JSONObject json, String rawJson) {
         List<StreamEvent> events = new ArrayList<>();
         JSONObject message = json.optJSONObject("message");
+        if (isRetractionNotice(json, message)) {
+            return List.of(StreamEvent.retraction(retractedUuids(json), rawJson));
+        }
         if (message != null && message.opt("content") instanceof String text) {
             return parseUserText(text, rawJson);
         }
@@ -190,6 +193,43 @@ public class StreamEventParser {
             return List.of(StreamEvent.toolResult(null, toolResult.toString(), false, rawJson));
         }
         return List.of(new StreamEvent("tool_result", null, null, -1, -1, false, rawJson));
+    }
+
+    /** The first words of the line the CLI writes when it withdraws a response and asks the model to try again. */
+    static final String RETRY_NOTICE = "The previous response failed to produce a valid tool call";
+
+    /**
+     * Whether a {@code user} line is the CLI withdrawing the response it just streamed and asking the
+     * model to answer again (seen in the CLI's own session record as a meta line naming the withdrawn
+     * messages in {@code retractedMessageUuids}, with {@link #RETRY_NOTICE} as its text). The withdrawn
+     * response was already streamed as {@code assistant} lines, so only this line tells the reader to
+     * forget it.
+     */
+    private static boolean isRetractionNotice(JSONObject json, JSONObject message) {
+        JSONArray named = json.optJSONArray("retractedMessageUuids");
+        if (named != null && !named.isEmpty()) return true;
+        if (message == null) return false;
+        Object content = message.opt("content");
+        if (content instanceof String s) return s.stripLeading().startsWith(RETRY_NOTICE);
+        if (content instanceof JSONArray blocks) {
+            for (int i = 0; i < blocks.length(); i++) {
+                JSONObject block = blocks.optJSONObject(i);
+                if (block != null && "text".equals(block.optString("type"))
+                        && block.optString("text", "").stripLeading().startsWith(RETRY_NOTICE)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** @return the withdrawn messages' ids, comma-separated, or {@code null} when the line names none */
+    private static String retractedUuids(JSONObject json) {
+        JSONArray named = json.optJSONArray("retractedMessageUuids");
+        if (named == null || named.isEmpty()) return null;
+        List<String> ids = new ArrayList<>();
+        for (int i = 0; i < named.length(); i++) ids.add(named.optString(i));
+        return String.join(",", ids);
     }
 
     /** The type of the event that carries what a command of the CLI printed. */

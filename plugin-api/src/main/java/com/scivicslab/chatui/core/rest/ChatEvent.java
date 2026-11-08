@@ -266,6 +266,19 @@ public record ChatEvent(
     }
 
     /**
+     * Creates an event saying the provider's harness withdrew the response it was streaming and asked the
+     * model to answer again: the text streamed since the last tool result is not part of the answer. The
+     * conversation drops that text; the pane is not sent this event.
+     *
+     * @param retractedUuids the withdrawn messages' ids, comma-separated, or {@code null} when the harness
+     *                       named none
+     * @return a new retraction event
+     */
+    public static ChatEvent retraction(String retractedUuids) {
+        return new ChatEvent("retraction", retractedUuids, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+    }
+
+    /**
      * Creates an event telling the pane that the conversation's queue changed, so it should read
      * it again. It carries no content: the queue itself is read from the REST endpoint, which is
      * the one place that knows its order.

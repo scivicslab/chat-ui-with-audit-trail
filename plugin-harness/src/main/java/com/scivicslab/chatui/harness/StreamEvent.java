@@ -75,6 +75,15 @@ public record StreamEvent(
                                null, null, null, null, toolUseId);
     }
 
+    /**
+     * The harness withdrew the response it had streamed and asked the model to answer again.
+     *
+     * @param retractedUuids the withdrawn messages' ids, comma-separated, or {@code null} when none were named
+     */
+    public static StreamEvent retraction(String retractedUuids, String rawJson) {
+        return new StreamEvent("retraction", retractedUuids, null, -1, -1, false, rawJson);
+    }
+
     /** @return {@code true} if {@code content} is non-null and non-empty */
     public boolean hasContent() {
         return content != null && !content.isEmpty();
