@@ -482,9 +482,8 @@ public class ChatResource {
         // (PromptOriginOnScreen_260915_oo01).
         Object saidSource = body != null ? body.get("source") : null;
         String source = saidSource == null ? "human" : String.valueOf(saidSource);
-        boolean toLiaison = actorSystem.isLiaison(projectId, chatId);
         promptQueueRef.tell(q -> enqueueTyped(q, text, model, emitter, chatSessionIIAR.asChatSessionRef(),
-                source, noThink, !hold, images, toLiaison));
+                source, noThink, !hold, images));
 
         return Response.ok(Map.of("type", "accepted")).build();
     }
@@ -496,12 +495,14 @@ public class ChatResource {
      */
     static void enqueueTyped(PromptQueue queue, String text, String model, java.util.function.Consumer<ChatEvent> emitter,
                              ActorRef<ChatSession> chatSessionRef, String source, boolean noThink, boolean auto,
-                             List<String> images, boolean toLiaison) {
-        // What the person types to the liaison is a decision or a question the conversations wait on, so
-        // it goes into the urgent rank (ConversationReportingLines_261108_oo01).
-        boolean urgent = "screen".equals(source) && toLiaison;
+                             List<String> images) {
+        // The person's prompt is queued like any other: in arrival order, not in the urgent rank, so that
+        // a report from a subordinate that was waiting first is not held back. The person moves a prompt
+        // ahead by hand in the Queue panel. The urgent rank is left to ask_chat_urgent, to ask_chat from
+        // the target's superior (AskChatTool), and to the messages that resume a paused turn
+        // (ConversationReportingLines_261108_oo01).
         queue.enqueue(text, model, "queue", emitter, chatSessionRef, source, null, new CompletableFuture<TurnReply>(),
-                noThink, auto, images, null, urgent);
+                noThink, auto, images, null, false);
     }
 
     /** What the provider says should be shown for this command, or one error event. */
