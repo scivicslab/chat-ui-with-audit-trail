@@ -261,15 +261,6 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     /** @param maxRetries how many redos this phase may ask for */
     public record RetryLimitArgs(@NotNull Integer maxRetries) {}
 
-    /** @param maxSearches how many searches this turn may run */
-    public record SearchLimitArgs(@NotNull Integer maxSearches) {}
-
-    /** @param maxDocuments how many documents to open at most */
-    public record ReadSourcesArgs(@NotNull Integer maxDocuments) {}
-
-    /** @param maxRewrites how many rewrites this turn may make */
-    public record AnswerLimitArgs(@NotNull Integer maxRewrites) {}
-
     /**
      * @param args the prompt, and optionally the model to answer it with
      * @return the result key to poll {@code getResult} with
@@ -513,116 +504,6 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     @Action("requestRedo")
     public ActionResult requestRedoAction(String arg) {
         return chatSession().requestRedo();
-    }
-
-    // ── 型3: 文書検索の状態機械 (DocRetrievalAgentLoop_260830_oo01) ──
-
-    /**
-     * @param arg unused
-     * @return success when the search returned candidates
-     */
-    @Action("searchDocs")
-    public ActionResult searchDocsAction(String arg) {
-        return chatSession().searchDocs();
-    }
-
-    /**
-     * @param arg unused
-     * @return success when the candidate list looks able to answer the question
-     */
-    @Action("judgeHitsSufficient")
-    public ActionResult judgeHitsSufficientAction(String arg) {
-        return chatSession().judgeHitsSufficient();
-    }
-
-    /**
-     * @param arg how many searches this turn may run
-     * @return success once that many have been run
-     */
-    @Action(value = "searchLimitReached", argsType = SearchLimitArgs.class)
-    public ActionResult searchLimitReachedAction(SearchLimitArgs args) {
-        return chatSession().searchLimitReached(String.valueOf(args.maxSearches()));
-    }
-
-    /**
-     * @param arg unused
-     * @return always successful
-     */
-    @Action("judgeHitsNeedRefinement")
-    public ActionResult judgeHitsNeedRefinementAction(String arg) {
-        return chatSession().judgeHitsNeedRefinement();
-    }
-
-    /**
-     * @param arg unused
-     * @return success when the new search returned candidates
-     */
-    @Action("refineQueryAndSearch")
-    public ActionResult refineQueryAndSearchAction(String arg) {
-        return chatSession().refineQueryAndSearch();
-    }
-
-    /**
-     * @param arg how many documents to open at most
-     * @return success when at least one was opened
-     */
-    @Action(value = "readSources", argsType = ReadSourcesArgs.class)
-    public ActionResult readSourcesAction(ReadSourcesArgs args) {
-        return chatSession().readSources(String.valueOf(args.maxDocuments()));
-    }
-
-    /**
-     * @param arg unused
-     * @return always successful
-     */
-    @Action("reportRetrievalFailure")
-    public ActionResult reportRetrievalFailureAction(String arg) {
-        return chatSession().reportRetrievalFailure();
-    }
-
-    /**
-     * @param arg unused
-     * @return always successful
-     */
-    @Action("answerFromSources")
-    public ActionResult answerFromSourcesAction(String arg) {
-        return chatSession().answerFromSources();
-    }
-
-    /**
-     * @param arg unused
-     * @return success when the draft states everything the question asked for
-     */
-    @Action("answerComplete")
-    public ActionResult answerCompleteAction(String arg) {
-        return chatSession().answerComplete();
-    }
-
-    /**
-     * @param arg how many rewrites this turn may make
-     * @return success once that many have been made
-     */
-    @Action(value = "answerLimitReached", argsType = AnswerLimitArgs.class)
-    public ActionResult answerLimitReachedAction(AnswerLimitArgs args) {
-        return chatSession().answerLimitReached(String.valueOf(args.maxRewrites()));
-    }
-
-    /**
-     * @param arg unused
-     * @return always successful
-     */
-    @Action("answerNeedsMore")
-    public ActionResult answerNeedsMoreAction(String arg) {
-        return chatSession().answerNeedsMore();
-    }
-
-    /**
-     * @param arg unused
-     * @return always successful
-     */
-    @Action("rewriteAnswer")
-    public ActionResult rewriteAnswerAction(String arg) {
-        return chatSession().rewriteAnswer();
     }
 
     /**

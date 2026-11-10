@@ -25,7 +25,7 @@ class WorkflowKindTest {
     @DisplayName("同梱の YAML を 3 種類に分ける")
     void theBundledFilesFallIntoThreeKinds() {
         for (String loop : List.of("chat-session-agent-loop", "plain-text-loop", "plain-text-no-context-loop",
-                "doc-retrieval-loop", "doc-retrieval-prompt-loop", "babysitter-loop", "research-babysitter-loop")) {
+                "doc-retrieval-prompt-loop", "babysitter-loop", "research-babysitter-loop")) {
             assertEquals(WorkflowKind.AGENT_LOOP, kindOfBundled(loop), loop);
         }
         for (String construction : List.of("prompt-construction-default", "prompt-construction-plain",

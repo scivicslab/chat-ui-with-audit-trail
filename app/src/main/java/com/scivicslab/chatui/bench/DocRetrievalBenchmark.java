@@ -28,7 +28,7 @@ import java.util.Set;
  * javac -cp ~/works/chat-ui-with-audit-trail.jar \
  *     src/main/java/com/scivicslab/chatui/bench/DocRetrievalBenchmark.java -d /tmp/bench
  * java -cp /tmp/bench:~/works/chat-ui-with-audit-trail.jar \
- *     com.scivicslab.chatui.bench.DocRetrievalBenchmark [baseline|prompt|statemachine]
+ *     com.scivicslab.chatui.bench.DocRetrievalBenchmark [baseline|prompt]
  * }</pre>
  *
  * <p>Scoring reads the I/O log rather than the answer text: {@code recordToolIo} records every tool
@@ -60,8 +60,8 @@ public final class DocRetrievalBenchmark {
 
     public static void main(String[] args) throws Exception {
         String variant = args.length > 0 ? args[0] : "baseline";
-        if (!variant.equals("baseline") && !variant.equals("prompt") && !variant.equals("statemachine")) {
-            System.err.println("unknown variant '" + variant + "' (baseline | prompt | statemachine)");
+        if (!variant.equals("baseline") && !variant.equals("prompt")) {
+            System.err.println("unknown variant '" + variant + "' (baseline | prompt)");
             System.exit(2);
         }
         // A dead embedding server makes html-saurus return an empty array rather than fail, which
@@ -104,10 +104,6 @@ public final class DocRetrievalBenchmark {
         // The loop names the prompt construction (AgentLoopDecidesThePrompt_261020_oo01).
         if (variant.equals("prompt")) {
             post(chatBase + "/agent-loop-workflow", "doc-retrieval-prompt-loop.yaml");
-        }
-        // 型3: the agent loop itself becomes the retrieval procedure.
-        if (variant.equals("statemachine")) {
-            post(chatBase + "/agent-loop-workflow", "doc-retrieval-loop.yaml");
         }
 
         long start = System.currentTimeMillis();

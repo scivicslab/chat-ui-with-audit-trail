@@ -85,7 +85,7 @@ class AgentLoopNamesThePromptTest {
         assertNull(iiar.setAgentLoopWorkflowFile("plain-text-loop.yaml"));
         assertEquals("prompt-construction-plain.yaml", promptWorkflowOf(iiar));
 
-        assertNull(iiar.setAgentLoopWorkflowFile("doc-retrieval-loop.yaml"));
+        assertNull(iiar.setAgentLoopWorkflowFile("babysitter-loop.yaml"));
         assertEquals(ChatSession.DEFAULT_PROMPT_WORKFLOW, promptWorkflowOf(iiar),
                 "a loop that names none does not keep the earlier loop's prompt construction");
 

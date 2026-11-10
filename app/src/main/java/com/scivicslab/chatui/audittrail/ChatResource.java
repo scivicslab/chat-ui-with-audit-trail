@@ -346,12 +346,12 @@ public class ChatResource {
 
     /**
      * Replaces this conversation's agent loop with another workflow — the state machine it runs for
-     * one turn ({@code DocRetrievalAgentLoop_260830_oo01} 型3).
+     * one turn.
      *
      * @param projectId owning project's id
      * @param chatId    conversation id within that project
      * @param file      classpath file name under {@code /workflows/}, e.g.
-     *                  {@code doc-retrieval-loop.yaml}
+     *                  {@code plain-text-loop.yaml}
      * @return {@code {"type":"ok","agentLoop":...}}, or 400/404 with the reason
      */
     @POST
@@ -482,14 +482,26 @@ public class ChatResource {
         // (PromptOriginOnScreen_260915_oo01).
         Object saidSource = body != null ? body.get("source") : null;
         String source = saidSource == null ? "human" : String.valueOf(saidSource);
-        // What the person types to the liaison is a decision or a question the conversations wait on, so
-        // it goes into the urgent rank (ConversationReportingLines_261108_oo01).
-        boolean urgent = "screen".equals(source) && actorSystem.isLiaison(projectId, chatId);
-        promptQueueRef.tell(q -> q.enqueue(text, model, "queue", emitter,
-                chatSessionIIAR.asChatSessionRef(), source, null, new CompletableFuture<TurnReply>(),
-                noThink, !hold, images, null, urgent));
+        boolean toLiaison = actorSystem.isLiaison(projectId, chatId);
+        promptQueueRef.tell(q -> enqueueTyped(q, text, model, emitter, chatSessionIIAR.asChatSessionRef(),
+                source, noThink, !hold, images, toLiaison));
 
         return Response.ok(Map.of("type", "accepted")).build();
+    }
+
+    /**
+     * Queues a prompt typed into a conversation's pane, or sent to {@link #chat} by a program.
+     *
+     * @param auto {@code false} to hold it in the queue until the person turns its Auto on or advances the queue
+     */
+    static void enqueueTyped(PromptQueue queue, String text, String model, java.util.function.Consumer<ChatEvent> emitter,
+                             ActorRef<ChatSession> chatSessionRef, String source, boolean noThink, boolean auto,
+                             List<String> images, boolean toLiaison) {
+        // What the person types to the liaison is a decision or a question the conversations wait on, so
+        // it goes into the urgent rank (ConversationReportingLines_261108_oo01).
+        boolean urgent = "screen".equals(source) && toLiaison;
+        queue.enqueue(text, model, "queue", emitter, chatSessionRef, source, null, new CompletableFuture<TurnReply>(),
+                noThink, auto, images, null, urgent);
     }
 
     /** What the provider says should be shown for this command, or one error event. */
