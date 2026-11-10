@@ -113,9 +113,10 @@ public final class AskChatTool {
         done.whenCompleteAsync((reply, failure) ->
                 deliverReply(system, myName, myChat, myQueue, targetName, requestId, urgent, reply, failure));
         Consumer<ChatEvent> targetWatchers = watchersOf(system, targetName);
-        // A message from the target's superior goes into the urgent rank, without the asker choosing it:
-        // a decision sent down must not wait behind other work (ConversationReportingLines_261108_oo01).
-        boolean fromSuperior = !urgent && isSuperiorOf(system, myProjectId, myChatId, targetName);
+        // The heading says when the sender is the target's superior. It does not change the message's rank:
+        // only ask_chat_urgent goes into the urgent rank, whoever sends it, so that a superior's new message
+        // does not hold back replies that were waiting first (ConversationReportingLines_261108_oo01).
+        boolean fromSuperior = isSuperiorOf(system, myProjectId, myChatId, targetName);
         String headed = "[" + (urgent ? "urgent request " : "request ") + requestId + " from " + myName
                 + (fromSuperior ? ", your superior" : "") + "]\n" + prompt;
         int passed;
@@ -124,7 +125,7 @@ public final class AskChatTool {
             // The queue is its own actor, so this does not wait for the target's turn.
             passed = targetQueue.ask(q -> q.enqueue(headed, null, "queue", targetWatchers,
                     targetChat.asChatSessionRef(), ChatSession.ASK_CHAT_SOURCE_PREFIX + myName, resultKey, done,
-                    false, true, java.util.List.of(), requestId, urgent || fromSuperior)).get(5, TimeUnit.SECONDS);
+                    false, true, java.util.List.of(), requestId, urgent)).get(5, TimeUnit.SECONDS);
         } catch (Exception e) {
             LOG.log(Level.WARNING, "ask_chat: could not queue request " + requestId + " for " + targetName, e);
             return "error: could not queue the request for " + targetName + ": " + e.getClass().getSimpleName();

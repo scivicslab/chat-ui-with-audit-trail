@@ -498,9 +498,8 @@ public class ChatResource {
                              List<String> images) {
         // The person's prompt is queued like any other: in arrival order, not in the urgent rank, so that
         // a report from a subordinate that was waiting first is not held back. The person moves a prompt
-        // ahead by hand in the Queue panel. The urgent rank is left to ask_chat_urgent, to ask_chat from
-        // the target's superior (AskChatTool), and to the messages that resume a paused turn
-        // (ConversationReportingLines_261108_oo01).
+        // ahead by hand in the Queue panel. The urgent rank is left to ask_chat_urgent and to the messages
+        // that resume a paused turn (ConversationReportingLines_261108_oo01).
         queue.enqueue(text, model, "queue", emitter, chatSessionRef, source, null, new CompletableFuture<TurnReply>(),
                 noThink, auto, images, null, false);
     }

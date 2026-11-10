@@ -911,13 +911,64 @@ class ConversationToolsTest {
     }
 
     /**
-     * A message from the target's superior goes ahead of the work already waiting in the target's queue,
-     * without the superior asking for urgency ({@code ConversationReportingLinesTests_261108_oo01}).
+     * A plain {@code ask_chat} from the target's superior waits in arrival order: it does not go ahead of a
+     * reply that was queued earlier. The heading still says it is from the superior. A superior who wants
+     * the message to go first sends it with {@code ask_chat_urgent} ({@code ConversationReportingLinesTests_261108_oo01}).
      */
     @Test
     @org.junit.jupiter.api.Tag("ConversationReportingLinesTests_261108_oo01")
-    void aMessageFromTheSuperiorGoesAheadOfWaitingWork() throws Exception {
-        IIActorSystem system = new IIActorSystem("conversation-tools-superior-first");
+    void aPlainMessageFromTheSuperiorWaitsBehindAnEarlierReply() throws Exception {
+        IIActorSystem system = new IIActorSystem("conversation-tools-superior-plain");
+        ActorRef<PromptQueue> queue2 = superiorAndBusySubordinate(system);
+        queue2.ask(q -> q.enqueue("[reply to request project1/chat-02:t1:r1, from project1/chat-03:t1]\ndone", null,
+                "queue", e -> {}, subordinateRef(system), ChatSession.ASK_CHAT_REPLY_SOURCE_PREFIX + "project1/chat-03", null,
+                new CompletableFuture<>(), false, true, List.of(), "project1/chat-02:t1:r1", false))
+                .get(5, java.util.concurrent.TimeUnit.SECONDS);
+
+        String sent = AskChatTool.send(system, "project1", "01", "02", "decision: use plan B", "project1/chat-01:t1:r1");
+
+        assertTrue(sent.startsWith("sent to project1/chat-02 as request"), sent);
+        List<PromptQueue.QueueEntry> order = queue2.ask(PromptQueue::snapshot).get(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertEquals(2, order.size(), order.toString());
+        assertTrue(order.get(0).prompt().startsWith("[reply to request project1/chat-02:t1:r1"),
+                "the reply queued first is still first: " + order);
+        assertTrue(order.get(1).prompt().startsWith("[request project1/chat-01:t1:r1 from project1/chat-01, your superior]")
+                && order.get(1).prompt().endsWith("decision: use plan B"), order.toString());
+        assertEquals(false, order.get(1).urgent(), "a plain ask_chat from the superior is not in the urgent rank");
+    }
+
+    /** {@code ask_chat_urgent} from the target's superior goes ahead of the reply that was queued earlier. */
+    @Test
+    @org.junit.jupiter.api.Tag("ConversationReportingLinesTests_261108_oo01")
+    void anUrgentMessageFromTheSuperiorGoesAheadOfAnEarlierReply() throws Exception {
+        IIActorSystem system = new IIActorSystem("conversation-tools-superior-urgent");
+        ActorRef<PromptQueue> queue2 = superiorAndBusySubordinate(system);
+        queue2.ask(q -> q.enqueue("[reply to request project1/chat-02:t1:r1, from project1/chat-03:t1]\ndone", null,
+                "queue", e -> {}, subordinateRef(system), ChatSession.ASK_CHAT_REPLY_SOURCE_PREFIX + "project1/chat-03", null,
+                new CompletableFuture<>(), false, true, List.of(), "project1/chat-02:t1:r1", false))
+                .get(5, java.util.concurrent.TimeUnit.SECONDS);
+
+        String sent = AskChatTool.sendUrgent(system, "project1", "01", "02", "decision: use plan B", "project1/chat-01:t1:r1");
+
+        assertTrue(sent.startsWith("sent to project1/chat-02 as urgent request project1/chat-01:t1:r1, ahead of 1 waiting"), sent);
+        List<PromptQueue.QueueEntry> order = queue2.ask(PromptQueue::snapshot).get(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertTrue(order.get(0).prompt().startsWith("[urgent request project1/chat-01:t1:r1 from project1/chat-01, your superior]"),
+                order.toString());
+        assertEquals(true, order.get(0).urgent());
+    }
+
+    /** @return chat-02's conversation, as its queue items refer to it */
+    private static ActorRef<ChatSession> subordinateRef(IIActorSystem system) {
+        return ((ChatSessionIIAR) (Object) system.getIIActor("project1/chat-02.chat")).asChatSessionRef();
+    }
+
+    /**
+     * Makes chat-01 the superior of chat-02 and starts a long turn on chat-02, so that what arrives next
+     * waits in chat-02's queue.
+     *
+     * @return chat-02's queue, empty, with chat-02 busy
+     */
+    private static ActorRef<PromptQueue> superiorAndBusySubordinate(IIActorSystem system) throws Exception {
         FakeControls controls = new FakeControls();
         Scripted boss = new Scripted(List.of("ok"), List.of());
         Paced worker = new Paced(List.of("w1", "w2", "w3"), java.util.Set.of(1));
@@ -932,18 +983,7 @@ class ConversationToolsTest {
         queue2.ask(q -> q.enqueue("the long job", null, "queue", e -> {}, two.asChatSessionRef(), "human", null,
                 new CompletableFuture<>(), false, true, List.of(), null, false)).get(5, java.util.concurrent.TimeUnit.SECONDS);
         waitUntil(() -> two.isBusyDirect());
-        queue2.ask(q -> q.enqueue("other waiting work", null, "queue", e -> {}, two.asChatSessionRef(), "human", null,
-                new CompletableFuture<>(), false, true, List.of(), null, false)).get(5, java.util.concurrent.TimeUnit.SECONDS);
-
-        String sent = AskChatTool.send(system, "project1", "01", "02", "decision: use plan B", "project1/chat-01:t1:r1");
-
-        assertTrue(sent.startsWith("sent to project1/chat-02 as request"), sent);
-        List<String> order = queue2.ask(q -> q.snapshot().stream().map(PromptQueue.QueueEntry::prompt).toList())
-                .get(5, java.util.concurrent.TimeUnit.SECONDS);
-        assertEquals(2, order.size(), order.toString());
-        assertTrue(order.get(0).startsWith("[request project1/chat-01:t1:r1 from project1/chat-01, your superior]")
-                && order.get(0).endsWith("decision: use plan B"), order.toString());
-        assertEquals("other waiting work", order.get(1));
+        return queue2;
     }
 
     /**

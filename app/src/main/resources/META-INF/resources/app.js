@@ -801,8 +801,9 @@
                     var cls = "queue-item";
                     if (i === 0) cls += " current";
                     if (i === 0 && !busy && !item.auto) cls += " waiting";
-                    // An urgent request went in ahead of the waiting items that are not urgent
-                    // (UrgentRequestAndStatusReport_261107_oo01).
+                    // An urgent item went in ahead of the waiting items that are not urgent: a request sent
+                    // with ask_chat_urgent, its reply, or a message that resumes a paused turn
+                    // (UrgentRequestAndStatusReport_261107_oo01, TimekeeperPausesATurnForAnUrgentRequest_261107_oo01).
                     if (item.urgent) cls += " urgent";
                     row.className = cls;
                     row.appendChild(queueIndex(sent.length + i + 1));
@@ -810,7 +811,7 @@
                         var urgentMark = document.createElement("span");
                         urgentMark.className = "queue-urgent";
                         urgentMark.textContent = "Urgent";
-                        urgentMark.title = "Sent with ask_chat_urgent: goes ahead of the waiting items that are not urgent";
+                        urgentMark.title = "A request sent with ask_chat_urgent, its reply, or a message that resumes a paused turn: goes ahead of the waiting items that are not urgent";
                         row.appendChild(urgentMark);
                     }
                     row.appendChild(queueText(item));
