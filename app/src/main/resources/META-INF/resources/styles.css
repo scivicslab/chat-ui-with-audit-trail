@@ -356,7 +356,7 @@ header h1[contenteditable]:focus {
     white-space: nowrap;
 }
 
-#save-chat-btn, #clear-chat-btn {
+#save-chat-btn, #clear-chat-btn, #view-mode-btn {
     background: var(--bg-tertiary);
     color: var(--text-secondary);
     border: 1px solid var(--border-color);
@@ -367,9 +367,19 @@ header h1[contenteditable]:focus {
     font-family: inherit;
 }
 
-#save-chat-btn:hover, #clear-chat-btn:hover {
+#save-chat-btn:hover, #clear-chat-btn:hover, #view-mode-btn:hover {
     color: var(--text-primary);
     border-color: var(--accent-blue);
+}
+
+/* The display toggle (ChatDisplayToggle_261110_oo01): in "Person only" the chat area hides every bubble of a turn
+   that the person did not start. Nothing is removed; taking the class off shows them again. */
+#view-mode-btn[aria-pressed="true"] {
+    color: var(--text-primary);
+    border-color: var(--accent-blue);
+}
+#chat-area.person-only .turn-other {
+    display: none;
 }
 
 #connection-status {

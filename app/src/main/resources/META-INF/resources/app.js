@@ -65,6 +65,10 @@
     var answerText = "";      // its markdown source so far
     var answerTimer = null;   // pending redraw of answerEl
     var busy = false;
+    // Whether the turn being drawn was started by the person at this pane (ChatDisplayToggle_261110_oo01). Every
+    // bubble is marked turn-person or turn-other when it is placed, so one class on the chat area hides the
+    // other turns. A line with no origin is taken for the person's, as appendMessage takes it for no badge.
+    var turnFromPerson = true;
 
     // Enable KaTeX math rendering inside markdown so LaTeX ($...$, $$...$$) in assistant answers
     // is typeset. Optional: if the CDN scripts did not load, fall back to plain markdown.
@@ -615,9 +619,17 @@
         footer.appendChild(row);
     }
 
+    // Puts a bubble in the chat area, marked with the kind of turn it belongs to.
+    function placeBubble(div) {
+        div.classList.add(turnFromPerson ? "turn-person" : "turn-other");
+        chatArea.appendChild(div);
+    }
+
     function appendMessage(role, text, images, origin, at, ids) {
         var div = document.createElement("div");
         div.className = "message " + role;
+        // A user bubble opens a turn: the assistant, info and error bubbles after it belong to it.
+        if (role === "user") turnFromPerson = !origin || origin === "screen";
         if (role === "user" && origin && origin !== "screen") {
             div.classList.add("from-" + String(origin).split(" ")[0]);
         }
@@ -641,7 +653,7 @@
             footer.appendChild(copyButton(text, "Copy"));
             footer.appendChild(translateSelect(div, text, false));
         }
-        chatArea.appendChild(div);
+        placeBubble(div);
         scrollToBottom();
         return div;
     }
@@ -653,7 +665,7 @@
         div.className = "message " + role;
         div.innerHTML = renderMarkdown(text);
         decorateCodeBlocks(div);
-        chatArea.appendChild(div);
+        placeBubble(div);
         scrollToBottom();
         return div;
     }
@@ -1013,7 +1025,7 @@
         if (!thinkingEl) {
             thinkingEl = document.createElement("div");
             thinkingEl.className = "message thinking";
-            chatArea.appendChild(thinkingEl);
+            placeBubble(thinkingEl);
             thinkingText = "";
         }
         thinkingText += chunk;
@@ -1464,6 +1476,7 @@
         localStorage.setItem(PROJECT_ID_KEY, projectId);
         localStorage.setItem(CHAT_ID_KEY, chatId);
         chatArea.textContent = "";
+        turnFromPerson = true;
         streamingEl = null;
         streamingMarkdown = "";
         thinkingEl = null;
@@ -1472,6 +1485,7 @@
         if (queueArea) { queueArea.style.display = "none"; queueArea.dataset.forcedOpen = "0"; }
         queueDrawn = null;   // another conversation: draw its queue even if it has the same shape
 
+        applyViewMode();
         loadModels();
         hydrateConversation();
         refreshQueue();
@@ -1502,6 +1516,7 @@
     // Save Chat reads the same GET /conversation the pane is drawn from.
     function clearChatDisplay() {
         chatArea.textContent = "";
+        turnFromPerson = true;
         streamingEl = null;
         streamingMarkdown = "";
         thinkingEl = null;
@@ -1510,6 +1525,40 @@
         fetch(apiUrl(chatUrl("/conversation")), { method: "DELETE" })
             .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); })
             .catch(function (err) { notify("Could not clear the conversation: " + err.message); });
+    }
+
+    // ── Display toggle: every turn, or only the turns the person started ───────────────────────
+    // ChatDisplayToggle_261110_oo01. A ConversationSquad actor's pane also draws the turns other actors start
+    // (an ask_chat request, a reply, a reminder, a resumed turn). "Person only" hides those turns' bubbles with
+    // one class on the chat area; nothing is deleted and the Queue panel, Save Chat and the server are not
+    // touched. The choice is kept per browser, per project and chat.
+    var VIEW_MODE_KEY_PREFIX = "chat-ui-view-mode:";
+
+    function viewModeKey() {
+        return VIEW_MODE_KEY_PREFIX + PROJECT_ID + "/" + CHAT_ID;
+    }
+
+    function currentViewMode() {
+        return localStorage.getItem(viewModeKey()) === "person" ? "person" : "all";
+    }
+
+    // Shows the stored choice of the chat now on screen: the class on the chat area and the button.
+    function applyViewMode() {
+        var personOnly = currentViewMode() === "person";
+        if (chatArea) chatArea.classList.toggle("person-only", personOnly);
+        var btn = document.getElementById("view-mode-btn");
+        if (!btn) return;
+        btn.textContent = personOnly ? "Person only" : "All";
+        btn.setAttribute("aria-pressed", personOnly ? "true" : "false");
+        btn.title = personOnly
+            ? "Showing only the turns you started. Click to show every turn of this ConversationSquad actor."
+            : "Showing every turn of this ConversationSquad actor. Click to show only the turns you started.";
+    }
+
+    function toggleViewMode() {
+        localStorage.setItem(viewModeKey(), currentViewMode() === "person" ? "all" : "person");
+        applyViewMode();
+        scrollToBottom();
     }
 
     function saveChatAsMarkdown() {
@@ -1722,6 +1771,9 @@
         if (clearChatBtn) clearChatBtn.addEventListener("click", clearChatDisplay);
         var saveChatBtn = el("save-chat-btn");
         if (saveChatBtn) saveChatBtn.addEventListener("click", saveChatAsMarkdown);
+        var viewModeBtn = el("view-mode-btn");
+        if (viewModeBtn) viewModeBtn.addEventListener("click", toggleViewMode);
+        applyViewMode();
 
         if (sendBtn) sendBtn.addEventListener("click", sendPrompt);
         if (promptInput) {

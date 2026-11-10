@@ -504,7 +504,7 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
 .chat-settings #activity-label { color: var(--accent-blue, #a5b4fc); }
 #main-panel header { gap: 12px; }
 #main-panel header .left-pane-actions { flex-shrink: 0; }
-#save-chat-btn, #clear-chat-btn { white-space: nowrap; }
+#save-chat-btn, #clear-chat-btn, #view-mode-btn { white-space: nowrap; }
 #app-header #connection-status { font-size: 12px; }
 #app-header input[type=number] { background: var(--bg-primary, #2a2a2a); color: var(--text-primary, #e6e6e6); border: 1px solid var(--border-color, #444); border-radius: 4px; padding: 3px 6px; font-size: 12px; width: 64px; }
 #app-header #cfg-status { color: var(--accent-blue, #a5b4fc); font-size: 12px; }
