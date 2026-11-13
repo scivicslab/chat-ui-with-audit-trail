@@ -795,7 +795,9 @@ class ConversationToolsTest {
         queue.tellNow(q -> q.enqueue("held", null, "queue", e -> {}, two.asChatSessionRef(),
                 "agent:ask_chat:project1/chat-01", "k", done, false, false, List.of(), "project1/chat-01:t1:r1")).join();
         assertTrue(queue.ask(q -> q.removeAt(0)).get(5, java.util.concurrent.TimeUnit.SECONDS));
-        assertEquals(TurnReply.NONE, done.get(5, java.util.concurrent.TimeUnit.SECONDS));
+        TurnReply told = done.get(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertEquals(null, told.reply(), "there is no answer");
+        assertEquals("removed from the queue before it ran", told.ending(), "and the asker is told why");
     }
 
     /** Urgent items go ahead of the waiting ones that are not, and keep their own order. */

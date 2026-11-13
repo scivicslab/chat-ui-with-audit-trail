@@ -259,7 +259,7 @@ public class PromptQueue {
         int before = queue.size();
         queue.removeIf(e -> {
             if (e.source() == null || !e.source().startsWith("agent:")) return false;
-            abandon(e);
+            abandon(e, "cleared from the queue when the conversation's turn was cancelled");
             return true;
         });
         int removed = before - queue.size();
@@ -346,17 +346,45 @@ public class PromptQueue {
      */
     public boolean removeAt(int index) {
         if (index < 0 || index >= queue.size()) return false;
-        abandon(queue.remove(index));
+        abandon(queue.remove(index), "removed from the queue before it ran");
         return true;
+    }
+
+    /**
+     * Takes the request with this id out of the queue because its sender asked to ({@code cancel_request}),
+     * if it still waits there ({@code CancelARequestInTheQueue_261113_oo01}). Only an item queued by that
+     * sender's {@code ask_chat} counts: a reply carries the same request id, and so does a request someone
+     * else sent. The item's {@code done} is completed with {@link TurnReply#WITHDRAWN}, so the sender is not
+     * sent a message about it.
+     *
+     * @param requestId the request's id
+     * @param source    the source the sender's {@code ask_chat} queued it under
+     * @return {@code true} if the request was waiting and is now removed; {@code false} when it is not in the
+     *         queue, which means it has started, has been answered, or was never queued here
+     */
+    public boolean withdraw(String requestId, String source) {
+        for (int i = 0; i < queue.size(); i++) {
+            QueueItem item = queue.get(i);
+            if (requestId.equals(item.requestId()) && source.equals(item.source())) {
+                queue.remove(i);
+                if (item.done() != null) item.done().complete(TurnReply.WITHDRAWN);
+                item.emitter().accept(ChatEvent.queueChanged());
+                logToConversationSquad("queue: request " + requestId + " withdrawn by its sender");
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
      * Completes the {@code done} of an item taken out of the queue without running, with no answer.
      * Another conversation's {@code ask_chat} waits on it; left incomplete, that conversation would
      * never hear that its request will not be answered ({@code ReportReachesTheAskerAfterDelegation_261107_oo01}).
+     *
+     * @param why what the sender is told, in the line that says its request ended without a reply
      */
-    private static void abandon(QueueItem item) {
-        if (item.done() != null) item.done().complete(TurnReply.NONE);
+    private static void abandon(QueueItem item, String why) {
+        if (item.done() != null) item.done().complete(new TurnReply(null, why, null));
     }
 
     /**

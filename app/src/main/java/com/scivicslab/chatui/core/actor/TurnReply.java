@@ -18,4 +18,11 @@ public record TurnReply(String reply, String ending, String turnId) {
 
     /** A turn that left nothing for its asker. */
     public static final TurnReply NONE = new TurnReply(null, null, null);
+
+    /**
+     * The sender took the request back while it waited in the queue ({@code cancel_request}). It is compared
+     * by identity: the sender already knows, so no message goes back to it
+     * ({@code CancelARequestInTheQueue_261113_oo01}).
+     */
+    public static final TurnReply WITHDRAWN = new TurnReply(null, "withdrawn by its sender", null);
 }

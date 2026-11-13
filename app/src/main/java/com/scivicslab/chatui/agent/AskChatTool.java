@@ -110,8 +110,13 @@ public final class AskChatTool {
         CompletableFuture<TurnReply> done = new CompletableFuture<>();
         // done completes inside the target's actor, carrying the answer; the delivery runs elsewhere
         // so that the target's thread is not held while the caller's queue takes the message.
-        done.whenCompleteAsync((reply, failure) ->
-                deliverReply(system, myName, myChat, myQueue, targetName, requestId, urgent, reply, failure));
+        done.whenCompleteAsync((reply, failure) -> {
+            // A request its sender took back with cancel_request leaves no message: the sender knows.
+            if (reply != TurnReply.WITHDRAWN) {
+                deliverReply(system, myName, myChat, myQueue, targetName, requestId, urgent, reply, failure);
+            }
+        });
+        SENT.put(requestId, new Sent(myName, targetName, targetQueue, done));
         Consumer<ChatEvent> targetWatchers = watchersOf(system, targetName);
         // The heading says when the sender is the target's superior. It does not change the message's rank:
         // only ask_chat_urgent goes into the urgent rank, whoever sends it, so that a superior's new message
@@ -127,6 +132,7 @@ public final class AskChatTool {
                     targetChat.asChatSessionRef(), ChatSession.ASK_CHAT_SOURCE_PREFIX + myName, resultKey, done,
                     false, true, java.util.List.of(), requestId, urgent)).get(5, TimeUnit.SECONDS);
         } catch (Exception e) {
+            SENT.remove(requestId);
             LOG.log(Level.WARNING, "ask_chat: could not queue request " + requestId + " for " + targetName, e);
             return "error: could not queue the request for " + targetName + ": " + e.getClass().getSimpleName();
         }
@@ -136,6 +142,66 @@ public final class AskChatTool {
         return "sent to " + targetName + " as " + (urgent ? "urgent request " : "request ") + requestId
                 + (urgent ? ", ahead of " + passed + " waiting message(s)" : "")
                 + "; its reply will arrive in this conversation as a new message when its turn ends" + elsewhere;
+    }
+
+    /** A request this instance's conversations have sent, kept so that its sender can take it back. */
+    private record Sent(String sender, String targetName, ActorRef<PromptQueue> targetQueue,
+                        CompletableFuture<TurnReply> done) {}
+
+    /** How many sent requests are remembered; the oldest go first. */
+    private static final int MAX_SENT = 2000;
+
+    /** The requests sent with {@code ask_chat}, by request id, oldest first. */
+    private static final java.util.Map<String, Sent> SENT = java.util.Collections.synchronizedMap(
+            new java.util.LinkedHashMap<>() {
+                @Override protected boolean removeEldestEntry(java.util.Map.Entry<String, Sent> eldest) {
+                    return size() > MAX_SENT;
+                }
+            });
+
+    /**
+     * The {@code cancel_request} tool: takes a request the caller sent with {@code ask_chat} out of the target's
+     * queue, if it still waits there ({@code CancelARequestInTheQueue_261113_oo01}). Only the sender can: a
+     * request id that the caller did not send is answered as not found. A request that has already started is
+     * not stopped.
+     *
+     * @param system    the actor system the conversations live in
+     * @param myName    the calling conversation's qualified name
+     * @param requestId the id {@code ask_chat} gave back
+     * @return a line starting with {@code removed}, {@code already running}, {@code already answered} or
+     *         {@code not found}, saying what happened and what the caller can do next
+     */
+    public static String cancel(IIActorSystem system, String myName, String requestId) {
+        if (requestId == null || requestId.isBlank()) return "error: requestId is required";
+        Sent sent = SENT.get(requestId.trim());
+        if (sent == null || !sent.sender().equals(myName)) {
+            return "not found: you sent no request with the id " + requestId.trim() + " in this run of the "
+                    + "instance. Check the id in the result of your ask_chat call.";
+        }
+        String id = requestId.trim();
+        if (sent.done().isDone()) {
+            return "already answered: request " + id + " has already been answered or ended, so there is nothing "
+                    + "to take back. Its reply is, or was, a message in your queue.";
+        }
+        boolean removed;
+        try {
+            removed = sent.targetQueue().ask(q -> q.withdraw(id, ChatSession.ASK_CHAT_SOURCE_PREFIX + myName))
+                    .get(5, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "cancel_request: could not reach the queue of " + sent.targetName(), e);
+            return "error: could not reach the queue of " + sent.targetName() + ": " + e.getClass().getSimpleName();
+        }
+        if (removed) {
+            return "removed: request " + id + " was taken out of " + sent.targetName() + "'s queue before it ran. "
+                    + "No reply will come for it; do not wait for one.";
+        }
+        if (sent.done().isDone()) {
+            return "already answered: request " + id + " has already been answered or ended, so there is nothing "
+                    + "to take back. Its reply is, or was, a message in your queue.";
+        }
+        return "already running: " + sent.targetName() + " has started request " + id + ", and it is not stopped. "
+                + "Its reply will arrive as usual; if the work is no longer wanted, send " + sent.targetName()
+                + " a follow-up request saying so.";
     }
 
     /** @return whether the sending conversation is the target's superior in their project's organization */

@@ -303,6 +303,17 @@ public class ChatSession extends Interpreter {
               has got — saying it should answer only that and keep the work it is doing — then end
               your turn. When every answer is back, sum up how far each one has got.
             """);
+        m.put("cancel_request", """
+            - cancel_request(requestId): take back a request you sent with ask_chat or ask_chat_urgent
+              while it still waits in the other conversation's queue. Requires a "requestId"
+              <parameter> tag: the id the ask_chat result gave, e.g. "project1/chat-01:s40:t5:r2".
+              Only you, the sender, can cancel it. The result says what happened: "removed" (it is
+              out of the queue and no reply will come, so do not wait for one), "already running"
+              (the other conversation has started it and it is not stopped; send a follow-up request
+              if the work is no longer wanted), "already answered" (nothing to take back), or "not
+              found". Use it when the work is no longer wanted, or when you are about to send the
+              same request again.
+            """);
         m.put("set_chat_timekeeper", """
             - set_chat_timekeeper(chatId, urgentWaitMinutes, childReplyWarnMinutes): change another
               conversation of this project's timekeeper. urgentWaitMinutes is how long an urgent
@@ -2435,6 +2446,18 @@ public class ChatSession extends Interpreter {
     }
 
     /**
+     * The {@code cancel_request} tool: takes a request this conversation sent out of the other conversation's
+     * queue, and when that worked, lets go of it here: a request this turn sent for a request it received no
+     * longer holds that request open, and the timekeeper no longer waits for its reply
+     * ({@code CancelARequestInTheQueue_261113_oo01}).
+     */
+    private String cancelRequest(String requestId) {
+        String result = AskChatTool.cancel(system, myChatName(), requestId);
+        if (result.startsWith("removed") && openRequests.close(requestId.trim())) publishOutstanding();
+        return result;
+    }
+
+    /**
      * The {@code accept_reply} tool: records that the reply this turn began with is enough
      * ({@code ReplyDecisionAndPromisedReport_261108_oo01}).
      *
@@ -2653,6 +2676,7 @@ public class ChatSession extends Interpreter {
                     extractInput(args, "chatId"), extractInput(args, "urgentWaitMinutes"),
                     extractInput(args, "childReplyWarnMinutes"));
             case "accept_reply" -> acceptReply(extractInput(args, "requestId"));
+            case "cancel_request" -> cancelRequest(extractInput(args, "requestId"));
             case "expect_report" -> expectReport(extractInput(args, "chatId"), extractInput(args, "requestId"),
                     extractInput(args, "minutes"));
             case "set_chat_name" -> ChatNameTool.set(conversationControls, projectId,
