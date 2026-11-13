@@ -1,5 +1,5 @@
 // Console script for chat-ui-with-audit-trail.
-//   - right-pane tab switching
+//   - right-pane menu (#right-tab-select): which section the right pane shows
 //   - Actors tab: fetch GET /api/actors and render the actor tree
 //   - Sessions tab: GET /api/sessions?conversationSquadId=<active ConversationSquad>, trace view unchanged (ported from
 //     quarkus-chat-ui3)
@@ -12,33 +12,46 @@
 (function () {
     "use strict";
 
-    // ── Right-pane tabs ─────────────────────────────────────────────────────
-    // Single click handler for #right-tab-bar (a second, separate listener here previously raced
-    // with initIo()'s own — both fired on the same click, and depending on timing that could kick
-    // off two concurrent ioLoadSessions() calls stepping on each other's DOM update).
-    function initTabs() {
-        var bar = document.getElementById("right-tab-bar");
-        if (!bar) return;
-        bar.addEventListener("click", function (e) {
-            var btn = e.target.closest(".rtab-btn");
-            if (!btn) return;
-            var tab = btn.getAttribute("data-tab");
-            bar.querySelectorAll(".rtab-btn").forEach(function (b) {
-                b.classList.toggle("active", b === btn);
-            });
-            document.querySelectorAll(".rtab-content").forEach(function (c) {
-                c.classList.toggle("active", c.id === "tab-" + tab);
-            });
-            if (tab === "logdb") ioOnShow();
-            if (tab === "syslog") refreshLogs();
-            if (tab === "agentloop") wfOnShow();
-            if (tab === "logsearch") lsearchOnShow();
-            if (tab === "jobrun") jobRunOnShow();
-            if (tab === "jobs") jobsOnShow();
-            if (tab === "joblog") jobLogOnShow();
-            if (tab === "actions") actOnShow();
-            if (tab === "methodsearch") msOnShow();
+    // ── Right-pane menu ─────────────────────────────────────────────────────
+    // The right pane shows one section (#tab-<name>) at a time, chosen in #right-tab-select. Every
+    // switch -- the person choosing an entry, a change of perspective, a link elsewhere on the page --
+    // goes through showRightTab, so a section's own onShow runs once, the same way whoever asked.
+    // (A second, separate listener once raced with initIo()'s own and started two concurrent
+    // ioLoadSessions() calls stepping on each other's DOM update.)
+    function rightTabSelect() {
+        return document.getElementById("right-tab-select");
+    }
+
+    /** The menu entry for section {@code tab} in perspective {@code kind}, or null. */
+    function rightTabOption(tab, kind) {
+        var sel = rightTabSelect();
+        if (!sel) return null;
+        return sel.querySelector('option[value="' + tab + '"][data-perspective="' + kind + '"]');
+    }
+
+    /** Shows section {@code tab} of the current perspective, selects its menu entry and runs its onShow. */
+    function showRightTab(tab) {
+        var opt = rightTabOption(tab, perspective);
+        if (!opt) return;
+        opt.selected = true;
+        document.querySelectorAll(".rtab-content").forEach(function (c) {
+            c.classList.toggle("active", c.id === "tab-" + tab);
         });
+        if (tab === "logdb") ioOnShow();
+        if (tab === "syslog") refreshLogs();
+        if (tab === "agentloop") wfOnShow();
+        if (tab === "logsearch") lsearchOnShow();
+        if (tab === "jobrun") jobRunOnShow();
+        if (tab === "jobs") jobsOnShow();
+        if (tab === "joblog") jobLogOnShow();
+        if (tab === "actions") actOnShow();
+        if (tab === "methodsearch") msOnShow();
+    }
+
+    function initTabs() {
+        var sel = rightTabSelect();
+        if (!sel) return;
+        sel.addEventListener("change", function () { showRightTab(sel.value); });
     }
 
     // ── Project perspective, right pane: run a workflow, list the jobs, read a job's log ────
@@ -234,8 +247,7 @@
         logBtn.addEventListener("click", function (e) {
             e.stopPropagation();
             jobLogSelected = j.jobId;
-            var tab = document.querySelector('#right-tab-bar .rtab-btn[data-tab="joblog"]');
-            if (tab) tab.click();
+            showRightTab("joblog");
         });
         actions.appendChild(logBtn);
         if (j.state === "RUNNING" || j.state === "QUEUED") {
@@ -1769,18 +1781,22 @@
         });
     }
 
-    // The right pane keeps one active tab per perspective. After a switch, the tab that was
-    // active may belong to the other perspective and be hidden now; if none of the new
-    // perspective's tabs is active, pick its first. Clicking goes through initTabs' handler, so
-    // the tab's own onShow runs as if the user had clicked it.
+    // The menu offers only the entries of the current perspective. After a switch, the entry that
+    // was selected may belong to the other perspective; then the new perspective's first entry is
+    // shown, through showRightTab, so its own onShow runs as if the person had chosen it.
     function activateFirstTabOf(kind) {
-        var bar = document.getElementById("right-tab-bar");
-        if (!bar) return;
-        var btns = Array.prototype.slice.call(
-            bar.querySelectorAll('.rtab-btn[data-perspective="' + kind + '"]'));
-        if (!btns.length) return;
-        var already = btns.filter(function (b) { return b.classList.contains("active"); })[0];
-        if (!already) btns[0].click();
+        var sel = rightTabSelect();
+        if (!sel) return;
+        var opts = Array.prototype.slice.call(sel.options);
+        opts.forEach(function (o) {
+            var other = o.getAttribute("data-perspective") !== kind;
+            o.hidden = other;
+            o.disabled = other;   // hidden alone still lets some browsers reach it with the arrow keys
+        });
+        var mine = opts.filter(function (o) { return o.getAttribute("data-perspective") === kind; });
+        if (!mine.length) return;
+        var selected = sel.options[sel.selectedIndex];
+        if (!selected || selected.getAttribute("data-perspective") !== kind) showRightTab(mine[0].value);
     }
 
     function restorePerspective() {
@@ -2054,8 +2070,9 @@
     // (ArtexProxyLogging_261017_oo01).
     var EXTERNAL_PROXY_WORKFLOW_PREFIX = "chat-ui-job-externalProxy:";
     function openExternalProxySessions() {
-        var btn = document.querySelector('#right-tab-bar .rtab-btn[data-tab="logdb"]');
-        if (btn) btn.click();
+        // Sessions belongs to the chat perspective; from the project one it would not be shown.
+        switchPerspective("chat");
+        showRightTab("logdb");
         var el = document.getElementById("io-sessions");
         if (!el) return;
         fetch("api/sessions")
@@ -2440,7 +2457,7 @@
                 })
                 .catch(function (e) { ioSetStatus("error: " + e); });
         });
-        // Tab-switch-triggered lazy load is wired once, in initTabs()'s own #right-tab-bar handler.
+        // The lazy load on showing this section is wired once, in showRightTab().
     }
 
 
@@ -2558,8 +2575,7 @@
     // which is where the conversations of every tab, present or removed, end up.
     function lsearchOpen() {
         switchPerspective("chat");
-        var btn = document.querySelector('#right-tab-bar .rtab-btn[data-tab="logsearch"]');
-        if (btn) btn.click();
+        showRightTab("logsearch");
     }
 
     function initLsearch() {

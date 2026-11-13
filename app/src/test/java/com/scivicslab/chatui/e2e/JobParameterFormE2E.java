@@ -90,7 +90,7 @@ public class JobParameterFormE2E {
                 page.waitForSelector("#project-wf-list .pwf-row");
                 page.click("#project-wf-list .pwf-row:has-text('e2e-params')");
                 page.waitForTimeout(500);
-                page.click("#right-tab-bar .rtab-btn[data-tab='jobrun']");
+                page.selectOption("#right-tab-select", "jobrun");
                 page.waitForSelector("#jobrun-params .jobrun-param");
 
                 int fields = (int) page.evaluate(

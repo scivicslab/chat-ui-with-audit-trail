@@ -220,22 +220,25 @@
 
         <div id="right-panel">
             <div id="right-tab-bar">
-                <!-- Each tab belongs to one perspective; only the active perspective's tabs are
-                     shown (ProjectPerspective_260911_oo01). -->
-                <button class="rtab-btn active" data-tab="logdb" data-perspective="chat">Sessions</button>
-                <button class="rtab-btn" data-tab="syslog" data-perspective="chat">System Log</button>
-                <button class="rtab-btn" data-tab="agentloop" data-perspective="chat">Agent Loop</button>
-                <button class="rtab-btn" data-tab="logsearch" data-perspective="chat">Log Search</button>
-                <button class="rtab-btn" data-tab="projectprop" data-perspective="project">Project Property</button>
-                <button class="rtab-btn" data-tab="jobrun" data-perspective="project">Run</button>
-                <button class="rtab-btn" data-tab="joblog" data-perspective="project">Job Log</button>
-                <button class="rtab-btn" data-tab="jobs" data-perspective="project">Batch Jobs</button>
-                <button class="rtab-btn" data-tab="methodsearch" data-perspective="project">Method Search</button>
-                <!-- Actions belongs to both perspectives: one button per perspective, one section
-                     without a perspective, so it stays shown whichever is active. -->
-                <button class="rtab-btn" data-tab="actions" data-perspective="chat">Actions</button>
-                <button class="rtab-btn" data-tab="actions" data-perspective="project">Actions</button>
-                <!-- Add new feature tabs here, with the perspective they belong to. -->
+                <!-- One menu instead of a row of tabs, which no longer fitted the pane's width. Each entry
+                     belongs to one perspective; only the active perspective's entries are offered
+                     (ProjectPerspective_260911_oo01). The value names the section to show (tab-<value>). -->
+                <select id="right-tab-select" aria-label="Right pane">
+                    <option value="logdb" data-perspective="chat" selected>Sessions</option>
+                    <option value="syslog" data-perspective="chat">System Log</option>
+                    <option value="agentloop" data-perspective="chat">Agent Loop</option>
+                    <option value="logsearch" data-perspective="chat">Log Search</option>
+                    <option value="projectprop" data-perspective="project">Project Property</option>
+                    <option value="jobrun" data-perspective="project">Run</option>
+                    <option value="joblog" data-perspective="project">Job Log</option>
+                    <option value="jobs" data-perspective="project">Batch Jobs</option>
+                    <option value="methodsearch" data-perspective="project">Method Search</option>
+                    <!-- Actions belongs to both perspectives: one entry per perspective, one section
+                         without a perspective, so it stays shown whichever is active. -->
+                    <option value="actions" data-perspective="chat">Actions</option>
+                    <option value="actions" data-perspective="project">Actions</option>
+                    <!-- Add new feature entries here, with the perspective they belong to. -->
+                </select>
             </div>
 
             <div class="rtab-body">

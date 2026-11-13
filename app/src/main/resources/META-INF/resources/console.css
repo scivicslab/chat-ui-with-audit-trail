@@ -72,31 +72,26 @@
 #right-config-bar input[type=number] { width: 64px; }
 #cfg-status { color: var(--accent-blue, #a5b4fc); margin-left: auto; }
 
-/* ── Right-pane tabs ───────────────────────────────────────────── */
+/* ── Right-pane menu ───────────────────────────────────────────── */
 #right-tab-bar {
     display: flex;
+    align-items: center;
     gap: 4px;
     flex-shrink: 0;
     padding: 0 8px;
     background: var(--bg-secondary, #161616);
     border-bottom: 2px solid var(--border-color, #2c2c2c);
 }
-.rtab-btn {
-    appearance: none;
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    color: var(--text-secondary, #9aa0a6);
+/* One menu instead of a row of tabs: the row no longer fitted the pane's width. */
+#right-tab-select {
+    margin: 6px 0;
+    padding: 4px 8px;
     font-size: 13px;
-    padding: 10px 14px;
-    cursor: pointer;
-    margin-bottom: -2px;
-}
-.rtab-btn:hover { color: var(--text-primary, #d0d0d0); }
-.rtab-btn.active {
-    color: var(--accent-blue, #a5b4fc);
-    border-bottom-color: var(--accent-blue, #6366f1);
     font-weight: 600;
+    color: var(--accent-blue, #a5b4fc);
+    background: var(--bg-primary, #1e1e1e);
+    border: 1px solid var(--border-color, #2c2c2c);
+    cursor: pointer;
 }
 
 .rtab-body { flex: 1; min-height: 0; overflow: hidden; display: flex; }
@@ -558,8 +553,7 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
     border-radius: var(--radius);
 }
 #right-tab-bar { border-bottom: 1px solid var(--border-color); }
-.rtab-btn { font-family: var(--font-body); font-weight: 500; }
-.rtab-btn.active { color: var(--accent-blue); border-bottom-color: var(--accent-blue); }
+#right-tab-select { font-family: var(--font-body); color: var(--accent-blue); border-radius: var(--radius); }
 
 /* ── Extensions panel (SkillAndAgentsFile_260830_oo01) ── */
 .ext-menu { position: relative; }
@@ -601,9 +595,10 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
 .actor-label.actor-has-note .actor-name { border-bottom: 1px dotted var(--text-secondary, #7a7a7a); }
 
 /* ── Perspective (ProjectPerspective_260911_oo01) ───────────────────────────
-   #console-root[data-perspective] decides which centre sub-pane and which right tabs are shown.
-   The selectors below are more specific than .rtab-content.active, so a tab of the other
-   perspective stays hidden even while it still carries "active". */
+   #console-root[data-perspective] decides which centre sub-pane and which right-pane sections are
+   shown (the menu's entries are offered per perspective by console.js). The selectors below are
+   more specific than .rtab-content.active, so a section of the other perspective stays hidden even
+   while it still carries "active". */
 #project-panel {
     width: 60%;            /* same initial width as #main-panel; the splitter sets it at runtime */
     flex-shrink: 0;
@@ -632,9 +627,7 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
 
 #console-root[data-perspective="chat"] #project-panel { display: none; }
 #console-root[data-perspective="project"] #main-panel { display: none; }
-#console-root[data-perspective="chat"] .rtab-btn[data-perspective="project"],
 #console-root[data-perspective="chat"] .rtab-content[data-perspective="project"] { display: none; }
-#console-root[data-perspective="project"] .rtab-btn[data-perspective="chat"],
 #console-root[data-perspective="project"] .rtab-content[data-perspective="chat"] { display: none; }
 
 /* Project pane, centre: the workflow catalog above, the one being read below
