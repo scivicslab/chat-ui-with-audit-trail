@@ -1489,9 +1489,14 @@
                 if (maxEl) maxEl.value = org.maxSubordinates || 5;
                 (chatIds || []).forEach(function (chatId) {
                     var li = document.createElement("li");
-                    var id = document.createElement("span");
-                    id.className = "projectprop-chat-id";
+                    // Clicking it shows the conversation as clicking its name in the tree does
+                    // (ProjectPropertyChatLinks_261114_oo01).
+                    var id = document.createElement("button");
+                    id.type = "button";
+                    id.className = "projectprop-chat-id projectprop-chat-link";
                     id.textContent = "chat-" + chatId;
+                    id.title = "Show chat-" + chatId + (chatNames[chatId] ? " (" + chatNames[chatId] + ")" : "");
+                    id.addEventListener("click", function () { showConversation(projectId, chatId); });
                     li.appendChild(id);
                     var nameInput = document.createElement("input");
                     nameInput.type = "text";
@@ -1870,6 +1875,71 @@
         return n;
     }
 
+    // Puts the screen on one conversation: the chat pane, the right pane and the tree's highlight. The
+    // conversation's name in the tree and its name in the Project Property list both call this, so the
+    // two cannot drift apart (ProjectPropertyChatLinks_261114_oo01).
+    function showConversation(projectId, chatId) {
+        window.chatUiSwitchChat(projectId, chatId);
+        // A conversation is shown in the chat perspective; leave the project one if in it
+        // (ProjectPerspective_260911_oo01).
+        switchPerspective("chat");
+        // Open the nodes above the conversation, so that its highlight is not inside a folded node. A click
+        // in the tree finds them open already.
+        expandActorsAbove(projectId + "/chat-" + chatId);
+        // Re-render so the tab-active highlight moves immediately, then bring it into view.
+        refreshActors().then(scrollActiveActorIntoView);
+        // Right pane follows the newly active tab (150_TabScopedLogging_260826_oo01) —
+        // re-fetch immediately rather than waiting for the next poll/tab-open.
+        ioSessionsLoaded = false;
+        if (document.getElementById("tab-logdb") && document.getElementById("tab-logdb").classList.contains("active")) {
+            ioLoadSessions();
+        }
+        lastLogSig = null;
+        if (document.getElementById("tab-syslog") && document.getElementById("tab-syslog").classList.contains("active")) {
+            refreshLogs();
+        }
+        if (document.getElementById("tab-agentloop") && document.getElementById("tab-agentloop").classList.contains("active")) {
+            wfOnShow();
+        }
+    }
+
+    // The last tree drawn, to find the nodes above a conversation.
+    var lastActorTree = null;
+
+    // Unfolds every node above the named actor. When the tree has not been drawn yet or does not hold the
+    // actor (a conversation just made), unfolds the project the name begins with.
+    function expandActorsAbove(actorName) {
+        var path = lastActorTree ? actorPathTo(lastActorTree, actorName) : null;
+        if (!path) {
+            var slash = actorName.indexOf("/");
+            if (slash > 0) collapsedActorNodes.delete(actorName.substring(0, slash));
+            return;
+        }
+        path.slice(0, -1).forEach(function (n) { collapsedActorNodes.delete(n); });
+    }
+
+    // The names from the root down to the actor, or null when the tree does not hold it.
+    function actorPathTo(node, actorName) {
+        if (node.name === actorName) return [node.name];
+        var kids = node.children || [];
+        for (var i = 0; i < kids.length; i++) {
+            var below = actorPathTo(kids[i], actorName);
+            if (below) return [node.name].concat(below);
+        }
+        return null;
+    }
+
+    function scrollActiveActorIntoView() {
+        var tree = document.getElementById("actors-tree");
+        var active = tree && tree.querySelector(".actor-name.tab-active");
+        if (!active || !active.scrollIntoView) return;
+        // A row already in view stays where it is (a click on a row in the tree always finds it so); one out of
+        // view is brought to the middle of the tree, with its neighbours around it.
+        var box = tree.getBoundingClientRect();
+        var row = active.getBoundingClientRect();
+        if (row.top < box.top || row.bottom > box.bottom) active.scrollIntoView({ block: "center" });
+    }
+
     function actorNodeEl(node, parentName) {
         var wrap = document.createElement("div");
         wrap.className = "actor-node";
@@ -1904,24 +1974,7 @@
             name.title = "Switch to " + tabMatch[1] + " / " + tabMatch[2];
             name.addEventListener("click", function (e) {
                 e.stopPropagation(); // don't also trigger the fold/unfold toggle on the label
-                window.chatUiSwitchChat(tabMatch[1], tabMatch[2]);
-                // A conversation is shown in the chat perspective; leave the project one if in it
-                // (ProjectPerspective_260911_oo01).
-                switchPerspective("chat");
-                refreshActors(); // re-render so the tab-active highlight moves immediately
-                // Right pane follows the newly active tab (150_TabScopedLogging_260826_oo01) —
-                // re-fetch immediately rather than waiting for the next poll/tab-open.
-                ioSessionsLoaded = false;
-                if (document.getElementById("tab-logdb") && document.getElementById("tab-logdb").classList.contains("active")) {
-                    ioLoadSessions();
-                }
-                lastLogSig = null;
-                if (document.getElementById("tab-syslog") && document.getElementById("tab-syslog").classList.contains("active")) {
-                    refreshLogs();
-                }
-                if (document.getElementById("tab-agentloop") && document.getElementById("tab-agentloop").classList.contains("active")) {
-                    wfOnShow();
-                }
+                showConversation(tabMatch[1], tabMatch[2]);
             });
         }
         // A Project node switches the whole console to that project's perspective
@@ -1992,6 +2045,7 @@
     function renderActorTree(root) {
         var el = document.getElementById("actors-tree");
         if (!el) return;
+        lastActorTree = root;
         el.textContent = "";
         if (!root) {
             var empty = document.createElement("div");
@@ -2011,11 +2065,18 @@
     }
 
     var actorsRefreshing = false;
+    var actorsRefreshAgain = false;
+    var actorsRefreshPromise = Promise.resolve();
+    // Returns a promise that settles when the tree shows what the call asked for. A call made while a
+    // refresh is running would have drawn what that refresh began before it: it runs once more after it.
     function refreshActors() {
-        if (actorsRefreshing) return;
+        if (actorsRefreshing) {
+            actorsRefreshAgain = true;
+            return actorsRefreshPromise;
+        }
         actorsRefreshing = true;
         var status = document.getElementById("actors-status");
-        fetch("api/actors")
+        actorsRefreshPromise = fetch("api/actors")
             .then(function (r) {
                 if (!r.ok) throw new Error("HTTP " + r.status);
                 return r.json();
@@ -2027,7 +2088,13 @@
             .catch(function (err) {
                 if (status) status.textContent = "error: " + err.message;
             })
-            .finally(function () { actorsRefreshing = false; });
+            .then(function () {
+                actorsRefreshing = false;
+                if (!actorsRefreshAgain) return;
+                actorsRefreshAgain = false;
+                return refreshActors();
+            });
+        return actorsRefreshPromise;
     }
 
     // Creates a new, independent project (ProjectScopedActorTree_260829_oo01) and switches the
