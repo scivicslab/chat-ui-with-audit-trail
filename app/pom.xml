@@ -248,6 +248,9 @@
         <configuration>
           <systemPropertyVariables>
             <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+            <!-- The end-of-turn reminder step adds a model call to every turn; the tests that count a conversation's
+                 model calls would all change. ReminderStepTest turns it on for the conversations it tests. -->
+            <chat-ui.reminder-decision>false</chat-ui.reminder-decision>
           </systemPropertyVariables>
         </configuration>
       </plugin>

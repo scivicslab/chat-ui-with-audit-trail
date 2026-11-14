@@ -293,7 +293,7 @@ class ConversationToolsTest {
         assertEquals(List.of("project1/02=claude:harness"), controls.providerCalls);
         assertEquals(List.of("project1/02=opus"), controls.setCalls);
         assertEquals(List.of("project1/02=worker chat-02"), controls.nameCalls);
-        assertEquals(List.of("project1/02=10,30"), controls.timekeeperCalls);
+        assertEquals(List.of("project1/02=10,5"), controls.timekeeperCalls);
     }
 
     @Test

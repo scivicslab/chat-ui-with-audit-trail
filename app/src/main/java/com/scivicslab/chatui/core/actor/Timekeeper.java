@@ -41,7 +41,13 @@ public class Timekeeper {
     static final long DEFAULT_URGENT_WAIT_MINUTES = 10;
 
     /** Default for how long a request may go without a reply before the conversation is told. */
-    static final long DEFAULT_CHILD_REPLY_WARN_MINUTES = 30;
+    static final long DEFAULT_CHILD_REPLY_WARN_MINUTES = 5;
+
+    /**
+     * Default wait for a reminder the end-of-turn step registers when the answer states no time of its own
+     * ({@code ReminderDecidedAtTheEndOfTheTurn_261114_oo01}).
+     */
+    public static final long DEFAULT_PROMISE_REMINDER_MINUTES = 5;
 
     /** Source of the notice put into the conversation's queue. */
     public static final String SOURCE = "agent:timekeeper";
@@ -106,6 +112,11 @@ public class Timekeeper {
      */
     public int expectReport(String requestId, String asker, long minutes) {
         return promised.expect(requestId, asker, System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(minutes));
+    }
+
+    /** @return the promised reports waiting for their time, soonest first, for the record and for tests */
+    public List<PromisedReports.Pending> pendingPromises() {
+        return promised.snapshot();
     }
 
     /**

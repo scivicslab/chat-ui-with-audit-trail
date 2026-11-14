@@ -348,6 +348,18 @@ public class ChatSessionIIAR extends InterpreterIIAR {
         return chatSession().replyLeftUndecided();
     }
 
+    /**
+     * The step at the end of a turn that decides whether the timekeeper must remind the conversation
+     * ({@code ReminderDecidedAtTheEndOfTheTurn_261114_oo01}).
+     *
+     * @param arg unused
+     * @return always successful, so that the turn goes on to {@code finish}
+     */
+    @Action("decideReminder")
+    public ActionResult decideReminderAction(String arg) {
+        return chatSession().decideReminder();
+    }
+
     @Action("hasMoreConstructedPrompts")
     public ActionResult hasMoreConstructedPromptsAction(String arg) {
         return chatSession().hasMoreConstructedPrompts();

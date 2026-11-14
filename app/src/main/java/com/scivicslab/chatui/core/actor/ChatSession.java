@@ -319,7 +319,7 @@ public class ChatSession extends Interpreter {
               conversation of this project's timekeeper. urgentWaitMinutes is how long an urgent
               request may wait while that conversation runs a long turn before the turn is paused to
               answer it (default 10); childReplyWarnMinutes is how long a request it sent may go
-              without a reply before it is told (default 30). Requires a "chatId" <parameter> tag and
+              without a reply before it is told (default 5). Requires a "chatId" <parameter> tag and
               at least one of the other two, in whole minutes; one left out keeps its value.
             """);
         m.put("accept_reply", """
@@ -335,9 +335,8 @@ public class ChatSession extends Interpreter {
               register it with that conversation's timekeeper. After "minutes" it is reminded once,
               and the answer it writes then comes to you as [follow-up to request …, reminder N].
               If that says "not yet" again, register again. Requires "chatId", "requestId" and
-              "minutes" (whole minutes) <parameter> tags. If you yourself told the person you would
-              report later, give your own id as "chatId" and leave out "requestId": you are
-              reminded, and your answer goes to your screen.
+              "minutes" (whole minutes) <parameter> tags. You do not register a reminder for a
+              report you promise yourself: the end of your turn decides that.
             """);
         m.put("set_chat_name", """
             - set_chat_name(chatId, name): give a conversation of this project, your own included, the
@@ -2385,29 +2384,162 @@ public class ChatSession extends Interpreter {
         String prompt = "Judge the text below against these criteria:\n" + criteria
                 + "\n\nIf it meets them as-is, reply with exactly:\nACCEPT\nOtherwise, reply "
                 + "with:\nREVISE: <a concise, specific description of what to fix>\n\nText:\n" + reply;
-        StringBuilder buf = new StringBuilder();
-        ProviderContext ctx = new ProviderContext(apiKey, List.of(), turnNoThink, () -> {});
-        ActorRef<LlmProvider> providerRef = providerRef();
+        String verdict;
         try {
-            providerRef.ask(p -> {
-                Consumer<ChatEvent> wrapped = event -> {
-                    if ("delta".equals(event.type()) && event.content() != null) {
-                        buf.append(event.content());
-                        turnEmitter.accept(ChatEvent.thinking(event.content()));
-                    }
-                };
-                p.sendPrompt(prompt, turnModel, wrapped, ctx);
-                return null;
-            }, system.getManagedThreadPool()).get();
+            verdict = callModelOnce(prompt, turnNoThink);
         } catch (Exception e) {
             logger.log(Level.WARNING, "Babysitter judge LLM call failed", e);
             String failed = "REVISE: judge call failed: " + e.getMessage();
             recordJudgeIo(prompt, failed);
             return failed;
         }
-        String verdict = buf.toString();
         recordJudgeIo(prompt, verdict);
         return verdict;
+    }
+
+    /**
+     * One blocking call to this conversation's model, whose streamed text is shown as "thinking" like the agent
+     * loop's own calls.
+     *
+     * @param prompt  what to ask
+     * @param noThink whether to ask the model to skip its thinking phase
+     * @return the model's reply text
+     * @throws Exception when the call fails
+     */
+    private String callModelOnce(String prompt, boolean noThink) throws Exception {
+        StringBuilder buf = new StringBuilder();
+        ProviderContext ctx = new ProviderContext(apiKey, List.of(), noThink, () -> {});
+        providerRef().ask(p -> {
+            Consumer<ChatEvent> wrapped = event -> {
+                if ("delta".equals(event.type()) && event.content() != null) {
+                    buf.append(event.content());
+                    turnEmitter.accept(ChatEvent.thinking(event.content()));
+                }
+            };
+            p.sendPrompt(prompt, turnModel, wrapped, ctx);
+            return null;
+        }, system.getManagedThreadPool()).get();
+        return buf.toString();
+    }
+
+    /**
+     * Whether the end-of-turn step runs. On unless {@code -Dchat-ui.reminder-decision=false}, which turns the
+     * model call off for an instance that must not pay it (the test suite does, except where it tests the step).
+     */
+    private volatile boolean reminderDecisionEnabled =
+            !"false".equalsIgnoreCase(System.getProperty("chat-ui.reminder-decision", "true"));
+
+    /** @param enabled whether the end-of-turn step runs on this conversation */
+    public void setReminderDecisionEnabled(boolean enabled) {
+        this.reminderDecisionEnabled = enabled;
+    }
+
+    /** What the end-of-turn step decided last, for the record and for tests; {@code null} before the first turn ends. */
+    private volatile String lastReminderDecision;
+
+    /** @return the line the end-of-turn step last wrote to the log, or {@code null} */
+    public String lastReminderDecision() {
+        return lastReminderDecision;
+    }
+
+    /**
+     * Agent-loop action at the end of a turn, after the final answer is fixed and before the turn ends: decides
+     * whether the timekeeper must remind this conversation, so that a promised later report does not depend on
+     * the model remembering to register one ({@code ReminderDecidedAtTheEndOfTheTurn_261114_oo01}).
+     *
+     * <ul>
+     * <li>Requests this conversation sent for a request it received are still out: the timekeeper's child-reply watch
+     * covers them. No model call; the log says so.</li>
+     * <li>Otherwise one small model call must answer {@code REGISTER <minutes or DEFAULT> | "<quote>"} or
+     * {@code NONE | <reason>}. Both are logged. On {@code REGISTER}, a reminder is registered with this
+     * conversation's timekeeper.</li>
+     * </ul>
+     *
+     * @return always {@code success=true}: a failure here must not stop the turn from ending
+     */
+    public ActionResult decideReminder() {
+        try {
+            decideReminderNow();
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "The end-of-turn reminder decision failed", e);
+            noteReminderDecision("SKIPPED | the decision failed: " + e.getMessage(), null, null);
+        }
+        return new ActionResult(true, "reminder decided");
+    }
+
+    private void decideReminderNow() throws Exception {
+        if (!reminderDecisionEnabled) return;
+        if (cancelled || pauseRequested || turnError != null || finalAnswer == null || finalAnswer.isBlank()) {
+            noteReminderDecision("SKIPPED | the turn has no final answer", null, null);
+            return;
+        }
+        List<OpenRequests.Outstanding> out = openRequests.outstandingChildren();
+        if (!out.isEmpty()) {
+            noteReminderDecision("COVERED | covered by child-reply watch (" + out.size() + " request(s) still out: "
+                    + out.stream().map(OpenRequests.Outstanding::requestId).collect(java.util.stream.Collectors.joining(", "))
+                    + ")", null, null);
+            return;
+        }
+        // Who the answer was written to: the conversation that asked, or the person.
+        FollowUpTo reminded = turnReminder != null && turnFollowUp != null && !REMINDER_TO_SCREEN.equals(turnFollowUp.asker())
+                ? turnFollowUp : null;
+        String request = reminded != null ? turnReminder : turnOriginal;
+        String asker = reminded != null ? reminded.asker() : turnOriginal != null ? openRequests.askerOf(turnOriginal) : null;
+        if (asker == null) request = null;
+        String addressee = asker == null ? "the person" : asker;
+        String now = java.time.ZonedDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm (EEEE) z"));
+        // What finish() will emit: the text written before a decision was asked for, then the final step's.
+        String answerText = answerBeforeDecision != null && !answerBeforeDecision.isBlank()
+                ? answerBeforeDecision + "\n\n" + finalAnswer : finalAnswer;
+        String prompt = ReminderDecision.prompt(answerText, addressee, AskChatTool.unansweredFrom(myChatName()), now);
+        String reply;
+        try {
+            reply = callModelOnce(prompt, true);
+        } catch (Exception e) {
+            noteReminderDecision("SKIPPED | the model call failed: " + e.getMessage(), prompt, null);
+            return;
+        }
+        ReminderDecision decision = ReminderDecision.parse(reply, answerText);
+        if (decision.kind() != ReminderDecision.Kind.REGISTER) {
+            noteReminderDecision(decision.describe(), prompt, reply);
+            return;
+        }
+        long minutes = decision.minutes() != null ? decision.minutes() : Timekeeper.DEFAULT_PROMISE_REMINDER_MINUTES;
+        ActorRef<Timekeeper> keeper = system == null ? null : system.getActor(myChatName() + ".timekeeper");
+        if (keeper == null) {
+            noteReminderDecision("SKIPPED | no timekeeper to register with | " + decision.describe(), prompt, reply);
+            return;
+        }
+        String req = request;
+        String ask = asker;
+        int number = keeper.ask(k -> k.expectReport(req, ask, minutes)).get(5, TimeUnit.SECONDS);
+        noteReminderDecision("REGISTERED " + minutes + " min (reminder " + number + ") for "
+                + (request == null ? "the person" : "request " + request + " from " + asker) + " | \""
+                + decision.quote() + "\""
+                + (decision.minutes() == null ? " | no time in the answer: the default" : ""), prompt, reply);
+    }
+
+    /**
+     * Writes the end-of-turn decision where a person can find it: the conversation's log, the screen's thinking
+     * trace, and the turn's record, as a step of its own that is not mistaken for the answer.
+     *
+     * @param decision what was decided, as one line
+     * @param prompt   the question put to the model, or {@code null} when none was
+     * @param reply    the model's reply, or {@code null} when none was asked
+     */
+    private void noteReminderDecision(String decision, String prompt, String reply) {
+        lastReminderDecision = decision;
+        logToConversationSquad("INFO", "turn" + ioTurnNo + ": reminder decision: " + decision);
+        turnEmitter.accept(ChatEvent.thinking("\n→ reminder: " + decision + "\n"));
+        if (prompt != null) stepCount++;   // a model call was made: it is counted like the others
+        if (ioLog == null || ioSession < 0) return;
+        try {
+            String m = "TOOL: reminder_decision\nINPUT:\n" + (prompt == null ? "(no model call)" : prompt)
+                    + "\nOBSERVATION:\n" + (reply == null ? "" : "MODEL REPLY: " + reply + "\n") + "DECISION: " + decision;
+            ioLog.record(ioSession, "agent", "turn" + ioTurnNo + "/step" + stepCount + "/tool", m);
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "I/O log reminder decision record failed", e);
+        }
     }
 
     /**

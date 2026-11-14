@@ -160,6 +160,21 @@ public final class AskChatTool {
             });
 
     /**
+     * @param myName the calling conversation's qualified name
+     * @return one line for each request it sent that has no reply yet, "{@code <id> to <target>}", oldest first
+     */
+    public static java.util.List<String> unansweredFrom(String myName) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        synchronized (SENT) {
+            for (java.util.Map.Entry<String, Sent> e : SENT.entrySet()) {
+                Sent s = e.getValue();
+                if (s.sender().equals(myName) && !s.done().isDone()) out.add(e.getKey() + " to " + s.targetName());
+            }
+        }
+        return out;
+    }
+
+    /**
      * The {@code cancel_request} tool: takes a request the caller sent with {@code ask_chat} out of the target's
      * queue, if it still waits there ({@code CancelARequestInTheQueue_261113_oo01}). Only the sender can: a
      * request id that the caller did not send is answered as not found. A request that has already started is

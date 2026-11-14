@@ -75,6 +75,23 @@ public final class PromisedReports {
         return due;
     }
 
+    /**
+     * One registration waiting for its time.
+     *
+     * @param requestId the request the report was promised for, or {@code null} for a promise made to the person
+     * @param asker     who waits for it, or {@code null} for the person
+     * @param dueAt     when it will be asked for, in milliseconds since the epoch
+     */
+    public record Pending(String requestId, String asker, long dueAt) {}
+
+    /** @return the registrations waiting for their time, soonest first */
+    public List<Pending> snapshot() {
+        List<Pending> all = new ArrayList<>();
+        for (Promise p : promises.values()) all.add(new Pending(p.requestId(), p.asker(), p.dueAt()));
+        all.sort((a, b) -> Long.compare(a.dueAt(), b.dueAt()));
+        return all;
+    }
+
     /** @return how many registrations are waiting for their time */
     public int pending() {
         return promises.size();

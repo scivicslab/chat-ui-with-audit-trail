@@ -195,7 +195,7 @@ class TeamBuilderTest {
 
         List<TeamBuilder.Built> built = builder.build(plan);
 
-        assertEquals(List.of("create 02", "provider 02 claude", "model 02 opus", "name 02", "superior 02 01", "timekeeper 02 10,30"),
+        assertEquals(List.of("create 02", "provider 02 claude", "model 02 opus", "name 02", "superior 02 01", "timekeeper 02 10,5"),
                 desk.calls.subList(0, 6));
         assertEquals("02", built.get(0).chatId());
         assertEquals("01", desk.superiors.get("02"), "the manager reports to the liaison");

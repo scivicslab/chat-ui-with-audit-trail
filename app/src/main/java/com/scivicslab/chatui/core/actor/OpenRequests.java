@@ -204,6 +204,15 @@ public final class OpenRequests {
         return o == null ? null : o.done;
     }
 
+    /**
+     * @param original the original request's id
+     * @return the qualified name of the conversation that sent the request, or {@code null} if it is not open
+     */
+    public String askerOf(String original) {
+        Original o = originals.get(original);
+        return o == null ? null : o.asker;
+    }
+
     /** @return the id of the last original request received, or {@code null} */
     public String last() {
         return last;

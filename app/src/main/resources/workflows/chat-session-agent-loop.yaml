@@ -85,10 +85,19 @@ steps:
   - states: ["think", "end"]
     label: think-final
     note: |
-      No tool was called and no more prompts are queued: emit the final answer already captured
-      in stepExpectingAction and end the turn. Reached only when think-action and think-continue
-      both just failed (tried third, same state).
+      No tool was called and no more prompts are queued: the final answer is fixed. Before it is
+      emitted and the turn ends, decideReminder settles whether the timekeeper must remind this
+      conversation (ReminderDecidedAtTheEndOfTheTurn_261114_oo01): when requests sent for a request
+      this conversation received are still out, the timekeeper's child-reply watch covers them and no
+      model call is made; otherwise one small model call must answer REGISTER <minutes> | "<quote>" or
+      NONE | <reason>, and either is logged. decideReminder always succeeds, so a failure there never
+      keeps the turn from ending. Then finish emits the final answer already captured in
+      stepExpectingAction and ends the turn. Reached only when think-action, think-continue and
+      think-undecided all just failed (tried last, same state).
     actions:
+      - actor: this
+        method: decideReminder
+        execution: direct
       - actor: this
         method: finish
         execution: direct

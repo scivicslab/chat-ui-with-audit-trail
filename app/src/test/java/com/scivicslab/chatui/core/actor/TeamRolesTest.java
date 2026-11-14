@@ -21,8 +21,8 @@ class TeamRolesTest {
     void theBundledTablePutsManagersAndWorkersOnClaudeOpusAndRepeatersOnTheLocalLlm() {
         TeamRoles roles = TeamRoles.bundled();
 
-        assertEquals(new TeamRoles.Role("claude", "opus", 10, 30), roles.role("manager"));
-        assertEquals(new TeamRoles.Role("claude", "opus", 10, 30), roles.role("worker"));
+        assertEquals(new TeamRoles.Role("claude", "opus", 10, 5), roles.role("manager"));
+        assertEquals(new TeamRoles.Role("claude", "opus", 10, 5), roles.role("worker"));
         assertEquals("openai-compat", roles.role("repeater").provider());
         assertEquals("google/gemma-4-26B-A4B-it", roles.role("repeater").model());
     }
@@ -62,12 +62,12 @@ class TeamRolesTest {
     void anOverrideReplacesWhatItNamesAndAProviderAloneDropsTheTablesModel() {
         TeamRoles roles = TeamRoles.bundled();
 
-        assertEquals(new TeamRoles.Role("claude", "sonnet", 10, 30),
+        assertEquals(new TeamRoles.Role("claude", "sonnet", 10, 5),
                 roles.overriding("worker", "", "sonnet").role("worker"));
-        assertEquals(new TeamRoles.Role("openai-compat", "", 10, 30),
+        assertEquals(new TeamRoles.Role("openai-compat", "", 10, 5),
                 roles.overriding("worker", "openai-compat", "").role("worker"),
                 "the table's opus is not carried over to another provider");
-        assertEquals(new TeamRoles.Role("openai-compat", "gemma", 10, 30),
+        assertEquals(new TeamRoles.Role("openai-compat", "gemma", 10, 5),
                 roles.overriding("worker", "openai-compat", "gemma").role("worker"));
         assertEquals(roles.role("worker"), roles.overriding("worker", "", "").role("worker"), "nothing named, nothing changed");
         assertEquals(roles.role("manager"), roles.overriding("worker", "openai-compat", "x").role("manager"));
