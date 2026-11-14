@@ -75,8 +75,9 @@
 /* ── Right-pane menu ───────────────────────────────────────────── */
 #right-tab-bar {
     display: flex;
-    align-items: center;
-    gap: 4px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
     flex-shrink: 0;
     padding: 0 8px;
     background: var(--bg-secondary, #161616);
@@ -84,7 +85,8 @@
 }
 /* One menu instead of a row of tabs: the row no longer fitted the pane's width. */
 #right-tab-select {
-    margin: 6px 0;
+    align-self: flex-start;
+    margin: 6px 0 0;
     padding: 4px 8px;
     font-size: 13px;
     font-weight: 600;
@@ -554,6 +556,19 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
 }
 #right-tab-bar { border-bottom: 1px solid var(--border-color); }
 #right-tab-select { font-family: var(--font-body); color: var(--accent-blue); border-radius: var(--radius); }
+/* The selected entry's description: at most two lines, so it does not push the panel far down in a
+   narrow pane; the whole text is in its tooltip. */
+#right-tab-desc {
+    margin: 0 0 6px;
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--text-secondary, #9aa0a6);
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+}
 
 /* ── Extensions panel (SkillAndAgentsFile_260830_oo01) ── */
 .ext-menu { position: relative; }

@@ -78,6 +78,24 @@ public class RightPaneMenuCheck {
                 + ".filter(c => c.offsetParent !== null).map(c => c.id)");
     }
 
+    /** The text of the description line under the menu. */
+    static String desc(Page page) {
+        return page.textContent("#right-tab-desc").trim();
+    }
+
+    /** The tooltip (title) of the offered entry with this label. */
+    static String titleOf(Page page, String label) {
+        return (String) page.evaluate("(l) => Array.from(document.querySelectorAll('#right-tab-select option'))"
+                + ".find(o => !o.hidden && o.textContent.trim() === l).title", label);
+    }
+
+    /** The description line shows the entry's own description, the same text as the entry's tooltip. */
+    static void describes(Page page, String label, String when) {
+        String d = desc(page);
+        check(!d.isEmpty() && d.equals(titleOf(page, label)) && d.length() > 40,
+                when + ": the line under the menu describes \"" + label + "\": " + d);
+    }
+
     /** Chooses the offered entry with this label, the way a person does in the menu. */
     static void choose(Page page, String label) {
         int index = ((Number) page.evaluate("(l) => Array.from(document.querySelectorAll('#right-tab-select option'))"
@@ -101,12 +119,16 @@ public class RightPaneMenuCheck {
     }
 
     static void everyEntryOpensItsSection(Page page, List<String> entries) {
+        java.util.Set<String> seen = new java.util.HashSet<>();
         for (String label : entries) {
             choose(page, label);
             String id = "tab-" + valueOf(page, label);
             check(selected(page).equals(label) && shown(page).equals(List.of(id)),
                     "choosing \"" + label + "\" shows only #" + id + " (shown: " + shown(page) + ")");
+            describes(page, label, "choosing \"" + label + "\"");
+            seen.add(desc(page));
         }
+        check(seen.size() == entries.size(), "every entry of this view has a description of its own: " + seen.size());
     }
 
     public static void main(String[] args) throws Exception {
@@ -140,6 +162,7 @@ public class RightPaneMenuCheck {
             check(offered(page).equals(CHAT_ENTRIES), "chat view offers " + CHAT_ENTRIES + ": " + offered(page));
             check(selected(page).equals("Sessions") && shown(page).equals(List.of("tab-logdb")),
                     "the chat view opens on Sessions: " + selected(page) + " " + shown(page));
+            describes(page, "Sessions", "on load");
             page.screenshot(new Page.ScreenshotOptions().setPath(Path.of("/tmp/uitest/menu-chat-sessions.png")));
             everyEntryOpensItsSection(page, CHAT_ENTRIES);
 
@@ -155,12 +178,14 @@ public class RightPaneMenuCheck {
             clickTreeNode(page, "Search every recorded conversation");
             check(selected(page).equals("Log Search") && shown(page).equals(List.of("tab-logsearch")),
                     "clicking outputMultiplexer opens Log Search: " + selected(page) + " " + shown(page));
+            describes(page, "Log Search", "after clicking outputMultiplexer");
 
             // The project view: a Project node switches the perspective; its first entry is shown.
             clickTreeNode(page, "Show project " + projectId);
             check(offered(page).equals(PROJECT_ENTRIES), "project view offers " + PROJECT_ENTRIES + ": " + offered(page));
             check(selected(page).equals("Project Property") && shown(page).equals(List.of("tab-projectprop")),
                     "the project view opens on Project Property: " + selected(page) + " " + shown(page));
+            describes(page, "Project Property", "after switching to the project view");
             page.screenshot(new Page.ScreenshotOptions().setPath(Path.of("/tmp/uitest/menu-project-property.png")));
             everyEntryOpensItsSection(page, PROJECT_ENTRIES);
 
@@ -172,6 +197,7 @@ public class RightPaneMenuCheck {
             String jobShown = page.textContent("#joblog-job").trim();
             check(selected(page).equals("Job Log") && shown(page).equals(List.of("tab-joblog")) && jobShown.equals(jobId),
                     "a job's Log button opens Job Log on " + jobId + ": " + selected(page) + " " + shown(page) + " " + jobShown);
+            describes(page, "Job Log", "after a job's Log button");
             page.screenshot(new Page.ScreenshotOptions().setPath(Path.of("/tmp/uitest/menu-project-joblog.png")));
 
             // The perspective is remembered across a reload, and the project view opens on its first entry.
@@ -189,6 +215,7 @@ public class RightPaneMenuCheck {
                             && shown(page).equals(List.of("tab-logdb")),
                     "clicking externalProxy.log from the project view opens Sessions in the chat view: "
                             + selected(page) + " " + shown(page));
+            describes(page, "Sessions", "after clicking externalProxy.log");
             clickTreeNode(page, "Show project " + projectId);
 
             // Back to the chat view through a ConversationSquad actor's node: its first entry is shown.
@@ -203,6 +230,7 @@ public class RightPaneMenuCheck {
             page.waitForTimeout(300);
             check(selected(page).equals("System Log") && shown(page).equals(List.of("tab-syslog")),
                     "ArrowDown on the focused menu moves to System Log: " + selected(page) + " " + shown(page));
+            describes(page, "System Log", "after ArrowDown");
             page.keyboard().press("End");
             page.waitForTimeout(300);
             check(selected(page).equals("Actions") && shown(page).equals(List.of("tab-actions")),
@@ -214,7 +242,11 @@ public class RightPaneMenuCheck {
             page.waitForTimeout(300);
             page.screenshot(new Page.ScreenshotOptions().setPath(Path.of("/tmp/uitest/menu-chat-800.png")));
             double barHeight = ((Number) page.evaluate("() => document.getElementById('right-tab-bar').offsetHeight")).doubleValue();
-            check(barHeight < 50, "at 800 px wide the menu bar is one line: " + barHeight + " px");
+            double descHeight = ((Number) page.evaluate("() => document.getElementById('right-tab-desc').offsetHeight")).doubleValue();
+            double lineHeight = ((Number) page.evaluate("() => parseFloat(getComputedStyle(document.getElementById('right-tab-desc')).lineHeight)")).doubleValue();
+            check(descHeight <= 2 * lineHeight + 1, "at 800 px wide the description takes at most two lines: "
+                    + descHeight + " px, line " + lineHeight + " px");
+            check(barHeight < 80, "at 800 px wide the menu and its description take under 80 px: " + barHeight + " px");
             browser.close();
         }
         System.out.println(failures == 0 ? "ALL PASS" : failures + " FAILED");

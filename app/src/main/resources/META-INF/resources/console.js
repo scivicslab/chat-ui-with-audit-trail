@@ -22,6 +22,33 @@
         return document.getElementById("right-tab-select");
     }
 
+    // What each entry of the right-pane menu shows and when to use it, keyed by the entry's value
+    // (the section tab-<value>). Shown in the line under the menu (#right-tab-desc) and as each
+    // entry's tooltip. Actions is the same panel in both perspectives, so it has one description.
+    var RIGHT_TAB_DESCRIPTIONS = {
+        logdb: "The recorded sessions of the conversation shown in the centre: open one to follow its turns step by step, and pick a message to read it in full below. Use it to see exactly what was sent to the model and what came back, or to delete old sessions.",
+        syslog: "The log lines of the conversation shown in the centre, refreshed every 3 seconds while Auto is on. Set Level to WARN or ERROR to find what went wrong in a turn.",
+        agentloop: "The agent loop this conversation runs and the prompt-construction workflow it uses, as read-only YAML. Choose another agent loop here to change how this conversation runs its turns.",
+        logsearch: "Searches the text of every conversation this instance has recorded, including removed ones. Use it to find where something was said when you do not know which conversation said it.",
+        actions: "Every actor a workflow YAML may name, and the actions each one offers with their descriptions and arguments. Use it while writing a workflow, to find the actor and method for a step.",
+        projectprop: "This project's name, working directory and conversations, and who the liaison is. Set them here, add or delete a conversation, or delete the project.",
+        jobrun: "Starts the workflow open in the centre pane as a batch job of this project, with a field for each input it declares. Open a workflow first, fill in its inputs, then press Run.",
+        joblog: "The lines one batch job wrote, refreshed every 3 seconds while Auto is on. Choose the job with its Log button under Batch Jobs.",
+        jobs: "This project's batch jobs, with their state and when they were queued and finished. Open a job's log, or stop a job that is queued or running.",
+        methodsearch: "Finds actions by part of their method name, with the actors a workflow may name to call them. Use it when you know the method but not which actor offers it."
+    };
+
+    /** Writes the selected entry's description into the line under the menu. */
+    function showRightTabDescription() {
+        var sel = rightTabSelect();
+        var line = document.getElementById("right-tab-desc");
+        if (!sel || !line) return;
+        var opt = sel.options[sel.selectedIndex];
+        var text = opt ? (RIGHT_TAB_DESCRIPTIONS[opt.value] || "") : "";
+        line.textContent = text;
+        line.title = text;   // the line shows at most two lines; the tooltip has all of it
+    }
+
     /** The menu entry for section {@code tab} in perspective {@code kind}, or null. */
     function rightTabOption(tab, kind) {
         var sel = rightTabSelect();
@@ -34,6 +61,7 @@
         var opt = rightTabOption(tab, perspective);
         if (!opt) return;
         opt.selected = true;
+        showRightTabDescription();
         document.querySelectorAll(".rtab-content").forEach(function (c) {
             c.classList.toggle("active", c.id === "tab-" + tab);
         });
@@ -51,6 +79,10 @@
     function initTabs() {
         var sel = rightTabSelect();
         if (!sel) return;
+        Array.prototype.forEach.call(sel.options, function (o) {
+            o.title = RIGHT_TAB_DESCRIPTIONS[o.value] || "";
+        });
+        showRightTabDescription();
         sel.addEventListener("change", function () { showRightTab(sel.value); });
     }
 

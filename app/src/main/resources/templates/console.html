@@ -237,8 +237,11 @@
                          without a perspective, so it stays shown whichever is active. -->
                     <option value="actions" data-perspective="chat">Actions</option>
                     <option value="actions" data-perspective="project">Actions</option>
-                    <!-- Add new feature entries here, with the perspective they belong to. -->
+                    <!-- Add new feature entries here, with the perspective they belong to, and their
+                         description in console.js (RIGHT_TAB_DESCRIPTIONS). -->
                 </select>
+                <!-- What the selected entry shows and when to use it (console.js fills it in). -->
+                <div id="right-tab-desc" aria-live="polite"></div>
             </div>
 
             <div class="rtab-body">
