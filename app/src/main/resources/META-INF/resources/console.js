@@ -22,20 +22,20 @@
         return document.getElementById("right-tab-select");
     }
 
-    // What each entry of the right-pane menu shows and when to use it, keyed by the entry's value
+    // Why the person opens each entry of the right-pane menu and what the panel does about it, keyed by the entry's value
     // (the section tab-<value>). Shown in the line under the menu (#right-tab-desc) and as each
     // entry's tooltip. Actions is the same panel in both perspectives, so it has one description.
     var RIGHT_TAB_DESCRIPTIONS = {
-        logdb: "The recorded sessions of the conversation shown in the centre: open one to follow its turns step by step, and pick a message to read it in full below. Use it to see exactly what was sent to the model and what came back, or to delete old sessions.",
-        syslog: "The log lines of the conversation shown in the centre, refreshed every 3 seconds while Auto is on. Set Level to WARN or ERROR to find what went wrong in a turn.",
-        agentloop: "The agent loop this conversation runs and the prompt-construction workflow it uses, as read-only YAML. Choose another agent loop here to change how this conversation runs its turns.",
-        logsearch: "Searches the text of every conversation this instance has recorded, including removed ones. Use it to find where something was said when you do not know which conversation said it.",
-        actions: "Every actor a workflow YAML may name, and the actions each one offers with their descriptions and arguments. Use it while writing a workflow, to find the actor and method for a step.",
-        projectprop: "This project's name, working directory and conversations, and who the liaison is. Set them here, add or delete a conversation, or delete the project.",
-        jobrun: "Starts the workflow open in the centre pane as a batch job of this project, with a field for each input it declares. Open a workflow first, fill in its inputs, then press Run.",
-        joblog: "The lines one batch job wrote, refreshed every 3 seconds while Auto is on. Choose the job with its Log button under Batch Jobs.",
-        jobs: "This project's batch jobs, with their state and when they were queued and finished. Open a job's log, or stop a job that is queued or running.",
-        methodsearch: "Finds actions by part of their method name, with the actors a workflow may name to call them. Use it when you know the method but not which actor offers it."
+        logdb: "To see exactly what this conversation sent to its model and what came back, open a recorded session and follow its turns step by step.",
+        syslog: "When a turn of this conversation went wrong, read its log here; set Level to WARN or ERROR to find the failure.",
+        agentloop: "This conversation runs each of its turns by the agent loop shown here; choose another one to change how it works.",
+        logsearch: "When you remember what was said but not which conversation said it, search here: it covers every conversation this instance recorded.",
+        actions: "A workflow step names an actor and one of its actions, so while writing a workflow, look up here which actors exist and what each action takes.",
+        projectprop: "To set up this project, edit its name, working directory, conversations and liaison here.",
+        jobrun: "To run the workflow open in the centre pane as a batch job, fill in its inputs here and press Run.",
+        joblog: "When a batch job did not do what you expected, read the lines it wrote; open it from the job's Log button under Batch Jobs.",
+        jobs: "To follow the batch jobs you started, see their state here, and open a job's log or stop it.",
+        methodsearch: "When you know a method's name but not which actor offers it, search for it here."
     };
 
     /** Writes the selected entry's description into the line under the menu. */
