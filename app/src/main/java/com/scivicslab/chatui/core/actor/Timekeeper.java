@@ -139,9 +139,7 @@ public class Timekeeper {
             warned.removeIf(id -> out.stream().noneMatch(o -> o.requestId().equals(id)));
             for (OpenRequests.Outstanding o : out) {
                 if (now - o.sentAt() > childReplyWarnMillis && warned.add(o.requestId())) {
-                    String text = "[no reply yet to request " + o.requestId() + " sent to " + o.target() + ", "
-                            + (now - o.sentAt()) / 60_000 + " minutes]\nDecide whether to ask it how far it has got "
-                            + "(ask_chat_urgent), send the request again, or answer without it.";
+                    String text = noticeText(o.requestId(), o.target(), (now - o.sentAt()) / 60_000);
                     queue.tell(q -> q.enqueue(text, null, "queue", watchers, chat.asChatSessionRef(), SOURCE, null,
                             new CompletableFuture<>(), false, true, List.of(), null, false));
                 }
@@ -157,6 +155,20 @@ public class Timekeeper {
         } catch (Exception e) {
             LOG.log(Level.WARNING, conversation + ": timekeeper check failed", e);
         }
+    }
+
+    /**
+     * The notice that a sent request has had no reply: which request, to whom, and for how long, so the
+     * conversation can judge from what it already knows, and plainly that ignoring it is a valid answer. The
+     * timekeeper does not suppress, merge or space out these notices; each one is the conversation's to judge.
+     */
+    static String noticeText(String requestId, String target, long minutesOut) {
+        return "[no reply yet to request " + requestId + " sent to " + target + ", " + minutesOut + " minutes]\n"
+                + "Request " + requestId + " to " + target + " has been out " + minutesOut + " minutes. A request "
+                + "that takes this long may be working normally. Ignoring this notice is a valid answer: if nothing "
+                + "needs doing, end the turn with one short line and make no tool calls. If you do act, use only what "
+                + "you already know, for example tell the person how far the work has got, and do not create extra "
+                + "work (no new request just to ask for progress).";
     }
 
     /** The reminder the conversation reads: which request, who waits, and what to write. */

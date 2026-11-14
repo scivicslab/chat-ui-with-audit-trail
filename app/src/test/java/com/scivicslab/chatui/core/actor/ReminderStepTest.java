@@ -256,6 +256,17 @@ class ReminderStepTest {
         assertTrue(!tools.contains("give your own id as \"chatId\""), "the self reminder is no longer the model's to register");
     }
 
+    /** The notice names the request and how long it has been out, and says plainly that ignoring it is valid. */
+    @Test
+    void theChildReplyNoticeNamesTheRequestAndSaysIgnoringItIsValid() {
+        String n = Timekeeper.noticeText("project1/chat-01:s1:t1:r1", "project1/chat-02", 7);
+        assertTrue(n.startsWith("[no reply yet to request project1/chat-01:s1:t1:r1 sent to project1/chat-02, 7 minutes]"), n);
+        assertTrue(n.contains("has been out 7 minutes"), n);
+        assertTrue(n.contains("Ignoring this notice is a valid answer"), n);
+        assertTrue(n.contains("make no tool calls"), n);
+        assertTrue(n.contains("do not create extra work"), n);
+    }
+
     @Test
     void theDefaultsAreFiveMinutes() {
         assertEquals(5, Timekeeper.DEFAULT_CHILD_REPLY_WARN_MINUTES);
