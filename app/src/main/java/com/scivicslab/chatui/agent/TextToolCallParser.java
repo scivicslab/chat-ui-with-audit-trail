@@ -33,8 +33,16 @@ import java.util.regex.Pattern;
  * </tool_call>
  * }</pre>
  *
- * <p>Both spellings produce the same {@link ToolCall}. Without the second, that text matched no tool
- * call, so the agent loop took it for the final answer and returned it, unexecuted, to the caller.</p>
+ * <p>A third spelling is GLM's own (measured: GLM-5.3-Flash behind an OpenAI-compatible server, on
+ * {@code project9/chat-01}): the tool name directly after {@code <tool_call>}, then key and value pairs.</p>
+ *
+ * <pre>{@code
+ * <tool_call>load_skill<arg_key>name</arg_key><arg_value>html-saurus-search</arg_value></tool_call>
+ * }</pre>
+ *
+ * <p>All spellings produce the same {@link ToolCall}. Without the second, that text matched no tool
+ * call, so the agent loop took it for the final answer and returned it, unexecuted, to the caller. The
+ * third did the same: three turns of a conversation ended at once, each showing the raw call as its answer.</p>
  *
  * <p>The first spelling was ported verbatim (parsing logic unchanged) from {@code quarkus-chat-ui3}'s
  * {@code TextToolCallParser}, where this was a fallback for a model that fell out of the native
@@ -76,6 +84,28 @@ public final class TextToolCallParser {
             "^[ \\t]*(?:<tool_call>\\s*)?<function=([^>\\s]+)\\s*>(.*?)"
                     + "(?:</function>|(?=^[ \\t]*(?:<tool_call>\\s*)?<function=)|\\z)",
             Pattern.DOTALL | Pattern.MULTILINE);
+    // GLM's spelling: <tool_call>NAME<arg_key>K</arg_key><arg_value>V</arg_value>...</tool_call>. A call begins at
+    // the start of a line, like the others, with the name directly after <tool_call> and then either an
+    // <arg_key> or the close tag: "<tool_call> is the tag" in prose is not a call named "is". The body ends at
+    // </tool_call>, at the next call that starts a line, or at the end of the text, so a missing close tag still
+    // yields the call. <function= after <tool_call> is the other spelling: a name starts with a letter.
+    private static final String GLM_START =
+            "^[ \\t]*<tool_call>[ \\t]*\\n?[ \\t]*([A-Za-z_][\\w.\\-]*+)\\s*(?=<arg_key>|</tool_call>)";
+    private static final Pattern GLM = Pattern.compile(
+            GLM_START + "(.*?)(?:</tool_call>|(?=^[ \\t]*<tool_call>)|\\z)", Pattern.DOTALL | Pattern.MULTILINE);
+    // The same call glued to the end of the reply, as GLM appends accept_reply to a finished answer (measured on
+    // project9/chat-01: "...完了済みです。<tool_call>accept_reply<arg_key>...</tool_call>" with no line break). A
+    // quotation in prose is not this: it is not the last thing in the reply, and does not follow a finished
+    // sentence (a colon, a space, a backtick or a quote mark before it).
+    private static final String GLM_TRAILING_START = "(?<=[。．.!?！？)）」』\\]】])<tool_call>[ \\t]*"
+            + "([A-Za-z_][\\w.\\-]*+)\\s*(?=<arg_key>|</tool_call>)";
+    private static final Pattern GLM_TRAILING =
+            Pattern.compile(GLM_TRAILING_START + "(.*?)</tool_call>\\s*\\z", Pattern.DOTALL);
+    // A <arg_key>KEY</arg_key><arg_value>VALUE</arg_value> pair. VALUE ends at </arg_value>, the next <arg_key>,
+    // </tool_call> or the end of the text; the <arg_value> open tag may be missing (measured), and so the close.
+    private static final Pattern GLM_ARG = Pattern.compile(
+            "<arg_key>(.*?)</arg_key>\\s*(?:<arg_value>)?(.*?)(?:</arg_value>|(?=<arg_key>)|(?=</tool_call>)|$)",
+            Pattern.DOTALL);
     // Fenced code blocks are examples, not calls.
     private static final Pattern CODE_FENCE = Pattern.compile("```.*?```", Pattern.DOTALL);
     // A <parameter=KEY>VALUE</parameter> pair of that spelling; VALUE ends at </parameter>, the next
@@ -93,7 +123,8 @@ public final class TextToolCallParser {
     public static boolean looksLikeTextToolCall(String content) {
         if (content == null) return false;
         String visible = withoutCodeFences(content);
-        return INVOKE_OPEN.matcher(visible).find() || FUNCTION.matcher(visible).find();
+        return INVOKE_OPEN.matcher(visible).find() || FUNCTION.matcher(visible).find()
+                || GLM.matcher(visible).find() || GLM_TRAILING.matcher(visible).find();
     }
 
     /**
@@ -134,6 +165,20 @@ public final class TextToolCallParser {
                 args.put(pm.group(1).trim(), clean(pm.group(2)));
             }
             calls.add(new ToolCall("text-call-" + idx++, name, toJson(args)));
+        }
+
+        String visible = withoutCodeFences(content);
+        for (Pattern glmSpelling : List.of(GLM, GLM_TRAILING)) {
+            Matcher glm = glmSpelling.matcher(visible);
+            while (glm.find()) {
+                String name = glm.group(1).trim();
+                Map<String, String> args = new LinkedHashMap<>();
+                Matcher am = GLM_ARG.matcher(glm.group(2));
+                while (am.find()) {
+                    args.put(am.group(1).trim(), clean(am.group(2)));
+                }
+                calls.add(new ToolCall("text-call-" + idx++, name, toJson(args)));
+            }
         }
         return calls;
     }
@@ -186,6 +231,10 @@ public final class TextToolCallParser {
         // The <tool_call><function=…> spelling, with or without the <tool_call> wrapper.
         out = out.replaceAll("(?ms)^[ \\t]*<tool_call>.*?</tool_call>", "");
         out = out.replaceAll("(?ms)^[ \\t]*<function=[^>\\s]+\\s*>.*?</function>", "");
+        // GLM's spelling with its </tool_call> missing: to the next call that starts a line, or the end.
+        out = out.replaceAll("(?ms)" + GLM_START + ".*?(?=^[ \\t]*<tool_call>|\\z)", "");
+        // ... and the call glued to the end of a finished sentence.
+        out = out.replaceAll("(?s)" + GLM_TRAILING_START + ".*?</tool_call>\\s*\\z", "");
         return JUNK_TOKEN.matcher(out).replaceAll("").trim();
     }
 }

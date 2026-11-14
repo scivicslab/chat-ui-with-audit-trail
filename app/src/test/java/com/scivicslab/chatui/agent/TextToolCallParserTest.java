@@ -8,7 +8,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
- * The two spellings of a text tool call the parser accepts.
+ * The three spellings of a text tool call the parser accepts.
  *
  * <p>The instructed spelling is {@code <invoke name="…">}. Some models (measured: Gemma 4 behind the
  * GPU broker, in {@code project1/05}) write the Qwen-style
@@ -155,5 +155,144 @@ class TextToolCallParserTest {
     void stripRemovesFunctionSpellingBlocksAndKeepsProse() {
         String text = "Let me check.\n<tool_call>\n<function=read>\n<parameter=path>\na\n</parameter>\n</function>\n</tool_call>";
         assertEquals("Let me check.", TextToolCallParser.stripToolCallBlocks(text));
+    }
+
+    // ---- GLM's native spelling: <tool_call>NAME<arg_key>K</arg_key><arg_value>V</arg_value></tool_call> ----
+    // Measured on project9/chat-01 (GLM-5.3-Flash-Uncensored, openai-compat): its last three turns ended at once with
+    // "0 tool call(s)" and the person saw these lines as the answer.
+
+    @Test
+    void glmSpellingIsParsedFromTheMeasuredReply() {
+        String text = "<tool_call>load_skill<arg_key>name</arg_key><arg_value>html-saurus-search</arg_value></tool_call>\n"
+                + "<tool_call>read<arg_key>path</arg_key><arg_value>doc_Base010/docs/a/b.md</arg_value></tool_call>";
+        assertTrue(TextToolCallParser.looksLikeTextToolCall(text));
+        List<ToolCall> calls = TextToolCallParser.parse(text);
+        assertEquals(2, calls.size());
+        assertEquals("load_skill", calls.get(0).name());
+        assertEquals("{\"name\":\"html-saurus-search\"}", calls.get(0).argumentsJson());
+        assertEquals("read", calls.get(1).name());
+        assertEquals("{\"path\":\"doc_Base010/docs/a/b.md\"}", calls.get(1).argumentsJson());
+        assertEquals("text-call-0", calls.get(0).id());
+        assertEquals("text-call-1", calls.get(1).id());
+    }
+
+    @Test
+    void glmSpellingAfterALongAnswerIsParsed() {
+        String text = "The work is finished and the report above is complete.\n\n"
+                + "<tool_call>accept_reply<arg_key>requestId</arg_key><arg_value>project9/chat-02:s40:t3:r1</arg_value>"
+                + "<arg_key>reason</arg_key><arg_value>the report answers the request</arg_value></tool_call>";
+        List<ToolCall> calls = TextToolCallParser.parse(text);
+        assertEquals(1, calls.size());
+        assertEquals("accept_reply", calls.get(0).name());
+        assertEquals("{\"requestId\":\"project9/chat-02:s40:t3:r1\",\"reason\":\"the report answers the request\"}",
+                calls.get(0).argumentsJson());
+    }
+
+    /**
+     * The measured shape: GLM glued accept_reply to the end of a finished answer, on the same line, with a value that
+     * has no opening tag (project9/chat-01, turns 14, 18 and 20).
+     */
+    @Test
+    void glmSpellingGluedToTheEndOfAFinishedSentenceIsParsed() {
+        String text = "# 「計算と証明が分かれている」問題への返答\n\n天気予報も駅構内の喫茶店も完了済みです。"
+                + "<tool_call>accept_reply<arg_key>requestId</arg_key><arg_value>project9/chat-02:s40:t3:r1</arg_value>"
+                + "<arg_key>reason</arg_key>返答の内容は十分で、追加の確認は不要なため</arg_value></tool_call>";
+        assertTrue(TextToolCallParser.looksLikeTextToolCall(text));
+        List<ToolCall> calls = TextToolCallParser.parse(text);
+        assertEquals(1, calls.size());
+        assertEquals("accept_reply", calls.get(0).name());
+        assertEquals("{\"requestId\":\"project9/chat-02:s40:t3:r1\",\"reason\":\"返答の内容は十分で、追加の確認は不要なため\"}",
+                calls.get(0).argumentsJson());
+        assertEquals("# 「計算と証明が分かれている」問題への返答\n\n天気予報も駅構内の喫茶店も完了済みです。",
+                TextToolCallParser.stripToolCallBlocks(text));
+    }
+
+    /** What the glued form must not take for a call: a quotation in prose, which is not a finished sentence's tail. */
+    @Test
+    void glmSpellingQuotedMidSentenceOrNotLastIsNotACall() {
+        String afterColon = "GLM writes it like this: <tool_call>read<arg_key>path</arg_key><arg_value>a</arg_value></tool_call>";
+        String inBackticks = "It wrote `<tool_call>read<arg_key>path</arg_key><arg_value>a</arg_value></tool_call>`";
+        String notLast = "It ended.<tool_call>read<arg_key>path</arg_key><arg_value>a</arg_value></tool_call> And more text.";
+        for (String prose : List.of(afterColon, inBackticks, notLast)) {
+            assertFalse(TextToolCallParser.looksLikeTextToolCall(prose), prose);
+            assertTrue(TextToolCallParser.parse(prose).isEmpty(), prose);
+        }
+    }
+
+    /** The measured line had a value with no opening tag: the key's close is followed by text, then </arg_value>. */
+    @Test
+    void glmSpellingToleratesAValueWithoutItsOpenTag() {
+        String text = "<tool_call>accept_reply<arg_key>requestId</arg_key><arg_value>project9/chat-02:s40:t3:r1</arg_value>"
+                + "<arg_key>reason</arg_key>the report answers the request</arg_value></tool_call>";
+        List<ToolCall> calls = TextToolCallParser.parse(text);
+        assertEquals(1, calls.size());
+        assertEquals("{\"requestId\":\"project9/chat-02:s40:t3:r1\",\"reason\":\"the report answers the request\"}",
+                calls.get(0).argumentsJson());
+    }
+
+    /** A value whose </arg_value> was not written ends at the next key. */
+    @Test
+    void glmSpellingToleratesAMissingArgValueClose() {
+        String text = "<tool_call>write<arg_key>path</arg_key><arg_value>out.txt<arg_key>content</arg_key>"
+                + "<arg_value>hello</arg_value></tool_call>";
+        List<ToolCall> calls = TextToolCallParser.parse(text);
+        assertEquals(1, calls.size());
+        assertEquals("{\"path\":\"out.txt\",\"content\":\"hello\"}", calls.get(0).argumentsJson());
+    }
+
+    @Test
+    void glmSpellingToleratesAMissingToolCallCloseAndSeparatesCalls() {
+        String text = "<tool_call>read<arg_key>path</arg_key><arg_value>a</arg_value>\n"
+                + "<tool_call>read<arg_key>path</arg_key><arg_value>b</arg_value>";
+        List<ToolCall> calls = TextToolCallParser.parse(text);
+        assertEquals(2, calls.size());
+        assertEquals("{\"path\":\"a\"}", calls.get(0).argumentsJson());
+        assertEquals("{\"path\":\"b\"}", calls.get(1).argumentsJson());
+    }
+
+    @Test
+    void glmSpellingWithNoArgumentsAndWithNewlinesInValues() {
+        List<ToolCall> none = TextToolCallParser.parse("<tool_call>list_chats</tool_call>");
+        assertEquals(1, none.size());
+        assertEquals("list_chats", none.get(0).name());
+        assertEquals("{}", none.get(0).argumentsJson());
+        List<ToolCall> multi = TextToolCallParser.parse(
+                "<tool_call>write<arg_key>content</arg_key><arg_value>line1\nline2</arg_value></tool_call>");
+        assertEquals("{\"content\":\"line1\\nline2\"}", multi.get(0).argumentsJson());
+    }
+
+    @Test
+    void glmSpellingIsNotCountedTwiceWithTheFunctionSpelling() {
+        String text = "<tool_call>\n<function=read>\n<parameter=path>\na\n</parameter>\n</function>\n</tool_call>\n"
+                + "<tool_call>read<arg_key>path</arg_key><arg_value>b</arg_value></tool_call>";
+        List<ToolCall> calls = TextToolCallParser.parse(text);
+        assertEquals(2, calls.size());
+        assertEquals("{\"path\":\"a\"}", calls.get(0).argumentsJson());
+        assertEquals("{\"path\":\"b\"}", calls.get(1).argumentsJson());
+    }
+
+    @Test
+    void glmSpellingQuotedInProseOrAFenceIsNotACall() {
+        String inBackticks = "GLM writes `<tool_call>read<arg_key>path</arg_key><arg_value>a</arg_value></tool_call>` for a call.";
+        String inMiddle = "It wrote <tool_call>read<arg_key>path</arg_key><arg_value>a</arg_value></tool_call> twice.";
+        String fenced = "The format is:\n```\n<tool_call>read<arg_key>path</arg_key><arg_value>a</arg_value></tool_call>\n```";
+        for (String prose : List.of(inBackticks, inMiddle, fenced)) {
+            assertFalse(TextToolCallParser.looksLikeTextToolCall(prose), prose);
+            assertTrue(TextToolCallParser.parse(prose).isEmpty(), prose);
+        }
+        String real = "Example:\n```\n<tool_call>read<arg_key>path</arg_key><arg_value>x</arg_value></tool_call>\n```\n"
+                + "<tool_call>read<arg_key>path</arg_key><arg_value>y</arg_value></tool_call>";
+        List<ToolCall> calls = TextToolCallParser.parse(real);
+        assertEquals(1, calls.size());
+        assertEquals("{\"path\":\"y\"}", calls.get(0).argumentsJson());
+    }
+
+    @Test
+    void stripRemovesGlmSpellingBlocksAndKeepsProseAndQuotes() {
+        String text = "Let me check.\n<tool_call>read<arg_key>path</arg_key><arg_value>a</arg_value></tool_call>\n"
+                + "<tool_call>read<arg_key>path</arg_key><arg_value>b</arg_value>";
+        assertEquals("Let me check.", TextToolCallParser.stripToolCallBlocks(text));
+        String quoted = "GLM writes `<tool_call>read<arg_key>path</arg_key><arg_value>a</arg_value></tool_call>` for a call.";
+        assertEquals(quoted, TextToolCallParser.stripToolCallBlocks(quoted));
     }
 }
