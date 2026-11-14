@@ -178,7 +178,7 @@ public class ChatSession extends Interpreter {
      */
     private static final int DEFAULT_STEP_LIMIT = 30;
     /** When the running turn began, for the duration reported with its answer. */
-    private long turnStartedAt;
+    private volatile long turnStartedAt;
     /** Ceiling on the observation size a workflow may ask for; set from configuration. */
     private int maxObservationChars = ContextBudget.OBS_THRESHOLD;
     /**
@@ -908,6 +908,12 @@ public class ChatSession extends Interpreter {
      * @return {@code true} if the actor is busy with an LLM request
      */
     public boolean isBusy() { return busy; }
+
+    /**
+     * @return when the running turn started, in milliseconds since the epoch, or {@code null} when no turn is
+     *         running; read without waiting, like {@link #isBusy()}
+     */
+    public Long runningSince() { return busy ? turnStartedAt : null; }
 
     /**
      * The conversation history as of the last {@link #recordHistory} call, safe to read from any
@@ -2779,6 +2785,13 @@ public class ChatSession extends Interpreter {
                 // Sent for the request this turn works for: that request waits for its reply.
                 if (turnOriginal != null && sent.startsWith("sent to ")) {
                     openRequests.childSent(turnOriginal, requestId,
+                            ChatUiActorSystem.resolveChatName(projectId, extractInput(args, "chatId")),
+                            System.currentTimeMillis());
+                    publishOutstanding();
+                } else if (sent.startsWith("sent to ")) {
+                    // A turn the person's prompt started: no request waits for this one, but the timekeeper's
+                    // child-reply watch covers it all the same (ReminderDecidedAtTheEndOfTheTurn_261114_oo01).
+                    openRequests.sentWithoutAnOriginal(requestId,
                             ChatUiActorSystem.resolveChatName(projectId, extractInput(args, "chatId")),
                             System.currentTimeMillis());
                     publishOutstanding();

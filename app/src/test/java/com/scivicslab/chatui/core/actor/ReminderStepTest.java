@@ -256,10 +256,65 @@ class ReminderStepTest {
         assertTrue(!tools.contains("give your own id as \"chatId\""), "the self reminder is no longer the model's to register");
     }
 
-    /** The notice names the request and how long it has been out, and says plainly that ignoring it is valid. */
+    /**
+     * A request sent from a turn the person's prompt started is watched too: it is counted as out, the timekeeper
+     * tells the conversation once, the notice says what the target is doing, and the reply still starts a turn of its
+     * own and takes the request off the list.
+     */
+    @Test
+    void aRequestFromAPersonStartedTurnIsWatchedOncePerRequestAndItsReplyStillStartsATurn() throws Exception {
+        IIActorSystem system = new IIActorSystem("reminder-step-person-started");
+        Scripted liaison = new Scripted(false, 0, invoke("ask_chat", "chatId", "02", "prompt", "do the job"),
+                "Handed it out.", "Nothing to do about the notice.", "thanks");
+        Scripted worker = new Scripted(true, 0, "the job is done");
+        Squad one = squad(system, "01", liaison);
+        Squad two = squad(system, "02", worker);
+        personTypes(two, "running");
+        assertTrue(worker.started.await(10, TimeUnit.SECONDS));
+        long now = System.currentTimeMillis();
+        Timekeeper keeper = new Timekeeper("project1/chat-01", one.chat(), one.queue(), e -> { }, Long.MAX_VALUE, 0,
+                target -> new Timekeeper.TargetState(true, true, now - 12 * 60_000L));
+
+        personTypes(one, "have chat-02 do the job");
+        String decision = waitForDecision(one);
+        assertTrue(decision.startsWith("COVERED | covered by child-reply watch"), "the request is counted as out: " + decision);
+        assertEquals(1, one.chat().outstandingChildrenDirect().size());
+        assertEquals("project1/chat-02", one.chat().outstandingChildrenDirect().get(0).target());
+        assertEquals(2, liaison.prompts.size(), "the covered turn made no decision call");
+
+        keeper.tick(System.currentTimeMillis() + 1);
+        keeper.tick(System.currentTimeMillis() + 2);
+        long deadline = System.currentTimeMillis() + 15_000;
+        while (liaison.prompts.size() < 3 && System.currentTimeMillis() < deadline) Thread.sleep(25);
+        Thread.sleep(300);
+        long notices = liaison.prompts.stream().filter(x -> x.contains("[no reply yet to request project1/chat-01:")).count();
+        assertEquals(1, notices, "once per request: " + liaison.prompts);
+        String notice = liaison.prompts.stream().filter(x -> x.contains("[no reply yet to request")).findFirst().orElseThrow();
+        assertTrue(notice.contains("project1/chat-02 is running a turn, started 12 minutes ago."), notice);
+
+        worker.release.countDown();
+        deadline = System.currentTimeMillis() + 15_000;
+        while (liaison.prompts.stream().noneMatch(x -> x.contains("[reply to request project1/chat-01:")) && System.currentTimeMillis() < deadline) {
+            Thread.sleep(25);
+        }
+        assertTrue(liaison.prompts.stream().anyMatch(x -> x.contains("[reply to request project1/chat-01:") && x.contains("the job is done")),
+                "the reply still starts a turn: " + liaison.prompts);
+        deadline = System.currentTimeMillis() + 10_000;
+        while (!one.chat().outstandingChildrenDirect().isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(25);
+        assertEquals(0, one.chat().outstandingChildrenDirect().size(), "the reply took the request off the list");
+    }
+
+    /** The notice names the request, how long it has been out and the target's state, and says plainly that ignoring it is valid. */
     @Test
     void theChildReplyNoticeNamesTheRequestAndSaysIgnoringItIsValid() {
-        String n = Timekeeper.noticeText("project1/chat-01:s1:t1:r1", "project1/chat-02", 7);
+        long now = 1_000_000_000_000L;
+        String n = Timekeeper.noticeText("project1/chat-01:s1:t1:r1", "project1/chat-02", 7,
+                new Timekeeper.TargetState(true, true, now - 12 * 60_000L), now);
+        assertTrue(n.contains("project1/chat-02 is running a turn, started 12 minutes ago."), n);
+        assertTrue(Timekeeper.noticeText("r", "project1/chat-02", 7, new Timekeeper.TargetState(true, false, 0), now)
+                .contains("project1/chat-02 is not running a turn."));
+        assertTrue(Timekeeper.noticeText("r", "project1/chat-02", 7, Timekeeper.TargetState.UNKNOWN, now)
+                .contains("project1/chat-02's state could not be read."));
         assertTrue(n.startsWith("[no reply yet to request project1/chat-01:s1:t1:r1 sent to project1/chat-02, 7 minutes]"), n);
         assertTrue(n.contains("has been out 7 minutes"), n);
         assertTrue(n.contains("Ignoring this notice is a valid answer"), n);

@@ -1173,7 +1173,15 @@ public class ChatUiActorSystem implements ConversationControls {
                         TimeUnit.MINUTES.toMillis(minutesSetting("chat-ui.timekeeper.urgent-wait-minutes",
                                 Timekeeper.DEFAULT_URGENT_WAIT_MINUTES)),
                         TimeUnit.MINUTES.toMillis(minutesSetting("chat-ui.timekeeper.child-reply-warn-minutes",
-                                Timekeeper.DEFAULT_CHILD_REPLY_WARN_MINUTES))));
+                                Timekeeper.DEFAULT_CHILD_REPLY_WARN_MINUTES)),
+                        target -> {
+                            // What the notice says about the conversation the request went to, read without
+                            // waiting for its turn.
+                            IIActorRef<?> t = actorSystem.getIIActor(target + ".chat");
+                            if (!(t instanceof ChatSessionIIAR c)) return Timekeeper.TargetState.UNKNOWN;
+                            Long since = c.runningSinceDirect();
+                            return new Timekeeper.TargetState(true, since != null, since == null ? 0 : since);
+                        }));
 
         restoreConversation(qualifiedName, chatSessionIIAR, providerRef);
 

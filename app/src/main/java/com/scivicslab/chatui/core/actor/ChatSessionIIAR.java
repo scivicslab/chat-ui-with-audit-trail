@@ -137,6 +137,9 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      */
     public boolean isBusyDirect() { return chatSession().isBusy(); }
 
+    /** When the running turn started, or {@code null} when none runs, read without waiting like {@link #isBusyDirect()}. */
+    public Long runningSinceDirect() { return chatSession().runningSince(); }
+
     /** The child requests still out, read without waiting for a running turn, as {@link #isBusyDirect()} is. */
     public java.util.List<OpenRequests.Outstanding> outstandingChildrenDirect() {
         return chatSession().outstandingChildren();

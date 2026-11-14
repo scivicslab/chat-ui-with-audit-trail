@@ -58,6 +58,7 @@ public class Timekeeper {
     private final Consumer<ChatEvent> watchers;
     private long urgentWaitMillis;
     private long childReplyWarnMillis;
+    private final java.util.function.Function<String, TargetState> targetStates;
     private final Set<String> warned = new HashSet<>();
     private final PromisedReports promised = new PromisedReports();
 
@@ -71,6 +72,28 @@ public class Timekeeper {
      */
     public Timekeeper(String conversation, ChatSessionIIAR chat, ActorRef<PromptQueue> queue,
                       Consumer<ChatEvent> watchers, long urgentWaitMillis, long childReplyWarnMillis) {
+        this(conversation, chat, queue, watchers, urgentWaitMillis, childReplyWarnMillis, name -> TargetState.UNKNOWN);
+    }
+
+    /**
+     * What a notice says about the conversation a request went to: whether it is running a turn, and since when.
+     *
+     * @param known        whether the target could be read at all
+     * @param running      whether it is running a turn now
+     * @param runningSince when the running turn started, in milliseconds since the epoch; meaningful when running
+     */
+    public record TargetState(boolean known, boolean running, long runningSince) {
+        /** The target could not be read. */
+        public static final TargetState UNKNOWN = new TargetState(false, false, 0);
+    }
+
+    /**
+     * @param targetStates reads the state of a conversation by its qualified name, without waiting for its turn
+     */
+    public Timekeeper(String conversation, ChatSessionIIAR chat, ActorRef<PromptQueue> queue,
+                      Consumer<ChatEvent> watchers, long urgentWaitMillis, long childReplyWarnMillis,
+                      java.util.function.Function<String, TargetState> targetStates) {
+        this.targetStates = targetStates;
         this.conversation = conversation;
         this.chat = chat;
         this.queue = queue;
@@ -139,7 +162,13 @@ public class Timekeeper {
             warned.removeIf(id -> out.stream().noneMatch(o -> o.requestId().equals(id)));
             for (OpenRequests.Outstanding o : out) {
                 if (now - o.sentAt() > childReplyWarnMillis && warned.add(o.requestId())) {
-                    String text = noticeText(o.requestId(), o.target(), (now - o.sentAt()) / 60_000);
+                    TargetState state;
+                    try {
+                        state = targetStates.apply(o.target());
+                    } catch (Exception e) {
+                        state = TargetState.UNKNOWN;
+                    }
+                    String text = noticeText(o.requestId(), o.target(), (now - o.sentAt()) / 60_000, state, now);
                     queue.tell(q -> q.enqueue(text, null, "queue", watchers, chat.asChatSessionRef(), SOURCE, null,
                             new CompletableFuture<>(), false, true, List.of(), null, false));
                 }
@@ -162,10 +191,14 @@ public class Timekeeper {
      * conversation can judge from what it already knows, and plainly that ignoring it is a valid answer. The
      * timekeeper does not suppress, merge or space out these notices; each one is the conversation's to judge.
      */
-    static String noticeText(String requestId, String target, long minutesOut) {
+    static String noticeText(String requestId, String target, long minutesOut, TargetState state, long now) {
+        String where = !state.known() ? target + "'s state could not be read."
+                : state.running() ? target + " is running a turn, started " + Math.max(0, (now - state.runningSince()) / 60_000)
+                        + " minutes ago."
+                : target + " is not running a turn.";
         return "[no reply yet to request " + requestId + " sent to " + target + ", " + minutesOut + " minutes]\n"
-                + "Request " + requestId + " to " + target + " has been out " + minutesOut + " minutes. A request "
-                + "that takes this long may be working normally. Ignoring this notice is a valid answer: if nothing "
+                + "Request " + requestId + " to " + target + " has been out " + minutesOut + " minutes. " + where
+                + " A request that takes this long may be working normally. Ignoring this notice is a valid answer: if nothing "
                 + "needs doing, end the turn with one short line and make no tool calls. If you do act, use only what "
                 + "you already know, for example tell the person how far the work has got, and do not create extra "
                 + "work (no new request just to ask for progress).";

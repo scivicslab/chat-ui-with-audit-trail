@@ -115,6 +115,20 @@ public final class OpenRequests {
         outstandingChildren.put(childRequestId, new Outstanding(childRequestId, target, sentAt));
     }
 
+    /**
+     * Records a request sent by a turn that works for no received request (one the person's prompt, or a
+     * reminder, started). No request waits for it, so it holds nothing open; it is counted as out only so that
+     * the timekeeper's child-reply watch covers it. Its reply, when it comes, closes it through
+     * {@link #replyArrived} like any other.
+     *
+     * @param childRequestId the id of the request sent
+     * @param target         the qualified name of the conversation it went to
+     * @param sentAt         when it was sent, in milliseconds since the epoch
+     */
+    public void sentWithoutAnOriginal(String childRequestId, String target, long sentAt) {
+        outstandingChildren.put(childRequestId, new Outstanding(childRequestId, target, sentAt));
+    }
+
     /** What {@link #reopen} did, or why it did not. */
     public enum Reopening {
         /** The child request counts as out again; its original request waits for the report. */
