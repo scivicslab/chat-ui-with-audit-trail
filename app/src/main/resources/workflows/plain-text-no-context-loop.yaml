@@ -66,6 +66,22 @@ steps:
         execution: direct
 
   - states: ["think", "think"]
+    label: think-cut-off
+    note: |
+      The step that just ran was cut off at the output limit (finish_reason=length). The partial
+      reply is already in the provider's history and no tool in it was run. continueAfterCutOff
+      queues a note — how much was written, continue in smaller pieces, a long document in several
+      file writes — as the next step's prompt, and the turn goes on under the same step limit. After
+      maxInARow cut-offs in a row it fails, and the scan goes on to think-final, which ends the turn
+      with what was written kept as the answer. No LLM call here (CutOffReplyContinues_261115_oo01).
+    actions:
+      - actor: this
+        method: continueAfterCutOff
+        arguments:
+          maxInARow: 3
+        execution: direct
+
+  - states: ["think", "think"]
     label: think-continue
     note: |
       No tool was called on the step that just ran, but the prompt-construction sub-workflow

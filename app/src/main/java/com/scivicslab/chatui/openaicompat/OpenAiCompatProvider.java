@@ -49,6 +49,16 @@ public class OpenAiCompatProvider implements LlmProvider {
      * the reply and for the estimate being wrong: the estimate is char-based, not a real tokenizer.
      */
     private static final double HISTORY_SHARE = 0.5;
+    /**
+     * Fewest tokens a reply is ever allowed to run to, however full the window already is. Below this a
+     * request would be refused or cut in a few sentences; the server's own context check, and the
+     * history trimming that follows it, decide what happens when even this does not fit.
+     */
+    static final int MIN_REPLY_TOKENS = 2_048;
+    /** The least tokens kept free of the window for the prompt estimate being wrong. */
+    private static final int REPLY_MARGIN_MIN_TOKENS = 1_024;
+    /** The share of the window kept free for the same reason, when that is more than the minimum. */
+    private static final double REPLY_MARGIN_SHARE = 0.02;
     /** How many leading messages are collapsed turns rather than the running turn's steps
      *  ({@code TurnResourceLimits_260830_oo01}). */
     private int collapsedCount = 0;
@@ -214,7 +224,7 @@ public class OpenAiCompatProvider implements LlmProvider {
             final int currentRetry = retries;
             try {
                 StringBuilder assistantBuf = new StringBuilder();
-                client.sendPrompt(currentModel, snapshot, ctx.noThink(), 0,
+                client.sendPrompt(currentModel, snapshot, ctx.noThink(), maxTokensFor(client, currentModel, snapshot),
                     new OpenAiCompatClient.StreamCallback() {
                         @Override public void onDelta(String content) {
                             assistantBuf.append(content);
@@ -228,6 +238,18 @@ public class OpenAiCompatProvider implements LlmProvider {
                         }
                         @Override public void onComplete(long durationMs, String finishReason) {
                             String response = assistantBuf.toString();
+                            if (wasCutOff(finishReason) && ctx.handlesCutOff()) {
+                                // The caller continues the turn itself: keep what was written, so the
+                                // next request carries it, and say the text is unfinished instead of
+                                // failing. Reasoning stays out of the history, as it does for a reply
+                                // that finished (RunawayGenerationLimits_260915_oo01).
+                                logger.warning("Reply cut off at the token limit after "
+                                        + response.length() + " chars; partial reply kept");
+                                history.addLast(new ChatMessage.Assistant(response));
+                                fitHistoryToBudget();
+                                emitter.accept(ChatEvent.cutOff(String.valueOf(response.length())));
+                                return;
+                            }
                             if (wasCutOff(finishReason)) {
                                 // Not an answer: the server stopped mid-sentence at a token limit.
                                 // Kept out of the history as well as reported, because a truncated
@@ -374,6 +396,40 @@ public class OpenAiCompatProvider implements LlmProvider {
         return (int) (contextTokens * HISTORY_SHARE);
     }
 
+    /**
+     * The {@code max_tokens} to send: the room left in the model's window after the prompt, less a
+     * safety margin, and never below {@link #MIN_REPLY_TOKENS}. Without it each server applies its own
+     * default, which is far below the window on some (32,768 tokens on one broker deployment), and a
+     * long reply is cut off the moment it passes that default.
+     *
+     * <p>The prompt size is {@link ContextBudget}'s estimate, which counts two characters to a token
+     * and so over-counts: the room it leaves is no more than the real room.</p>
+     *
+     * @param contextTokens the model's context length as the server reported it; at or below zero
+     *                      when it did not
+     * @param promptTokens  the estimated tokens of the whole request
+     * @return the value to send, or {@code 0} to send nothing because the window is unknown
+     */
+    static int replyBudgetTokens(int contextTokens, int promptTokens) {
+        if (contextTokens <= 0) return 0;
+        int margin = Math.max(REPLY_MARGIN_MIN_TOKENS, (int) (contextTokens * REPLY_MARGIN_SHARE));
+        int room = contextTokens - promptTokens - margin;
+        return Math.min(Math.max(room, MIN_REPLY_TOKENS), contextTokens);
+    }
+
+    /**
+     * {@link #replyBudgetTokens} for one request, with the window read from the server's model list
+     * ({@code max_model_len} in {@code /v1/models}, cached by the client).
+     *
+     * @return the value to send as {@code max_tokens}, or {@code 0} when the window is not known
+     */
+    private int maxTokensFor(OpenAiCompatClient client, String model, List<ChatMessage> messages) {
+        if (client == null || model == null || model.isBlank()) return 0;
+        int prompt = 0;
+        for (ChatMessage m : messages) prompt += ContextBudget.estimateMessageTokens(contentOf(m));
+        return replyBudgetTokens(client.getMaxModelLen(model), prompt);
+    }
+
     /** @return the estimated token count of the whole history */
     private int estimateHistoryTokens() {
         int sum = 0;
@@ -439,8 +495,9 @@ public class OpenAiCompatProvider implements LlmProvider {
         if (client == null) {
             return null;
         }
+        List<ChatMessage> oneShot = List.of(new ChatMessage.User(prompt));
         OpenAiCompatClient.NonStreamingResponse response = client.sendNonStreaming(
-                currentModel, List.of(new ChatMessage.User(prompt)), true, 0, List.of());
+                currentModel, oneShot, true, maxTokensFor(client, currentModel, oneShot), List.of());
         String reason = response.finishReason();
         if (reason != null && reason.startsWith("error")) {
             return null;
@@ -474,7 +531,7 @@ public class OpenAiCompatProvider implements LlmProvider {
         }
         java.util.concurrent.atomic.AtomicReference<String> sent = new java.util.concurrent.atomic.AtomicReference<>();
         OpenAiCompatClient.NonStreamingResponse response = client.sendNonStreaming(
-                useModel, messages, noThink == null || noThink, 0, List.of(), sent::set);
+                useModel, messages, noThink == null || noThink, maxTokensFor(client, useModel, messages), List.of(), sent::set);
         String reason = response.finishReason();
         if (reason != null && reason.startsWith("error")) {
             return new com.scivicslab.chatui.core.provider.OneShotReply(null, sent.get(), reason);
@@ -498,7 +555,8 @@ public class OpenAiCompatProvider implements LlmProvider {
             return null;
         }
         try {
-            return client.sendPrompt(currentModel, List.of(new ChatMessage.User(prompt)), true, 0,
+            List<ChatMessage> oneShot = List.of(new ChatMessage.User(prompt));
+            return client.sendPrompt(currentModel, oneShot, true, maxTokensFor(client, currentModel, oneShot),
                     new OpenAiCompatClient.StreamCallback() {
                         @Override public void onDelta(String content) { onDelta.accept(content); }
                         @Override public void onComplete(long durationMs, String finishReason) { }

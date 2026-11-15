@@ -138,6 +138,19 @@ public record ChatEvent(
     }
 
     /**
+     * Creates the event a provider sends when the server stopped a reply at a token limit
+     * ({@code finish_reason=length}) and the caller asked to handle that itself
+     * ({@code ProviderContext#handlesCutOff}). The text written so far has already been streamed as
+     * {@code delta} events; this event says the text is unfinished.
+     *
+     * @param charsWritten how many characters of reply text were written before the cut, as a decimal string
+     * @return a new cut_off event
+     */
+    public static ChatEvent cutOff(String charsWritten) {
+        return new ChatEvent("cut_off", charsWritten, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+    }
+
+    /**
      * Creates an informational event (e.g., model changed, processing started).
      *
      * @param content the informational message

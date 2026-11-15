@@ -23,8 +23,21 @@ public record ProviderContext(
      * (null when the caller does not want it). The I/O log records this string, so the record
      * shows the {@code messages} array the model actually read.
      */
-    Consumer<String> onRequestBody
+    Consumer<String> onRequestBody,
+    /**
+     * Whether the caller handles a reply cut off at a token limit itself. When {@code true}, a provider
+     * that sees {@code finish_reason=length} keeps the partial reply in its history and sends a
+     * {@code cut_off} event instead of an {@code error}; when {@code false}, it reports an error and
+     * keeps nothing, as before.
+     */
+    boolean handlesCutOff
 ) {
+    /** Constructor for callers that want the request body but not cut-off handling. */
+    public ProviderContext(String apiKey, List<String> imageDataUrls, boolean noThink, Runnable onActivity,
+                           Consumer<String> onRequestBody) {
+        this(apiKey, imageDataUrls, noThink, onActivity, onRequestBody, false);
+    }
+
     /** Constructor for callers that do not need the request body. */
     public ProviderContext(String apiKey, List<String> imageDataUrls, boolean noThink, Runnable onActivity) {
         this(apiKey, imageDataUrls, noThink, onActivity, null);

@@ -249,6 +249,9 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     /** @param maxSteps how many LLM calls one turn may make */
     public record StepLimitArgs(@NotNull Integer maxSteps) {}
 
+    /** The {@code think-cut-off} transition's argument: how many cut-offs in a row the turn continues through. */
+    public record CutOffArgs(@NotNull Integer maxInARow) {}
+
     /** @param prompt the text to queue as this turn's next prompt */
     public record AppendPromptArgs(@NotNull String prompt) {}
 
@@ -329,6 +332,19 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     @Action(value = "stepLimitReached", argsType = StepLimitArgs.class)
     public ActionResult stepLimitReachedAction(StepLimitArgs args) {
         return chatSession().stepLimitReached(String.valueOf(args.maxSteps()));
+    }
+
+    /**
+     * The {@code think-cut-off} transition: when the step that just ran was cut off at the output limit,
+     * queues a note as the next prompt so the turn continues; fails otherwise, or once too many steps in a
+     * row were cut off ({@code CutOffReplyContinues_261115_oo01}).
+     *
+     * @param args how many consecutive cut-offs the turn continues through
+     * @return success when the note was queued
+     */
+    @Action(value = "continueAfterCutOff", argsType = CutOffArgs.class)
+    public ActionResult continueAfterCutOffAction(CutOffArgs args) {
+        return chatSession().continueAfterCutOff(String.valueOf(args.maxInARow()));
     }
 
     /**

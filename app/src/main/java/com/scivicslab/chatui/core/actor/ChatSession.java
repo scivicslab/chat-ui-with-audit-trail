@@ -177,6 +177,8 @@ public class ChatSession extends Interpreter {
      * {@code Interpreter.runUntilEnd}'s 10000-iteration backstop.
      */
     private static final int DEFAULT_STEP_LIMIT = 30;
+    /** How many consecutive cut-off replies a turn continues through ({@code think-cut-off}). */
+    static final int DEFAULT_MAX_CUT_OFFS_IN_A_ROW = 3;
     /** When the running turn began, for the duration reported with its answer. */
     private volatile long turnStartedAt;
     /** Ceiling on the observation size a workflow may ask for; set from configuration. */
@@ -475,6 +477,14 @@ public class ChatSession extends Interpreter {
     // closure, so the whole turn runs on this actor's own single thread.
     private String question;
     private String pendingPrompt;
+    // A reply cut off at the output limit (CutOffReplyContinues_261115_oo01). cutOffPending: the step
+    // that just ran was cut off and continueAfterCutOff has not dealt with it yet; cutOffRun: how many
+    // steps in a row were cut off; cutOffText: the text those steps wrote, kept for the answer if the
+    // turn gives up; cutOffChars: how much the latest one wrote.
+    private boolean cutOffPending;
+    private int cutOffRun;
+    private int cutOffChars;
+    private final StringBuilder cutOffText = new StringBuilder();
     // Data URLs attached to this turn's prompt, sent to the provider on step 1 only
     // (stepExpectingAction) — a later step's provider call carries a tool observation, not the
     // original attachment, so re-sending them would just repeat the same image every step.
@@ -1311,6 +1321,10 @@ public class ChatSession extends Interpreter {
         this.stepLimitHit = false;
         this.cancelled = false;
         this.constructedPrompts.clear();
+        this.cutOffPending = false;
+        this.cutOffRun = 0;
+        this.cutOffChars = 0;
+        this.cutOffText.setLength(0);
         this.requestMessagesToRestore = null;
         this.lastWorkerReply = null;
         this.lastJudgment = null;
@@ -1623,7 +1637,7 @@ public class ChatSession extends Interpreter {
         // model's chain of thought ran to a stop token before it ever reached <invoke> or an
         // answer. Retried once, same prompt, as its own step — a second draw from the same model
         // most often lands on a tool call or an answer (EmptyStopRetry_261009_oo01).
-        if (outcome.calls().isEmpty() && outcome.text().isBlank() && turnError == null) {
+        if (!outcome.cutOff() && outcome.calls().isEmpty() && outcome.text().isBlank() && turnError == null) {
             turnEmitter.accept(ChatEvent.thinking(
                     "\n→ retrying: the reply had no text and no tool call\n"));
             stepCount++;
@@ -1644,6 +1658,21 @@ public class ChatSession extends Interpreter {
             return new ActionResult(false, "cancelled");
         }
 
+        if (outcome.cutOff()) {
+            // Neither an answer nor a tool call: the think-cut-off transition decides whether the
+            // turn goes on. The step ends here without a final answer so that nothing but it does.
+            cutOffPending = true;
+            cutOffRun++;
+            cutOffChars = outcome.text().length();
+            cutOffText.append(outcome.text());
+            finalAnswer = null;
+            logToConversationSquad("WARNING", "turn" + ioTurnNo + "/step" + stepCount + "/llm cut off at the output limit after "
+                    + cutOffChars + " chars (" + cutOffRun + " in a row)");
+            return new ActionResult(false, "cut off");
+        }
+        cutOffRun = 0;
+        cutOffText.setLength(0);
+
         if (!outcome.calls().isEmpty()) {
             pendingCalls = outcome.calls();
             for (ToolCall tc : outcome.calls()) {
@@ -1661,7 +1690,7 @@ public class ChatSession extends Interpreter {
     }
 
     /** What one {@link #callLlmStep} call produced: the text to keep, and what it parsed from it. */
-    private record LlmStepOutcome(String text, List<ToolCall> calls) {}
+    private record LlmStepOutcome(String text, List<ToolCall> calls, boolean cutOff) {}
 
     /**
      * Sends one prompt to the provider and returns what came back, recorded to the I/O log as its
@@ -1676,7 +1705,8 @@ public class ChatSession extends Interpreter {
         // The body the provider sends is kept so the I/O log can record it as it was sent
         // (RequestMessagesControl_261018_oo01); a provider with no request body leaves it null.
         java.util.concurrent.atomic.AtomicReference<String> sentBody = new java.util.concurrent.atomic.AtomicReference<>();
-        ProviderContext ctx = new ProviderContext(apiKey, stepImages, turnNoThink, () -> {}, sentBody::set);
+        ProviderContext ctx = new ProviderContext(apiKey, stepImages, turnNoThink, () -> {}, sentBody::set, true);
+        boolean[] cutOff = {false};
         StringBuilder assistantBuf = new StringBuilder();
         // The reasoning is kept for the record, not for the answer: it goes to the I/O log's
         // REASONING: section and never into assistantBuf, which is what the next step parses for
@@ -1735,6 +1765,12 @@ public class ChatSession extends Interpreter {
                     // text is a failed turn, not an empty answer (TurnErrorInConversation_260913_oo01).
                     turnError = event.content() == null ? "unknown error" : event.content();
                     turnEmitter.accept(event);
+                } else if ("cut_off".equals(event.type())) {
+                    // Not an error: the provider kept the partial reply and the turn continues
+                    // (CutOffReplyContinues_261115_oo01). Remembered here, acted on after the step.
+                    cutOff[0] = true;
+                    turnEmitter.accept(ChatEvent.thinking("\n→ the reply was cut off at the output limit after "
+                            + event.content() + " chars\n"));
                 } else if ("retraction".equals(event.type())) {
                     String dropped = assistantBuf.substring(responseStart[0]);
                     assistantBuf.setLength(responseStart[0]);
@@ -1769,11 +1805,14 @@ public class ChatSession extends Interpreter {
         }, system.getManagedThreadPool()).get();
 
         String text = assistantBuf.toString();
-        List<ToolCall> calls = TextToolCallParser.parse(text);
-        answerStream.finish(!calls.isEmpty());
+        // A cut-off reply runs no tool: its last call, if it holds one, never closed, and the text
+        // before it is no answer either. The step's text is kept, and shown as the live trace rather
+        // than as the answer.
+        List<ToolCall> calls = cutOff[0] ? List.of() : TextToolCallParser.parse(text);
+        answerStream.finish(cutOff[0] || !calls.isEmpty());
         recordStepIo(promptToSend, sentBody.get(), text, thinkingBuf.toString(), calls);
         turnTranscript.append("You wrote:\n").append(text).append("\n\n");
-        return new LlmStepOutcome(text, calls);
+        return new LlmStepOutcome(text, calls, cutOff[0]);
     }
 
     /**
@@ -1991,7 +2030,9 @@ public class ChatSession extends Interpreter {
         boolean reached = stepCount >= max;
         if (reached) stepLimitHit = true;
         if (reached && finalAnswer == null) {
-            finalAnswer = "(step limit of " + max + " reached)";
+            // A turn that ran out of steps right after a cut-off still keeps what that reply wrote.
+            String kept = cutOffText.toString().strip();
+            finalAnswer = (kept.isEmpty() ? "" : kept + "\n\n") + "(step limit of " + max + " reached)";
         }
         return new ActionResult(reached, reached ? "step limit " + max + " reached"
                                                  : stepCount + "/" + max + " steps used");
@@ -2687,6 +2728,45 @@ public class ChatSession extends Interpreter {
             default:
                 return "";
         }
+    }
+
+    /**
+     * Agent-loop action {@code think-cut-off}: the step that just ran was cut off at the output limit
+     * ({@code finish_reason=length}). The provider has kept the partial reply in the history, so this
+     * queues a note as the next step's prompt, telling the model how much it wrote and to continue in
+     * smaller pieces, and the turn goes on under the step limit. After {@code maxInARow} cut-offs in a
+     * row the turn ends instead, with what was written kept as its answer
+     * ({@code CutOffReplyContinues_261115_oo01}). Fails when the last step was not cut off.
+     *
+     * @param maxInARow how many consecutive cut-offs the turn continues through; blank or unparsable
+     *                  falls back to {@link #DEFAULT_MAX_CUT_OFFS_IN_A_ROW}
+     * @return {@code success=true} when the note was queued as the next step's prompt
+     */
+    public ActionResult continueAfterCutOff(String maxInARow) {
+        if (!cutOffPending) return new ActionResult(false, "not cut off");
+        cutOffPending = false;
+        if (cancelled || pauseRequested) return new ActionResult(false, "paused or cancelled");
+        int max = parsePositiveOr(maxInARow, DEFAULT_MAX_CUT_OFFS_IN_A_ROW);
+        if (cutOffRun > max) {
+            String kept = cutOffText.toString().strip();
+            finalAnswer = (kept.isEmpty() ? "" : kept + "\n\n")
+                    + "(The turn ended: the reply was cut off at the output limit " + cutOffRun
+                    + " times in a row. What was written is kept above.)";
+            logToConversationSquad("WARNING", "turn" + ioTurnNo + ": ended after " + cutOffRun
+                    + " cut-off replies in a row");
+            return new ActionResult(false, "too many cut-offs in a row");
+        }
+        String written = cutOffChars == 0
+                ? "no text before it was cut (the output limit was spent on thinking)"
+                : cutOffChars + " characters";
+        String note = "Your last reply was cut off at the output limit after " + written + ", so it was not "
+                + "finished and no tool in it was run. Continue in smaller pieces. If you were writing a long "
+                + "document, write it in several file writes, or append it part by part, each well under the "
+                + "limit, rather than in one huge call. Do not repeat what you already wrote.";
+        pendingPrompt = note;
+        turnTranscript.append(note).append("\n\n");
+        turnEmitter.accept(ChatEvent.thinking("\n→ " + note + "\n"));
+        return new ActionResult(true, "continuing after a cut-off");
     }
 
     /**
