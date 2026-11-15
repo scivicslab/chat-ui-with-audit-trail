@@ -83,6 +83,22 @@ class ChatSessionCutOffTest {
     }
 
     private List<ChatEvent> runTurn(ChatSessionIIAR iiar) throws Exception {
+        return runTurn(iiar, null);
+    }
+
+    /** Runs a turn under the named workflow from the test resources, or the default loop when null. */
+    private List<ChatEvent> runTurn(ChatSessionIIAR iiar, String agentLoopYaml) throws Exception {
+        if (agentLoopYaml != null) {
+            iiar.tellNow(a -> {
+                ChatSession c = (ChatSession) a;
+                c.reset();
+                try (java.io.InputStream in = ChatSessionCutOffTest.class.getResourceAsStream("/workflows/" + agentLoopYaml)) {
+                    c.readYaml(in);
+                } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                }
+            }).join();
+        }
         List<ChatEvent> emitted = new ArrayList<>();
         ActorRef<ChatSession> chatRef = iiar.asChatSessionRef();
         chatRef.tellNow(c -> {
@@ -188,5 +204,21 @@ class ChatSessionCutOffTest {
                 assertTrue(yaml.indexOf("method: continueAfterCutOff") < yaml.indexOf("label: think-final"), loop);
             }
         }
+    }
+
+    // The number in the YAML reaches the action as an integer: these run the real YAML through the interpreter,
+    // and the limit they name differs from the Java default (3) in each direction.
+    @Test
+    void theLimitIsTheNumberTheYamlNames_lowerThanTheDefault() throws Exception {
+        ScriptedProvider provider = new ScriptedProvider(List.of(cutOffAfter("chunk ")));
+        runTurn(newSession(provider, new CapturingIoLog()), "cut-off-limit-1.yaml");
+        assertEquals(2, provider.prompts.size(), "maxInARow: 1 continues once, the second cut-off ends the turn");
+    }
+
+    @Test
+    void theLimitIsTheNumberTheYamlNames_higherThanTheDefault() throws Exception {
+        ScriptedProvider provider = new ScriptedProvider(List.of(cutOffAfter("chunk ")));
+        runTurn(newSession(provider, new CapturingIoLog()), "cut-off-limit-5.yaml");
+        assertEquals(6, provider.prompts.size(), "maxInARow: 5 continues five times, the sixth cut-off ends the turn");
     }
 }
