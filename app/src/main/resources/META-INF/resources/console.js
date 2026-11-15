@@ -35,7 +35,8 @@
         jobrun: "To run the workflow open in the centre pane as a batch job, fill in its inputs here and press Run.",
         joblog: "When a batch job did not do what you expected, read the lines it wrote; open it from the job's Log button under Batch Jobs.",
         jobs: "To follow the batch jobs you started, see their state here, and open a job's log or stop it.",
-        methodsearch: "When you know a method's name but not which actor offers it, search for it here."
+        methodsearch: "When you know a method's name but not which actor offers it, search for it here.",
+        timekeeper: "A timekeeper has nothing to show in this pane; what it is watching is in the centre pane."
     };
 
     /** Writes the selected entry's description into the line under the menu. */
@@ -1192,7 +1193,7 @@
     }
 
     // ── Centre/right splitter (drag handle, persisted like the left dock) ────
-    // Sets the width of both centre panes, #main-panel and #project-panel, so switching perspective
+    // Sets the width of the three centre panes, #main-panel, #project-panel and #timekeeper-panel, so switching perspective
     // keeps the line where it was. Kept as a percentage of #console-root rather than pixels, so a
     // narrower window still leaves the right pane its minimum width.
     var CENTRE_WIDTH_KEY = "chat-ui-centre-width-pct";
@@ -1202,7 +1203,8 @@
     function initSplitter() {
         var root = document.getElementById("console-root");
         var splitter = document.getElementById("splitter");
-        var panes = [document.getElementById("main-panel"), document.getElementById("project-panel")]
+        var panes = [document.getElementById("main-panel"), document.getElementById("project-panel"),
+                     document.getElementById("timekeeper-panel")]
             .filter(function (p) { return !!p; });
         if (!root || !splitter || !panes.length) return;
 
@@ -1307,18 +1309,26 @@
     var PERSPECTIVE_PROJECT_KEY = "chat-ui-perspective-project";
     var perspective = "chat";
     var perspectiveProjectId = null;
+    // The conversation whose timekeeper the "timekeeper" perspective shows: {projectId, chatId}
+    // (TimekeeperViewInTheActorTree_261115_oo01).
+    var PERSPECTIVE_TIMEKEEPER_KEY = "chat-ui-perspective-timekeeper";
+    var perspectiveTimekeeper = null;
     // The project every start creates; it has no delete button (ProjectDeletion_261011_oo01).
     var DEFAULT_PROJECT_ID = "project1";
 
-    function switchPerspective(kind, projectId) {
-        if (kind !== "project") kind = "chat";
+    // For "project", projectId names the project; for "timekeeper", projectId and chatId name the conversation.
+    function switchPerspective(kind, projectId, chatId) {
+        if (kind !== "project" && kind !== "timekeeper") kind = "chat";
+        if (kind === "timekeeper" && !(projectId && chatId) && !perspectiveTimekeeper) kind = "chat";
         var root = document.getElementById("console-root");
         if (!root) return;
         perspective = kind;
         if (kind === "project" && projectId) perspectiveProjectId = projectId;
+        if (kind === "timekeeper" && projectId && chatId) perspectiveTimekeeper = { projectId: projectId, chatId: chatId };
         root.setAttribute("data-perspective", kind);
         localStorage.setItem(PERSPECTIVE_KEY, kind);
         if (perspectiveProjectId) localStorage.setItem(PERSPECTIVE_PROJECT_KEY, perspectiveProjectId);
+        if (perspectiveTimekeeper) localStorage.setItem(PERSPECTIVE_TIMEKEEPER_KEY, JSON.stringify(perspectiveTimekeeper));
         var title = document.getElementById("project-panel-title");
         if (title && kind === "project") title.textContent = perspectiveProjectId || "Project";
         activateFirstTabOf(kind);
@@ -1326,6 +1336,134 @@
             projectWfOnShow();
             projectPropLoad();
         }
+        if (kind === "timekeeper") timekeeperLoad();
+    }
+
+    // ── Timekeeper perspective, centre pane: what one conversation's timekeeper is watching ─────
+    // GET api/projects/{p}/chats/{c}/timekeeper reads it, without waiting for a running turn; nothing here
+    // changes it (TimekeeperViewInTheActorTree_261115_oo01). Refreshed every 3s while the pane shows, as the
+    // job lists are.
+    var timekeeperTimer = null;
+
+    // "7m 05s", "-2m 00s" (negative: already past); under a minute "42s".
+    function tkSpan(ms) {
+        var neg = ms < 0;
+        var s = Math.floor(Math.abs(ms) / 1000);
+        var m = Math.floor(s / 60);
+        var text = m > 0 ? m + "m " + ("0" + (s % 60)).slice(-2) + "s" : s + "s";
+        return neg ? "-" + text : text;
+    }
+
+    // Time to come reads "in 3m 00s"; time that has passed reads "3m 00s ago", marked as late.
+    function tkWhen(ms) {
+        return ms >= 0 ? "in " + tkSpan(ms) : tkSpan(-ms) + " ago";
+    }
+
+    function tkCell(tr, text, cls) {
+        var td = document.createElement("td");
+        td.textContent = text;
+        if (cls) td.className = cls;
+        tr.appendChild(td);
+    }
+
+    function tkTable(into, heads, rows, emptyText) {
+        into.textContent = "";
+        if (!rows.length) {
+            var none = document.createElement("div");
+            none.className = "tk-none";
+            none.textContent = emptyText;
+            into.appendChild(none);
+            return;
+        }
+        var table = document.createElement("table");
+        table.className = "tk-table";
+        var head = document.createElement("tr");
+        heads.forEach(function (h) {
+            var th = document.createElement("th");
+            th.textContent = h;
+            head.appendChild(th);
+        });
+        table.appendChild(head);
+        rows.forEach(function (r) { table.appendChild(r); });
+        into.appendChild(table);
+    }
+
+    function timekeeperRender(w) {
+        setText("tk-urgent-wait", w.urgentWaitMinutes + (w.urgentWaitMinutes === 1 ? " minute" : " minutes"));
+        setText("tk-warn", w.childReplyWarnMinutes + (w.childReplyWarnMinutes === 1 ? " minute" : " minutes"));
+        setText("tk-turn", w.running
+            ? "running" + (w.runningSince ? ", started " + tkSpan(Date.now() - w.runningSince) + " ago" : "")
+            : "not running a turn");
+
+        var urgent = document.getElementById("tk-urgent");
+        if (urgent) {
+            if (w.urgentWaitingMillis == null) {
+                urgent.textContent = "None waiting.";
+                urgent.className = "tk-none";
+            } else {
+                urgent.className = "";
+                urgent.textContent = "Waiting " + tkSpan(w.urgentWaitingMillis) + ". "
+                    + (w.pauseInMillis == null
+                        ? "No turn is running, so nothing would be paused; it is answered next."
+                        : w.pauseInMillis >= 0
+                            ? "The running turn would be paused in " + tkSpan(w.pauseInMillis) + "."
+                            : "Past the limit: the running turn is paused at the next check (every 30s).");
+            }
+        }
+
+        tkTable(document.getElementById("tk-sent"),
+            ["Request id", "Target", "Out for", "Notice"],
+            (w.sent || []).map(function (s) {
+                var tr = document.createElement("tr");
+                tkCell(tr, s.requestId);
+                tkCell(tr, s.target || "(unknown)");
+                tkCell(tr, tkSpan(s.outMillis));
+                tkCell(tr, s.noticeSent ? "sent"
+                    : s.noticeDueInMillis >= 0 ? "not sent; due " + tkWhen(s.noticeDueInMillis)
+                    : "not sent; due at the next check", s.noticeSent ? "tk-late" : "");
+                return tr;
+            }),
+            "None: every request this conversation sent has had its reply.");
+
+        tkTable(document.getElementById("tk-promised"),
+            ["Request id", "Reminder due", "Reminder"],
+            (w.promised || []).map(function (p) {
+                var tr = document.createElement("tr");
+                tkCell(tr, p.requestId || "(to the person)");
+                tkCell(tr, p.dueInMillis >= 0 ? tkWhen(p.dueInMillis) : "due now (next check)");
+                tkCell(tr, "#" + p.number);
+                return tr;
+            }),
+            "None registered.");
+    }
+
+    function timekeeperLoad() {
+        var tk = perspectiveTimekeeper;
+        var title = document.getElementById("timekeeper-panel-title");
+        if (!tk) {
+            if (title) title.textContent = "Timekeeper";
+            return Promise.resolve();
+        }
+        if (title) title.textContent = tk.projectId + "/chat-" + tk.chatId + ".timekeeper";
+        return fetch("api/projects/" + encodeURIComponent(tk.projectId) + "/chats/" + encodeURIComponent(tk.chatId) + "/timekeeper")
+            .then(function (r) {
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                return r.json();
+            })
+            .then(function (w) {
+                if (perspective !== "timekeeper" || perspectiveTimekeeper !== tk) return;
+                timekeeperRender(w);
+                setText("timekeeper-status", "");
+            })
+            .catch(function (err) { setText("timekeeper-status", "error: " + err.message); });
+    }
+
+    function initTimekeeperPane() {
+        var refresh = document.getElementById("timekeeper-refresh");
+        if (refresh) refresh.addEventListener("click", timekeeperLoad);
+        if (!timekeeperTimer) timekeeperTimer = setInterval(function () {
+            if (perspective === "timekeeper") timekeeperLoad();
+        }, 3000);
     }
 
     // ── Project perspective, right pane: the project's own name and working directory ──────────
@@ -1841,6 +1979,9 @@
         var pid = localStorage.getItem(PERSPECTIVE_PROJECT_KEY);
         if (kind === "project" && !pid) kind = "chat";
         perspectiveProjectId = pid;
+        try { perspectiveTimekeeper = JSON.parse(localStorage.getItem(PERSPECTIVE_TIMEKEEPER_KEY)); }
+        catch (e) { perspectiveTimekeeper = null; }
+        if (kind === "timekeeper" && !perspectiveTimekeeper) kind = "chat";
         switchPerspective(kind, pid);
     }
 
@@ -1989,6 +2130,23 @@
             name.addEventListener("click", function (e) {
                 e.stopPropagation(); // don't also trigger the fold/unfold toggle on the label
                 switchPerspective("project", node.name);
+                refreshActors(); // re-render so the tab-active highlight moves immediately
+            });
+        }
+        // A Timekeeper node (the ".timekeeper" child of a ConversationSquad actor) switches the console to that
+        // conversation's timekeeper perspective: the centre pane shows what it is watching, the right pane
+        // has nothing for it (TimekeeperViewInTheActorTree_261115_oo01). Matched by type, as Project is.
+        var tkMatch = node.type === "Timekeeper" ? /^([^/]+)\/chat-([^.]+)\.timekeeper$/.exec(node.name) : null;
+        if (tkMatch) {
+            name.classList.add("tab-switchable");
+            if (perspective === "timekeeper" && perspectiveTimekeeper
+                    && perspectiveTimekeeper.projectId === tkMatch[1] && perspectiveTimekeeper.chatId === tkMatch[2]) {
+                name.classList.add("tab-active");
+            }
+            name.title = "Show what the timekeeper of " + tkMatch[1] + " / " + tkMatch[2] + " is watching";
+            name.addEventListener("click", function (e) {
+                e.stopPropagation(); // don't also trigger the fold/unfold toggle on the label
+                switchPerspective("timekeeper", tkMatch[1], tkMatch[2]);
                 refreshActors(); // re-render so the tab-active highlight moves immediately
             });
         }
@@ -2862,6 +3020,7 @@
         initJobs();
         initProjectProp();
         initMethodSearch();
+        initTimekeeperPane();
         restorePerspective(); // before the tree renders, so its highlight matches
         refreshActors();   // the actor dock is visible by default
         ioOnShow();         // Sessions is the default-active right-pane tab

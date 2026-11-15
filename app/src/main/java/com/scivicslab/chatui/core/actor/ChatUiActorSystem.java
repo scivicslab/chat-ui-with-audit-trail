@@ -2145,6 +2145,25 @@ public class ChatUiActorSystem implements ConversationControls {
     }
 
     /**
+     * What one conversation's timekeeper is watching now, for the screen
+     * ({@code TimekeeperViewInTheActorTree_261115_oo01}). Read-only: it does not wait for a running turn, since it
+     * asks the timekeeper, a child of the conversation with a thread of its own.
+     *
+     * @return the state, or {@code null} when the conversation has no timekeeper
+     * @throws IllegalStateException when the timekeeper did not answer within 5 seconds
+     */
+    public Timekeeper.Watch timekeeperWatch(String projectId, String chatId) {
+        ActorRef<Timekeeper> keeper = actorSystem.getActor(chatActorName(projectId, chatId) + ".timekeeper");
+        if (keeper == null) return null;
+        long now = System.currentTimeMillis();
+        try {
+            return keeper.ask(k -> k.watch(now)).get(10, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            throw new IllegalStateException("the timekeeper did not answer: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * @param projectId owning project's id
      * @param chatId    conversation id within that project
      * @return the conversation's {@link ConversationSquad}, or {@code null} if none was created

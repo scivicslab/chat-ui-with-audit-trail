@@ -645,6 +645,46 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
 #console-root[data-perspective="chat"] .rtab-content[data-perspective="project"] { display: none; }
 #console-root[data-perspective="project"] .rtab-content[data-perspective="chat"] { display: none; }
 
+/* The timekeeper perspective (TimekeeperViewInTheActorTree_261115_oo01): its own centre pane, laid out as
+   #project-panel is, and a right pane that shows only its one placeholder section. */
+#timekeeper-panel {
+    width: 60%;
+    flex-shrink: 0;
+    min-width: 320px;
+    height: 100%;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary, #1e1e1e);
+    color: var(--text-primary, #e6e6e6);
+}
+#timekeeper-panel > header {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-color, #2c2c2c);
+    flex-shrink: 0;
+}
+#timekeeper-panel > main { flex: 1; min-height: 0; overflow: auto; padding: 12px; }
+#console-root[data-perspective="chat"] #timekeeper-panel,
+#console-root[data-perspective="project"] #timekeeper-panel { display: none; }
+#console-root[data-perspective="timekeeper"] #main-panel,
+#console-root[data-perspective="timekeeper"] #project-panel { display: none; }
+#console-root[data-perspective="chat"] .rtab-content[data-perspective="timekeeper"],
+#console-root[data-perspective="project"] .rtab-content[data-perspective="timekeeper"] { display: none; }
+#console-root[data-perspective="timekeeper"] .rtab-content[data-perspective="chat"],
+#console-root[data-perspective="timekeeper"] .rtab-content[data-perspective="project"] { display: none; }
+
+.tk-section { margin-bottom: 18px; }
+.tk-section h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--text-secondary, #9aa0a6); }
+.tk-limits { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
+.tk-limits dt { color: var(--text-secondary, #9aa0a6); font-family: monospace; }
+.tk-limits dd { margin: 0; }
+.tk-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.tk-table th, .tk-table td { text-align: left; padding: 3px 10px 3px 0; border-bottom: 1px solid var(--border-color, #2c2c2c); vertical-align: top; }
+.tk-table th { color: var(--text-secondary, #9aa0a6); font-weight: 500; }
+.tk-none { color: var(--text-secondary, #9aa0a6); }
+.tk-late { color: #e0a040; }
+
 /* Project pane, centre: the workflow catalog above, the one being read below
    (ProjectPerspective_260911_oo01, step 2). Same two-region shape as the Sessions tab. */
 #project-workflows { display: flex; flex-direction: column; padding: 0; }

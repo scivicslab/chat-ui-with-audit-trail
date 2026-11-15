@@ -4,6 +4,7 @@ import com.scivicslab.chatui.agent.ToolSet;
 import com.scivicslab.chatui.core.actor.ChatSession;
 import com.scivicslab.chatui.core.actor.ChatSessionIIAR;
 import com.scivicslab.chatui.core.actor.ChatUiActorSystem;
+import com.scivicslab.chatui.core.actor.Timekeeper;
 import com.scivicslab.chatui.core.actor.TurnReply;
 import com.scivicslab.chatui.core.actor.PromptQueue;
 import com.scivicslab.chatui.core.actor.SseConnection;
@@ -691,6 +692,32 @@ public class ChatResource {
         // Absent rather than a made-up number when this conversation asks the server for nothing.
         if (temperature != null) status.put("temperature", temperature);
         return status;
+    }
+
+    /**
+     * What this conversation's timekeeper is watching now: its limits, the requests this conversation sent
+     * that have no reply yet, the promised reports waiting for their time, and whether an urgent item waits
+     * while a turn runs ({@code TimekeeperViewInTheActorTree_261115_oo01}). Read-only; it does not wait for a
+     * running turn.
+     *
+     * @param chatId ConversationSquad identifier
+     * @return the {@link Timekeeper.Watch} as JSON; 404 for no such conversation, 503 when the timekeeper did not answer
+     */
+    @GET
+    @Path("/{projectId}/chats/{chatId}/timekeeper")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response timekeeper(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
+        requireChat(projectId, chatId);
+        try {
+            Timekeeper.Watch watch = actorSystem.timekeeperWatch(projectId, chatId);
+            if (watch == null) {
+                return Response.status(404).entity(Map.of("type", "error", "message", "no timekeeper for "
+                        + ChatUiActorSystem.chatActorName(projectId, chatId))).build();
+            }
+            return Response.ok(watch).build();
+        } catch (IllegalStateException e) {
+            return Response.status(503).entity(Map.of("type", "error", "message", e.getMessage())).build();
+        }
     }
 
     /**

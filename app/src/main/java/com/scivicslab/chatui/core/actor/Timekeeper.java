@@ -143,6 +143,97 @@ public class Timekeeper {
     }
 
     /**
+     * What this timekeeper is watching at one moment, for the screen ({@code TimekeeperViewInTheActorTree_261115_oo01}).
+     * Times that lie ahead or behind are given as milliseconds from now: positive is still to come, negative is
+     * already past (the next check acts on it).
+     *
+     * @param conversation          the conversation's qualified name
+     * @param urgentWaitMinutes     how long an urgent request may wait at the front of a running turn
+     * @param childReplyWarnMinutes how long a sent request may go without a reply before the conversation is told
+     * @param running               whether the conversation is running a turn
+     * @param runningSince          when that turn started, in milliseconds since the epoch, or {@code null}
+     * @param urgentWaitingMillis   how long the urgent item at the front has waited, or {@code null} when none waits
+     * @param pauseInMillis         how long until the running turn would be paused for it, or {@code null} when no
+     *                              urgent item waits or no turn runs
+     * @param sent                  the requests this conversation sent that have no reply yet, oldest first
+     * @param promised              the promised reports waiting for their time, soonest first
+     */
+    public record Watch(String conversation, long urgentWaitMinutes, long childReplyWarnMinutes, boolean running,
+                        Long runningSince, Long urgentWaitingMillis, Long pauseInMillis,
+                        List<Sent> sent, List<Promised> promised) {
+
+        /** @return whether an urgent item waits at the front of the queue */
+        public boolean urgentWaiting() {
+            return urgentWaitingMillis != null;
+        }
+
+        /**
+         * A request sent and not yet answered.
+         *
+         * @param requestId         the request's id
+         * @param target            the qualified name of the conversation it went to, or {@code null} when not known
+         * @param outMillis         how long it has been out
+         * @param noticeSent        whether the "no reply yet" notice has already been put into the queue
+         * @param noticeDueInMillis how long until that notice is due (negative once due)
+         */
+        public record Sent(String requestId, String target, long outMillis, boolean noticeSent, long noticeDueInMillis) {}
+
+        /**
+         * A promised report waiting for its time.
+         *
+         * @param requestId   the request it was promised for, or {@code null} for a promise to the person
+         * @param asker       the conversation waiting for it, or {@code null} for the person
+         * @param dueInMillis how long until the reminder (negative once due)
+         * @param number      which reminder it will be for the request, counting from 1
+         */
+        public record Promised(String requestId, String asker, long dueInMillis, int number) {}
+    }
+
+    /**
+     * Builds what the screen shows from the state the timekeeper reads. A plain function, so that it is tested
+     * without actors.
+     *
+     * @param urgentQueuedAt when the urgent item at the front of the queue entered it, or {@code null} when none waits
+     * @param warned         the requests whose notice has been put into the queue
+     */
+    static Watch summarize(String conversation, long urgentWaitMillis, long childReplyWarnMillis, boolean running,
+                           Long runningSince, Long urgentQueuedAt, List<OpenRequests.Outstanding> out,
+                           Set<String> warned, List<PromisedReports.Pending> promised, long now) {
+        Long waited = urgentQueuedAt == null ? null : now - urgentQueuedAt;
+        Long pauseIn = waited != null && running ? urgentWaitMillis - waited : null;
+        List<Watch.Sent> sent = out.stream()
+                .sorted((a, b) -> Long.compare(a.sentAt(), b.sentAt()))
+                .map(o -> new Watch.Sent(o.requestId(), o.target(), now - o.sentAt(), warned.contains(o.requestId()),
+                        o.sentAt() + childReplyWarnMillis - now))
+                .toList();
+        List<Watch.Promised> due = promised.stream()
+                .sorted((a, b) -> Long.compare(a.dueAt(), b.dueAt()))
+                .map(p -> new Watch.Promised(p.requestId(), p.asker(), p.dueAt() - now, p.number()))
+                .toList();
+        return new Watch(conversation, TimeUnit.MILLISECONDS.toMinutes(urgentWaitMillis),
+                TimeUnit.MILLISECONDS.toMinutes(childReplyWarnMillis), running, running ? runningSince : null,
+                waited, pauseIn, sent, due);
+    }
+
+    /**
+     * What this timekeeper watches now. It reads the conversation without waiting for a running turn, as
+     * {@link #tick} does, and changes nothing.
+     *
+     * @param now the current time, in milliseconds since the epoch
+     */
+    public Watch watch(long now) {
+        Long urgentQueuedAt = null;
+        try {
+            urgentQueuedAt = queue.ask(PromptQueue::frontUrgentQueuedAt).get(5, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, conversation + ": the queue did not say whether an urgent item waits", e);
+        }
+        boolean running = chat.isBusyDirect();
+        return summarize(conversation, urgentWaitMillis, childReplyWarnMillis, running, chat.runningSinceDirect(),
+                urgentQueuedAt, chat.outstandingChildrenDirect(), warned, promised.snapshot(), now);
+    }
+
+    /**
      * One check, at {@code now}.
      *
      * @param now the current time, in milliseconds since the epoch

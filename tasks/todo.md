@@ -420,3 +420,24 @@ B ではこれが polish 系（普段使うジョブ）に起きたので、`tex
 - 画面(app.js)は触っていない。`/` で始まる行は従来どおりサーバが受ける。
 - 動作中の 28014 には反映していない。反映には `app` と `plugin-harness` の jar を作り直して置き換える必要がある。
 - CLI のコマンドは I/O ログに残す(ラベル `command/<時刻>`、`REQUEST:`/`RESPONSE:`/`ERROR:`。`oneshot/<時刻>` と同じ置き方)。この製品のコマンドは設定を変えるだけなので残さない。`app` 404 件、`plugin-harness` 42 件が通った。
+
+# Timekeeper view in the actor tree (TimekeeperViewInTheActorTree_261115_oo01)
+
+Clicking a conversation's `.timekeeper` actor in the left-pane tree shows what that timekeeper is watching in the
+centre pane; the right pane has nothing for it. Read-only.
+
+## Plan
+- [x] Read how the Project click is wired (`switchPerspective`, `data-perspective` right-pane menu, `showConversation`) and reuse it
+- [x] Read the design docs 120, 140, 170
+- [x] Test first: `TimekeeperWatchTest` (red: did not compile, `Timekeeper.summarize` did not exist)
+- [x] `Timekeeper.summarize` / `watch`; `PromisedReports.Pending.number`; `ChatUiActorSystem.timekeeperWatch`; `GET .../chats/{chatId}/timekeeper`
+- [x] Third perspective `timekeeper` in console.html / console.css / console.js
+- [x] mvn test on W206 (own Job), no `-DskipTests`, `rm -rf target` first
+- [x] Real browser against a throwaway instance (28977) with a scripted model server: `e2e/TimekeeperViewCheck.java`
+- [x] Docs: new `120_TimekeeperViewInTheActorTree_261115_oo01`, pointer in `ProjectPerspective_260911_oo01`
+
+## Review
+- W206 Job: `mvn test` 623 tests, 0 failures (`TimekeeperWatchTest` 9). Red run before the code: compile error on the missing API.
+- Browser: 14 checks pass on the jar built on W206 (screenshots `/tmp/uitest/timekeeper-chat0*.png`).
+- Found only in the browser: `console.html` is a Qute template, so `{p}` in an HTML comment made `/` answer 500. Comments there must not contain braces.
+- Not verified: a real model; a promised report that is already due and waiting for the next 30 s check; the pause actually happening (the view only shows the countdown).

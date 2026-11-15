@@ -96,7 +96,9 @@
              data-perspective decides what both sub-panes show (ProjectPerspective_260911_oo01):
                "chat"    — one conversation: #main-panel, and the chat-scoped right tabs
                "project" — one project: #project-panel, and the project-scoped right tabs
-             Clicking a chat-<id> actor picks "chat"; clicking a Project actor picks "project". -->
+               "timekeeper" — one conversation's timekeeper: #timekeeper-panel, and a right pane with nothing to show
+             Clicking a chat-<id> actor picks "chat"; clicking a Project actor picks "project"; clicking a
+             chat-<id>.timekeeper actor picks "timekeeper" (TimekeeperViewInTheActorTree_261115_oo01). -->
         <div id="console-root" data-perspective="chat">
         <div id="main-panel">
             <!-- ===== BEGIN chat-ui markup (unchanged: Claude features kept) ===== -->
@@ -216,6 +218,41 @@
             </main>
         </div>
 
+        <!-- Centre sub-pane for the "timekeeper" perspective: what one conversation's timekeeper is
+             watching now. Read-only; console.js fills it from GET api/projects/&lt;project&gt;/chats/&lt;chat&gt;/timekeeper
+             (TimekeeperViewInTheActorTree_261115_oo01). -->
+        <div id="timekeeper-panel">
+            <header>
+                <div class="left-pane-actions" style="display:flex;align-items:center;gap:8px">
+                    <span id="timekeeper-panel-title" class="project-panel-title">Timekeeper</span>
+                    <button id="timekeeper-refresh" type="button">Refresh</button>
+                    <span id="timekeeper-status"></span>
+                </div>
+            </header>
+            <main id="timekeeper-body">
+                <section class="tk-section">
+                    <h3>Limits</h3>
+                    <dl class="tk-limits">
+                        <dt>urgentWaitMinutes</dt><dd id="tk-urgent-wait"></dd>
+                        <dt>childReplyWarnMinutes</dt><dd id="tk-warn"></dd>
+                        <dt>Turn</dt><dd id="tk-turn"></dd>
+                    </dl>
+                </section>
+                <section class="tk-section">
+                    <h3>Urgent item at the front of the queue</h3>
+                    <div id="tk-urgent"></div>
+                </section>
+                <section class="tk-section">
+                    <h3>Requests sent, no reply yet</h3>
+                    <div id="tk-sent"></div>
+                </section>
+                <section class="tk-section">
+                    <h3>Promised reports</h3>
+                    <div id="tk-promised"></div>
+                </section>
+            </main>
+        </div>
+
         <div id="splitter" title="Drag to resize"></div>
 
         <div id="right-panel">
@@ -233,6 +270,7 @@
                     <option value="joblog" data-perspective="project">Job Log</option>
                     <option value="jobs" data-perspective="project">Batch Jobs</option>
                     <option value="methodsearch" data-perspective="project">Method Search</option>
+                    <option value="timekeeper" data-perspective="timekeeper">Timekeeper</option>
                     <!-- Actions belongs to both perspectives: one entry per perspective, one section
                          without a perspective, so it stays shown whichever is active. -->
                     <option value="actions" data-perspective="chat">Actions</option>
@@ -351,6 +389,9 @@
                 <!-- Method Search: part of a method name finds the actions that have it, one row per
                      class and action, with the actors a workflow may name to call it; choosing a row
                      shows it the way the Actions tab does (MethodSearch_261011_oo01). -->
+                <section id="tab-timekeeper" class="rtab-content" data-perspective="timekeeper">
+                    <div class="project-placeholder">Nothing to show for a timekeeper.</div>
+                </section>
                 <section id="tab-methodsearch" class="rtab-content" data-perspective="project">
                     <div class="tab-toolbar">
                         <input id="ms-query" type="text" placeholder="method name, e.g. putJson">
