@@ -5,6 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 /**
@@ -60,21 +61,33 @@ public final class TextToolCallParser {
     // behind <function_calls>, the way a model writes one. The same tag in the middle of a sentence, in
     // backticks or in a table row is prose quoting the spelling, not a call, as for the function=
     // spelling below (2026-11-08: a report that quoted call blocks was run as calls and lost).
+    // The quotes around a name in the tag syntax: the ASCII " and the typographic ones a model sometimes
+    // writes instead (“ ” ″, measured on GLM-5.3-Flash-Uncensored: <invoke name=“read">). Only here, around
+    // a name; a parameter's value is taken as written.
+    private static final String Q = "[\"\u201C\u201D\u2033]";
+    private static final String NAME = "([^\"\u201C\u201D\u2033]+)";
     private static final String INVOKE_START =
-            "^[ \\t]*(?:<function_calls>\\s*)?<invoke\\s+name=\"([^\"]+)\"\\s*>";
+            "^[ \\t]*(?:<function_calls>\\s*)?<invoke\\s+name=" + Q + NAME + Q + "\\s*>";
     // Each <invoke name="TOOL"> ... </invoke> block that starts a line (DOTALL so it spans newlines).
     private static final Pattern INVOKE =
             Pattern.compile(INVOKE_START + "(.*?)</invoke>", Pattern.DOTALL | Pattern.MULTILINE);
     // The start of a call, whether or not its </invoke> was written.
     private static final Pattern INVOKE_OPEN = Pattern.compile(INVOKE_START, Pattern.MULTILINE);
-    // A <parameter name="KEY">VALUE</parameter> pair; VALUE ends at </parameter>, the next <parameter,
-    // <reason>, or </invoke> — tolerating a missing close tag.
-    private static final Pattern PARAM = Pattern.compile(
-            "<parameter\\s+name=\"([^\"]+)\"\\s*>(.*?)(?:</parameter>|(?=<parameter)|(?=<reason)|(?=</invoke>)|$)",
-            Pattern.DOTALL);
+    // The opening tag of a <parameter name="KEY">VALUE</parameter> pair. Where VALUE ends is decided by
+    // valueEnd: a value may itself contain these tags as text (a prompt that tells another conversation
+    // how to write a call), so the next "<parameter" alone does not end it.
+    private static final Pattern PARAM_OPEN = Pattern.compile("<parameter\\s+name=" + Q + NAME + Q + "\\s*>");
+    // A parameter or <reason> that starts a line: where a value whose </parameter> is missing ends.
+    private static final Pattern NEXT_AT_LINE_START =
+            Pattern.compile("^[ \\t]*(?:<parameter\\s+name=" + Q + "|<reason\\s*>)", Pattern.MULTILINE);
+    private static final String PARAM_CLOSE = "</parameter>";
     // A bare <reason>VALUE (with or without a closing tag) some outputs use instead of a parameter.
     private static final Pattern REASON = Pattern.compile(
-            "<reason\\s*>(.*?)(?:</reason>|(?=</invoke>)|(?=<parameter)|$)", Pattern.DOTALL);
+            "<reason\\s*>(.*?)(?:</reason>|(?=</invoke>)|(?=<parameter\\s+name=)|$)", Pattern.DOTALL);
+    // Anything at the start of a line that begins a call, whether or not the rest of it can be read: what
+    // analyze() checks a reply for, to tell a broken call attempt from prose.
+    private static final Pattern ATTEMPT = Pattern.compile(
+            "^[ \\t]*(?:<function_calls>\\s*)?(?:<invoke\\b|<tool_call>|<function=)", Pattern.MULTILINE);
     // The <function=TOOL> ... </function> spelling. A call begins at the start of a line (optionally
     // behind <tool_call>), the way a model writes one: the same tags quoted in the middle of a
     // sentence or a table row are prose about the spelling, not a call. The body ends at
@@ -135,29 +148,68 @@ public final class TextToolCallParser {
      * @return the parsed calls, or an empty list when none are present
      */
     public static List<ToolCall> parse(String content) {
+        return analyze(content, name -> List.of()).calls();
+    }
+
+    /**
+     * What a reply's tool calls are, and what is wrong with any it tried to write
+     * ({@code BrokenToolCallRepair_261115_oo01}).
+     *
+     * @param calls    every call that could be read, in order
+     * @param problems one sentence per thing that kept a call from being run, empty when every call is
+     *                 sound; when not empty, the reply is a broken call attempt and none of its calls runs
+     * @param example  the call written out in the exact format, for the tool the first broken attempt
+     *                 named (or {@code read} when it named none)
+     */
+    public record Analysis(List<ToolCall> calls, List<String> problems, String exampleTool) {
+        /** @return whether the reply tried to call a tool and the call cannot be run as written */
+        public boolean broken() { return !problems.isEmpty(); }
+    }
+
+    /**
+     * Reads every call in {@code content} and checks each attempt to write one. A line that starts a
+     * call ({@code <invoke}, {@code <tool_call>}, {@code <function=}) but yields none, a call whose
+     * tool needs arguments it was not given, and the quote marks a model sometimes writes in place of
+     * {@code "} are named, so the model can be told exactly what to write again. A call quoted in a
+     * fenced code block or in the middle of a sentence is prose, not an attempt.
+     *
+     * @param content        the reply
+     * @param requiredParams the arguments each tool cannot run without, by tool name (empty for a tool
+     *                       this does not know)
+     */
+    public static Analysis analyze(String content, Function<String, List<String>> requiredParams) {
         List<ToolCall> calls = new ArrayList<>();
-        if (!looksLikeTextToolCall(content)) return calls;
-
-        Matcher inv = INVOKE.matcher(withoutCodeFences(content));
+        List<String> problems = new ArrayList<>();
+        String[] exampleTool = {null};
+        if (content == null) return new Analysis(calls, problems, "read");
+        String visible = withoutCodeFences(content);
+        // Where each readable call lies, to find the attempts no pattern read.
+        List<int[]> readSpans = new ArrayList<>();
         int idx = 0;
-        while (inv.find()) {
-            String name = inv.group(1).trim();
-            String body = inv.group(2);
 
-            Map<String, String> args = new LinkedHashMap<>();
-            Matcher pm = PARAM.matcher(body);
-            while (pm.find()) {
-                args.put(pm.group(1).trim(), clean(pm.group(2)));
-            }
-            Matcher rm = REASON.matcher(body);
-            if (rm.find() && !args.containsKey("reason")) {
-                args.put("reason", clean(rm.group(1)));
-            }
+        Matcher inv = INVOKE.matcher(visible);
+        while (inv.find()) {
+            readSpans.add(new int[]{inv.start(), inv.end()});
+            String name = inv.group(1).trim();
+            String opener = visible.substring(inv.start(), inv.end(1) + 1);
+            Map<String, String> args = invokeArgs(inv.group(2));
+            // <reason> is looked for outside the parameter values: a value may mention the tag as text.
+            Matcher rm = REASON.matcher(outsideValues(inv.group(2)));
+            if (rm.find() && !args.containsKey("reason")) args.put("reason", clean(rm.group(1)));
             calls.add(new ToolCall("text-call-" + idx++, name, toJson(args)));
+            List<String> wrong = argumentProblems(name, args, inv.group(2), requiredParams);
+            if (!wrong.isEmpty()) {
+                if (!opener.trim().matches("(?s).*name=\".*\"")) {
+                    wrong.add(0, "the quote around name= in " + opener.trim() + " is not the ASCII quote \"");
+                }
+                problems.addAll(wrong);
+                if (exampleTool[0] == null) exampleTool[0] = name;
+            }
         }
 
-        Matcher fn = FUNCTION.matcher(withoutCodeFences(content));
+        Matcher fn = FUNCTION.matcher(visible);
         while (fn.find()) {
+            readSpans.add(new int[]{fn.start(), fn.end()});
             String name = fn.group(1).trim();
             Map<String, String> args = new LinkedHashMap<>();
             Matcher pm = FUNCTION_PARAM.matcher(fn.group(2));
@@ -165,12 +217,17 @@ public final class TextToolCallParser {
                 args.put(pm.group(1).trim(), clean(pm.group(2)));
             }
             calls.add(new ToolCall("text-call-" + idx++, name, toJson(args)));
+            List<String> wrong = argumentProblems(name, args, null, requiredParams);
+            if (!wrong.isEmpty()) {
+                problems.addAll(wrong);
+                if (exampleTool[0] == null) exampleTool[0] = name;
+            }
         }
 
-        String visible = withoutCodeFences(content);
         for (Pattern glmSpelling : List.of(GLM, GLM_TRAILING)) {
             Matcher glm = glmSpelling.matcher(visible);
             while (glm.find()) {
+                readSpans.add(new int[]{glm.start(), glm.end()});
                 String name = glm.group(1).trim();
                 Map<String, String> args = new LinkedHashMap<>();
                 Matcher am = GLM_ARG.matcher(glm.group(2));
@@ -178,9 +235,141 @@ public final class TextToolCallParser {
                     args.put(am.group(1).trim(), clean(am.group(2)));
                 }
                 calls.add(new ToolCall("text-call-" + idx++, name, toJson(args)));
+                List<String> wrong = argumentProblems(name, args, null, requiredParams);
+                if (!wrong.isEmpty()) {
+                    problems.addAll(wrong);
+                    if (exampleTool[0] == null) exampleTool[0] = name;
+                }
             }
         }
-        return calls;
+
+        // A line that starts a call no pattern above could read.
+        List<Integer> attempts = new ArrayList<>();
+        Matcher attempt = ATTEMPT.matcher(visible);
+        while (attempt.find()) attempts.add(attempt.start());
+        for (int i = 0; i < attempts.size(); i++) {
+            int at = attempts.get(i);
+            if (readSpans.stream().anyMatch(span -> at >= span[0] && at < span[1])) continue;
+            int until = i + 1 < attempts.size() ? attempts.get(i + 1) : visible.length();
+            int lineEnd = visible.indexOf('\n', at);
+            String line = visible.substring(at, lineEnd < 0 || lineEnd > until ? until : lineEnd).trim();
+            Matcher open = INVOKE_OPEN.matcher(visible);
+            if (open.find(at) && open.start() == at) {
+                // An <invoke name="TOOL"> whose </invoke> never came: say everything wrong with it, not
+                // only the missing close tag, so one repair can fix it all.
+                String name = open.group(1).trim();
+                String opener = visible.substring(at, open.end()).trim();
+                if (!opener.matches("(?s).*name=\".*\".*")) {
+                    problems.add("the quote around name= in " + opener + " is not the ASCII quote \"");
+                }
+                problems.add("your call to " + name + " is not closed with </invoke>");
+                String body = visible.substring(open.end(), until);
+                problems.addAll(argumentProblems(name, invokeArgs(body), body, requiredParams));
+                if (exampleTool[0] == null) exampleTool[0] = name;
+            } else {
+                problems.add(unreadableAttempt(line, visible.substring(at, until)));
+                if (exampleTool[0] == null) exampleTool[0] = "read";
+            }
+        }
+        return new Analysis(calls, problems, exampleTool[0] == null ? "read" : exampleTool[0]);
+    }
+
+    /** What keeps a call that was read from running: required arguments it was not given. */
+    private static List<String> argumentProblems(String name, Map<String, String> args, String body,
+                                                 Function<String, List<String>> requiredParams) {
+        List<String> wrong = new ArrayList<>();
+        List<String> missing = new ArrayList<>();
+        // Only an argument left out counts as missing: a tool decides what an empty one means (set_chat_name
+        // clears the name with it).
+        for (String p : requiredParams.apply(name)) {
+            if (!args.containsKey(p)) missing.add(p);
+        }
+        if (missing.isEmpty()) return wrong;
+        boolean noTags = args.keySet().stream().allMatch("reason"::equals);
+        if (noTags) {
+            wrong.add("your call to " + name + " has no <parameter> tag: each argument must be written inside "
+                    + "<parameter name=\"...\">...</parameter>; lines without that tag are not read as arguments");
+        } else {
+            wrong.add("your call to " + name + " lacks the parameter" + (missing.size() > 1 ? "s " : " ")
+                    + String.join(", ", missing.stream().map(m -> "\"" + m + "\"").toList()));
+        }
+        if ("read".equals(name) && missing.contains("path") && body != null && hasBareLines(body)) {
+            wrong.add("read takes all its paths in one \"path\" parameter, one path per line");
+        }
+        return wrong;
+    }
+
+    /** Whether a call's body has lines of text outside any tag, as a model writes arguments it did not tag. */
+    private static boolean hasBareLines(String body) {
+        for (String line : body.split("\n")) {
+            String t = line.trim();
+            if (!t.isEmpty() && !t.startsWith("<")) return true;
+        }
+        return false;
+    }
+
+    /** Says why a line that starts a call could not be read as one. */
+    private static String unreadableAttempt(String line, String fromLine) {
+        if (line.startsWith("<invoke") || line.startsWith("<function_calls>")) {
+            if (!line.contains("name=")) return "the line " + line + " starts a call but names no tool with name=\"...\"";
+            if (!fromLine.contains("</invoke>")) return "the call " + line + " is not closed with </invoke>";
+            return "the line " + line + " starts a call that could not be read; the opening tag must be "
+                    + "<invoke name=\"TOOL\"> with ASCII quotes";
+        }
+        return "the line " + line + " starts a call that names no tool";
+    }
+
+    /**
+     * The arguments of one {@code <invoke>} call's body. Each value runs from its opening tag to the
+     * {@code </parameter>} that is followed by the next parameter, a {@code <reason>}, or the end of
+     * the call, so a value may contain these tags as text. When that close tag is missing, the value
+     * ends at the next parameter or {@code <reason>} that starts a line, or at the end of the call.
+     */
+    private static Map<String, String> invokeArgs(String body) {
+        Map<String, String> args = new LinkedHashMap<>();
+        Matcher open = PARAM_OPEN.matcher(body);
+        int from = 0;
+        while (from < body.length() && open.find(from)) {
+            String key = open.group(1).trim();
+            int valueStart = open.end();
+            int[] end = valueEnd(body, valueStart);
+            args.put(key, clean(body.substring(valueStart, end[0])));
+            from = end[1];
+        }
+        return args;
+    }
+
+    /** @return a call's body with every parameter, value and tags, taken out */
+    private static String outsideValues(String body) {
+        StringBuilder outside = new StringBuilder();
+        Matcher open = PARAM_OPEN.matcher(body);
+        int from = 0;
+        while (from < body.length() && open.find(from)) {
+            outside.append(body, from, open.start());
+            from = valueEnd(body, open.end())[1];
+        }
+        if (from < body.length()) outside.append(body.substring(from));
+        return outside.toString();
+    }
+
+    /** @return {where the value ends, where the search for the next parameter goes on} */
+    private static int[] valueEnd(String body, int valueStart) {
+        // A parameter that starts a line before any fitting close tag means this value's close tag is
+        // missing: the value ends there rather than taking in the next parameter.
+        Matcher next = NEXT_AT_LINE_START.matcher(body);
+        int nextAt = next.find(valueStart) ? next.start() : -1;
+        int close = body.indexOf(PARAM_CLOSE, valueStart);
+        while (close >= 0) {
+            if (nextAt >= 0 && nextAt < close) return new int[]{nextAt, nextAt};
+            int after = close + PARAM_CLOSE.length();
+            String rest = body.substring(after).stripLeading();
+            if (rest.isEmpty() || rest.startsWith("<reason") || PARAM_OPEN.matcher(rest).lookingAt()) {
+                return new int[]{close, after};
+            }
+            close = body.indexOf(PARAM_CLOSE, after);
+        }
+        if (nextAt >= 0) return new int[]{nextAt, nextAt};
+        return new int[]{body.length(), body.length()};
     }
 
     /** @return {@code content} with its fenced code blocks removed */
@@ -227,7 +416,7 @@ public final class TextToolCallParser {
         if (content == null) return "";
         String out = content.replaceAll("(?s)<function_calls>.*?</function_calls>", "");
         // Some outputs omit the wrapper and emit a bare <invoke>…</invoke>; drop those too.
-        out = out.replaceAll("(?ms)^[ \\t]*<invoke\\s+name=\"[^\"]+\"\\s*>.*?</invoke>", "");
+        out = out.replaceAll("(?ms)^[ \\t]*<invoke\\s+name=" + Q + NAME + Q + "\\s*>.*?</invoke>", "");
         // The <tool_call><function=…> spelling, with or without the <tool_call> wrapper.
         out = out.replaceAll("(?ms)^[ \\t]*<tool_call>.*?</tool_call>", "");
         out = out.replaceAll("(?ms)^[ \\t]*<function=[^>\\s]+\\s*>.*?</function>", "");

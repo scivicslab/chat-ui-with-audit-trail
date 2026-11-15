@@ -179,6 +179,8 @@ public class ChatSession extends Interpreter {
     private static final int DEFAULT_STEP_LIMIT = 30;
     /** How many consecutive cut-off replies a turn continues through ({@code think-cut-off}). */
     static final int DEFAULT_MAX_CUT_OFFS_IN_A_ROW = 3;
+    /** How many broken tool calls in a row a turn repairs when the agent loop names no number. */
+    static final int DEFAULT_MAX_REPAIRS_IN_A_ROW = 3;
     /** When the running turn began, for the duration reported with its answer. */
     private volatile long turnStartedAt;
     /** Ceiling on the observation size a workflow may ask for; set from configuration. */
@@ -221,6 +223,46 @@ public class ChatSession extends Interpreter {
      * ({@code CliHarnessProvider_260912_oo01}).
      */
     private static final Map<String, String> TOOL_DESCRIPTIONS = toolDescriptions();
+
+    /**
+     * The arguments a tool runs without: the ones its description calls optional, and the ones its code
+     * gives a meaning when left out (accept_reply's requestId is the reply the turn began with,
+     * set_chat_name's name clears the name, expect_report's chatId is this conversation, set_superior's
+     * superiorChatId removes the superior, write's content writes an empty file). Every other argument in
+     * a tool's signature ({@code - name(a, b)} in {@link #TOOL_DESCRIPTIONS}) is one the tool cannot run
+     * without, and a call that lacks it is repaired rather than run ({@code BrokenToolCallRepair_261115_oo01}).
+     */
+    static final Map<String, List<String>> OPTIONAL_PARAMETERS = Map.of(
+            "create_chat", List.of("provider", "model", "superior", "role"),
+            "get_chat_log", List.of("count"),
+            "complete_messages", List.of("model", "noThink"),
+            "list_references", List.of("direction", "relation"),
+            "set_chat_timekeeper", List.of("urgentWaitMinutes", "childReplyWarnMinutes"),
+            "accept_reply", List.of("requestId"),
+            "set_chat_name", List.of("name"),
+            "expect_report", List.of("chatId"),
+            "set_superior", List.of("superiorChatId"),
+            "write", List.of("content"));
+
+    /**
+     * @return the arguments {@code tool} cannot run without: its signature's arguments less the optional
+     *         ones; empty for a tool this conversation has no description of
+     */
+    static List<String> requiredParameters(String tool) {
+        List<String> signature = signatureOf(tool);
+        List<String> optional = OPTIONAL_PARAMETERS.getOrDefault(tool, List.of());
+        return signature.stream().filter(a -> !optional.contains(a)).toList();
+    }
+
+    /** @return the argument names in {@code - tool(a, b)} of the tool's description, in order */
+    static List<String> signatureOf(String tool) {
+        String description = TOOL_DESCRIPTIONS.get(tool);
+        if (description == null) return List.of();
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("-\\s*" + java.util.regex.Pattern.quote(tool) + "\\(([^)]*)\\)").matcher(description);
+        if (!m.find() || m.group(1).isBlank()) return List.of();
+        return java.util.Arrays.stream(m.group(1).split(",")).map(String::trim).filter(a -> !a.isEmpty()).toList();
+    }
 
     private static Map<String, String> toolDescriptions() {
         Map<String, String> m = new LinkedHashMap<>();
@@ -485,6 +527,16 @@ public class ChatSession extends Interpreter {
     private int cutOffRun;
     private int cutOffChars;
     private final StringBuilder cutOffText = new StringBuilder();
+    // A reply that tried to call a tool but whose call cannot be run as written
+    // (BrokenToolCallRepair_261115_oo01). repairPending: the step that just ran was such a reply and
+    // repairBrokenCall has not dealt with it yet; repairRun: how many steps in a row were; repairText:
+    // the latest such reply, kept for the answer if the turn gives up; repairProblems and repairTool: what
+    // was wrong, and the tool whose exact form the note shows.
+    private boolean repairPending;
+    private int repairRun;
+    private String repairText;
+    private List<String> repairProblems = List.of();
+    private String repairTool;
     // Data URLs attached to this turn's prompt, sent to the provider on step 1 only
     // (stepExpectingAction) — a later step's provider call carries a tool observation, not the
     // original attachment, so re-sending them would just repeat the same image every step.
@@ -1325,6 +1377,11 @@ public class ChatSession extends Interpreter {
         this.cutOffRun = 0;
         this.cutOffChars = 0;
         this.cutOffText.setLength(0);
+        this.repairPending = false;
+        this.repairRun = 0;
+        this.repairText = null;
+        this.repairProblems = List.of();
+        this.repairTool = null;
         this.requestMessagesToRestore = null;
         this.lastWorkerReply = null;
         this.lastJudgment = null;
@@ -1673,6 +1730,22 @@ public class ChatSession extends Interpreter {
         cutOffRun = 0;
         cutOffText.setLength(0);
 
+        if (outcome.analysis().broken()) {
+            // The reply tried to call a tool, but the call cannot be run as written. Nothing in it runs;
+            // the think-repair transition decides whether the turn goes on with a note saying what was
+            // wrong. The reply is kept as the answer meanwhile, so a loop without that transition ends
+            // the turn as it did before (BrokenToolCallRepair_261115_oo01).
+            repairPending = true;
+            repairRun++;
+            repairText = outcome.text();
+            repairProblems = outcome.analysis().problems();
+            repairTool = outcome.analysis().exampleTool();
+            finalAnswer = outcome.text().trim();
+            recordRepair();
+            return new ActionResult(false, "tool call could not be read");
+        }
+        repairRun = 0;
+
         if (!outcome.calls().isEmpty()) {
             pendingCalls = outcome.calls();
             for (ToolCall tc : outcome.calls()) {
@@ -1689,8 +1762,29 @@ public class ChatSession extends Interpreter {
         return new ActionResult(false, "final");
     }
 
-    /** What one {@link #callLlmStep} call produced: the text to keep, and what it parsed from it. */
-    private record LlmStepOutcome(String text, List<ToolCall> calls, boolean cutOff) {}
+    /**
+     * What one {@link #callLlmStep} call produced: the text to keep, the calls to run (none when the reply
+     * is a broken call attempt), and what the parser found in it.
+     */
+    private record LlmStepOutcome(String text, List<ToolCall> calls, boolean cutOff,
+                                  TextToolCallParser.Analysis analysis) {}
+
+    /**
+     * Records one broken tool call to the I/O log ({@code turn{N}/step{M}/repair}) and the conversation's
+     * own log: what was wrong with it, and how many in a row this turn has had.
+     */
+    private void recordRepair() {
+        String what = String.join("; ", repairProblems);
+        logToConversationSquad("WARNING", "turn" + ioTurnNo + "/step" + stepCount
+                + "/llm: tool call could not be run as written (" + repairRun + " in a row): " + what);
+        if (ioLog == null || ioSession < 0) return;
+        try {
+            ioLog.record(ioSession, "agent", "turn" + ioTurnNo + "/step" + stepCount + "/repair",
+                    "BROKEN CALL (" + repairRun + " in a row)\nPROBLEMS:\n- " + String.join("\n- ", repairProblems));
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "I/O log repair record failed", e);
+        }
+    }
 
     /**
      * Sends one prompt to the provider and returns what came back, recorded to the I/O log as its
@@ -1808,11 +1902,16 @@ public class ChatSession extends Interpreter {
         // A cut-off reply runs no tool: its last call, if it holds one, never closed, and the text
         // before it is no answer either. The step's text is kept, and shown as the live trace rather
         // than as the answer.
-        List<ToolCall> calls = cutOff[0] ? List.of() : TextToolCallParser.parse(text);
-        answerStream.finish(cutOff[0] || !calls.isEmpty());
+        TextToolCallParser.Analysis analysis = cutOff[0]
+                ? new TextToolCallParser.Analysis(List.of(), List.of(), "read")
+                : TextToolCallParser.analyze(text, ChatSession::requiredParameters);
+        // A broken call attempt runs none of its calls: one call written wrong among several means the
+        // model's plan is not what it meant to send.
+        List<ToolCall> calls = analysis.broken() ? List.of() : analysis.calls();
+        answerStream.finish(cutOff[0] || !calls.isEmpty() || analysis.broken());
         recordStepIo(promptToSend, sentBody.get(), text, thinkingBuf.toString(), calls);
         turnTranscript.append("You wrote:\n").append(text).append("\n\n");
-        return new LlmStepOutcome(text, calls, cutOff[0]);
+        return new LlmStepOutcome(text, calls, cutOff[0], analysis);
     }
 
     /**
@@ -2030,8 +2129,10 @@ public class ChatSession extends Interpreter {
         boolean reached = stepCount >= max;
         if (reached) stepLimitHit = true;
         if (reached && finalAnswer == null) {
-            // A turn that ran out of steps right after a cut-off still keeps what that reply wrote.
-            String kept = cutOffText.toString().strip();
+            // A turn that ran out of steps right after a cut-off, or a broken tool call, still keeps what
+            // that reply wrote.
+            String kept = cutOffText.length() > 0 ? cutOffText.toString().strip()
+                    : (repairText == null ? "" : repairText.strip());
             finalAnswer = (kept.isEmpty() ? "" : kept + "\n\n") + "(step limit of " + max + " reached)";
         }
         return new ActionResult(reached, reached ? "step limit " + max + " reached"
@@ -2767,6 +2868,71 @@ public class ChatSession extends Interpreter {
         turnTranscript.append(note).append("\n\n");
         turnEmitter.accept(ChatEvent.thinking("\n→ " + note + "\n"));
         return new ActionResult(true, "continuing after a cut-off");
+    }
+
+    /**
+     * Agent-loop action {@code think-repair}: the step that just ran tried to call a tool, but the call
+     * cannot be run as written (a quote mark that is not ASCII, no parameter tags, a missing close tag, a
+     * required argument left out). The reply stays in the provider's history; this queues a note saying
+     * exactly what was wrong and showing the call in its exact form as the next step's prompt, and the
+     * turn goes on under the step limit. After {@code maxInARow} broken calls in a row the turn ends
+     * instead, with the reply kept as its answer and a line saying why
+     * ({@code BrokenToolCallRepair_261115_oo01}). Fails when the last step was not a broken call.
+     *
+     * @param maxInARow how many consecutive broken calls the turn repairs; blank or unparsable falls back
+     *                  to {@link #DEFAULT_MAX_REPAIRS_IN_A_ROW}
+     * @return {@code success=true} when the note was queued as the next step's prompt
+     */
+    public ActionResult repairBrokenCall(String maxInARow) {
+        if (!repairPending) return new ActionResult(false, "no broken tool call");
+        repairPending = false;
+        if (cancelled || pauseRequested) return new ActionResult(false, "paused or cancelled");
+        int max = parsePositiveOr(maxInARow, DEFAULT_MAX_REPAIRS_IN_A_ROW);
+        if (repairRun > max) {
+            String kept = repairText == null ? "" : repairText.strip();
+            finalAnswer = (kept.isEmpty() ? "" : kept + "\n\n")
+                    + "(The turn ended: a tool call could not be run as written " + repairRun
+                    + " times in a row. The last reply is kept above.)";
+            logToConversationSquad("WARNING", "turn" + ioTurnNo + ": ended after " + repairRun
+                    + " broken tool calls in a row");
+            return new ActionResult(false, "too many broken tool calls in a row");
+        }
+        String note = brokenCallNote(repairProblems, repairTool);
+        finalAnswer = null;
+        pendingPrompt = note;
+        turnTranscript.append(note).append("\n\n");
+        turnEmitter.accept(ChatEvent.thinking("\n→ " + note + "\n"));
+        return new ActionResult(true, "repairing a broken tool call");
+    }
+
+    /**
+     * The note sent after a broken tool call: what was wrong with it, and the call written out in the
+     * exact form, with each argument the tool needs.
+     */
+    static String brokenCallNote(List<String> problems, String tool) {
+        StringBuilder note = new StringBuilder("Your last reply tried to call a tool, but the call could not be run "
+                + "as written, so no tool ran:\n");
+        for (String p : problems) note.append("- ").append(p).append("\n");
+        note.append("Write the call again, exactly in this form: ASCII double quotes, each argument in its own "
+                + "parameter tag, and the call closed with </invoke>.\n");
+        note.append(exampleCall(tool));
+        return note.toString();
+    }
+
+    /** One call to {@code tool} in the exact form, with a placeholder for each argument it needs. */
+    static String exampleCall(String tool) {
+        String name = (tool == null || tool.isBlank()) ? "read" : tool;
+        StringBuilder call = new StringBuilder("<invoke name=\"").append(name).append("\">\n");
+        List<String> args = requiredParameters(name);
+        if ("read".equals(name)) {
+            call.append("<parameter name=\"path\">first/file.md\nsecond/file.md</parameter>\n");
+        } else if (args.isEmpty() && !TOOL_DESCRIPTIONS.containsKey(name)) {
+            call.append("<parameter name=\"NAME\">VALUE</parameter>\n");
+        } else {
+            for (String a : args) call.append("<parameter name=\"").append(a).append("\">...</parameter>\n");
+        }
+        call.append("<reason>one concise sentence on why you need this now</reason>\n</invoke>");
+        return call.toString();
     }
 
     /**

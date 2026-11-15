@@ -73,6 +73,24 @@ steps:
         execution: direct
 
   - states: ["think", "think"]
+    label: think-repair
+    note: |
+      The step that just ran tried to call a tool, but the call cannot be run as written: a quote mark
+      around name= that is not ASCII, no <parameter> tags, an <invoke> never closed, or an argument the
+      tool needs left out. Nothing in it ran, and the reply is already in the provider's history.
+      repairBrokenCall queues a note saying exactly what was wrong and showing the call in its exact
+      form, as the next step's prompt, and the turn goes on under the same step limit. After maxInARow
+      broken calls in a row it fails, and the scan goes on to think-final, which ends the turn with the
+      reply kept as the answer and a line saying why. No LLM call here
+      (BrokenToolCallRepair_261115_oo01).
+    actions:
+      - actor: this
+        method: repairBrokenCall
+        arguments:
+          maxInARow: 3
+        execution: direct
+
+  - states: ["think", "think"]
     label: think-continue
     note: |
       No tool was called on the step that just ran, but the prompt-construction sub-workflow

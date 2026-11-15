@@ -348,6 +348,20 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     }
 
     /**
+     * The {@code think-repair} transition: when the step that just ran tried to call a tool but the call
+     * cannot be run as written, queues a note saying what was wrong and showing the exact form, so the turn
+     * continues; fails otherwise, or once too many broken calls came in a row
+     * ({@code BrokenToolCallRepair_261115_oo01}).
+     *
+     * @param args how many consecutive broken calls the turn repairs
+     * @return success when the note was queued
+     */
+    @Action(value = "repairBrokenCall", argsType = CutOffArgs.class)
+    public ActionResult repairBrokenCallAction(CutOffArgs args) {
+        return chatSession().repairBrokenCall(String.valueOf(args.maxInARow()));
+    }
+
+    /**
      * @param arg unused
      * @return always successful
      */
