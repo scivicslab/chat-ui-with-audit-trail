@@ -14,6 +14,7 @@ import com.scivicslab.pojoactor.distributed.DistributedIIActorSystem;
 import com.scivicslab.pojoactor.distributed.FileMessageIdStore;
 import com.scivicslab.pojoactor.distributed.NodeInfo;
 import com.scivicslab.pojoactor.distributed.Receipt;
+import com.scivicslab.pojoactor.distributed.RemoteActorRef;
 import com.scivicslab.pojoactor.distributed.discovery.StaticNodeDiscovery;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 
@@ -24,8 +25,10 @@ import com.scivicslab.turingworkflow.workflow.IIActorSystem;
  * hands each message to this instance's conversations. The conversations themselves stay in this instance's own
  * actor system.
  *
- * <p>Started only when {@code chat-ui.peers} names at least one node ({@code name=host:port}); otherwise there is no
- * remote path at all. A message the same node sent before, under the same message id, is run once.</p>
+ * <p>Started only when there is a source of peers: {@code chat-ui.peers} naming at least one node
+ * ({@code name=host:port}), or the AI-workspace at {@code chat-ui.workspace-url}; otherwise there is no remote path at
+ * all. Only registered nodes are sent to; a node the workspace no longer lists is unregistered at the next refresh.
+ * A message the same node sent before, under the same message id, is run once.</p>
  */
 public final class RemoteNodes implements AutoCloseable {
 
@@ -54,6 +57,9 @@ public final class RemoteNodes implements AutoCloseable {
 
     /** How long reading another instance's turn state may take. */
     public static final Duration STATE_TIMEOUT = Duration.ofSeconds(5);
+
+    /** The start of the answer to a send to a node that is not registered. */
+    public static final String NODE_NOT_KNOWN = "node not known";
 
     private static final Map<IIActorSystem, RemoteNodes> BY_SYSTEM = new ConcurrentHashMap<>();
 
@@ -140,12 +146,19 @@ public final class RemoteNodes implements AutoCloseable {
     }
 
     /**
-     * Reads the workspace's list again and makes every node in it reachable; nothing when the peers were set by hand.
-     * A node that left the list stays reachable by name until this instance restarts; a send to it fails.
+     * Reads the workspace's list again: every node in it is registered, and every registered node no longer in it is
+     * unregistered, so a send to it is refused at once with {@link #NODE_NOT_KNOWN}. A node that comes back is
+     * registered again by the next refresh. Nothing when the peers were set by hand, or when the workspace cannot be
+     * reached (the last list stays).
      */
     public synchronized void refreshPeers() {
         if (workspace == null || !workspace.refresh()) return;
-        for (NodeInfo peer : workspace.peers()) {
+        List<NodeInfo> peers = workspace.peers();
+        Set<String> listed = peers.stream().map(NodeInfo::getNodeId).collect(java.util.stream.Collectors.toSet());
+        for (String gone : others()) {
+            if (!listed.contains(gone)) node.unregisterRemoteNode(gone);
+        }
+        for (NodeInfo peer : peers) {
             node.registerRemoteNode(peer.getNodeId(), peer.getHost(), peer.getPort());
         }
     }
@@ -182,6 +195,11 @@ public final class RemoteNodes implements AutoCloseable {
         return node.getNodes().stream().anyMatch(n -> n.getNodeId().equals(name) && !n.getNodeId().equals(myName()));
     }
 
+    /** @return the answer to a send to {@code nodeName}, which is not registered */
+    public String notKnown(String nodeName) {
+        return NODE_NOT_KNOWN + ": " + nodeName + "; the nodes this instance knows are " + others();
+    }
+
     /** @return the names of the other nodes */
     public List<String> others() {
         return node.getNodes().stream().map(NodeInfo::getNodeId).filter(n -> !n.equals(myName())).toList();
@@ -191,15 +209,38 @@ public final class RemoteNodes implements AutoCloseable {
      * Sends one message to another instance's {@link #GATEWAY}, trying again under the same message id until it is
      * received, at most {@link #SEND_ATTEMPTS} times.
      *
-     * @return the receipt of the last try
+     * @return the receipt of the last try, or a refusal saying {@link #NODE_NOT_KNOWN} when the node is not
+     *         registered, without any try
      */
     public Receipt send(String nodeName, String action, String json) {
-        return node.getRemoteActor(nodeName, GATEWAY).sendWithRetry(action, json, SEND_ATTEMPTS, SEND_DELAY);
+        RemoteActorRef gateway = gatewayOf(nodeName);
+        if (gateway == null) return Receipt.refused(null, notKnown(nodeName));
+        return gateway.sendWithRetry(action, json, SEND_ATTEMPTS, SEND_DELAY);
     }
 
-    /** Calls another instance's {@link #GATEWAY} and waits for the result: only for short reads. */
+    /**
+     * Calls another instance's {@link #GATEWAY} and waits for the result: only for short reads. A node that is not
+     * registered is answered at once with a failure saying {@link #NODE_NOT_KNOWN}.
+     */
     public ActionResult call(String nodeName, String action, String json) {
-        return node.getRemoteActor(nodeName, GATEWAY).callByActionName(action, json, STATE_TIMEOUT);
+        RemoteActorRef gateway = gatewayOf(nodeName);
+        if (gateway == null) return new ActionResult(false, notKnown(nodeName));
+        return gateway.callByActionName(action, json, STATE_TIMEOUT);
+    }
+
+    /**
+     * The one place a reference to another instance is made, and only to a registered node. The lookup and the
+     * reference are one step, so a refresh that unregisters the node just before gives "not known", not an exception.
+     *
+     * @return the other instance's {@link #GATEWAY}, or {@code null} when {@code nodeName} is not registered
+     */
+    private RemoteActorRef gatewayOf(String nodeName) {
+        if (nodeName == null || nodeName.equals(myName())) return null;
+        try {
+            return node.getRemoteActor(nodeName, GATEWAY);
+        } catch (IllegalArgumentException notRegistered) {
+            return null;
+        }
     }
 
     /**

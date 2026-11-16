@@ -516,7 +516,7 @@ public final class AskChatTool {
         }
         String nodeName = node.strip();
         if (!nodes.knows(nodeName)) {
-            return "error: unknown node " + nodeName + "; the nodes this instance knows are " + nodes.others();
+            return "error: " + nodes.notKnown(nodeName);
         }
         String myName = ChatUiActorSystem.chatActorName(myProjectId, myChatId);
         IIActorRef<?> mine = system.getIIActor(myName + ".chat");
@@ -551,7 +551,7 @@ public final class AskChatTool {
         }
         String nodeName = node.strip();
         if (!nodes.knows(nodeName)) {
-            return "error: unknown node " + nodeName + "; the nodes this instance knows are " + nodes.others();
+            return "error: " + nodes.notKnown(nodeName);
         }
         Receipt receipt = nodes.send(nodeName, "registerPromise", new JSONObject().put("target", targetName)
                 .put("requestId", requestId).put("asker", myName).put("senderNode", nodes.myName())

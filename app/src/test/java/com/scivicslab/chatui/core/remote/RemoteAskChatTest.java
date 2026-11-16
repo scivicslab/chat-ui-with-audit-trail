@@ -508,6 +508,51 @@ class RemoteAskChatTest {
     }
 
     @Test
+    void aNodeThatLeavesTheWorkspaceListIsUnregistered_sendsToItAnswerNodeNotKnown_andItIsReachedAgainWhenItReturns()
+            throws Exception {
+        try (StubWorkspace ws = new StubWorkspace()) {
+            IIActorSystem a = new IIActorSystem("instance-a-drop");
+            IIActorSystem b = new IIActorSystem("instance-b-drop");
+            Scripted asker = new Scripted(false,
+                    invoke("ask_chat", "chatId", "01", "node", "chat-ui-b", "prompt", "first job"), "Noted.",
+                    invoke("ask_chat", "chatId", "01", "node", "chat-ui-b", "prompt", "second job"), "Handed it out.",
+                    invoke("accept_reply"), "Done.");
+            Scripted worker = new Scripted(false, "the second job is done");
+            Squad one = squad(a, asker);
+            squad(b, worker);
+            portA = freePort();
+            portB = freePort();
+            ws.lists("chat-ui-a", portA, "chat-ui-b", portB);
+            remoteA = RemoteNodes.start(a, "", ws.url(), "chat-ui-a", portA, dir.resolve("a-ids.txt"));
+            remoteB = RemoteNodes.start(b, "", ws.url(), "chat-ui-b", portB, dir.resolve("b-ids.txt"));
+            assertEquals(List.of("chat-ui-b"), remoteA.others());
+
+            // b drops off the workspace's list; a reads the list again.
+            ws.lists("chat-ui-a", portA);
+            remoteA.refreshPeers();
+            assertEquals(List.of(), remoteA.others(), "b is unregistered after the refresh");
+            Receipt direct = remoteA.send("chat-ui-b", "readTurnState", new JSONObject().put("target", "x").toString());
+            assertFalse(direct.accepted(), "a send to b is refused at once");
+            assertTrue(direct.detail().contains("node not known"), direct.detail());
+
+            personTypes(one, "have the other instance do the first job");
+            waitUntil(() -> asker.prompts.size() >= 2, "the tool's answer to the first ask_chat");
+            assertTrue(asker.prompts.get(1).contains("node not known: chat-ui-b"),
+                    "ask_chat to b answers node not known: " + asker.prompts.get(1));
+            assertFalse(worker.prompts.stream().anyMatch(p -> p.contains("first job")), "nothing reached b");
+
+            // b is listed again; the next refresh registers it again.
+            ws.lists("chat-ui-a", portA, "chat-ui-b", portB);
+            remoteA.refreshPeers();
+            assertEquals(List.of("chat-ui-b"), remoteA.others(), "b is registered again");
+
+            personTypes(one, "have the other instance do the second job");
+            waitUntil(() -> asker.prompts.stream().anyMatch(p -> p.contains("[reply to request project1/chat-01:")
+                    && p.contains("the second job is done")), "the reply from b after it came back");
+        }
+    }
+
+    @Test
     void peersSetByHandComeFirst_theWorkspaceIsNotAsked() throws Exception {
         try (StubWorkspace ws = new StubWorkspace()) {
             IIActorSystem a = new IIActorSystem("instance-a-byhand");
