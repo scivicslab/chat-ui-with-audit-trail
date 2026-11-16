@@ -28,6 +28,7 @@ steps:
   - states: ["think", "end"]
     label: step-limit
     note: |
+      A turn that ends here arms the reply-wait watches again too (rearmReplyWatches), as think-final does.
       How many LLM calls one turn may make is this workflow's to decide, not Java's
       (TurnResourceLimits_260830_oo01) — so it is a transition here rather than a hidden check
       inside stepExpectingAction. Placed first among "think"'s transitions so it is evaluated
@@ -40,6 +41,9 @@ steps:
         method: stepLimitReached
         arguments:
           maxSteps: 50
+        execution: direct
+      - actor: this
+        method: rearmReplyWatches
         execution: direct
       - actor: this
         method: finish
@@ -119,6 +123,9 @@ steps:
   - states: ["think", "end"]
     label: think-final
     note: |
+      First, rearmReplyWatches arms again the timekeeper's reply-wait watch of each request this conversation sent
+      that is still open, so that a request that stays open is reminded once per interval until its reply arrives,
+      it is cancelled or it is closed (ReplyWatchRearmedAtTheEndOfEveryTurn_261116_oo01). It always succeeds.
       No tool was called and no more prompts are queued: the final answer is fixed. Before it is
       emitted and the turn ends, decideReminder settles whether the timekeeper must remind this
       conversation (ReminderDecidedAtTheEndOfTheTurn_261114_oo01): when requests sent for a request
@@ -129,6 +136,9 @@ steps:
       stepExpectingAction and ends the turn. Reached only when think-action, think-continue and
       think-undecided all just failed (tried last, same state).
     actions:
+      - actor: this
+        method: rearmReplyWatches
+        execution: direct
       - actor: this
         method: decideReminder
         execution: direct

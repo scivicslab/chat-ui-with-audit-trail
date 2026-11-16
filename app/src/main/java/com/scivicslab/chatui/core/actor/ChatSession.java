@@ -2590,6 +2590,44 @@ public class ChatSession extends Interpreter {
         this.reminderDecisionEnabled = enabled;
     }
 
+    /** What the end-of-turn reply-watch step did last, one line per open request; empty before it first runs. */
+    private volatile List<String> lastReplyWatchLines = List.of();
+
+    /** @return what the end-of-turn reply-watch step did last, one line per open request */
+    public List<String> lastReplyWatchLines() {
+        return lastReplyWatchLines;
+    }
+
+    /**
+     * Agent-loop action at the end of every turn, whatever ended it: arms again the timekeeper's reply-wait watch of
+     * each request this conversation sent that is still open (no reply, not cancelled, not closed), so a request that
+     * stays open is reminded once per interval until it closes, instead of once and never again. The decision is the
+     * workflow's, not the model's ({@code ReplyWatchRearmedAtTheEndOfEveryTurn_261116_oo01}). Each request's outcome
+     * is logged.
+     *
+     * @return always {@code success=true}: a failure here must not stop the turn from ending
+     */
+    public ActionResult rearmReplyWatches() {
+        try {
+            List<OpenRequests.Outstanding> open = openRequests.outstandingChildren();
+            ActorRef<Timekeeper> keeper = system == null ? null : system.getActor(myChatName() + ".timekeeper");
+            if (keeper == null) {
+                lastReplyWatchLines = List.of();
+                if (!open.isEmpty()) logToConversationSquad("WARNING", "turn" + ioTurnNo + ": reply watch: no timekeeper");
+                return new ActionResult(true, "no timekeeper");
+            }
+            long now = System.currentTimeMillis();
+            List<String> lines = keeper.ask(k -> k.rearmReplyWatches(open, now)).get(5, TimeUnit.SECONDS);
+            lastReplyWatchLines = lines;
+            for (String line : lines) logToConversationSquad("INFO", "turn" + ioTurnNo + ": " + line);
+            return new ActionResult(true, lines.size() + " open request(s)");
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "The end-of-turn reply watch failed", e);
+            logToConversationSquad("WARNING", "turn" + ioTurnNo + ": reply watch failed: " + e.getMessage());
+            return new ActionResult(true, "reply watch failed");
+        }
+    }
+
     /** What the end-of-turn step decided last, for the record and for tests; {@code null} before the first turn ends. */
     private volatile String lastReminderDecision;
 

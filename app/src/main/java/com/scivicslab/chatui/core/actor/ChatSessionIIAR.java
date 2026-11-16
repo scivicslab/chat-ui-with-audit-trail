@@ -382,6 +382,18 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     }
 
     /**
+     * The step at the end of every turn that arms again the reply-wait watch of each request still open
+     * ({@code ReplyWatchRearmedAtTheEndOfEveryTurn_261116_oo01}).
+     *
+     * @param arg unused
+     * @return always successful, so that the turn goes on to end
+     */
+    @Action("rearmReplyWatches")
+    public ActionResult rearmReplyWatchesAction(String arg) {
+        return chatSession().rearmReplyWatches();
+    }
+
+    /**
      * The step at the end of a turn that decides whether the timekeeper must remind the conversation
      * ({@code ReminderDecidedAtTheEndOfTheTurn_261114_oo01}).
      *

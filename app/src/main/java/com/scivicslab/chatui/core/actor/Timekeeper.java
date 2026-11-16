@@ -60,6 +60,12 @@ public class Timekeeper {
     private long childReplyWarnMillis;
     private final java.util.function.Function<String, TargetState> targetStates;
     private final Set<String> warned = new HashSet<>();
+    /**
+     * When the reply-wait watch of a request was armed again, at the end of a turn after its notice
+     * ({@code ReplyWatchRearmedAtTheEndOfEveryTurn_261116_oo01}). A request not here is watched from when it was sent.
+     * One entry per request, so a request never has more than one watch pending.
+     */
+    private final java.util.Map<String, Long> rearmedAt = new java.util.HashMap<>();
     private final PromisedReports promised = new PromisedReports();
 
     /**
@@ -199,12 +205,25 @@ public class Timekeeper {
     static Watch summarize(String conversation, long urgentWaitMillis, long childReplyWarnMillis, boolean running,
                            Long runningSince, Long urgentQueuedAt, List<OpenRequests.Outstanding> out,
                            Set<String> warned, List<PromisedReports.Pending> promised, long now) {
+        return summarize(conversation, urgentWaitMillis, childReplyWarnMillis, running, runningSince, urgentQueuedAt, out,
+                warned, java.util.Map.of(), promised, now);
+    }
+
+    /**
+     * As above, with the times the watches were armed again ({@code ReplyWatchRearmedAtTheEndOfEveryTurn_261116_oo01}).
+     *
+     * @param rearmedAt when each request's watch was armed again, by request id
+     */
+    static Watch summarize(String conversation, long urgentWaitMillis, long childReplyWarnMillis, boolean running,
+                           Long runningSince, Long urgentQueuedAt, List<OpenRequests.Outstanding> out,
+                           Set<String> warned, java.util.Map<String, Long> rearmedAt,
+                           List<PromisedReports.Pending> promised, long now) {
         Long waited = urgentQueuedAt == null ? null : now - urgentQueuedAt;
         Long pauseIn = waited != null && running ? urgentWaitMillis - waited : null;
         List<Watch.Sent> sent = out.stream()
                 .sorted((a, b) -> Long.compare(a.sentAt(), b.sentAt()))
                 .map(o -> new Watch.Sent(o.requestId(), o.target(), now - o.sentAt(), warned.contains(o.requestId()),
-                        o.sentAt() + childReplyWarnMillis - now))
+                        watchedFrom(o, rearmedAt) + childReplyWarnMillis - now))
                 .toList();
         List<Watch.Promised> due = promised.stream()
                 .sorted((a, b) -> Long.compare(a.dueAt(), b.dueAt()))
@@ -230,7 +249,7 @@ public class Timekeeper {
         }
         boolean running = chat.isBusyDirect();
         return summarize(conversation, urgentWaitMillis, childReplyWarnMillis, running, chat.runningSinceDirect(),
-                urgentQueuedAt, chat.outstandingChildrenDirect(), warned, promised.snapshot(), now);
+                urgentQueuedAt, chat.outstandingChildrenDirect(), warned, rearmedAt, promised.snapshot(), now);
     }
 
     /**
@@ -251,8 +270,9 @@ public class Timekeeper {
             List<OpenRequests.Outstanding> out = chat.outstandingChildrenDirect();
             // A request that came back and was reopened is warned about again, counting from its reopening.
             warned.removeIf(id -> out.stream().noneMatch(o -> o.requestId().equals(id)));
+            rearmedAt.keySet().removeIf(id -> out.stream().noneMatch(o -> o.requestId().equals(id)));
             for (OpenRequests.Outstanding o : out) {
-                if (now - o.sentAt() > childReplyWarnMillis && warned.add(o.requestId())) {
+                if (now - watchedFrom(o, rearmedAt) > childReplyWarnMillis && warned.add(o.requestId())) {
                     TargetState state;
                     try {
                         state = targetStates.apply(o.target());
@@ -275,6 +295,40 @@ public class Timekeeper {
         } catch (Exception e) {
             LOG.log(Level.WARNING, conversation + ": timekeeper check failed", e);
         }
+    }
+
+    /**
+     * Arms again the reply-wait watch of every open request whose notice has been given, so that another notice comes
+     * one interval after now; a request whose watch is still pending keeps it, so it never has two
+     * ({@code ReplyWatchRearmedAtTheEndOfEveryTurn_261116_oo01}). Called by the step at the end of every turn of the
+     * conversation, so a request that stays open is reminded once per interval until its reply arrives, it is
+     * cancelled, or it is closed. Watches of requests no longer open are dropped.
+     *
+     * @param open the requests the conversation sent that are still open
+     * @param now  the current time, in milliseconds since the epoch
+     * @return one line per open request, saying what was done with its watch
+     */
+    public List<String> rearmReplyWatches(List<OpenRequests.Outstanding> open, long now) {
+        Set<String> ids = new HashSet<>();
+        for (OpenRequests.Outstanding o : open) ids.add(o.requestId());
+        warned.retainAll(ids);
+        rearmedAt.keySet().retainAll(ids);
+        List<String> lines = new java.util.ArrayList<>();
+        for (OpenRequests.Outstanding o : open) {
+            if (warned.remove(o.requestId())) {
+                rearmedAt.put(o.requestId(), now);
+                lines.add("reply watch re-armed: " + o.requestId());
+            } else {
+                lines.add("reply watch already pending: " + o.requestId());
+            }
+        }
+        return lines;
+    }
+
+    /** @return when a request's current watch started: when it was sent or reopened, or when it was armed again */
+    private static long watchedFrom(OpenRequests.Outstanding o, java.util.Map<String, Long> rearmedAt) {
+        Long again = rearmedAt.get(o.requestId());
+        return again == null ? o.sentAt() : Math.max(again, o.sentAt());
     }
 
     /**
