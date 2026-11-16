@@ -583,14 +583,17 @@ public final class AskChatTool {
         String senderNode = m.getString("senderNode");
         String target = m.getString("target");
         boolean urgent = m.optBoolean("urgent", false);
+        LOG.info("remote request " + requestId + " from " + sender + " on node " + senderNode + " for " + target);
         IIActorRef<?> targetActor = local.getIIActor(target + ".chat");
         ActorRef<PromptQueue> targetQueue = local.getActor(target + ".queue");
         if (!(targetActor instanceof ChatSessionIIAR targetChat) || targetQueue == null) {
+            String notFound = "conversation not found on node " + nodes.myName() + ": " + target;
+            LOG.warning("remote request " + requestId + " from node " + senderNode + " refused: " + notFound);
             sendOrLog(nodes, senderNode, "enqueueReply", new JSONObject().put("requestId", requestId).put("asker", sender)
                     .put("from", target).put("urgent", urgent).put("text", "[request " + requestId + " to " + target
-                            + " ended without a reply: there is no conversation " + target + " on node " + nodes.myName()
-                            + "]"), "no-such-conversation reply to request " + requestId);
-            return new ActionResult(false, "no conversation " + target);
+                            + " ended without a reply: " + notFound + "]"),
+                    "no-such-conversation reply to request " + requestId);
+            return new ActionResult(false, notFound);
         }
         CompletableFuture<TurnReply> done = new CompletableFuture<>();
         String localId = localIdOf(senderNode, requestId);

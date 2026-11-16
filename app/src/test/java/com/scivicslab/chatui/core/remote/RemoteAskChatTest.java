@@ -553,6 +553,48 @@ class RemoteAskChatTest {
     }
 
     @Test
+    void theChatIdWrittenAsProjectSlashChatDashNN_projectSlashNN_orNN_reachesTheSameRemoteConversation() throws Exception {
+        IIActorSystem a = new IIActorSystem("instance-a-ids");
+        IIActorSystem b = new IIActorSystem("instance-b-ids");
+        Scripted asker = new Scripted(false,
+                invoke("ask_chat", "chatId", "project1/chat-01", "node", "b", "prompt", "job one"),
+                invoke("ask_chat", "chatId", "project1/01", "node", "b", "prompt", "job two"),
+                invoke("ask_chat", "chatId", "01", "node", "b", "prompt", "job three"),
+                "Handed them out.");
+        Scripted worker = new Scripted(false, "done");
+        Squad one = squad(a, asker);
+        squad(b, worker);
+        startNodes(a, b);
+
+        personTypes(one, "hand out three jobs");
+
+        for (String job : List.of("job one", "job two", "job three")) {
+            waitUntil(() -> worker.prompts.stream().anyMatch(p -> p.contains(job)), job + " on b's project1/chat-01");
+        }
+        assertFalse(asker.prompts.stream().anyMatch(p -> p.contains("chat-chat-")), "no doubled prefix: " + asker.prompts);
+    }
+
+    @Test
+    void aRequestToAConversationTheOtherInstanceDoesNotHave_comesBackAsConversationNotFound() throws Exception {
+        IIActorSystem a = new IIActorSystem("instance-a-none");
+        IIActorSystem b = new IIActorSystem("instance-b-none");
+        Scripted asker = new Scripted(false, invoke("ask_chat", "chatId", "99", "node", "b", "prompt", "anyone there"),
+                "Handed it out.", "Noted.");
+        Squad one = squad(a, asker);
+        squad(b, new Scripted(false, "unused"));
+        startNodes(a, b);
+
+        personTypes(one, "ask a conversation that does not exist");
+
+        waitUntil(() -> asker.prompts.stream().anyMatch(p -> p.contains("[request project1/chat-01:")
+                && p.contains("ended without a reply")), "the answer from b in a's queue");
+        String reply = asker.prompts.stream().filter(p -> p.contains("[request project1/chat-01:")
+                && p.contains("ended without a reply")).findFirst().orElseThrow();
+        assertTrue(reply.contains("conversation not found on node b: project1/chat-99"), reply);
+        waitUntil(() -> one.chat().outstandingChildrenDirect().isEmpty(), "the request closed on a");
+    }
+
+    @Test
     void peersSetByHandComeFirst_theWorkspaceIsNotAsked() throws Exception {
         try (StubWorkspace ws = new StubWorkspace()) {
             IIActorSystem a = new IIActorSystem("instance-a-byhand");

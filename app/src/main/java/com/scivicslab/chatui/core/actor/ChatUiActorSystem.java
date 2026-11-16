@@ -211,7 +211,7 @@ public class ChatUiActorSystem implements ConversationControls {
      * @return e.g. {@code "project1/chat-01"}
      */
     public static String chatActorName(String projectId, String chatId) {
-        return projectId + "/chat-" + chatId;
+        return projectId + "/" + CHAT_PREFIX + chatId;
     }
 
     /**
@@ -231,6 +231,9 @@ public class ChatUiActorSystem implements ConversationControls {
 
     /** What a ChatSession's name adds to its conversation's. */
     static final String CHAT_SESSION_SUFFIX = ".chat";
+
+    /** What a conversation's name puts before its id. */
+    private static final String CHAT_PREFIX = "chat-";
 
     /** What a provider's name adds to its ChatSession's. */
     static final String PROVIDER_SUFFIX = ".provider";
@@ -926,7 +929,8 @@ public class ChatUiActorSystem implements ConversationControls {
      * into a qualified conversation name. A bare id ({@code "02"}) names a conversation in the
      * caller's own project; a qualified one ({@code "project2/02"}) names one in another project,
      * so crossing a project boundary is visible in the argument itself
-     * ({@code ProjectNamespacePrefix_260829_oo01}).
+     * ({@code ProjectNamespacePrefix_260829_oo01}). The id may also be written as the conversation's own name
+     * shows it, {@code "chat-02"} or {@code "project2/chat-02"}: the {@code chat-} is not added a second time.
      *
      * @param callerProjectId the calling conversation's project id
      * @param target          the {@code chatId} argument as written by the caller
@@ -934,9 +938,10 @@ public class ChatUiActorSystem implements ConversationControls {
      */
     public static String resolveChatName(String callerProjectId, String target) {
         int slash = target.indexOf('/');
-        return slash < 0
-                ? chatActorName(callerProjectId, target)
-                : chatActorName(target.substring(0, slash), target.substring(slash + 1));
+        String project = slash < 0 ? callerProjectId : target.substring(0, slash);
+        String id = slash < 0 ? target : target.substring(slash + 1);
+        if (id.startsWith(CHAT_PREFIX)) id = id.substring(CHAT_PREFIX.length());
+        return chatActorName(project, id);
     }
 
     /**
