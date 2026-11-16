@@ -458,8 +458,10 @@ public class ChatUiActorSystem implements ConversationControls {
     private com.scivicslab.chatui.core.remote.RemoteNodes remoteNodes;
 
     /**
-     * Starts the path to other chat-ui instances when {@code chat-ui.peers} names a node ({@code name=host:port})
-     * ({@code ConversationSquadsAcrossInstances_261115_oo01}). This instance's node is {@code chat-ui.node-name}
+     * Starts the path to other chat-ui instances when there is a source of peers
+     * ({@code ConversationSquadsAcrossInstances_261115_oo01}): the {@code name=host:port} entries of
+     * {@code chat-ui.peers} if any, or else the AI-workspace at {@code chat-ui.workspace-url}, which lists the
+     * instances it runs. With neither, the instance runs alone, as a single jar. This instance's node is {@code chat-ui.node-name}
      * (default {@code chat-ui-<HTTP port>}) and listens on 127.0.0.1 at {@code chat-ui.actor-port} (default the HTTP
      * port plus 1000). The message ids it has seen are kept next to the I/O log. A failure leaves the remote path
      * off and the rest of the instance running.
@@ -473,7 +475,8 @@ public class ChatUiActorSystem implements ConversationControls {
                     .map(Integer::parseInt)
                     .orElseGet(() -> com.scivicslab.pojoactor.distributed.DistributedIIActorSystem.publicationPortFor(httpPort));
             String dbPath = configValue("chat-ui.iolog.db-path").orElse("chat-ui-iolog");
-            remoteNodes = com.scivicslab.chatui.core.remote.RemoteNodes.start(actorSystem, peers, name, actorPort,
+            String workspaceUrl = configValue("chat-ui.workspace-url").orElse("");
+            remoteNodes = com.scivicslab.chatui.core.remote.RemoteNodes.start(actorSystem, peers, workspaceUrl, name, actorPort,
                     java.nio.file.Path.of(dbPath + "-" + httpPort + "-remote-message-ids.txt"));
         } catch (Exception e) {
             LOG.log(Level.WARNING, "The path to other chat-ui instances could not start; it stays off", e);

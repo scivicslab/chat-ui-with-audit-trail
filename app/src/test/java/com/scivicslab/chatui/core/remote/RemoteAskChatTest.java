@@ -421,4 +421,119 @@ class RemoteAskChatTest {
                 "the follow-up in a's queue");
         assertTrue(asker.prompts.stream().anyMatch(p -> p.contains("[follow-up to request project1/chat-01:t1:r1") && p.contains("42 items")));
     }
+
+    /** Plays the AI-workspace's {@code GET /api/chat-ui/peers}; the list can change while the test runs. */
+    private static final class StubWorkspace implements AutoCloseable {
+        final com.sun.net.httpserver.HttpServer server;
+        final java.util.concurrent.atomic.AtomicReference<String> list = new java.util.concurrent.atomic.AtomicReference<>("[]");
+        final java.util.concurrent.atomic.AtomicInteger asked = new java.util.concurrent.atomic.AtomicInteger();
+
+        StubWorkspace() throws Exception {
+            server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+            server.createContext("/api/chat-ui/peers", ex -> {
+                asked.incrementAndGet();
+                byte[] out = list.get().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                ex.getResponseHeaders().add("Content-Type", "application/json");
+                ex.sendResponseHeaders(200, out.length);
+                ex.getResponseBody().write(out);
+                ex.close();
+            });
+            server.start();
+        }
+
+        String url() { return "http://127.0.0.1:" + server.getAddress().getPort(); }
+
+        void lists(Object... nameAndPort) {
+            org.json.JSONArray a = new org.json.JSONArray();
+            for (int i = 0; i < nameAndPort.length; i += 2) {
+                a.put(new JSONObject().put("name", nameAndPort[i]).put("host", "127.0.0.1").put("actorPort", nameAndPort[i + 1]));
+            }
+            list.set(a.toString());
+        }
+
+        @Override public void close() { server.stop(0); }
+    }
+
+    @Test
+    void twoInstancesFindEachOtherThroughTheWorkspace_withNoPeersSetByHand() throws Exception {
+        try (StubWorkspace ws = new StubWorkspace()) {
+            IIActorSystem a = new IIActorSystem("instance-a-ws");
+            IIActorSystem b = new IIActorSystem("instance-b-ws");
+            Scripted asker = new Scripted(false, invoke("ask_chat", "chatId", "01", "node", "chat-ui-b", "prompt", "do the job"),
+                    "Handed it out.", invoke("accept_reply"), "Done.");
+            Scripted worker = new Scripted(false, "the job is done");
+            Squad one = squad(a, asker);
+            squad(b, worker);
+            portA = freePort();
+            portB = freePort();
+            ws.lists("chat-ui-a", portA, "chat-ui-b", portB);
+            remoteA = RemoteNodes.start(a, "", ws.url(), "chat-ui-a", portA, dir.resolve("a-ids.txt"));
+            remoteB = RemoteNodes.start(b, "", ws.url(), "chat-ui-b", portB, dir.resolve("b-ids.txt"));
+            assertTrue(remoteA != null && remoteB != null, "the receiving side opens with the workspace as the only source");
+            assertEquals(List.of("chat-ui-b"), remoteA.others(), "a's own entry is left out");
+
+            personTypes(one, "have the other instance do the job");
+            waitUntil(() -> asker.prompts.stream().anyMatch(p -> p.contains("[reply to request project1/chat-01:")
+                    && p.contains("the job is done")), "the reply in a's queue");
+        }
+    }
+
+    @Test
+    void anInstanceThatJoinsLaterIsReachedAfterTheListIsReadAgainForAnUnknownNode() throws Exception {
+        try (StubWorkspace ws = new StubWorkspace()) {
+            IIActorSystem a = new IIActorSystem("instance-a-late");
+            IIActorSystem c = new IIActorSystem("instance-c-late");
+            Scripted asker = new Scripted(false, invoke("ask_chat", "chatId", "01", "node", "chat-ui-c", "prompt", "do the job"),
+                    "Handed it out.", invoke("accept_reply"), "Done.");
+            Scripted worker = new Scripted(false, "the late one did it");
+            Squad one = squad(a, asker);
+            squad(c, worker);
+            portA = freePort();
+            int portC = freePort();
+            ws.lists("chat-ui-a", portA);
+            remoteA = RemoteNodes.start(a, "", ws.url(), "chat-ui-a", portA, dir.resolve("a-ids.txt"));
+            assertEquals(List.of(), remoteA.others(), "a starts alone");
+
+            // c starts later; the workspace lists it, but a has not read the list since.
+            ws.lists("chat-ui-a", portA, "chat-ui-c", portC);
+            RemoteNodes remoteC = RemoteNodes.start(c, "", ws.url(), "chat-ui-c", portC, dir.resolve("c-ids.txt"));
+            try {
+                personTypes(one, "have the late instance do the job");
+                waitUntil(() -> asker.prompts.stream().anyMatch(p -> p.contains("[reply to request project1/chat-01:")
+                        && p.contains("the late one did it")), "the reply from the instance that joined later");
+            } finally {
+                remoteC.close();
+            }
+        }
+    }
+
+    @Test
+    void peersSetByHandComeFirst_theWorkspaceIsNotAsked() throws Exception {
+        try (StubWorkspace ws = new StubWorkspace()) {
+            IIActorSystem a = new IIActorSystem("instance-a-byhand");
+            IIActorSystem b = new IIActorSystem("instance-b-byhand");
+            Scripted asker = new Scripted(false, invoke("ask_chat", "chatId", "01", "node", "b", "prompt", "do the job"),
+                    "Handed it out.", invoke("accept_reply"), "Done.");
+            Scripted worker = new Scripted(false, "the job is done");
+            Squad one = squad(a, asker);
+            squad(b, worker);
+            portA = freePort();
+            portB = freePort();
+            // The workspace would send b's name to a port nobody listens on.
+            ws.lists("a", portA, "b", freePort());
+            remoteA = RemoteNodes.start(a, "b=127.0.0.1:" + portB, ws.url(), "a", portA, dir.resolve("a-ids.txt"));
+            remoteB = RemoteNodes.start(b, "a=127.0.0.1:" + portA, ws.url(), "b", portB, dir.resolve("b-ids.txt"));
+
+            personTypes(one, "have the other instance do the job");
+            waitUntil(() -> asker.prompts.stream().anyMatch(p -> p.contains("[reply to request project1/chat-01:")
+                    && p.contains("the job is done")), "the reply through the list set by hand");
+            assertEquals(0, ws.asked.get(), "the workspace was never asked");
+        }
+    }
+
+    @Test
+    void withNoSourceOfPeersThereIsNoRemotePath() throws Exception {
+        assertEquals(null, RemoteNodes.start(new IIActorSystem("instance-alone"), "28010,http://localhost:28014", "",
+                "alone", freePort(), dir.resolve("alone-ids.txt")));
+    }
 }

@@ -57,14 +57,22 @@ public final class RemoteNodes implements AutoCloseable {
 
     private static final Map<IIActorSystem, RemoteNodes> BY_SYSTEM = new ConcurrentHashMap<>();
 
+    /** How often the peer list is read again from the workspace. */
+    public static final long WORKSPACE_REFRESH_SECONDS = 60;
+
     private final IIActorSystem local;
     private final DistributedIIActorSystem node;
     private final FileMessageIdStore messageIds;
+    /** The workspace's peer list, or {@code null} when the peers were set by hand in {@code chat-ui.peers}. */
+    private final WorkspaceNodeDiscovery workspace;
+    private com.scivicslab.pojoactor.core.scheduler.Scheduler refresher;
 
-    private RemoteNodes(IIActorSystem local, DistributedIIActorSystem node, FileMessageIdStore messageIds) {
+    private RemoteNodes(IIActorSystem local, DistributedIIActorSystem node, FileMessageIdStore messageIds,
+                        WorkspaceNodeDiscovery workspace) {
         this.local = local;
         this.node = node;
         this.messageIds = messageIds;
+        this.workspace = workspace;
     }
 
     /**
@@ -79,21 +87,67 @@ public final class RemoteNodes implements AutoCloseable {
      */
     public static RemoteNodes start(IIActorSystem local, String peers, String myName, int actorPort, Path messageIdFile)
             throws java.io.IOException {
-        List<NodeInfo> nodes = StaticNodeDiscovery.parsePeers(nodeEntries(peers));
-        if (nodes.isEmpty()) return null;
+        return start(local, peers, null, myName, actorPort, messageIdFile);
+    }
+
+    /**
+     * Starts the remote path from where the peer list comes: the {@code name=host:port} entries of
+     * {@code chat-ui.peers} when there are any (a list set by hand comes first, and the workspace is not asked), or
+     * else the AI-workspace at {@code workspaceUrl}, read now, every {@link #WORKSPACE_REFRESH_SECONDS} seconds, and
+     * whenever a node not yet in the list is named. With neither, there is no remote path.
+     *
+     * @param workspaceUrl the value of {@code chat-ui.workspace-url}, or {@code null} or blank when there is none
+     * @return the started remote path, or {@code null} when there is no source of peers
+     */
+    public static RemoteNodes start(IIActorSystem local, String peers, String workspaceUrl, String myName, int actorPort,
+                                    Path messageIdFile) throws java.io.IOException {
+        NodeInfo me = new NodeInfo(myName, "127.0.0.1", actorPort);
+        List<NodeInfo> byHand = StaticNodeDiscovery.parsePeers(nodeEntries(peers));
+        com.scivicslab.pojoactor.distributed.discovery.NodeDiscovery discovery;
+        WorkspaceNodeDiscovery workspace = null;
+        if (!byHand.isEmpty()) {
+            discovery = new StaticNodeDiscovery(me, byHand);
+        } else if (workspaceUrl != null && !workspaceUrl.isBlank()) {
+            workspace = new WorkspaceNodeDiscovery(me, workspaceUrl.strip());
+            workspace.refresh();
+            discovery = workspace;
+        } else {
+            return null;
+        }
         FileMessageIdStore ids = new FileMessageIdStore(messageIdFile, DEDUP_MAX_ENTRIES, DEDUP_MAX_AGE);
         DistributedIIActorSystem node = DistributedIIActorSystem.builder()
-                .discovery(new StaticNodeDiscovery(new NodeInfo(myName, "127.0.0.1", actorPort), nodes))
+                .discovery(discovery)
                 .allowedActions(ALLOWED)
                 .deduplicateWith(ids)
                 .callTimeout(STATE_TIMEOUT)
                 .build();
-        RemoteNodes remote = new RemoteNodes(local, node, ids);
+        RemoteNodes remote = new RemoteNodes(local, node, ids, workspace);
         node.addIIActor(new RemoteGatewayIIAR(GATEWAY, new RemoteGateway(local, remote), node));
         node.startHttpServer("127.0.0.1", actorPort);
+        if (workspace != null) remote.startRefreshing();
         BY_SYSTEM.put(local, remote);
-        LOG.info("Remote path on 127.0.0.1:" + actorPort + " as node " + myName + "; peers " + nodes);
+        LOG.info("Remote path on 127.0.0.1:" + actorPort + " as node " + myName + "; peers "
+                + (workspace == null ? "set by hand: " + byHand : "from the workspace " + workspaceUrl + ": " + workspace.peers()));
         return remote;
+    }
+
+    /** Reads the workspace's list every {@link #WORKSPACE_REFRESH_SECONDS} seconds, as a scheduled actor message. */
+    private void startRefreshing() {
+        com.scivicslab.pojoactor.core.ActorRef<RemoteNodes> self = node.actorOf("chat-ui-peer-list", this);
+        refresher = new com.scivicslab.pojoactor.core.scheduler.Scheduler(1);
+        refresher.scheduleWithFixedDelay("chat-ui-peer-list", self, RemoteNodes::refreshPeers,
+                WORKSPACE_REFRESH_SECONDS, WORKSPACE_REFRESH_SECONDS, java.util.concurrent.TimeUnit.SECONDS);
+    }
+
+    /**
+     * Reads the workspace's list again and makes every node in it reachable; nothing when the peers were set by hand.
+     * A node that left the list stays reachable by name until this instance restarts; a send to it fails.
+     */
+    public synchronized void refreshPeers() {
+        if (workspace == null || !workspace.refresh()) return;
+        for (NodeInfo peer : workspace.peers()) {
+            node.registerRemoteNode(peer.getNodeId(), peer.getHost(), peer.getPort());
+        }
     }
 
     /** @return the {@code name=host:port} entries of {@code chat-ui.peers}; the others are for {@code OtherInstances} */
@@ -113,8 +167,18 @@ public final class RemoteNodes implements AutoCloseable {
         return node.getMyNode().getNodeId();
     }
 
-    /** @return whether {@code name} is a node this instance knows */
+    /**
+     * @return whether {@code name} is a node this instance knows. A name not in the workspace's list makes this
+     *         instance read the list again first, so an instance started later is reached without a restart.
+     */
     public boolean knows(String name) {
+        if (listed(name)) return true;
+        if (workspace == null) return false;
+        refreshPeers();
+        return listed(name);
+    }
+
+    private boolean listed(String name) {
         return node.getNodes().stream().anyMatch(n -> n.getNodeId().equals(name) && !n.getNodeId().equals(myName()));
     }
 
@@ -169,6 +233,7 @@ public final class RemoteNodes implements AutoCloseable {
 
     @Override
     public void close() {
+        if (refresher != null) refresher.close();
         BY_SYSTEM.remove(local, this);
         node.close();
         messageIds.close();
