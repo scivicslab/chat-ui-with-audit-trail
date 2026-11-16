@@ -1530,7 +1530,7 @@
 
     // ── Display toggle: every turn, or only the turns the person started ───────────────────────
     // ChatDisplayToggle_261110_oo01. A ConversationSquad actor's pane also draws the turns other actors start
-    // (an ask_chat request, a reply, a reminder, a resumed turn). "Person only" hides those turns' bubbles with
+    // (an ask_chat request, a reply, a reminder, a resumed turn). "Show person's turns only" hides those turns' bubbles with
     // one class on the chat area; nothing is deleted and the Queue panel, Save Chat and the server are not
     // touched. The choice is kept per browser, per project and chat.
     var VIEW_MODE_KEY_PREFIX = "chat-ui-view-mode:";
@@ -1549,7 +1549,7 @@
         if (chatArea) chatArea.classList.toggle("person-only", personOnly);
         var btn = document.getElementById("view-mode-btn");
         if (!btn) return;
-        btn.textContent = personOnly ? "Person only" : "All";
+        btn.textContent = personOnly ? "Show person's turns only" : "Show all turns";
         btn.setAttribute("aria-pressed", personOnly ? "true" : "false");
         btn.title = personOnly
             ? "Showing only the turns you started. Click to show every turn of this ConversationSquad actor."
