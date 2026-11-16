@@ -256,6 +256,7 @@ public class ChatUiActorSystem implements ConversationControls {
     @PostConstruct
     void init() {
         actorSystem = new IIActorSystem("chat-ui");
+        startRemoteNodes();
 
         // System-wide log multiplexer (150_TabScopedLogging_260826_oo01): the top of the chat-log
         // hierarchy, and MultiplexerLogHandler's hardcoded forwarding target for framework/non-actor
@@ -451,6 +452,39 @@ public class ChatUiActorSystem implements ConversationControls {
         }));
         timekeeperTickerRef.tell(t -> t.bind(timekeeperTickerRef));
         timekeeperTickerRef.tell(TimekeeperTicker::start);
+    }
+
+    /** The other chat-ui instances this one exchanges requests with, or {@code null} when none is configured. */
+    private com.scivicslab.chatui.core.remote.RemoteNodes remoteNodes;
+
+    /**
+     * Starts the path to other chat-ui instances when {@code chat-ui.peers} names a node ({@code name=host:port})
+     * ({@code ConversationSquadsAcrossInstances_261115_oo01}). This instance's node is {@code chat-ui.node-name}
+     * (default {@code chat-ui-<HTTP port>}) and listens on 127.0.0.1 at {@code chat-ui.actor-port} (default the HTTP
+     * port plus 1000). The message ids it has seen are kept next to the I/O log. A failure leaves the remote path
+     * off and the rest of the instance running.
+     */
+    private void startRemoteNodes() {
+        try {
+            String peers = configValue("chat-ui.peers").orElse("");
+            String name = configValue("chat-ui.node-name").map(String::strip).filter(v -> !v.isEmpty())
+                    .orElse("chat-ui-" + httpPort);
+            int actorPort = configValue("chat-ui.actor-port").map(String::strip).filter(v -> !v.isEmpty())
+                    .map(Integer::parseInt)
+                    .orElseGet(() -> com.scivicslab.pojoactor.distributed.DistributedIIActorSystem.publicationPortFor(httpPort));
+            String dbPath = configValue("chat-ui.iolog.db-path").orElse("chat-ui-iolog");
+            remoteNodes = com.scivicslab.chatui.core.remote.RemoteNodes.start(actorSystem, peers, name, actorPort,
+                    java.nio.file.Path.of(dbPath + "-" + httpPort + "-remote-message-ids.txt"));
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "The path to other chat-ui instances could not start; it stays off", e);
+            remoteNodes = null;
+        }
+    }
+
+    /** Closes the path to other chat-ui instances before the actor system goes away. */
+    @PreDestroy
+    void stopRemoteNodes() {
+        if (remoteNodes != null) remoteNodes.close();
     }
 
     /** Stops the timekeepers' schedule before the actor system goes away. */
@@ -1176,7 +1210,13 @@ public class ChatUiActorSystem implements ConversationControls {
                                 Timekeeper.DEFAULT_CHILD_REPLY_WARN_MINUTES)),
                         target -> {
                             // What the notice says about the conversation the request went to, read without
-                            // waiting for its turn.
+                            // waiting for its turn. A conversation of another instance is asked over the remote path.
+                            int mark = target.indexOf(ChatSession.REMOTE_TARGET_MARK);
+                            if (mark > 0) {
+                                return com.scivicslab.chatui.core.remote.RemoteNodes.turnStateOf(actorSystem,
+                                        target.substring(mark + ChatSession.REMOTE_TARGET_MARK.length()),
+                                        target.substring(0, mark));
+                            }
                             IIActorRef<?> t = actorSystem.getIIActor(target + ".chat");
                             if (!(t instanceof ChatSessionIIAR c)) return Timekeeper.TargetState.UNKNOWN;
                             Long since = c.runningSinceDirect();

@@ -68,7 +68,8 @@ public final class OtherInstances {
         if (configured == null) return urls;
         for (String item : configured.split(",")) {
             String peer = item.strip();
-            if (peer.isEmpty()) continue;
+            // name=host:port is a node of the remote path (RemoteNodes), not an instance to look names up in.
+            if (peer.isEmpty() || peer.contains("=")) continue;
             String url = peer.matches("\\d+") ? "http://localhost:" + peer : peer.replaceAll("/+$", "");
             if (ownPort != null && url.equals("http://localhost:" + ownPort)) continue;
             if (!urls.contains(url)) urls.add(url);

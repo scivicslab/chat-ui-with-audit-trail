@@ -232,17 +232,20 @@ public class ChatSession extends Interpreter {
      * a tool's signature ({@code - name(a, b)} in {@link #TOOL_DESCRIPTIONS}) is one the tool cannot run
      * without, and a call that lacks it is repaired rather than run ({@code BrokenToolCallRepair_261115_oo01}).
      */
-    static final Map<String, List<String>> OPTIONAL_PARAMETERS = Map.of(
-            "create_chat", List.of("provider", "model", "superior", "role"),
-            "get_chat_log", List.of("count"),
-            "complete_messages", List.of("model", "noThink"),
-            "list_references", List.of("direction", "relation"),
-            "set_chat_timekeeper", List.of("urgentWaitMinutes", "childReplyWarnMinutes"),
-            "accept_reply", List.of("requestId"),
-            "set_chat_name", List.of("name"),
-            "expect_report", List.of("chatId"),
-            "set_superior", List.of("superiorChatId"),
-            "write", List.of("content"));
+    static final Map<String, List<String>> OPTIONAL_PARAMETERS = Map.ofEntries(
+            Map.entry("ask_chat", List.of("node")),
+            Map.entry("ask_chat_urgent", List.of("node")),
+            Map.entry("cancel_request", List.of("node")),
+            Map.entry("create_chat", List.of("provider", "model", "superior", "role")),
+            Map.entry("get_chat_log", List.of("count")),
+            Map.entry("complete_messages", List.of("model", "noThink")),
+            Map.entry("list_references", List.of("direction", "relation")),
+            Map.entry("set_chat_timekeeper", List.of("urgentWaitMinutes", "childReplyWarnMinutes")),
+            Map.entry("accept_reply", List.of("requestId")),
+            Map.entry("set_chat_name", List.of("name")),
+            Map.entry("expect_report", List.of("chatId")),
+            Map.entry("set_superior", List.of("superiorChatId")),
+            Map.entry("write", List.of("content")));
 
     /**
      * @return the arguments {@code tool} cannot run without: its signature's arguments less the optional
@@ -328,9 +331,11 @@ public class ChatSession extends Interpreter {
               trash is a person's job — do not try to.
             """);
         m.put("ask_chat", """
-            - ask_chat(chatId, prompt): send an instruction to another conversation (e.g. "02" for
+            - ask_chat(chatId, prompt, node): send an instruction to another conversation (e.g. "02" for
               one in your own project, or "project2/02" to reach one in another project). Requires
-              "chatId" and "prompt" <parameter> tags. It does NOT wait: the result only says the
+              "chatId" and "prompt" <parameter> tags. Give "node" only to reach a conversation of
+              another chat-ui instance: the node's name as this instance is configured with it; then
+              chatId names the conversation there. Leave "node" out for this instance. It does NOT wait: the result only says the
               instruction was sent, and under which request id, e.g. "project1/chat-01:s40:t5:r2"
               (your conversation, session, turn, and the number of this ask_chat in your turn). The
               reply reaches you only AFTER YOU END YOUR TURN: it comes as a new message starting
@@ -346,7 +351,7 @@ public class ChatSession extends Interpreter {
               checking once whether the other conversation is stuck.
             """);
         m.put("ask_chat_urgent", """
-            - ask_chat_urgent(chatId, prompt): as ask_chat, but the request goes into the other
+            - ask_chat_urgent(chatId, prompt, node): as ask_chat (including "node"), but the request goes into the other
               conversation's queue ahead of every waiting message that is not urgent, and its reply
               comes back to you the same way. It does not interrupt a turn the other conversation
               is running; it is answered next. Requires "chatId" and "prompt" <parameter> tags.
@@ -356,8 +361,9 @@ public class ChatSession extends Interpreter {
               your turn. When every answer is back, sum up how far each one has got.
             """);
         m.put("cancel_request", """
-            - cancel_request(requestId): take back a request you sent with ask_chat or ask_chat_urgent
-              while it still waits in the other conversation's queue. Requires a "requestId"
+            - cancel_request(requestId, node): take back a request you sent with ask_chat or ask_chat_urgent
+              while it still waits in the other conversation's queue. "node" is optional: a request
+              sent to another instance is found by its id; its result then arrives as a new message. Requires a "requestId"
               <parameter> tag: the id the ask_chat result gave, e.g. "project1/chat-01:s40:t5:r2".
               Only you, the sender, can cancel it. The result says what happened: "removed" (it is
               out of the queue and no reply will come, so do not wait for one), "already running"
@@ -2783,6 +2789,19 @@ public class ChatSession extends Interpreter {
         return result;
     }
 
+    /** Between a conversation's name and its node, in what the timekeeper watches for a request sent to another instance. */
+    public static final String REMOTE_TARGET_MARK = " on node ";
+
+    /**
+     * A request this conversation sent to another instance was taken out of the queue there: it no longer waits for
+     * a reply ({@code ConversationSquadsAcrossInstances_261115_oo01}).
+     *
+     * @param requestId the request taken back
+     */
+    public void remoteRequestWithdrawn(String requestId) {
+        if (openRequests.close(requestId)) publishOutstanding();
+    }
+
     /**
      * The {@code accept_reply} tool: records that the reply this turn began with is enough
      * ({@code ReplyDecisionAndPromisedReport_261108_oo01}).
@@ -3063,29 +3082,34 @@ public class ChatSession extends Interpreter {
                     extractInput(args, "direction"), extractInput(args, "relation"));
             case "ask_chat", "ask_chat_urgent" -> {
                 String requestId = nextRequestId();
-                String sent = "ask_chat_urgent".equals(tc.name())
+                String node = extractInput(args, "node").strip();
+                boolean urgentAsk = "ask_chat_urgent".equals(tc.name());
+                // A conversation of another chat-ui instance (ConversationSquadsAcrossInstances_261115_oo01); the
+                // timekeeper names it with its node, so its watch reads that instance, not one of this name here.
+                String sent = !node.isEmpty()
+                        ? AskChatTool.sendRemote(system, projectId, chatId, node,
+                                extractInput(args, "chatId"), extractInput(args, "prompt"), requestId, urgentAsk)
+                        : urgentAsk
                         ? AskChatTool.sendUrgent(system, projectId, chatId,
                                 extractInput(args, "chatId"), extractInput(args, "prompt"), requestId)
                         : AskChatTool.send(system, projectId, chatId,
                                 extractInput(args, "chatId"), extractInput(args, "prompt"), requestId);
+                String watched = ChatUiActorSystem.resolveChatName(projectId, extractInput(args, "chatId"))
+                        + (node.isEmpty() ? "" : REMOTE_TARGET_MARK + node);
                 // A request back to the conversation whose reply this turn decides on is a decision.
-                if (sent.startsWith("sent to ") && undecidedReplier != null && undecidedReplier.equals(
+                if (sent.startsWith("sent to ") && node.isEmpty() && undecidedReplier != null && undecidedReplier.equals(
                         ChatUiActorSystem.resolveChatName(projectId, extractInput(args, "chatId")))) {
                     undecidedRequest = null;
                     undecidedReplier = null;
                 }
                 // Sent for the request this turn works for: that request waits for its reply.
                 if (turnOriginal != null && sent.startsWith("sent to ")) {
-                    openRequests.childSent(turnOriginal, requestId,
-                            ChatUiActorSystem.resolveChatName(projectId, extractInput(args, "chatId")),
-                            System.currentTimeMillis());
+                    openRequests.childSent(turnOriginal, requestId, watched, System.currentTimeMillis());
                     publishOutstanding();
                 } else if (sent.startsWith("sent to ")) {
                     // A turn the person's prompt started: no request waits for this one, but the timekeeper's
                     // child-reply watch covers it all the same (ReminderDecidedAtTheEndOfTheTurn_261114_oo01).
-                    openRequests.sentWithoutAnOriginal(requestId,
-                            ChatUiActorSystem.resolveChatName(projectId, extractInput(args, "chatId")),
-                            System.currentTimeMillis());
+                    openRequests.sentWithoutAnOriginal(requestId, watched, System.currentTimeMillis());
                     publishOutstanding();
                 }
                 yield sent;

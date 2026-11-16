@@ -8,7 +8,12 @@ import com.scivicslab.chatui.core.actor.Organization;
 import com.scivicslab.chatui.core.actor.PromptQueue;
 import com.scivicslab.chatui.core.actor.SseConnection;
 import com.scivicslab.chatui.core.actor.TurnReply;
+import com.scivicslab.chatui.core.actor.Timekeeper;
+import com.scivicslab.chatui.core.remote.RemoteNodes;
 import com.scivicslab.chatui.core.rest.ChatEvent;
+import com.scivicslab.pojoactor.action.ActionResult;
+import com.scivicslab.pojoactor.distributed.Receipt;
+import org.json.JSONObject;
 import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
@@ -116,7 +121,7 @@ public final class AskChatTool {
                 deliverReply(system, myName, myChat, myQueue, targetName, requestId, urgent, reply, failure);
             }
         });
-        SENT.put(requestId, new Sent(myName, targetName, targetQueue, done));
+        SENT.put(requestId, new Sent(myName, targetName, targetQueue, done, null));
         Consumer<ChatEvent> targetWatchers = watchersOf(system, targetName);
         // The heading says when the sender is the target's superior. It does not change the message's rank:
         // only ask_chat_urgent goes into the urgent rank, whoever sends it, so that a superior's new message
@@ -144,9 +149,14 @@ public final class AskChatTool {
                 + "; its reply will arrive in this conversation as a new message when its turn ends" + elsewhere;
     }
 
-    /** A request this instance's conversations have sent, kept so that its sender can take it back. */
+    /**
+     * A request this instance's conversations have sent, kept so that its sender can take it back.
+     *
+     * @param targetQueue the target's queue in this instance, or {@code null} when the target is on another node
+     * @param node        the node the target is on, or {@code null} for this instance
+     */
     private record Sent(String sender, String targetName, ActorRef<PromptQueue> targetQueue,
-                        CompletableFuture<TurnReply> done) {}
+                        CompletableFuture<TurnReply> done, String node) {}
 
     /** How many sent requests are remembered; the oldest go first. */
     private static final int MAX_SENT = 2000;
@@ -198,6 +208,7 @@ public final class AskChatTool {
             return "already answered: request " + id + " has already been answered or ended, so there is nothing "
                     + "to take back. Its reply is, or was, a message in your queue.";
         }
+        if (sent.node() != null) return cancelRemote(system, myName, id, sent);
         boolean removed;
         try {
             removed = sent.targetQueue().ask(q -> q.withdraw(id, ChatSession.ASK_CHAT_SOURCE_PREFIX + myName))
@@ -289,6 +300,16 @@ public final class AskChatTool {
      */
     public static void followUp(IIActorSystem system, String myName, String askerName, String requestId,
                                 TurnReply turn, int reminder) {
+        Received from = RECEIVED.get(requestId);
+        if (from != null && from.sender().equals(askerName)) {
+            String body = turn.reply() != null ? turn.reply()
+                    : "its turn left no answer" + (turn.ending() == null ? "" : ": " + turn.ending());
+            String text = "[follow-up to request " + requestId + ", from "
+                    + (turn.turnId() == null ? myName : turn.turnId()) + ", reminder " + reminder + "]\n" + body;
+            sendOrLog(from.nodes(), from.senderNode(), "enqueueFollowUp", new JSONObject().put("requestId", requestId)
+                    .put("asker", askerName).put("from", myName).put("text", text), "follow-up to request " + requestId);
+            return;
+        }
         IIActorRef<?> askerActor = system.getIIActor(askerName + ".chat");
         ActorRef<PromptQueue> askerQueue = system.getActor(askerName + ".queue");
         if (!(askerActor instanceof ChatSessionIIAR askerChat) || askerQueue == null) {
@@ -441,6 +462,230 @@ public final class AskChatTool {
             return Outcome.of("error: ask_chat failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
         } finally {
             watchdog.tell(w -> w.endWait(myName));
+        }
+    }
+
+    // ---- Requests between conversations of two chat-ui instances (ConversationSquadsAcrossInstances_261115_oo01).
+    // The sender's side keeps the request in SENT with the node it went to; the target's side keeps it in RECEIVED,
+    // so that the reply, a follow-up and a cancel find their way back. Everything goes as one message to the other
+    // instance's gateway actor, sent again under the same message id until it is received; the other side drops a
+    // second copy.
+
+    /** A request another instance's conversation sent to one of this instance's conversations. */
+    private record Received(RemoteNodes nodes, String senderNode, String sender, String target,
+                            CompletableFuture<TurnReply> done) {}
+
+    /** The requests that came from other instances, by request id, oldest first. */
+    private static final java.util.Map<String, Received> RECEIVED = java.util.Collections.synchronizedMap(
+            new java.util.LinkedHashMap<>() {
+                @Override protected boolean removeEldestEntry(java.util.Map.Entry<String, Received> eldest) {
+                    return size() > MAX_SENT;
+                }
+            });
+
+    /**
+     * {@code ask_chat} and {@code ask_chat_urgent} with a {@code node}: sends the request to a conversation of
+     * another chat-ui instance. Returns once that instance has received it; the reply comes back as a new message,
+     * as for a request inside this instance.
+     *
+     * @param node the node the target conversation is on, as named in {@code chat-ui.peers}
+     * @return a line saying the request was sent and under which id, or an {@code error: ...} string
+     */
+    public static String sendRemote(IIActorSystem system, String myProjectId, String myChatId, String node,
+                                    String target, String prompt, String requestId, boolean urgent) {
+        if (target == null || target.isBlank()) return "error: chatId is required";
+        if (prompt == null || prompt.isBlank()) return "error: prompt is required";
+        RemoteNodes nodes = RemoteNodes.of(system);
+        if (nodes == null) {
+            return "error: node " + node + " is not available: this instance has no other chat-ui instance "
+                    + "configured. Leave node out to reach a conversation of this instance.";
+        }
+        String nodeName = node.strip();
+        if (!nodes.knows(nodeName)) {
+            return "error: unknown node " + nodeName + "; the nodes this instance knows are " + nodes.others();
+        }
+        String myName = ChatUiActorSystem.chatActorName(myProjectId, myChatId);
+        IIActorRef<?> mine = system.getIIActor(myName + ".chat");
+        if (!(mine instanceof ChatSessionIIAR)) {
+            return "error: the calling conversation " + myName + " is not registered";
+        }
+        String targetName = ChatUiActorSystem.resolveChatName(myProjectId, target);
+        CompletableFuture<TurnReply> done = new CompletableFuture<>();
+        SENT.put(requestId, new Sent(myName, targetName, null, done, nodeName));
+        JSONObject m = new JSONObject().put("requestId", requestId).put("sender", myName)
+                .put("senderNode", nodes.myName()).put("target", targetName).put("prompt", prompt).put("urgent", urgent);
+        Receipt receipt = nodes.send(nodeName, "enqueueRequest", m.toString());
+        if (!receipt.accepted()) {
+            SENT.remove(requestId);
+            return "error: node " + nodeName + " did not receive the request: " + receipt.detail();
+        }
+        return "sent to " + targetName + " on node " + nodeName + " as " + (urgent ? "urgent request " : "request ")
+                + requestId + "; its reply will arrive in this conversation as a new message when its turn ends";
+    }
+
+    /** Asks the target's instance to take a request back; what became of it comes back as a new message. */
+    private static String cancelRemote(IIActorSystem system, String myName, String id, Sent sent) {
+        RemoteNodes nodes = RemoteNodes.of(system);
+        if (nodes == null) return "error: the remote path is not running, so request " + id + " cannot be taken back";
+        Receipt receipt = nodes.send(sent.node(), "withdrawRequest", new JSONObject().put("requestId", id)
+                .put("sender", myName).put("senderNode", nodes.myName()).toString());
+        if (!receipt.accepted()) {
+            return "error: node " + sent.node() + " did not receive the cancel: " + receipt.detail();
+        }
+        return "cancel sent: request " + id + " went to " + sent.targetName() + " on node " + sent.node()
+                + ". Whether it was removed arrives as a new message: \"removed\" means no reply will come.";
+    }
+
+    /** On the target's instance: a request from another instance goes into the target's queue. */
+    public static ActionResult remoteRequestArrived(IIActorSystem local, RemoteNodes nodes, JSONObject m) {
+        String requestId = m.getString("requestId");
+        String sender = m.getString("sender");
+        String senderNode = m.getString("senderNode");
+        String target = m.getString("target");
+        boolean urgent = m.optBoolean("urgent", false);
+        IIActorRef<?> targetActor = local.getIIActor(target + ".chat");
+        ActorRef<PromptQueue> targetQueue = local.getActor(target + ".queue");
+        if (!(targetActor instanceof ChatSessionIIAR targetChat) || targetQueue == null) {
+            sendOrLog(nodes, senderNode, "enqueueReply", new JSONObject().put("requestId", requestId).put("asker", sender)
+                    .put("from", target).put("urgent", urgent).put("text", "[request " + requestId + " to " + target
+                            + " ended without a reply: there is no conversation " + target + " on node " + nodes.myName()
+                            + "]"), "no-such-conversation reply to request " + requestId);
+            return new ActionResult(false, "no conversation " + target);
+        }
+        CompletableFuture<TurnReply> done = new CompletableFuture<>();
+        RECEIVED.put(requestId, new Received(nodes, senderNode, sender, target, done));
+        done.whenCompleteAsync((reply, failure) -> {
+            if (reply == TurnReply.WITHDRAWN) return;
+            sendOrLog(nodes, senderNode, "enqueueReply", new JSONObject().put("requestId", requestId).put("asker", sender)
+                    .put("from", target).put("urgent", urgent).put("text", replyMessage(target, requestId, reply, failure)),
+                    "reply to request " + requestId);
+        });
+        String headed = "[" + (urgent ? "urgent request " : "request ") + requestId + " from " + sender
+                + " on node " + senderNode + "]\n" + m.getString("prompt");
+        Consumer<ChatEvent> watchers = watchersOf(local, target);
+        try {
+            targetQueue.ask(q -> q.enqueue(headed, null, "queue", watchers, targetChat.asChatSessionRef(),
+                    ChatSession.ASK_CHAT_SOURCE_PREFIX + sender, requestId, done, false, true, java.util.List.of(),
+                    requestId, urgent)).get(5, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            RECEIVED.remove(requestId);
+            LOG.log(Level.WARNING, "remote request " + requestId + " could not be queued for " + target, e);
+            return new ActionResult(false, "could not queue the request: " + e.getClass().getSimpleName());
+        }
+        return new ActionResult(true, "queued for " + target);
+    }
+
+    /** On the sender's instance: the reply goes into the sender's queue, as a reply inside one instance does. */
+    public static ActionResult remoteReplyArrived(IIActorSystem local, JSONObject m) {
+        String requestId = m.getString("requestId");
+        String from = m.getString("from");
+        ActionResult queued = enqueueFor(local, m.getString("asker"), m.getString("text"),
+                ChatSession.ASK_CHAT_REPLY_SOURCE_PREFIX + from, requestId, m.optBoolean("urgent", false));
+        Sent sent = SENT.get(requestId);
+        if (sent != null && sent.node() != null) sent.done().complete(new TurnReply(null, "answered on node " + sent.node(), null));
+        return queued;
+    }
+
+    /** On the sender's instance: a follow-up to a request goes into the sender's queue. */
+    public static ActionResult remoteFollowUpArrived(IIActorSystem local, JSONObject m) {
+        return enqueueFor(local, m.getString("asker"), m.getString("text"),
+                ChatSession.ASK_CHAT_REPLY_SOURCE_PREFIX + m.getString("from"), m.getString("requestId"), false);
+    }
+
+    /** On the target's instance: the sender takes a request back, if it still waits in the queue. */
+    public static ActionResult remoteWithdraw(IIActorSystem local, RemoteNodes nodes, JSONObject m) {
+        String requestId = m.getString("requestId");
+        String sender = m.getString("sender");
+        Received r = RECEIVED.get(requestId);
+        String result;
+        String target;
+        if (r == null || !r.sender().equals(sender)) {
+            result = "not found";
+            target = "?";
+        } else {
+            target = r.target();
+            boolean removed = false;
+            ActorRef<PromptQueue> queue = local.getActor(target + ".queue");
+            try {
+                if (queue != null) {
+                    removed = queue.ask(q -> q.withdraw(requestId, ChatSession.ASK_CHAT_SOURCE_PREFIX + sender))
+                            .get(5, TimeUnit.SECONDS);
+                }
+            } catch (Exception e) {
+                LOG.log(Level.WARNING, "remote cancel of " + requestId + " could not reach the queue of " + target, e);
+            }
+            result = removed ? "removed" : r.done().isDone() ? "already answered" : "already running";
+        }
+        sendOrLog(nodes, m.getString("senderNode"), "enqueueCancelResult", new JSONObject().put("requestId", requestId)
+                .put("asker", sender).put("from", target).put("result", result), "cancel result of " + requestId);
+        return new ActionResult(true, result);
+    }
+
+    /** On the sender's instance: what became of a request it took back, as a message of its own. */
+    public static ActionResult remoteCancelResult(IIActorSystem local, JSONObject m) {
+        String requestId = m.getString("requestId");
+        String asker = m.getString("asker");
+        String result = m.getString("result");
+        Sent sent = SENT.get(requestId);
+        String where = sent == null ? m.optString("from", "?") : sent.targetName() + " on node " + sent.node();
+        String meaning = switch (result) {
+            case "removed" -> "It was taken out of the queue before it ran. No reply will come for it; do not wait for one.";
+            case "already running" -> "It has started and is not stopped. Its reply will arrive as usual.";
+            case "already answered" -> "It was already answered; its reply is, or was, a message in your queue.";
+            default -> "The other instance has no such request from you.";
+        };
+        if ("removed".equals(result)) {
+            if (sent != null) sent.done().complete(TurnReply.WITHDRAWN);
+            IIActorRef<?> askerActor = local.getIIActor(asker + ".chat");
+            if (askerActor instanceof ChatSessionIIAR askerChat) {
+                askerChat.asChatSessionRef().tell(c -> c.remoteRequestWithdrawn(requestId));
+            }
+        }
+        return enqueueFor(local, asker, "[cancel result for request " + requestId + " to " + where + ": " + result
+                + "]\n" + meaning, CANCEL_RESULT_SOURCE_PREFIX + m.optString("from", "?"), null, false);
+    }
+
+    /** Source of the message that says what became of a request taken back across instances. */
+    public static final String CANCEL_RESULT_SOURCE_PREFIX = "agent:cancel-result:";
+
+    /** On the instance of the conversation that promised a report: registers it with that conversation's timekeeper. */
+    public static ActionResult remoteRegisterPromise(IIActorSystem local, JSONObject m) {
+        String target = m.getString("target");
+        ActorRef<Timekeeper> keeper = local.getActor(target + ".timekeeper");
+        if (keeper == null) return new ActionResult(false, "no conversation " + target);
+        String requestId = m.getString("requestId");
+        String asker = m.getString("asker");
+        long minutes = m.getLong("minutes");
+        try {
+            int n = keeper.ask(k -> k.expectReport(requestId, asker, minutes)).get(5, TimeUnit.SECONDS);
+            return new ActionResult(true, "reminder " + n);
+        } catch (Exception e) {
+            return new ActionResult(false, "could not register: " + e.getClass().getSimpleName());
+        }
+    }
+
+    /** Puts one message in a conversation's queue, as a reply inside one instance is put there. */
+    private static ActionResult enqueueFor(IIActorSystem local, String chatName, String text, String source,
+                                           String requestId, boolean urgent) {
+        IIActorRef<?> chat = local.getIIActor(chatName + ".chat");
+        ActorRef<PromptQueue> queue = local.getActor(chatName + ".queue");
+        if (!(chat instanceof ChatSessionIIAR c) || queue == null) {
+            LOG.warning("message for " + chatName + " dropped: no such conversation here");
+            return new ActionResult(false, "no conversation " + chatName);
+        }
+        Consumer<ChatEvent> watchers = watchersOf(local, chatName);
+        queue.tell(q -> q.enqueue(text, null, "queue", watchers, c.asChatSessionRef(), source, null,
+                new CompletableFuture<>(), false, true, java.util.List.of(), requestId, urgent));
+        return new ActionResult(true, "queued for " + chatName);
+    }
+
+    /** Sends one message to another instance and logs it when that instance never received it. */
+    private static void sendOrLog(RemoteNodes nodes, String node, String action, JSONObject m, String what) {
+        try {
+            Receipt receipt = nodes.send(node, action, m.toString());
+            if (!receipt.accepted()) LOG.warning(what + " not received by node " + node + ": " + receipt.detail());
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, what + " could not be sent to node " + node, e);
         }
     }
 }
