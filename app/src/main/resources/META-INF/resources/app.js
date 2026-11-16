@@ -67,7 +67,9 @@
     var busy = false;
     // Whether the turn being drawn was started by the person at this pane (ChatDisplayToggle_261110_oo01). Every
     // bubble is marked turn-person or turn-other when it is placed, so one class on the chat area hides the
-    // other turns. A line with no origin is taken for the person's, as appendMessage takes it for no badge.
+    // other turns' inputs and steps. A line with no origin is taken for the person's, as appendMessage takes it
+    // for no badge. A turn's final answer is also marked turn-answer (markAnswer): it is addressed to the person
+    // whoever started the turn, so the filter never hides it.
     var turnFromPerson = true;
 
     // Enable KaTeX math rendering inside markdown so LaTeX ($...$, $$...$$) in assistant answers
@@ -625,6 +627,14 @@
         chatArea.appendChild(div);
     }
 
+    // Marks a bubble as its turn's final answer. Only two things say a bubble is one: the "delta" event, which
+    // ChatSession sends once per turn with the confirmed answer, and an assistant line of GET /conversation,
+    // which records nothing but those answers. Provisional answers and steps stay unmarked.
+    function markAnswer(div) {
+        if (div) div.classList.add("turn-answer");
+        return div;
+    }
+
     function appendMessage(role, text, images, origin, at, ids) {
         var div = document.createElement("div");
         div.className = "message " + role;
@@ -1115,6 +1125,7 @@
                 } else {
                     streamingEl = appendMarkdownMessage("assistant", streamingMarkdown);
                 }
+                markAnswer(streamingEl);
                 scrollToBottom();
                 break;
             case "queue":
@@ -1528,11 +1539,13 @@
             .catch(function (err) { notify("Could not clear the conversation: " + err.message); });
     }
 
-    // ── Display toggle: every turn, or only the turns the person started ───────────────────────
+    // ── Display toggle: every message, or only what is addressed to the person ─────────────────
     // ChatDisplayToggle_261110_oo01. A ConversationSquad actor's pane also draws the turns other actors start
-    // (an ask_chat request, a reply, a reminder, a resumed turn). "Show person's turns only" hides those turns' bubbles with
-    // one class on the chat area; nothing is deleted and the Queue panel, Save Chat and the server are not
-    // touched. The choice is kept per browser, per project and chat.
+    // (an ask_chat request, a reply, a notice, a reminder, a job, a resumed turn). "Show person-facing messages only" hides
+    // those turns' inputs and steps with one class on the chat area, and keeps every turn's final answer
+    // (turn-answer), since that answer is written to the person; the person's own turns stay whole. Nothing
+    // is deleted and the Queue panel, Save Chat and the server are not touched. The choice is kept per
+    // browser, per project and chat.
     var VIEW_MODE_KEY_PREFIX = "chat-ui-view-mode:";
 
     function viewModeKey() {
@@ -1549,11 +1562,12 @@
         if (chatArea) chatArea.classList.toggle("person-only", personOnly);
         var btn = document.getElementById("view-mode-btn");
         if (!btn) return;
-        btn.textContent = personOnly ? "Show person's turns only" : "Show all turns";
+        btn.textContent = personOnly ? "Show person-facing messages only" : "Show all messages";
         btn.setAttribute("aria-pressed", personOnly ? "true" : "false");
         btn.title = personOnly
-            ? "Showing only the turns you started. Click to show every turn of this ConversationSquad actor."
-            : "Showing every turn of this ConversationSquad actor. Click to show only the turns you started.";
+            ? "Showing the turns you started, and the final answer of every other turn. Click to show every message."
+            : "Showing every message of this ConversationSquad actor. Click to hide the inputs and steps of the turns "
+              + "you did not start, keeping their final answers.";
     }
 
     function toggleViewMode() {
@@ -1607,7 +1621,7 @@
                         // for the line. A line brought back from the I/O log after a restart has no
                         // time, and gets none: the time of the reload would state something false.
                         // The session id is not kept, so it is not shown.
-                        var div = appendMarkdownMessage(t.role, t.content);
+                        var div = markAnswer(appendMarkdownMessage(t.role, t.content));
                         appendAnswerFooter(div, t.content, { durationMs: t.durationMs, model: t.model,
                             turnId: t.turnId, requestId: t.requestId }, t.at == null ? null : t.at);
                     } else {

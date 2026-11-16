@@ -10,7 +10,9 @@ import java.util.List;
 
 /**
  * Browser check of the chat pane's display toggle (ChatDisplayToggle_261110_oo01), run against a throwaway instance
- * that has only chat-01 (it makes chat-02 and chat-03, runs a job that asks both, and sends turns). Java Playwright,
+ * that has only chat-01 (it makes chat-02 and chat-03, runs a job that asks both, and sends turns, one of which has
+ * chat-02 ask chat-03 so that the reply starts a turn of chat-02). The model is e2e/ScriptedModelServer.java, started
+ * first. Java Playwright,
  * outside the Maven build: a main() against a running instance, as the testing standard has it.
  *
  * <pre>
@@ -48,6 +50,11 @@ public class ViewToggleCheck {
         }
         throw new IllegalStateException("chat " + chat + " stayed busy");
     }
+
+    /** What the filter hides: the inputs and steps of the turns the person did not start. */
+    static final String HIDDEN = "#chat-area .message.turn-other:not(.turn-answer)";
+    /** What it keeps of those turns: each one's final answer. */
+    static final String OTHER_ANSWERS = "#chat-area .message.turn-other.turn-answer";
 
     static int visible(Page page, String selector) {
         int n = 0;
@@ -107,28 +114,37 @@ public class ViewToggleCheck {
             check(otherUsers == otherBefore, "the others' user bubbles are the same as before: " + otherUsers);
             check(page.querySelectorAll("#chat-area .message.assistant.turn-other").size() >= 2,
                     "their answers carry turn-other too");
+            check(page.querySelectorAll(OTHER_ANSWERS).size() == page.querySelectorAll("#chat-area .message.assistant.turn-other").size(),
+                    "and each of those answers is marked as its turn's final answer (turn-answer)");
             String btn = page.textContent("#view-mode-btn");
-            check("Show all turns".equals(btn.strip()), "the button starts as 'Show all turns': " + btn);
-            check(visible(page, "#chat-area .message") == allBubbles, "in 'Show all turns' every bubble is visible");
+            check("Show all messages".equals(btn.strip()), "the button starts as 'Show all messages': " + btn);
+            check(visible(page, "#chat-area .message") == allBubbles, "in 'Show all messages' every bubble is visible");
             page.screenshot(new Page.ScreenshotOptions().setPath(Path.of("/tmp/uitest/1-all.png")));
 
-            // Toggle to "Show person's turns only".
+            // Toggle to "Show person-facing messages only".
             page.click("#view-mode-btn");
-            check("Show person's turns only".equals(page.textContent("#view-mode-btn").strip()), "the button now reads 'Show person's turns only'");
+            check("Show person-facing messages only".equals(page.textContent("#view-mode-btn").strip()), "the button now reads 'Show person-facing messages only'");
             check("true".equals(page.getAttribute("#view-mode-btn", "aria-pressed")), "aria-pressed is true");
-            check(visible(page, "#chat-area .message.turn-other") == 0, "no turn-other bubble is visible");
+            check(page.querySelectorAll(HIDDEN).size() >= 2 && visible(page, HIDDEN) == 0,
+                    "no input or step of another actor's turn is visible");
+            int otherAnswers = page.querySelectorAll(OTHER_ANSWERS).size();
+            check(otherAnswers >= 2 && visible(page, OTHER_ANSWERS) == otherAnswers,
+                    "every final answer of another actor's turn stays visible: " + otherAnswers);
             int personVisible = visible(page, "#chat-area .message.turn-person");
             check(personVisible >= 2 && personVisible == page.querySelectorAll("#chat-area .message.turn-person").size(),
                     "the person's turn (input and answer) is visible: " + personVisible);
             check(page.querySelectorAll("#chat-area .message").size() == allBubbles, "nothing was deleted: still " + allBubbles + " bubbles");
             page.screenshot(new Page.ScreenshotOptions().setPath(Path.of("/tmp/uitest/2-person-only.png")));
 
-            // A live bubble that arrives while in "Show person's turns only" follows the same rule.
+            // A live turn that arrives while in "Show person-facing messages only" follows the same rule.
             rest("POST", "/api/projects/project1/chats/02/chat", "{\"text\":\"Second API turn while hidden: reply OK.\"}");
             page.waitForFunction("document.querySelectorAll('#chat-area .message.user.turn-other').length >= " + (otherUsers + 1));
             waitIdle("02");
             page.waitForFunction("document.querySelectorAll('#chat-area .message.assistant.turn-other').length >= " + (otherBefore + 1));
-            check(visible(page, "#chat-area .message.turn-other") == 0, "a live turn from the API arrives hidden");
+            check(visible(page, HIDDEN) == 0, "a live turn from the API: its input arrives hidden");
+            check(visible(page, OTHER_ANSWERS) == page.querySelectorAll(OTHER_ANSWERS).size()
+                            && page.querySelectorAll(OTHER_ANSWERS).size() == otherAnswers + 1,
+                    "and its final answer arrives visible");
             page.fill("#prompt-input", "Second person turn: name one prime number.");
             page.click("#send-btn");
             page.waitForFunction("document.querySelectorAll('#chat-area .message.user.turn-person').length >= 2");
@@ -136,18 +152,60 @@ public class ViewToggleCheck {
             page.waitForFunction("document.querySelectorAll('#chat-area .message.assistant.turn-person').length >= 2");
             check(visible(page, "#chat-area .message.turn-person") == page.querySelectorAll("#chat-area .message.turn-person").size(),
                     "a live turn the person starts is visible");
-            check(visible(page, "#chat-area .message.turn-other") == 0, "and the others are still hidden");
+            check(visible(page, HIDDEN) == 0, "and the others' inputs and steps are still hidden");
+
+            // A turn that a reply starts, as the liaison's are: chat-02 asks chat-03 (an API turn), and chat-03's
+            // reply starts a turn of chat-02 whose final answer is written to the person. Its input (the reply)
+            // and its steps (the accept_reply call) are hidden; its final answer is shown. Every bubble of those
+            // turns that is not a final answer is recorded as it arrives, to see that none was shown even while
+            // the turns ran.
+            page.evaluate("() => { window.__stepsSeen = 0; window.__stepsShown = 0;"
+                    + " new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => {"
+                    + "   if (!n.classList || !n.classList.contains('turn-other') || n.classList.contains('turn-answer')) return;"
+                    + "   window.__stepsSeen++; if (getComputedStyle(n).display !== 'none') window.__stepsShown++; })))"
+                    + " .observe(document.getElementById('chat-area'), { childList: true }); }");
+            rest("POST", "/api/projects/project1/chats/02/chat", "{\"text\":\"SCENARIO-R ask chat-03 for the result.\"}");
+            page.waitForFunction("() => Array.from(document.querySelectorAll('#chat-area .message.assistant'))"
+                    + ".some(e => e.textContent.includes('FINAL-FOR-PERSON'))", null, new Page.WaitForFunctionOptions().setTimeout(120_000));
+            waitIdle("02");
+            Thread.sleep(500);
+            ElementHandle replyInput = null, finalAnswer = null;
+            for (ElementHandle e : page.querySelectorAll("#chat-area .message.user")) {
+                if (e.textContent().startsWith("[reply to request ")) replyInput = e;
+            }
+            for (ElementHandle e : page.querySelectorAll("#chat-area .message.assistant")) {
+                if (e.textContent().contains("FINAL-FOR-PERSON")) finalAnswer = e;
+            }
+            check(replyInput != null && "true".equals(String.valueOf(replyInput.evaluate("e => e.classList.contains('turn-other')")))
+                            && !replyInput.isVisible(),
+                    "the reply that started chat-02's turn is hidden");
+            check(finalAnswer != null && "true".equals(String.valueOf(finalAnswer.evaluate("e => e.classList.contains('turn-answer') && e.classList.contains('turn-other')")))
+                            && finalAnswer.isVisible(),
+                    "that turn's final answer, addressed to the person, is visible");
+            Number seen = (Number) page.evaluate("() => window.__stepsSeen");
+            Number shown = (Number) page.evaluate("() => window.__stepsShown");
+            check(seen.intValue() >= 2 && shown.intValue() == 0,
+                    "no input or step of those turns was shown while they ran: " + seen + " arrived, " + shown + " shown");
+            check(visible(page, HIDDEN) == 0, "after those turns, no input or step of another actor's turn is visible");
+            if (finalAnswer != null) finalAnswer.scrollIntoViewIfNeeded();
+            page.screenshot(new Page.ScreenshotOptions().setPath(Path.of("/tmp/uitest/2b-reply-answer.png")));
+            int otherUsersBeforeReload = page.querySelectorAll("#chat-area .message.user.turn-other").size();
 
             // Reload: the choice and the marks come back from storage and from the restored history.
             int total = page.querySelectorAll("#chat-area .message").size();
             page.reload();
             page.waitForLoadState(LoadState.DOMCONTENTLOADED);
             page.waitForSelector("#chat-area .message.user", ATTACHED);
-            check("Show person's turns only".equals(page.textContent("#view-mode-btn").strip()), "after reload the button still reads 'Show person's turns only'");
+            check("Show person-facing messages only".equals(page.textContent("#view-mode-btn").strip()), "after reload the button still reads 'Show person-facing messages only'");
             check(page.querySelectorAll("#chat-area .message.user.turn-person").size() == 2
-                            && page.querySelectorAll("#chat-area .message.user.turn-other").size() == otherBefore + 1,
+                            && page.querySelectorAll("#chat-area .message.user.turn-other").size() == otherUsersBeforeReload,
                     "restored history marks the turns the same way");
-            check(visible(page, "#chat-area .message.turn-other") == 0, "after reload the other turns are hidden");
+            check(visible(page, HIDDEN) == 0, "after reload the other turns' inputs are hidden");
+            check(page.querySelectorAll(OTHER_ANSWERS).size() >= 4 && visible(page, OTHER_ANSWERS) == page.querySelectorAll(OTHER_ANSWERS).size(),
+                    "after reload the other turns' final answers are visible, the reply turn's among them: "
+                            + page.querySelectorAll(OTHER_ANSWERS).size());
+            check(page.querySelectorAll(OTHER_ANSWERS).stream().anyMatch(e -> e.textContent().contains("FINAL-FOR-PERSON") && e.isVisible()),
+                    "after reload the reply turn's final answer is still visible");
             check(visible(page, "#chat-area .message.turn-person") == page.querySelectorAll("#chat-area .message.turn-person").size(),
                     "after reload the person's turns are visible");
             page.screenshot(new Page.ScreenshotOptions().setPath(Path.of("/tmp/uitest/3-reloaded.png")));
@@ -155,16 +213,16 @@ public class ViewToggleCheck {
             // Another chat has its own choice.
             page.evaluate("window.chatUiSwitchChat('project1','03')");
             page.waitForSelector("#chat-area .message.user", ATTACHED);
-            check("Show all turns".equals(page.textContent("#view-mode-btn").strip()), "chat-03 has its own choice: 'Show all turns'");
+            check("Show all messages".equals(page.textContent("#view-mode-btn").strip()), "chat-03 has its own choice: 'Show all messages'");
             check(visible(page, "#chat-area .message.turn-other") >= 2, "chat-03 shows its job turn");
             page.evaluate("window.chatUiSwitchChat('project1','02')");
             page.waitForSelector("#chat-area .message.user", ATTACHED);
-            check("Show person's turns only".equals(page.textContent("#view-mode-btn").strip()), "back on chat-02 the choice is 'Show person's turns only'");
-            check(visible(page, "#chat-area .message.turn-other") == 0, "and its other turns are hidden");
+            check("Show person-facing messages only".equals(page.textContent("#view-mode-btn").strip()), "back on chat-02 the choice is 'Show person-facing messages only'");
+            check(visible(page, HIDDEN) == 0, "and its other turns' inputs are hidden");
 
             // Back to All.
             page.click("#view-mode-btn");
-            check("Show all turns".equals(page.textContent("#view-mode-btn").strip()), "toggled back to 'Show all turns'");
+            check("Show all messages".equals(page.textContent("#view-mode-btn").strip()), "toggled back to 'Show all messages'");
             check(visible(page, "#chat-area .message") == page.querySelectorAll("#chat-area .message").size(), "everything is visible again");
             page.screenshot(new Page.ScreenshotOptions().setPath(Path.of("/tmp/uitest/4-all-again.png")));
             browser.close();

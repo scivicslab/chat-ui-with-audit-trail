@@ -372,13 +372,14 @@ header h1[contenteditable]:focus {
     border-color: var(--accent-blue);
 }
 
-/* The display toggle (ChatDisplayToggle_261110_oo01): in "Show person's turns only" the chat area hides every bubble of a turn
-   that the person did not start. Nothing is removed; taking the class off shows them again. */
+/* The display toggle (ChatDisplayToggle_261110_oo01): in "Show person-facing messages only" the chat area hides the input and
+   steps of every turn the person did not start, and keeps its final answer (turn-answer). Nothing is removed;
+   taking the class off shows them again. */
 #view-mode-btn[aria-pressed="true"] {
     color: var(--text-primary);
     border-color: var(--accent-blue);
 }
-#chat-area.person-only .turn-other {
+#chat-area.person-only .turn-other:not(.turn-answer) {
     display: none;
 }
 
