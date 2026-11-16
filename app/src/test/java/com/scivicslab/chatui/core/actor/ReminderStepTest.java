@@ -251,7 +251,7 @@ class ReminderStepTest {
         String tools = one.chat().askNow(a -> ((ChatSession) a).toolInstructionsText()).join();
         assertTrue(tools.contains("without a reply before it is told (default 5)"), "set_chat_timekeeper says 5");
         assertTrue(!tools.contains("(default 30)"), "no 30 is left");
-        assertTrue(tools.contains("- expect_report(chatId, requestId, minutes)"), "the tool itself stays");
+        assertTrue(tools.contains("- expect_report(chatId, requestId, minutes, node)"), "the tool itself stays");
         assertTrue(tools.contains("about 20 more minutes"), "for a reply that says so");
         assertTrue(!tools.contains("give your own id as \"chatId\""), "the self reminder is no longer the model's to register");
     }

@@ -75,7 +75,7 @@ class RemoteAskChatTest {
 
     private record Squad(ChatSessionIIAR chat, ActorRef<PromptQueue> queue, ActorRef<Timekeeper> keeper) {}
 
-    private static Squad squad(IIActorSystem system, Scripted provider) {
+    private static Squad squad(IIActorSystem system, LlmProvider provider) {
         ChatSessionIIAR iiar = new ChatSessionIIAR("project1/chat-01.chat", provider, Optional.empty(), null, system);
         system.addIIActor(iiar);
         ActorRef<LlmProvider> providerRef = iiar.<LlmProvider>createChild(iiar.getName() + ".provider", provider);
@@ -264,11 +264,161 @@ class RemoteAskChatTest {
                 }).orElseThrow();
 
         // b's conversation promised a report; its timekeeper asks it now, and the answer goes back to a as a follow-up.
-        two.keeper().ask(k -> k.expectReport(requestId, "project1/chat-01", 0)).get(5, TimeUnit.SECONDS);
+        // b keeps the request under its local id: the sending node in front of the sender's id. b's own end-of-turn
+        // step registers a promise under that id too.
+        two.keeper().ask(k -> k.expectReport("a|" + requestId, "project1/chat-01", 0)).get(5, TimeUnit.SECONDS);
         two.keeper().ask(k -> { k.tick(System.currentTimeMillis() + 60_000); return null; }).get(5, TimeUnit.SECONDS);
         waitUntil(() -> asker.prompts.stream().anyMatch(p -> p.contains("[follow-up to request " + requestId)),
                 "the follow-up in a's queue");
         String followUp = asker.prompts.stream().filter(p -> p.contains("[follow-up to request " + requestId)).findFirst().orElseThrow();
         assertTrue(followUp.contains("42 items"), followUp);
+    }
+
+    /** Answers each prompt by what it asks for: "job from X" is answered "answer to X". */
+    private static final class Echo implements LlmProvider {
+        final List<String> prompts = new CopyOnWriteArrayList<>();
+        final CountDownLatch started = new CountDownLatch(1);
+        final CountDownLatch release = new CountDownLatch(1);
+
+        @Override public String id() { return "echo"; }
+        @Override public String displayName() { return "Echo"; }
+        @Override public List<ModelEntry> getAvailableModels() { return List.of(); }
+        @Override public String getCurrentModel() { return "echo-model"; }
+        @Override public void setModel(String model) {}
+        @Override public void cancel() {}
+
+        @Override
+        public void sendPrompt(String prompt, String model, Consumer<ChatEvent> emitter, ProviderContext ctx) {
+            prompts.add(prompt);
+            if (prompt.contains("warm-up job") && started.getCount() > 0) {
+                started.countDown();
+                try { release.await(30, TimeUnit.SECONDS); } catch (InterruptedException ignored) { }
+            }
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("job from (\\w+)").matcher(prompt);
+            String who = null;
+            while (m.find()) who = m.group(1);
+            emitter.accept(ChatEvent.delta(who == null ? "ok" : "answer to " + who));
+            emitter.accept(ChatEvent.result(null, 0, 0));
+        }
+    }
+
+    private static String request(String requestId, String senderNode, String prompt) {
+        return new JSONObject().put("requestId", requestId).put("sender", "project1/chat-01")
+                .put("senderNode", senderNode).put("target", "project1/chat-01").put("prompt", prompt)
+                .put("urgent", false).toString();
+    }
+
+    /**
+     * Request ids are unique only inside the instance that made them, so two nodes can send the same id to one
+     * receiver. The receiver keeps them apart by (sender node, request id): a cancel from one node takes back only
+     * its own request, and each reply goes back to the node that sent it.
+     */
+    @Test
+    void twoNodesSendingTheSameRequestIdStaySeparate() throws Exception {
+        IIActorSystem a = new IIActorSystem("instance-a-clash");
+        IIActorSystem b = new IIActorSystem("instance-b-clash");
+        IIActorSystem c = new IIActorSystem("instance-c-clash");
+        Scripted askerA = new Scripted(false, "ok");
+        Scripted askerC = new Scripted(false, "ok");
+        Echo worker = new Echo();
+        squad(a, askerA);
+        squad(b, worker);
+        squad(c, askerC);
+        portA = freePort();
+        portB = freePort();
+        int portC = freePort();
+        remoteA = RemoteNodes.start(a, "b=127.0.0.1:" + portB, "a", portA, dir.resolve("a-ids.txt"));
+        remoteB = RemoteNodes.start(b, "a=127.0.0.1:" + portA + ",c=127.0.0.1:" + portC, "b", portB, dir.resolve("b-ids.txt"));
+        RemoteNodes remoteC = RemoteNodes.start(c, "b=127.0.0.1:" + portB, "c", portC, dir.resolve("c-ids.txt"));
+        try {
+            RemoteActorRef gateway = new RemoteActorRef(RemoteNodes.GATEWAY, new NodeInfo("b", "127.0.0.1", portB));
+            String same = "project1/chat-01:t1:r1";
+            // b is held by a first job, so the next two wait in its queue.
+            assertTrue(gateway.send("enqueueRequest", request("project1/chat-01:t0:r9", "a", "warm-up job")).accepted());
+            assertTrue(worker.started.await(15, TimeUnit.SECONDS));
+            assertTrue(gateway.send("enqueueRequest", request(same, "a", "do the job from a")).accepted());
+            assertTrue(gateway.send("enqueueRequest", request(same, "c", "do the job from c")).accepted());
+
+            // c takes its request back; a's, with the same id, stays.
+            assertTrue(gateway.send("withdrawRequest", new JSONObject().put("requestId", same)
+                    .put("sender", "project1/chat-01").put("senderNode", "c").toString()).accepted());
+            waitUntil(() -> askerC.prompts.stream().anyMatch(p -> p.contains("[cancel result for request " + same)),
+                    "the cancel result on c");
+            assertTrue(askerC.prompts.stream().anyMatch(p -> p.contains("[cancel result for request " + same) && p.contains(": removed]")),
+                    "c's request was removed: " + askerC.prompts);
+
+            worker.release.countDown();
+            waitUntil(() -> askerA.prompts.stream().anyMatch(p -> p.contains("[reply to request " + same)), "a's reply");
+            String replyA = askerA.prompts.stream().filter(p -> p.contains("[reply to request " + same)).findFirst().orElseThrow();
+            assertTrue(replyA.contains("answer to a"), "a's own request ran and its reply came to a: " + replyA);
+            Thread.sleep(500);
+            assertFalse(worker.prompts.stream().anyMatch(p -> p.contains("do the job from c")), "c's request never ran");
+            assertFalse(askerC.prompts.stream().anyMatch(p -> p.contains("[reply to request " + same)), "c got no reply");
+        } finally {
+            remoteC.close();
+        }
+    }
+
+    @Test
+    void twoNodesSendingTheSameRequestIdBothGetTheirOwnReplies() throws Exception {
+        IIActorSystem a = new IIActorSystem("instance-a-clash2");
+        IIActorSystem b = new IIActorSystem("instance-b-clash2");
+        IIActorSystem c = new IIActorSystem("instance-c-clash2");
+        Scripted askerA = new Scripted(false, "ok");
+        Scripted askerC = new Scripted(false, "ok");
+        Echo worker = new Echo();
+        squad(a, askerA);
+        squad(b, worker);
+        squad(c, askerC);
+        portA = freePort();
+        portB = freePort();
+        int portC = freePort();
+        remoteA = RemoteNodes.start(a, "b=127.0.0.1:" + portB, "a", portA, dir.resolve("a-ids.txt"));
+        remoteB = RemoteNodes.start(b, "a=127.0.0.1:" + portA + ",c=127.0.0.1:" + portC, "b", portB, dir.resolve("b-ids.txt"));
+        RemoteNodes remoteC = RemoteNodes.start(c, "b=127.0.0.1:" + portB, "c", portC, dir.resolve("c-ids.txt"));
+        try {
+            RemoteActorRef gateway = new RemoteActorRef(RemoteNodes.GATEWAY, new NodeInfo("b", "127.0.0.1", portB));
+            String same = "project1/chat-01:t1:r1";
+            assertTrue(gateway.send("enqueueRequest", request("project1/chat-01:t0:r9", "a", "warm-up job")).accepted());
+            assertTrue(worker.started.await(15, TimeUnit.SECONDS));
+            assertTrue(gateway.send("enqueueRequest", request(same, "a", "do the job from a")).accepted());
+            assertTrue(gateway.send("enqueueRequest", request(same, "c", "do the job from c")).accepted());
+            worker.release.countDown();
+
+            waitUntil(() -> askerA.prompts.stream().anyMatch(p -> p.contains("[reply to request " + same))
+                    && askerC.prompts.stream().anyMatch(p -> p.contains("[reply to request " + same)), "both replies");
+            assertTrue(askerA.prompts.stream().anyMatch(p -> p.contains("[reply to request " + same) && p.contains("answer to a")),
+                    "a's reply is a's: " + askerA.prompts);
+            assertTrue(askerC.prompts.stream().anyMatch(p -> p.contains("[reply to request " + same) && p.contains("answer to c")),
+                    "c's reply is c's: " + askerC.prompts);
+        } finally {
+            remoteC.close();
+        }
+    }
+
+    @Test
+    void expectReportWithANodeRegistersThePromiseWithTheRemoteConversationsTimekeeper() throws Exception {
+        IIActorSystem a = new IIActorSystem("instance-a-expect");
+        IIActorSystem b = new IIActorSystem("instance-b-expect");
+        Scripted asker = new Scripted(false, invoke("ask_chat", "chatId", "01", "node", "b", "prompt", "start the survey"),
+                "Handed it out.",
+                invoke("expect_report", "chatId", "01", "node", "b", "requestId", "project1/chat-01:t1:r1", "minutes", "1"),
+                "Waiting for the report.", "noted");
+        Scripted worker = new Scripted(false, "Started; I will report when it is done.", "The survey is done: 42 items.");
+        Squad one = squad(a, asker);
+        Squad two = squad(b, worker);
+        startNodes(a, b);
+
+        personTypes(one, "start the survey on the other instance");
+        waitUntil(() -> asker.prompts.stream().anyMatch(p -> p.contains("[reply to request project1/chat-01:t1:r1")), "the reply");
+        waitUntil(() -> asker.prompts.stream().anyMatch(p -> p.contains("timekeeper will remind it")), "expect_report ran");
+        String result = asker.prompts.stream().filter(p -> p.contains("timekeeper will remind it")).findFirst().orElseThrow();
+        assertTrue(result.contains("on node b"), "the promise went to b: " + result);
+        waitUntil(() -> !two.keeper().askNow(Timekeeper::pendingPromises).join().isEmpty(), "b's timekeeper holds the promise");
+
+        two.keeper().ask(k -> { k.tick(System.currentTimeMillis() + 120_000); return null; }).get(5, TimeUnit.SECONDS);
+        waitUntil(() -> asker.prompts.stream().anyMatch(p -> p.contains("[follow-up to request project1/chat-01:t1:r1")),
+                "the follow-up in a's queue");
+        assertTrue(asker.prompts.stream().anyMatch(p -> p.contains("[follow-up to request project1/chat-01:t1:r1") && p.contains("42 items")));
     }
 }

@@ -243,7 +243,7 @@ public class ChatSession extends Interpreter {
             Map.entry("set_chat_timekeeper", List.of("urgentWaitMinutes", "childReplyWarnMinutes")),
             Map.entry("accept_reply", List.of("requestId")),
             Map.entry("set_chat_name", List.of("name")),
-            Map.entry("expect_report", List.of("chatId")),
+            Map.entry("expect_report", List.of("chatId", "node")),
             Map.entry("set_superior", List.of("superiorChatId")),
             Map.entry("write", List.of("content")));
 
@@ -388,13 +388,14 @@ public class ChatSession extends Interpreter {
               replied. Requires a "requestId" <parameter> tag.
             """);
         m.put("expect_report", """
-            - expect_report(chatId, requestId, minutes): when a reply says a report will come later
+            - expect_report(chatId, requestId, minutes, node): when a reply says a report will come later
               (for example "I will report later" or "not finished yet, about 20 more minutes"),
               register it with that conversation's timekeeper. After "minutes" it is reminded once,
               and the answer it writes then comes to you as [follow-up to request …, reminder N].
               If that says "not yet" again, register again. Requires "chatId", "requestId" and
-              "minutes" (whole minutes) <parameter> tags. You do not register a reminder for a
-              report you promise yourself: the end of your turn decides that.
+              "minutes" (whole minutes) <parameter> tags. Give "node" when the conversation that
+              promised the report is on another chat-ui instance, as you gave it to ask_chat. You do
+              not register a reminder for a report you promise yourself: the end of your turn decides that.
             """);
         m.put("set_chat_name", """
             - set_chat_name(chatId, name): give a conversation of this project, your own included, the
@@ -2835,7 +2836,7 @@ public class ChatSession extends Interpreter {
      * with no request, is a promise made to the person: the reminder's answer stays on this conversation's
      * screen ({@code ReplyDecisionAndPromisedReport_261108_oo01}).
      */
-    private String expectReport(String chatId, String requestId, String minutesText) {
+    private String expectReport(String chatId, String requestId, String node, String minutesText) {
         long minutes;
         try {
             minutes = Long.parseLong(minutesText.trim());
@@ -2843,6 +2844,19 @@ public class ChatSession extends Interpreter {
             minutes = -1;
         }
         if (minutes <= 0) return "error: minutes must be a whole number above 0";
+        if (!node.isBlank()) {
+            // A conversation of another chat-ui instance (ConversationSquadsAcrossInstances_261115_oo01).
+            if (chatId.isBlank()) return "error: give chatId, the conversation on node " + node.strip() + " that promised the report";
+            if (requestId.isBlank()) return "error: give requestId, the request whose report was promised";
+            String target = ChatUiActorSystem.resolveChatName(projectId, chatId);
+            String result = AskChatTool.expectReportRemote(system, myChatName(), node, target, requestId, minutes);
+            if (result.startsWith("error")) return result;
+            if (undecidedRequest != null && requestId.equals(undecidedRequest)) {
+                undecidedRequest = null;
+                undecidedReplier = null;
+            }
+            return result + reopenAfterPromise(requestId, target + REMOTE_TARGET_MARK + node.strip());
+        }
         String target = chatId.isBlank() ? myChatName() : ChatUiActorSystem.resolveChatName(projectId, chatId);
         boolean self = target.equals(myChatName());
         if (!self && requestId.isBlank()) {
@@ -3138,7 +3152,7 @@ public class ChatSession extends Interpreter {
                     extractInput(args, "childReplyWarnMinutes"));
             case "accept_reply" -> acceptReply(extractInput(args, "requestId"));
             case "cancel_request" -> cancelRequest(extractInput(args, "requestId"));
-            case "expect_report" -> expectReport(extractInput(args, "chatId"), extractInput(args, "requestId"),
+            case "expect_report" -> expectReport(extractInput(args, "chatId"), extractInput(args, "requestId"), extractInput(args, "node"),
                     extractInput(args, "minutes"));
             case "set_chat_name" -> ChatNameTool.set(conversationControls, projectId,
                     extractInput(args, "chatId"), extractInput(args, "name"));

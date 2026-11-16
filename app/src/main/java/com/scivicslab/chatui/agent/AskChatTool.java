@@ -304,10 +304,11 @@ public final class AskChatTool {
         if (from != null && from.sender().equals(askerName)) {
             String body = turn.reply() != null ? turn.reply()
                     : "its turn left no answer" + (turn.ending() == null ? "" : ": " + turn.ending());
-            String text = "[follow-up to request " + requestId + ", from "
+            // The sender knows the request by its own id, not by this instance's local one.
+            String text = "[follow-up to request " + from.requestId() + ", from "
                     + (turn.turnId() == null ? myName : turn.turnId()) + ", reminder " + reminder + "]\n" + body;
-            sendOrLog(from.nodes(), from.senderNode(), "enqueueFollowUp", new JSONObject().put("requestId", requestId)
-                    .put("asker", askerName).put("from", myName).put("text", text), "follow-up to request " + requestId);
+            sendOrLog(from.nodes(), from.senderNode(), "enqueueFollowUp", new JSONObject().put("requestId", from.requestId())
+                    .put("asker", askerName).put("from", myName).put("text", text), "follow-up to request " + from.requestId());
             return;
         }
         IIActorRef<?> askerActor = system.getIIActor(askerName + ".chat");
@@ -471,11 +472,24 @@ public final class AskChatTool {
     // instance's gateway actor, sent again under the same message id until it is received; the other side drops a
     // second copy.
 
-    /** A request another instance's conversation sent to one of this instance's conversations. */
-    private record Received(RemoteNodes nodes, String senderNode, String sender, String target,
+    /**
+     * A request another instance's conversation sent to one of this instance's conversations.
+     *
+     * @param requestId the id the sender gave it, unique only on the sender's node
+     */
+    private record Received(RemoteNodes nodes, String senderNode, String requestId, String sender, String target,
                             CompletableFuture<TurnReply> done) {}
 
-    /** The requests that came from other instances, by request id, oldest first. */
+    /**
+     * The id under which this instance keeps a request from another node: in the target's queue, in the target's
+     * open requests, in its timekeeper's promises, and in {@link #RECEIVED}. A request id is unique only on the node
+     * that made it, so two nodes can send the same one; with the sender's node in front, they stay apart.
+     */
+    static String localIdOf(String senderNode, String requestId) {
+        return senderNode + "|" + requestId;
+    }
+
+    /** The requests that came from other instances, by {@link #localIdOf}, oldest first. */
     private static final java.util.Map<String, Received> RECEIVED = java.util.Collections.synchronizedMap(
             new java.util.LinkedHashMap<>() {
                 @Override protected boolean removeEldestEntry(java.util.Map.Entry<String, Received> eldest) {
@@ -523,6 +537,32 @@ public final class AskChatTool {
                 + requestId + "; its reply will arrive in this conversation as a new message when its turn ends";
     }
 
+    /**
+     * {@code expect_report} with a {@code node}: registers the report a conversation of another instance promised
+     * with that conversation's timekeeper. The reminder's answer comes back as a follow-up.
+     *
+     * @return a line saying the promise was sent, or an {@code error: ...} string
+     */
+    public static String expectReportRemote(IIActorSystem system, String myName, String node, String targetName,
+                                            String requestId, long minutes) {
+        RemoteNodes nodes = RemoteNodes.of(system);
+        if (nodes == null) {
+            return "error: node " + node + " is not available: this instance has no other chat-ui instance configured";
+        }
+        String nodeName = node.strip();
+        if (!nodes.knows(nodeName)) {
+            return "error: unknown node " + nodeName + "; the nodes this instance knows are " + nodes.others();
+        }
+        Receipt receipt = nodes.send(nodeName, "registerPromise", new JSONObject().put("target", targetName)
+                .put("requestId", requestId).put("asker", myName).put("senderNode", nodes.myName())
+                .put("minutes", minutes).toString());
+        if (!receipt.accepted()) {
+            return "error: node " + nodeName + " did not receive the promise: " + receipt.detail();
+        }
+        return "ok: " + targetName + " on node " + nodeName + ": its timekeeper will remind it in " + minutes
+                + " minutes to report on request " + requestId + "; its answer will come to you as a follow-up";
+    }
+
     /** Asks the target's instance to take a request back; what became of it comes back as a new message. */
     private static String cancelRemote(IIActorSystem system, String myName, String id, Sent sent) {
         RemoteNodes nodes = RemoteNodes.of(system);
@@ -553,7 +593,8 @@ public final class AskChatTool {
             return new ActionResult(false, "no conversation " + target);
         }
         CompletableFuture<TurnReply> done = new CompletableFuture<>();
-        RECEIVED.put(requestId, new Received(nodes, senderNode, sender, target, done));
+        String localId = localIdOf(senderNode, requestId);
+        RECEIVED.put(localId, new Received(nodes, senderNode, requestId, sender, target, done));
         done.whenCompleteAsync((reply, failure) -> {
             if (reply == TurnReply.WITHDRAWN) return;
             sendOrLog(nodes, senderNode, "enqueueReply", new JSONObject().put("requestId", requestId).put("asker", sender)
@@ -565,10 +606,10 @@ public final class AskChatTool {
         Consumer<ChatEvent> watchers = watchersOf(local, target);
         try {
             targetQueue.ask(q -> q.enqueue(headed, null, "queue", watchers, targetChat.asChatSessionRef(),
-                    ChatSession.ASK_CHAT_SOURCE_PREFIX + sender, requestId, done, false, true, java.util.List.of(),
-                    requestId, urgent)).get(5, TimeUnit.SECONDS);
+                    ChatSession.ASK_CHAT_SOURCE_PREFIX + sender, localId, done, false, true, java.util.List.of(),
+                    localId, urgent)).get(5, TimeUnit.SECONDS);
         } catch (Exception e) {
-            RECEIVED.remove(requestId);
+            RECEIVED.remove(localId);
             LOG.log(Level.WARNING, "remote request " + requestId + " could not be queued for " + target, e);
             return new ActionResult(false, "could not queue the request: " + e.getClass().getSimpleName());
         }
@@ -596,7 +637,8 @@ public final class AskChatTool {
     public static ActionResult remoteWithdraw(IIActorSystem local, RemoteNodes nodes, JSONObject m) {
         String requestId = m.getString("requestId");
         String sender = m.getString("sender");
-        Received r = RECEIVED.get(requestId);
+        String localId = localIdOf(m.getString("senderNode"), requestId);
+        Received r = RECEIVED.get(localId);
         String result;
         String target;
         if (r == null || !r.sender().equals(sender)) {
@@ -608,7 +650,7 @@ public final class AskChatTool {
             ActorRef<PromptQueue> queue = local.getActor(target + ".queue");
             try {
                 if (queue != null) {
-                    removed = queue.ask(q -> q.withdraw(requestId, ChatSession.ASK_CHAT_SOURCE_PREFIX + sender))
+                    removed = queue.ask(q -> q.withdraw(localId, ChatSession.ASK_CHAT_SOURCE_PREFIX + sender))
                             .get(5, TimeUnit.SECONDS);
                 }
             } catch (Exception e) {
@@ -653,7 +695,10 @@ public final class AskChatTool {
         String target = m.getString("target");
         ActorRef<Timekeeper> keeper = local.getActor(target + ".timekeeper");
         if (keeper == null) return new ActionResult(false, "no conversation " + target);
-        String requestId = m.getString("requestId");
+        // The promise is kept under the local id of the request it is about, so the reminder's answer finds its
+        // way back to the node that asked (followUp).
+        String requestId = m.has("senderNode") ? localIdOf(m.getString("senderNode"), m.getString("requestId"))
+                : m.getString("requestId");
         String asker = m.getString("asker");
         long minutes = m.getLong("minutes");
         try {
