@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 /**
@@ -71,6 +72,23 @@ public final class TextToolCallParser {
     // Each <invoke name="TOOL"> ... </invoke> block that starts a line (DOTALL so it spans newlines).
     private static final Pattern INVOKE =
             Pattern.compile(INVOKE_START + "(.*?)</invoke>", Pattern.DOTALL | Pattern.MULTILINE);
+    // The same call glued to the end of a finished sentence, on the same line: "...確かめます。<invoke name=...>...</invoke>"
+    // (SquareBracketCallRepair_261116_oo01). It must be the last thing in the reply, and what comes before the tag
+    // must be the end of a sentence, as for GLM's spelling below: a tag quoted in the middle of a sentence, after a
+    // colon, a space or a backtick, is prose about the spelling and not a call. Groups: 1 the tool name, 2 the body.
+    private static final String SENTENCE_END = "[。．.!?！？)）」』\\]】]";
+    private static final String INVOKE_TRAILING_START =
+            "(?<=" + SENTENCE_END + "[ \\t]{0,3})<invoke\\s+name=" + Q + NAME + Q + "\\s*>";
+    private static final Pattern INVOKE_TRAILING = Pattern.compile(
+            INVOKE_TRAILING_START + "(.*?)</invoke>(?:\\s*</function_calls>)?\\s*\\z", Pattern.DOTALL);
+    // A call written the way the prompt tells a model to show an example, with square brackets. It is never run,
+    // since an answer may quote one; analyze() calls it a broken attempt only when it names a tool of the
+    // conversation and carries a parameter block.
+    private static final Pattern BRACKET_INVOKE = Pattern.compile(
+            "^[ \\t]*(?:\\[function_calls\\]\\s*)?\\[invoke\\s+name=" + Q + NAME + Q + "\\s*\\](.*?)(?:\\[/invoke\\]|\\z)",
+            Pattern.DOTALL | Pattern.MULTILINE);
+    private static final Pattern BRACKET_PARAM =
+            Pattern.compile("\\[parameter\\s+name=" + Q + NAME + Q + "\\s*\\](.*?)\\[/parameter\\]", Pattern.DOTALL);
     // The start of a call, whether or not its </invoke> was written.
     private static final Pattern INVOKE_OPEN = Pattern.compile(INVOKE_START, Pattern.MULTILINE);
     // The opening tag of a <parameter name="KEY">VALUE</parameter> pair. Where VALUE ends is decided by
@@ -136,8 +154,8 @@ public final class TextToolCallParser {
     public static boolean looksLikeTextToolCall(String content) {
         if (content == null) return false;
         String visible = withoutCodeFences(content);
-        return INVOKE_OPEN.matcher(visible).find() || FUNCTION.matcher(visible).find()
-                || GLM.matcher(visible).find() || GLM_TRAILING.matcher(visible).find();
+        return INVOKE_OPEN.matcher(visible).find() || INVOKE_TRAILING.matcher(visible).find()
+                || FUNCTION.matcher(visible).find() || GLM.matcher(visible).find() || GLM_TRAILING.matcher(visible).find();
     }
 
     /**
@@ -178,6 +196,19 @@ public final class TextToolCallParser {
      *                       this does not know)
      */
     public static Analysis analyze(String content, Function<String, List<String>> requiredParams) {
+        return analyze(content, requiredParams, name -> false);
+    }
+
+    /**
+     * As {@link #analyze(String, Function)}, and a call written in the example form (square brackets) that names a
+     * tool of this conversation and carries a parameter block is a broken attempt too, when the reply holds no other
+     * call ({@code SquareBracketCallRepair_261116_oo01}): the model that was told to write an example in square
+     * brackets sometimes writes a real call that way. It is never run; the model is told to write it again.
+     *
+     * @param toolHere whether a tool of this name is one this conversation may call
+     */
+    public static Analysis analyze(String content, Function<String, List<String>> requiredParams,
+                                   Predicate<String> toolHere) {
         List<ToolCall> calls = new ArrayList<>();
         List<String> problems = new ArrayList<>();
         String[] exampleTool = {null};
@@ -187,7 +218,8 @@ public final class TextToolCallParser {
         List<int[]> readSpans = new ArrayList<>();
         int idx = 0;
 
-        Matcher inv = INVOKE.matcher(visible);
+        for (Pattern invokePattern : List.of(INVOKE, INVOKE_TRAILING)) {
+        Matcher inv = invokePattern.matcher(visible);
         while (inv.find()) {
             readSpans.add(new int[]{inv.start(), inv.end()});
             String name = inv.group(1).trim();
@@ -205,6 +237,7 @@ public final class TextToolCallParser {
                 problems.addAll(wrong);
                 if (exampleTool[0] == null) exampleTool[0] = name;
             }
+        }
         }
 
         Matcher fn = FUNCTION.matcher(visible);
@@ -269,6 +302,19 @@ public final class TextToolCallParser {
             } else {
                 problems.add(unreadableAttempt(line, visible.substring(at, until)));
                 if (exampleTool[0] == null) exampleTool[0] = "read";
+            }
+        }
+        // Nothing could be run, and nothing was found wrong: a call in the example form is an attempt, not an answer.
+        if (calls.isEmpty() && problems.isEmpty()) {
+            Matcher square = BRACKET_INVOKE.matcher(visible);
+            while (square.find()) {
+                String name = square.group(1).trim();
+                if (!toolHere.test(name) || !BRACKET_PARAM.matcher(square.group(2)).find()) continue;
+                problems.add("your call to " + name + " is written with square brackets ([invoke ...], [parameter ...]), "
+                        + "the form for showing a call as an example, so it was not run; write the call again with "
+                        + "angle brackets (< and >). If you meant it as an example, write your answer again without "
+                        + "a complete call block");
+                if (exampleTool[0] == null) exampleTool[0] = name;
             }
         }
         return new Analysis(calls, problems, exampleTool[0] == null ? "read" : exampleTool[0]);
@@ -424,6 +470,7 @@ public final class TextToolCallParser {
         out = out.replaceAll("(?ms)" + GLM_START + ".*?(?=^[ \\t]*<tool_call>|\\z)", "");
         // ... and the call glued to the end of a finished sentence.
         out = out.replaceAll("(?s)" + GLM_TRAILING_START + ".*?</tool_call>\\s*\\z", "");
+        out = out.replaceAll("(?s)" + INVOKE_TRAILING_START + ".*?</invoke>(?:\\s*</function_calls>)?\\s*\\z", "");
         return JUNK_TOKEN.matcher(out).replaceAll("").trim();
     }
 }

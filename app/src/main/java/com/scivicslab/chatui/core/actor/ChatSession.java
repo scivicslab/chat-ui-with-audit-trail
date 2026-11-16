@@ -254,6 +254,14 @@ public class ChatSession extends Interpreter {
         return signature.stream().filter(a -> !optional.contains(a)).toList();
     }
 
+    /**
+     * @return whether {@code name} is a tool this conversation is shown and may call: a built-in or plugin tool
+     *         that its {@link ToolSet} contains
+     */
+    private boolean toolOfThisConversation(String name) {
+        return (TOOL_DESCRIPTIONS.containsKey(name) || pluginTools.containsKey(name)) && toolSet.contains(name);
+    }
+
     /** @return the argument names in {@code - tool(a, b)} of the tool's description, in order */
     static List<String> signatureOf(String tool) {
         String description = TOOL_DESCRIPTIONS.get(tool);
@@ -1904,7 +1912,7 @@ public class ChatSession extends Interpreter {
         // than as the answer.
         TextToolCallParser.Analysis analysis = cutOff[0]
                 ? new TextToolCallParser.Analysis(List.of(), List.of(), "read")
-                : TextToolCallParser.analyze(text, ChatSession::requiredParameters);
+                : TextToolCallParser.analyze(text, ChatSession::requiredParameters, this::toolOfThisConversation);
         // A broken call attempt runs none of its calls: one call written wrong among several means the
         // model's plan is not what it meant to send.
         List<ToolCall> calls = analysis.broken() ? List.of() : analysis.calls();

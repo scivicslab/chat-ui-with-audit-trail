@@ -180,4 +180,83 @@ class ChatSessionToolCallRepairTest {
             }
         }
     }
+
+    // ---- SquareBracketCallRepair_261116_oo01
+
+    /** project8/chat-01 (Claude, sonnet), 2026-11-16 10:29:50 on 28010: the reply as it was shown. */
+    static final String SQUARE_REPLY_1029 = "届いたかどうかを、相手の会話のログで確かめます。\n\n"
+            + "[invoke name=\"get_chat_log\"]\n"
+            + "[parameter name=\"chatId\"]project1/chat-01[/parameter]\n"
+            + "[parameter name=\"count\"]10[/parameter]\n"
+            + "<reason>Check whether the ask_chat message arrived in project1/chat-01.</reason>\n"
+            + "[/invoke]";
+
+    private static final String REAL_CALL = "<invoke name=\"get_chat_log\">\n<parameter name=\"chatId\">project1/chat-01</parameter>\n"
+            + "<parameter name=\"count\">10</parameter>\n<reason>Check whether the message arrived.</reason>\n</invoke>";
+
+    @Test
+    void aCallWrittenInTheExampleFormIsRepaired_notTakenAsTheFinalAnswer() {
+        CapturingIoLog ioLog = new CapturingIoLog();
+        ScriptedProvider provider = new ScriptedProvider(List.of(SQUARE_REPLY_1029, REAL_CALL, "The log shows it arrived."));
+        ChatSessionIIAR iiar = newSession(provider, ioLog);
+
+        List<ChatEvent> emitted = runTurn(iiar);
+
+        assertEquals(3, provider.prompts.size(), "the turn went on after the example-form call: " + ioLog.records);
+        String note = provider.prompts.get(1);
+        assertTrue(note.contains("get_chat_log"), note);
+        assertTrue(note.contains("square brackets"), note);
+        assertTrue(note.contains("was not run"), note);
+        assertTrue(note.contains("angle brackets"), note);
+        assertTrue(note.contains("<invoke name=\"get_chat_log\">\n<parameter name=\"chatId\">"), "the exact form is shown: " + note);
+        assertTrue(ioLog.records.stream().anyMatch(r -> r.label().equals("turn1/step1/repair")), "logged: " + ioLog.records);
+        assertTrue(ioLog.records.stream().noneMatch(r -> r.label().equals("turn1/step1/tool")), "the example form never runs");
+        assertTrue(ioLog.records.stream().anyMatch(r -> r.label().equals("turn1/step2/tool") && r.content().contains("TOOL: get_chat_log")),
+                "the rewritten call ran: " + ioLog.records);
+        List<ChatSession.HistoryEntry> history = iiar.getHistorySnapshotDirect();
+        assertEquals("The log shows it arrived.", history.get(history.size() - 1).content());
+        assertFalse(answerOf(emitted).contains("[invoke name=\"get_chat_log\"]"), "the example form was not the answer");
+    }
+
+    @Test
+    void aCallGluedToTheEndOfTheSentenceBeforeItRuns() {
+        CapturingIoLog ioLog = new CapturingIoLog();
+        String reply = "式を確かめます。<invoke name=\"calc\">\n<parameter name=\"expression\">1+1</parameter>\n"
+                + "<reason>check</reason>\n</invoke>";
+        ScriptedProvider provider = new ScriptedProvider(List.of(reply, "The result is 2."));
+        ChatSessionIIAR iiar = newSession(provider, ioLog);
+
+        runTurn(iiar);
+
+        assertEquals(2, provider.prompts.size(), "the call was run and the turn went on: " + ioLog.records);
+        assertTrue(ioLog.records.stream().anyMatch(r -> r.label().equals("turn1/step1/tool") && r.content().contains("TOOL: calc")),
+                "the call ran: " + ioLog.records);
+        List<ChatSession.HistoryEntry> history = iiar.getHistorySnapshotDirect();
+        assertEquals("The result is 2.", history.get(history.size() - 1).content());
+    }
+
+    @Test
+    void plainTextThenACallOnTheLinesBelowItRuns() {
+        CapturingIoLog ioLog = new CapturingIoLog();
+        String reply = "式を確かめます。\n\n<invoke name=\"calc\">\n<parameter name=\"expression\">1+1</parameter>\n"
+                + "<reason>check</reason>\n</invoke>";
+        ScriptedProvider provider = new ScriptedProvider(List.of(reply, "The result is 2."));
+        ChatSessionIIAR iiar = newSession(provider, ioLog);
+
+        runTurn(iiar);
+
+        assertEquals(2, provider.prompts.size(), ioLog.records.toString());
+        assertTrue(ioLog.records.stream().anyMatch(r -> r.label().equals("turn1/step1/tool") && r.content().contains("TOOL: calc")));
+    }
+
+    @Test
+    void anExampleFormBlockInACodeFenceIsAnAnswer() {
+        String reply = "To show a call without running it, write:\n```\n" + SQUARE_REPLY_1029 + "\n```\nThat is all.";
+        ScriptedProvider provider = new ScriptedProvider(List.of(reply));
+        ChatSessionIIAR iiar = newSession(provider, new CapturingIoLog());
+
+        runTurn(iiar);
+
+        assertEquals(1, provider.prompts.size());
+    }
 }

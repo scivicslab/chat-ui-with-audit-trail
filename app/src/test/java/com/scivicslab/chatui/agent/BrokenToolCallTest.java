@@ -128,4 +128,99 @@ class BrokenToolCallTest {
         assertFalse(a.broken(), a.toString());
         assertEquals(1, a.calls().size());
     }
+
+    // ---- A call written in the example form, and a call glued to the end of a sentence
+    // (SquareBracketCallRepair_261116_oo01).
+
+    /** project8/chat-01 (Claude, sonnet), 2026-11-16 10:29:50 on 28010: the reply as it was shown. */
+    static final String SQUARE_REPLY_1029 = "届いたかどうかを、相手の会話のログで確かめます。\n\n"
+            + "[invoke name=\"get_chat_log\"]\n"
+            + "[parameter name=\"chatId\"]project1/chat-01[/parameter]\n"
+            + "[parameter name=\"count\"]10[/parameter]\n"
+            + "<reason>Check whether the ask_chat message arrived in project1/chat-01.</reason>\n"
+            + "[/invoke]";
+
+    private static final java.util.function.Predicate<String> TOOLS_HERE =
+            name -> List.of("get_chat_log", "read", "ask_chat", "calc").contains(name);
+
+    @Test
+    void aCallInTheExampleFormOfAToolOfThisConversationIsABrokenAttempt_notAnAnswer() {
+        TextToolCallParser.Analysis a = TextToolCallParser.analyze(SQUARE_REPLY_1029, REQUIRED, TOOLS_HERE);
+        assertTrue(a.broken(), "the reply meant to call a tool: " + a);
+        assertTrue(a.calls().isEmpty(), "the square-bracket form is never run: " + a.calls());
+        String said = String.join("\n", a.problems());
+        assertTrue(said.contains("get_chat_log"), said);
+        assertTrue(said.contains("square brackets"), said);
+        assertTrue(said.contains("was not run"), said);
+        assertTrue(said.contains("angle brackets"), said);
+        assertEquals("get_chat_log", a.exampleTool());
+    }
+
+    @Test
+    void withoutTheToolSetTheExampleFormStaysProse() {
+        TextToolCallParser.Analysis a = TextToolCallParser.analyze(SQUARE_REPLY_1029, REQUIRED);
+        assertFalse(a.broken(), a.toString());
+        assertTrue(a.calls().isEmpty());
+    }
+
+    @Test
+    void anExampleFormBlockIsLeftAlone_unlessItNamesAToolHereAndCarriesParameters() {
+        // a tool this conversation does not have
+        assertFalse(TextToolCallParser.analyze(
+                "[invoke name=\"no_such_tool\"]\n[parameter name=\"a\"]b[/parameter]\n[/invoke]", REQUIRED, TOOLS_HERE).broken());
+        // no parameter block
+        assertFalse(TextToolCallParser.analyze("[invoke name=\"get_chat_log\"]\n[/invoke]", REQUIRED, TOOLS_HERE).broken());
+        // quoted in a fenced code block
+        assertFalse(TextToolCallParser.analyze("Write it like this:\n```\n" + SQUARE_REPLY_1029 + "\n```\n", REQUIRED, TOOLS_HERE).broken());
+        // quoted in the middle of a sentence
+        assertFalse(TextToolCallParser.analyze(
+                "The example form is [invoke name=\"get_chat_log\"] with [parameter name=\"chatId\"]x[/parameter] inside.",
+                REQUIRED, TOOLS_HERE).broken());
+    }
+
+    @Test
+    void aRealCallAlongsideAnExampleFormBlockRuns_andTheExampleIsNotRepaired() {
+        String text = "Shown as an example:\n[invoke name=\"get_chat_log\"]\n[parameter name=\"chatId\"]x[/parameter]\n[/invoke]\n\n"
+                + "<invoke name=\"read\">\n<parameter name=\"path\">a.md</parameter>\n</invoke>";
+        TextToolCallParser.Analysis a = TextToolCallParser.analyze(text, REQUIRED, TOOLS_HERE);
+        assertFalse(a.broken(), a.toString());
+        assertEquals(1, a.calls().size());
+        assertEquals("read", a.calls().get(0).name());
+    }
+
+    private static final String CALL = "<invoke name=\"get_chat_log\">\n<parameter name=\"chatId\">project1/chat-01</parameter>\n"
+            + "<parameter name=\"count\">10</parameter>\n<reason>r</reason>\n</invoke>";
+
+    @Test
+    void plainTextThenACallAtTheStartOfALineRuns() {
+        for (String sep : List.of("\n\n", "\n", "\n\n  ")) {
+            TextToolCallParser.Analysis a = TextToolCallParser.analyze("確かめます。" + sep + CALL, REQUIRED, TOOLS_HERE);
+            assertEquals(1, a.calls().size(), "separator " + sep.replace("\n", "\\n"));
+            assertEquals("get_chat_log", a.calls().get(0).name());
+            assertFalse(a.broken());
+        }
+    }
+
+    @Test
+    void aCallGluedToTheEndOfAFinishedSentenceRuns() {
+        for (String glue : List.of("確かめます。", "確かめます。 ", "I will check it.", "確認します）")) {
+            TextToolCallParser.Analysis a = TextToolCallParser.analyze(glue + CALL, REQUIRED, TOOLS_HERE);
+            assertEquals(1, a.calls().size(), "glue: " + glue);
+            assertEquals("get_chat_log", a.calls().get(0).name());
+            assertTrue(a.calls().get(0).argumentsJson().contains("\"count\":\"10\""), a.calls().get(0).argumentsJson());
+            assertFalse(a.broken(), a.toString());
+        }
+        assertTrue(TextToolCallParser.looksLikeTextToolCall("確かめます。" + CALL));
+        assertEquals("確かめます。", TextToolCallParser.stripToolCallBlocks("確かめます。" + CALL));
+    }
+
+    @Test
+    void aTagQuotedInTheMiddleOfASentenceIsStillNotACall() {
+        for (String prose : List.of(
+                "A call starts with <invoke name=\"get_chat_log\"> and ends with </invoke>, as in `" + CALL + "` here.",
+                "The form: <invoke name=\"get_chat_log\"><parameter name=\"chatId\">x</parameter></invoke> is what to write.",
+                "Use <invoke name=\"get_chat_log\"> for it. Then more text follows after the tag.")) {
+            assertTrue(TextToolCallParser.analyze(prose, REQUIRED, TOOLS_HERE).calls().isEmpty(), prose);
+        }
+    }
 }
