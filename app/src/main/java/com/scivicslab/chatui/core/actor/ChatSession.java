@@ -863,6 +863,11 @@ public class ChatSession extends Interpreter {
         this.skillRegistryRef = skillRegistryRef;
     }
 
+    /** @return the project instructions this conversation sends with each turn, or {@code null} when it has none */
+    public String getProjectInstructions() {
+        return projectInstructions;
+    }
+
     /**
      * @param projectInstructions this session's project's instructions, or {@code null} for none.
      *                            Re-sent whenever the project's working directory changes, so a

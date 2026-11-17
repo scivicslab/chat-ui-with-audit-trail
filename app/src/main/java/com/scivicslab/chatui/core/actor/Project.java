@@ -67,16 +67,70 @@ public class Project {
     private Path instructionsFile;
     private String instructions;
     private String name;
+    /** The project's own session, where its name and working directory are recorded; {@code null} records nothing. */
+    private com.scivicslab.chatui.core.iolog.SessionEntries entries;
 
     /**
-     * Sets the name a person reads, or clears it when {@code newName} is null or blank.
+     * Records this project's name and working directory, from now on, to {@code entries}, the project's own session
+     * ({@code EachActorRecordsItsOwnState_261118_oo01}).
+     */
+    public void recordsTo(com.scivicslab.chatui.core.iolog.SessionEntries entries) {
+        this.entries = entries;
+    }
+
+    /**
+     * Puts back the name and the working directory the last {@code settings} entry holds, reading the directory's
+     * instructions again, and writes nothing. An entry the earlier code wrote has the same label and keys, and the
+     * organization and role edges it also carried are read by their own actors. Nothing recorded leaves the project
+     * as it is.
+     */
+    public void restore() {
+        if (entries == null) return;
+        String json = entries.latest(com.scivicslab.chatui.core.iolog.IoLogView.SETTINGS_LABEL);
+        if (json == null || json.isBlank()) return;
+        org.json.JSONObject o;
+        try {
+            o = new org.json.JSONObject(json);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "The settings entry of " + projectId + " is not JSON; left as it is", e);
+            return;
+        }
+        name = cleaned(o.isNull("name") ? null : o.optString("name", null));
+        String dir = o.isNull("workingDir") ? null : o.optString("workingDir", null);
+        if (dir != null && !dir.isBlank()) {
+            String outcome = readWorkingDir(Path.of(dir));
+            if (outcome.startsWith("error:")) LOG.warning("Restoring the working directory of " + projectId + ": " + outcome);
+        }
+    }
+
+    /**
+     * Sets the name a person reads, or clears it when {@code newName} is null or blank, and records it when it changed.
      *
      * <p>Separate from the actor's own name ({@code project1}), which stays as it is: the REST
      * paths and every conversation's name are built from it, while this one is meant to change
      * whenever the work does ({@code ProjectProperty_260929_oo01}).</p>
      */
     public void setName(String newName) {
-        name = newName == null || newName.isBlank() ? null : newName.strip();
+        String before = name;
+        name = cleaned(newName);
+        if (!java.util.Objects.equals(before, name)) record();
+    }
+
+    private static String cleaned(String newName) {
+        return newName == null || newName.isBlank() ? null : newName.strip();
+    }
+
+    /**
+     * Writes the name and the working directory as one {@code settings} entry: both in one, because the last entry is
+     * the current value, so an entry with only one of them would read back as the other cleared
+     * ({@code ProjectProperty_260929_oo01}).
+     */
+    private void record() {
+        if (entries == null) return;
+        org.json.JSONObject o = new org.json.JSONObject();
+        o.put("name", name == null ? org.json.JSONObject.NULL : name);
+        o.put("workingDir", workingDir == null ? org.json.JSONObject.NULL : workingDir.toString());
+        entries.write(com.scivicslab.chatui.core.iolog.IoLogView.SETTINGS_LABEL, o.toString());
     }
 
     /** @return the name a person reads, or {@code null} when none has been set */
@@ -90,10 +144,19 @@ public class Project {
      * or a directory with neither file, simply has no instructions — that is the normal state, not
      * an error.
      *
+     * <p>Recorded when the directory changed; reading the same directory again records nothing.</p>
+     *
      * @param dir the project's working directory, or {@code null} to clear it
      * @return a one-line account of what was loaded, or an {@code error: ...} string
      */
     public String setWorkingDir(Path dir) {
+        Path before = workingDir;
+        String outcome = readWorkingDir(dir);
+        if (!java.util.Objects.equals(before, workingDir)) record();
+        return outcome;
+    }
+
+    private String readWorkingDir(Path dir) {
         workingDir = dir;
         instructionsFile = null;
         instructions = null;

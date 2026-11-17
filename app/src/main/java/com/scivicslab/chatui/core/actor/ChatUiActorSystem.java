@@ -192,8 +192,6 @@ public class ChatUiActorSystem implements ConversationControls {
     private ActorRef<CallWatchdog> callWatchdogRef;
     /** Which conversations exist across a restart, kept in the I/O log ({@code ConversationRestoreOnRestart_260904_oo01}). */
     private ActorRef<ConversationRegistry> conversationRegistryRef;
-    /** Each project's recorded settings in the I/O log: name, working directory, organization, role edges. */
-    private ActorRef<ProjectSettings> projectSettingsRef;
     private ActorRef<SkillRegistry> skillRegistryRef;
     private ActorRef<com.scivicslab.chatui.audittrail.ActivityWatcher> activityWatcherRef;
     private FileAccessScope fileScope;
@@ -329,8 +327,6 @@ public class ChatUiActorSystem implements ConversationControls {
         // records it there (ConversationRestoreOnRestart_260904_oo01).
         conversationRegistryRef = housekeeperRef.createChild("conversationRegistry",
                 new ConversationRegistry(ioLogStore, ioLogView));
-        // Each project's recorded settings; created before any project is restored (ProjectProperty_260929_oo01).
-        projectSettingsRef = housekeeperRef.createChild("projectSettings", new ProjectSettings(ioLogStore, ioLogView));
 
         // The loader a job's workflow calls to create and remove actors, and to bring in a Turing
         // Workflow plugin (WorkflowPluginLoader_260913_oo01). Always present: creating and removing
@@ -962,11 +958,14 @@ public class ChatUiActorSystem implements ConversationControls {
      */
     private void wireProject(String projectId) {
         ActorRef<Project> ref = projects.get(projectId);
+        com.scivicslab.chatui.core.iolog.SessionEntries own =
+                com.scivicslab.chatui.core.iolog.SessionEntries.ofProject(ioLogStore, ioLogView, projectId);
         ref.tell(p -> p.bind(projectId, actorSystem, ref, SYSTEM_LOG_ACTOR, ioLogStore));
+        // The project records its own name and working directory (EachActorRecordsItsOwnState_261118_oo01).
+        ref.tell(p -> p.recordsTo(own));
         ref.tell(Project::startWatching);
         // The project's role table, its child, recording to the project's own session (EachActorRecordsItsOwnState_261118_oo01).
-        ref.createChild(rolesActorName(projectId),
-                new RoleTable(projectId, com.scivicslab.chatui.core.iolog.SessionEntries.ofProject(ioLogStore, ioLogView, projectId)));
+        ref.createChild(rolesActorName(projectId), new RoleTable(projectId, own));
     }
 
     /** Stops every project's job watch before the actor system goes away. */
@@ -1480,7 +1479,6 @@ public class ChatUiActorSystem implements ConversationControls {
             LOG.log(Level.WARNING, "Failed to set the name of " + projectId, e);
             return "error: " + e.getMessage();
         }
-        recordProjectProperties(projectId);
         String applied = getProjectName(projectId);
         return applied == null ? "ok: name cleared" : "ok: name set to " + applied;
     }
@@ -1940,66 +1938,21 @@ public class ChatUiActorSystem implements ConversationControls {
     }
 
     /**
-     * Writes the project's name and working directory to its own log session as one entry.
-     *
-     * <p>Both values in one entry, because the last entry of the session is the current value: an
-     * entry carrying only the name would read back as a project whose working directory had been
-     * cleared ({@code ProjectProperty_260929_oo01}).</p>
-     */
-    private void recordProjectProperties(String projectId) {
-        if (projectSettingsRef == null) return;
-        try {
-            ActorRef<Project> projectRef = projects.get(projectId);
-            String name = getProjectName(projectId);
-            Path dir = projectRef == null ? null : projectRef.ask(Project::getWorkingDir).get(5, TimeUnit.SECONDS);
-            // The organization and the role edges are no longer here: each records itself
-            // (EachActorRecordsItsOwnState_261118_oo01).
-            ProjectSettings.Snapshot snapshot = new ProjectSettings.Snapshot(name, dir == null ? null : dir.toString());
-            // Waited for, so the entry is in the log before the caller goes on (a restart right after finds it).
-            projectSettingsRef.tell(s -> s.record(projectId, snapshot)).get(10, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            LOG.log(Level.WARNING, "Could not record the properties of " + projectId, e);
-        }
-    }
-
-    /**
-     * Puts a project that came back from the log onto the name and working directory its last
-     * entry names. The working directory goes through {@link #setProjectWorkingDir} rather than
-     * straight onto the actor, so that the directory's instructions are read and handed to the
-     * conversations exactly as they are when a person sets it.
+     * Puts a project that came back from the log onto the name and working directory it recorded, and hands the
+     * directory's instructions to its conversations, as setting the directory does. The project reads them itself
+     * and writes nothing ({@code EachActorRecordsItsOwnState_261118_oo01}).
      */
     private void restoreProjectProperties(String projectId) {
-        if (projectSettingsRef == null) return;
-        restoringProperties = true;
+        ActorRef<Project> projectRef = projects.get(projectId);
+        if (projectRef == null) return;
         try {
-            ProjectSettings.Snapshot s = askOrDefault(projectSettingsRef, ps -> ps.read(projectId), null);
-            if (s == null) return;
-            String name = s.name();
-            if (name != null) {
-                ActorRef<Project> projectRef = projects.get(projectId);
-                if (projectRef != null) projectRef.tell(p -> p.setName(name));
-            }
-            String dir = s.workingDir();
-            if (dir != null && !dir.isBlank()) {
-                String outcome = setProjectWorkingDir(projectId, Path.of(dir));
-                if (outcome.startsWith("error:")) {
-                    LOG.warning("Restoring the working directory of " + projectId + ": " + outcome);
-                }
-            }
-            LOG.info("Restored the properties of " + projectId + ": name=" + name + ", workingDir=" + dir);
+            projectRef.tell(Project::restore).get(10, TimeUnit.SECONDS);
+            handInstructions(projectId, projectRef);
+            LOG.info("Restored the properties of " + projectId + ": name=" + getProjectName(projectId));
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Could not restore the properties of " + projectId, e);
-        } finally {
-            restoringProperties = false;
         }
     }
-
-    /**
-     * Set while {@link #restoreProjectProperties} runs, so that the {@link #setProjectWorkingDir}
-     * it calls does not write the entry it has just read back. Without it every restart appends one
-     * more entry saying what the previous one already said.
-     */
-    private boolean restoringProperties;
 
     public String setProjectWorkingDir(String projectId, Path workingDir) {
         ActorRef<Project> projectRef = projects.get(projectId);
@@ -2011,14 +1964,18 @@ public class ChatUiActorSystem implements ConversationControls {
             LOG.log(Level.WARNING, "Failed to set working directory for " + projectId, e);
             return "error: " + e.getMessage();
         }
+        handInstructions(projectId, projectRef);
+        return outcome;
+    }
+
+    /** Hands the project's instructions, as the project read them from its working directory, to its conversations. */
+    private void handInstructions(String projectId, ActorRef<Project> projectRef) {
         String instructions = readProjectInstructions(projectRef);
         String prefix = projectId + "/";
         for (Map.Entry<String, ChatSessionIIAR> entry : chatSessions.entrySet()) {
             if (!entry.getKey().startsWith(prefix)) continue;
             entry.getValue().tell(a -> ((ChatSession) a).setProjectInstructions(instructions));
         }
-        if (!restoringProperties) recordProjectProperties(projectId);
-        return outcome;
     }
 
     /**

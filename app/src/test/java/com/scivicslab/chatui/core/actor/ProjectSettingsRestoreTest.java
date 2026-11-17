@@ -12,8 +12,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * A log written by the code before the project-settings actor existed restores through it unchanged: the
- * project's name, its organization and its role edges come back.
+ * A log written by the earlier code, which kept a project's name, organization and role edges in one settings entry,
+ * restores unchanged now that the project, its organization and its role table each read their own part
+ * ({@code EachActorRecordsItsOwnState_261118_oo01}).
  */
 class ProjectSettingsRestoreTest {
 
