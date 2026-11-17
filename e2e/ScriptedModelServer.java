@@ -30,7 +30,8 @@ import java.util.regex.Pattern;
  * {@code TASK-WORK} holds chat-02's turn open (TimekeeperViewCheck).</li>
  * <li>{@code SCENARIO-G}: set superiors and role edges among chat-02..05 (one role target in project2);
  * {@code SCENARIO-G2}: move chat-05 under chat-01, give chat-02's "worker" to chat-05, and make chat-05 chat-04's
- * "tester" and chat-01's "archivist" (a role with no emoji of its own), so chat-05 plays four roles (ConversationGraphCheck).</li>
+ * "tester" and chat-01's "archivist" (a role with no emoji of its own), so chat-05 plays four roles;
+ * {@code SCENARIO-G3}: make project2/chat-01 chat-02's "translator", a role edge into another project (ConversationGraphCheck).</li>
  * <li>The end-of-turn reminder check registers a reminder only for an answer that says "I will report back".</li>
  * <li>Anything else: "OK. I will report back in 12 minutes."</li>
  * </ul>
@@ -129,6 +130,16 @@ public class ScriptedModelServer {
             </invoke>
             </function_calls>""";
 
+    static final String GRAPH_G3 = """
+            <function_calls>
+            <invoke name="set_collaborator">
+            <parameter name="chatId">02</parameter>
+            <parameter name="role">translator</parameter>
+            <parameter name="collaboratorChatId">project2/01</parameter>
+            <reason>a role played by a conversation of another project</reason>
+            </invoke>
+            </function_calls>""";
+
     static final String ASK_03 = """
             <function_calls>
             <invoke name="ask_chat">
@@ -170,6 +181,7 @@ public class ScriptedModelServer {
         }
         if (last.contains("HELLO-ONLY")) return "Hello.";
         if (last.contains("SCENARIO-A")) return CALLS_A;
+        if (last.contains("SCENARIO-G3")) return GRAPH_G3;
         if (last.contains("SCENARIO-G2")) return GRAPH_G2;
         if (last.contains("SCENARIO-G")) return GRAPH_G;
         if (last.contains("SCENARIO-R")) return ASK_03;
