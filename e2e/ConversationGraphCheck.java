@@ -37,6 +37,50 @@ public class ConversationGraphCheck {
         return http.send(b.build(), HttpResponse.BodyHandlers.ofString()).body();
     }
 
+    /** A project workflow that puts chat-04 on a model and an agent loop, as build-team does with the chats actor. */
+    static final String SET_MODEL_AND_LOOP = """
+            name: e2e-set-model-and-loop
+            steps:
+              - states: ["0", "1"]
+                actions:
+                  - actor: chats
+                    method: setModel
+                    arguments: {chat: project1/chat-04, model: model-from-workflow}
+              - states: ["1", "2"]
+                actions:
+                  - actor: chats
+                    method: setAgentLoop
+                    arguments: {chat: project1/chat-04, loop: plain-text-loop.yaml}
+              - states: ["2", "end"]
+                actions:
+                  - {actor: this, method: finish, arguments: ["done"], execution: direct}
+            """;
+
+    /** The working directory project1 is given, where its workflows are saved. */
+    static final String WORKING_DIR = "/tmp/cg-e2e-wd";
+
+    static String restText(String method, String path, String body) throws Exception {
+        HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(base + path)).header("Content-Type", "text/plain");
+        b = b.method(method, HttpRequest.BodyPublishers.ofString(body));
+        return http.send(b.build(), HttpResponse.BodyHandlers.ofString()).body();
+    }
+
+    /** Runs the project workflow above and waits for it to end; returns the job's last state. */
+    static String runSetModelAndLoop() throws Exception {
+        java.nio.file.Files.createDirectories(Path.of(WORKING_DIR));
+        restText("POST", "/api/projects/project1/working-dir", WORKING_DIR);
+        restText("PUT", "/api/projects/project1/workflows/e2e-set-model-and-loop", SET_MODEL_AND_LOOP);
+        String job = rest("POST", "/api/projects/project1/jobs", "{\"workflow\":\"e2e-set-model-and-loop\"}");
+        String jobId = job.replaceAll(".*\"jobId\"\\s*:\\s*\"([^\"]+)\".*", "$1");
+        String state = job;
+        for (int i = 0; i < 120; i++) {
+            state = rest("GET", "/api/projects/project1/jobs/" + jobId, null);
+            if (state.contains("FINISHED") || state.contains("FAILED") || state.contains("STOPPED")) break;
+            Thread.sleep(500);
+        }
+        return state;
+    }
+
     static void check(boolean ok, String what) {
         System.out.println((ok ? "PASS  " : "FAIL  ") + what);
         if (!ok) failures++;
@@ -169,6 +213,15 @@ public class ConversationGraphCheck {
                     "a role with no emoji of its own takes the fallback, and the legend says so: " + legend(page));
             page.screenshot(new Page.ScreenshotOptions().setPath(Path.of("/tmp/uitest/graph-2-changed.png")));
 
+            // A project workflow puts chat-04 on a model and an agent loop; the tooltip follows.
+            String jobEnd = runSetModelAndLoop();
+            check(jobEnd.contains("FINISHED"), "the project workflow that sets chat-04's model and loop finished: "
+                    + jobEnd.substring(0, Math.min(160, jobEnd.length())));
+            page.waitForFunction("() => { const n = document.querySelector(\"#conv-graph .cg-node[data-chat='04']\");"
+                    + " return n && (n.getAttribute('data-tip') || '').includes(': model-from-workflow'); }",
+                    null, new Page.WaitForFunctionOptions().setTimeout(15_000));
+            check(true, "chat-04's tooltip names the model the workflow set: " + tooltip(page, "04").replace('\n', '|'));
+
             // What each conversation runs on, in its tooltip, as the REST graph read it from the conversation.
             String g2 = rest("GET", "/api/projects/project1/graph", null);
             String provider = g2.replaceAll("(?s).*\"chatId\":\"03\",\"name\":null,\"liaison\":false,\"provider\":\"([^\"]*)\".*", "$1");
@@ -255,6 +308,14 @@ public class ConversationGraphCheck {
                     + tooltip(page, "05").replace('\n', '|'));
             check("01".equals(attr(page, "#conv-graph path.cg-sup[data-to='05']", "data-from")),
                     "the org chart came back too: chat-05 under chat-01");
+            check(tooltip(page, "04").contains(": model-from-workflow"),
+                    "the model a project workflow set on chat-04 came back: " + tooltip(page, "04").replace('\n', '|'));
+            String loops = rest("GET", "/api/projects/project1/chats/04/agent-loops", null);
+            check(loops.matches("(?s).*\\{\"file\":\"plain-text-loop\\.yaml\"[^}]*\"current\":true.*"),
+                    "the agent loop a project workflow set on chat-04 came back as its current loop");
+            String project = rest("GET", "/api/projects/project1", null);
+            check(project.contains("\"workingDir\":\"" + WORKING_DIR + "\""),
+                    "project1's working directory came back through its settings record: " + project.substring(0, Math.min(200, project.length())));
             page.screenshot(new Page.ScreenshotOptions().setPath(Path.of("/tmp/uitest/graph-3-after-restart.png")));
             browser.close();
         }
