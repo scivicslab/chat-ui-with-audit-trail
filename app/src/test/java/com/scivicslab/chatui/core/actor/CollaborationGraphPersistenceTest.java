@@ -93,4 +93,21 @@ class CollaborationGraphPersistenceTest {
             assertEquals("project1/chat-02", collaborator(second, "project1/chat-01", "worker"));
         }
     }
+
+    @Test
+    void anEdgeToAConversationThatDidNotComeBackIsDroppedAtStartUp(@TempDir Path dir) throws Exception {
+        try (SystemsOnOneLog systems = new SystemsOnOneLog(dir.resolve("roles-missing"))) {
+            ChatUiActorSystem first = systems.start();
+            first.createChat("project1");
+            first.createChat("project1");
+            recorded(systems, "project1", "01", "02");   // chat-03 has no session, so it does not come back
+            assertTrue(first.setCollaborator("project1/chat-01", "01", "worker", "03").startsWith("ok"));
+            assertTrue(first.setCollaborator("project1/chat-01", "01", "reviewer", "02").startsWith("ok"));
+
+            ChatUiActorSystem second = systems.start();
+            assertNull(second.getChatSession("project1", "03"), "chat-03 did not come back");
+            assertNull(collaborator(second, "project1/chat-01", "worker"), "so the edge naming it is gone");
+            assertEquals("project1/chat-02", collaborator(second, "project1/chat-01", "reviewer"));
+        }
+    }
 }

@@ -92,6 +92,17 @@ public class CollaborationGraph {
         return forget(name -> name.startsWith(prefix));
     }
 
+    /**
+     * Forgets every assignment whose source or target is not among {@code existing}: after a restart, the
+     * conversations that did not come back.
+     *
+     * @param existing the qualified names of the conversations that exist now
+     * @return the projects whose sources lost an assignment
+     */
+    public Set<String> forgetMissing(Set<String> existing) {
+        return forget(name -> !existing.contains(name));
+    }
+
     private Set<String> forget(Predicate<String> gone) {
         Set<String> touched = new TreeSet<>();
         for (Iterator<Map.Entry<String, Map<String, String>>> it = edges.entrySet().iterator(); it.hasNext(); ) {

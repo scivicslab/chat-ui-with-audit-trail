@@ -168,6 +168,7 @@ public class ScriptedModelServer {
             Thread.sleep(3_600_000);   // the long turn
             return "finished";
         }
+        if (last.contains("HELLO-ONLY")) return "Hello.";
         if (last.contains("SCENARIO-A")) return CALLS_A;
         if (last.contains("SCENARIO-G2")) return GRAPH_G2;
         if (last.contains("SCENARIO-G")) return GRAPH_G;

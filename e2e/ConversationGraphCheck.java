@@ -86,7 +86,13 @@ public class ConversationGraphCheck {
 
     public static void main(String[] args) throws Exception {
         if (args.length > 0) base = args[0];
+        if (args.length > 1 && "after-restart".equals(args[1])) {
+            afterRestart();
+            return;
+        }
         for (int i = 0; i < 4; i++) rest("POST", "/api/projects/project1/chats", null);
+        // One turn each, so that each has a session in the log and comes back after a restart (after-restart mode).
+        for (String c : List.of("02", "03", "04", "05")) turn(c, "HELLO-ONLY say hello");
         turn("01", "SCENARIO-G build the organization");
         String g = rest("GET", "/api/projects/project1/graph", null);
         System.out.println("graph: " + g);
@@ -179,6 +185,46 @@ public class ConversationGraphCheck {
             check(page.isVisible("#actors-tree") && !page.isVisible("#conv-graph") && !page.isVisible("#graph-project")
                             && "Actors".equals(page.textContent("#left-dock .dock-title").strip()),
                     "Actor Tree brings the tree back");
+            browser.close();
+        }
+        System.out.println(failures == 0 ? "ALL PASSED" : failures + " FAILED");
+        System.exit(failures == 0 ? 0 : 1);
+    }
+
+    /**
+     * Run against the same instance after a restart on the same data directory: the roles the normal run left
+     * (after SCENARIO-G2) are still on the nodes, since role edges are saved with the project's settings
+     * (CollaborationGraph_260828_oo01). The edge to project2/chat-05, which never existed, is dropped at start-up.
+     * Nothing is set up here.
+     */
+    static void afterRestart() throws Exception {
+        String g = rest("GET", "/api/projects/project1/graph", null);
+        System.out.println("graph after restart: " + g);
+        check(g.contains("\"role\":\"worker\",\"to\":\"05\"") && g.contains("\"role\":\"archivist\",\"to\":\"05\"")
+                        && g.contains("\"role\":\"tester\",\"to\":\"05\"") && g.contains("\"role\":\"reviewer\",\"to\":\"04\""),
+                "the REST graph still has the role edges after the restart");
+        check(!g.contains("project2"), "the edge to project2/chat-05, a conversation that never existed, was dropped at start-up");
+        try (Playwright pw = Playwright.create()) {
+            Browser browser = pw.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
+            BrowserContext ctx = browser.newContext(new Browser.NewContextOptions().setViewportSize(1400, 900));
+            ctx.addInitScript("localStorage.setItem('chat-ui-last-project','project1');"
+                    + "localStorage.setItem('chat-ui-last-chat','01');");
+            Page page = ctx.newPage();
+            page.onPageError(e -> check(false, "page error: " + e));
+            page.navigate(base + "/");
+            page.waitForLoadState(LoadState.DOMCONTENTLOADED);
+            page.waitForSelector("#actors-tree .actor-name");
+            chooseView(page, "graph");
+            page.waitForSelector("#conv-graph svg .cg-node");
+            check("🔍".equals(prefix(page, "04")) && "🏷️🤝🧪…".equals(prefix(page, "05"))
+                            && page.querySelectorAll("#conv-graph .cg-node.cg-external").isEmpty() && "".equals(prefix(page, "03")),
+                    "after the restart the nodes carry the same roles: 04=" + prefix(page, "04") + " 05=" + prefix(page, "05")
+                            + " project2/05=" + prefix(page, "project2/05"));
+            check(tooltip(page, "05").contains("worker for chat-02"), "and chat-05 is still chat-02's worker: "
+                    + tooltip(page, "05").replace('\n', '|'));
+            check("01".equals(attr(page, "#conv-graph path.cg-sup[data-to='05']", "data-from")),
+                    "the org chart came back too: chat-05 under chat-01");
+            page.screenshot(new Page.ScreenshotOptions().setPath(Path.of("/tmp/uitest/graph-3-after-restart.png")));
             browser.close();
         }
         System.out.println(failures == 0 ? "ALL PASSED" : failures + " FAILED");

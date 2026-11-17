@@ -402,6 +402,14 @@ public class ChatUiActorSystem implements ConversationControls {
         for (String projectId : List.copyOf(projects.keySet())) {
             restoreProjectProperties(projectId);
         }
+        // A role edge saved for a conversation that did not come back would name nobody; drop it once every
+        // project is back, since an edge may point into another project (CollaborationGraph_260828_oo01).
+        if (collaborationGraphRef != null) {
+            java.util.Set<String> existing = new java.util.HashSet<>(chats.keySet());
+            java.util.Set<String> pruned = askOrDefault(collaborationGraphRef, g -> g.forgetMissing(existing),
+                    java.util.Set.<String>of());
+            if (!pruned.isEmpty()) LOG.info("Role edges dropped for conversations that did not come back, in " + pruned);
+        }
         LOG.info("Actor system initialised with " + projects.size() + " project(s), "
                 + chats.size() + " conversation(s)");
 
