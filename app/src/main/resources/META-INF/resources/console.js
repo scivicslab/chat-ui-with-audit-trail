@@ -2276,14 +2276,25 @@
     }
 
     // ── Left dock, Graph view (ConversationGraphInTheLeftPane_261117_oo01) ─────────────────────────
-    // One project's conversations, with superior -> subordinate edges from its Organization actor and role
-    // edges from the CollaborationGraph actor, both read by GET api/projects/{p}/graph on every call. The dock
-    // is narrow, so the conversations are rows: indented by depth in the org chart, superior edges as elbows
-    // on the left, and the roles a conversation plays as emoji in front of its label.
+    // Every project of the instance in one tree, read by GET api/graph on every call: each project a top-level row
+    // with its name (the id beside it, lighter), and under it its conversations with superior -> subordinate edges
+    // from its Organization actor and the roles they play from the CollaborationGraph actor. The dock is narrow,
+    // so the conversations are rows: indented by depth in the org chart, superior edges as elbows on the left, and
+    // the roles a conversation plays as emoji in front of its label. A project row folds and unfolds its
+    // conversations; which are folded is remembered like the view choice.
     var LEFT_VIEW_KEY = "chat-ui-left-view";
     var leftView = localStorage.getItem(LEFT_VIEW_KEY) === "graph" ? "graph" : "tree";
-    var graphProjectChosen = null;     // a project picked in the select; otherwise the active chat's project
+    var GRAPH_COLLAPSED_KEY = "chat-ui-graph-collapsed";
+    var graphCollapsed = (function () {
+        try {
+            var saved = JSON.parse(localStorage.getItem(GRAPH_COLLAPSED_KEY) || "[]");
+            return new Set(Array.isArray(saved) ? saved : []);
+        } catch (e) {
+            return new Set();
+        }
+    })();
     var graphLastSig = null;           // what was last drawn, so an unchanged graph is not redrawn
+    var graphLastData = null;          // the last answer, to redraw at once when a project is folded or unfolded
     var SVG_NS = "http://www.w3.org/2000/svg";
 
     function svgEl(tag, attrs, parent) {
@@ -2293,45 +2304,20 @@
         return e;
     }
 
-    // The projects the actor tree last showed, for the select.
-    function graphProjects() {
-        var out = [];
-        (function walk(n) {
-            if (!n) return;
-            if (n.type === "Project") out.push(n.name);
-            (n.children || []).forEach(walk);
-        })(lastActorTree);
-        return out.sort();
-    }
-
-    function graphProjectId() {
-        if (graphProjectChosen) return graphProjectChosen;
-        var c = (typeof window.chatUiGetActiveChat === "function") ? window.chatUiGetActiveChat() : null;
-        return (c && c.projectId) || perspectiveProjectId || DEFAULT_PROJECT_ID;
-    }
-
-    function fillGraphProjectSelect() {
-        var sel = document.getElementById("graph-project");
-        if (!sel) return;
-        var ids = graphProjects();
-        var current = graphProjectId();
-        if (ids.indexOf(current) < 0) ids.push(current);
-        var want = ids.join("\n");
-        if (sel.getAttribute("data-ids") !== want) {
-            sel.textContent = "";
-            ids.forEach(function (id) {
-                var o = document.createElement("option");
-                o.value = id;
-                o.textContent = id;
-                sel.appendChild(o);
-            });
-            sel.setAttribute("data-ids", want);
+    function toggleGraphProject(projectId) {
+        if (graphCollapsed.has(projectId)) graphCollapsed.delete(projectId);
+        else graphCollapsed.add(projectId);
+        localStorage.setItem(GRAPH_COLLAPSED_KEY, JSON.stringify(Array.from(graphCollapsed)));
+        var box = document.getElementById("conv-graph");
+        if (box && graphLastData) {
+            renderGraph(graphLastData, box);
+            graphLastSig = null;   // the next refresh draws again from the server's answer
         }
-        sel.value = current;
     }
 
-    // The rows: roots first (the liaison first among them), each followed by its subordinates, depth first.
-    function graphRows(g) {
+    // The rows of one project: roots first (the liaison first among them), each followed by its subordinates,
+    // depth first. Keys are "<project>/<id>", so the same id in two projects is two rows.
+    function projectRows(g, depth0) {
         var kids = {}, hasSuperior = {};
         (g.superiorEdges || []).forEach(function (e) {
             (kids[e.from] = kids[e.from] || []).push(e.to);
@@ -2346,19 +2332,36 @@
         function visit(id, depth) {
             if (seen[id]) return;
             seen[id] = true;
-            rows.push({ id: id, node: byId[id], depth: depth, project: g.projectId });
+            rows.push({ kind: "chat", key: g.projectId + "/" + id, id: id, node: byId[id], depth: depth, project: g.projectId });
             (kids[id] || []).slice().sort().forEach(function (k) { visit(k, depth + 1); });
         }
-        roots.forEach(function (r) { visit(r, 0); });
+        roots.forEach(function (r) { visit(r, depth0); });
         // A cycle in the table would leave nodes unvisited; they are drawn as roots rather than lost.
-        (g.nodes || []).forEach(function (n) { visit(n.chatId, 0); });
-        // Role targets in another project get rows of their own at the bottom.
-        (g.roleEdges || []).forEach(function (e) {
-            var key = e.toProject + "/" + e.to;
-            if (e.toProject !== g.projectId && !seen[key]) {
-                seen[key] = true;
-                rows.push({ id: key, node: null, depth: 0, project: e.toProject, external: true, chatId: e.to });
-            }
+        (g.nodes || []).forEach(function (n) { visit(n.chatId, depth0); });
+        return rows;
+    }
+
+    // Every row of the tree: each project's row, then (unless folded) its conversations. A role target that is
+    // not a conversation of any project here (it lives on another chat-ui instance, or is gone) gets a placeholder
+    // row at the bottom.
+    function graphRowsAll(all) {
+        var rows = [], present = {};
+        (all.projects || []).forEach(function (g) {
+            (g.nodes || []).forEach(function (n) { present[g.projectId + "/" + n.chatId] = true; });
+        });
+        (all.projects || []).forEach(function (g) {
+            rows.push({ kind: "project", key: "project:" + g.projectId, project: g.projectId, g: g, depth: 0 });
+            if (!graphCollapsed.has(g.projectId)) rows = rows.concat(projectRows(g, 1));
+        });
+        var placed = {};
+        (all.projects || []).forEach(function (g) {
+            (g.roleEdges || []).forEach(function (e) {
+                var key = e.toProject + "/" + e.to;
+                if (!present[key] && !placed[key]) {
+                    placed[key] = true;
+                    rows.push({ kind: "chat", key: key, id: e.to, node: null, depth: 0, project: e.toProject, external: true });
+                }
+            });
         });
         return rows;
     }
@@ -2379,11 +2382,17 @@
 
     // Who serves whom: for each node key (a bare id in the project, "project/id" outside it), the roles it plays,
     // each with the conversation it plays it for. Sorted by role, then by that conversation.
-    function rolesPlayed(g) {
+    // Who serves whom across all projects: for each row key ("<project>/<id>"), the roles it plays, each with the
+    // conversation it plays it for, named relative to the target ("chat-02" in the same project, else
+    // "project2/chat-02"). Sorted by role, then by that conversation.
+    function rolesPlayedAll(all) {
         var by = {};
-        (g.roleEdges || []).forEach(function (e) {
-            var key = e.toProject === g.projectId ? e.to : e.toProject + "/" + e.to;
-            (by[key] = by[key] || []).push({ role: e.role, forChat: e.from });
+        (all.projects || []).forEach(function (g) {
+            (g.roleEdges || []).forEach(function (e) {
+                var key = e.toProject + "/" + e.to;
+                var forChat = e.toProject === g.projectId ? "chat-" + e.from : g.projectId + "/chat-" + e.from;
+                (by[key] = by[key] || []).push({ role: e.role, forChat: forChat });
+            });
         });
         Object.keys(by).forEach(function (k) {
             by[k].sort(function (a, b) {
@@ -2423,45 +2432,44 @@
         if (el) el.style.display = "none";
     }
 
-    function renderGraph(g, box) {
+    function renderGraph(all, box) {
         hideGraphTip();   // the node under the pointer may be redrawn away
         box.textContent = "";
-        var rows = graphRows(g);
-        if (!rows.length) {
+        var rows = graphRowsAll(all);
+        if (!(all.projects || []).length) {
             var none = document.createElement("div");
             none.className = "cg-note";
-            none.textContent = "No conversations in " + g.projectId + ".";
+            none.textContent = "No projects.";
             box.appendChild(none);
             return;
         }
-        var roles = rolesPlayed(g);
+        var roles = rolesPlayedAll(all);
         var W = Math.max(220, box.clientWidth - 12), ROW = 26;
 
-        // The legend: the tree line, then each emoji in use with its role name, as many to a line as fit.
+        // The legend: the tree line, then each emoji in use with its role name, in two columns.
         var inUse = {};
-        (g.roleEdges || []).forEach(function (e) {
-            var em = roleEmoji(e.role);
-            (inUse[em] = inUse[em] || []);
-            if (inUse[em].indexOf(e.role) < 0) inUse[em].push(e.role);
+        (all.projects || []).forEach(function (g) {
+            (g.roleEdges || []).forEach(function (e) {
+                var em = roleEmoji(e.role);
+                inUse[em] = inUse[em] || [];
+                if (inUse[em].indexOf(e.role) < 0) inUse[em].push(e.role);
+            });
         });
         var legendItems = Object.keys(inUse).sort(function (a, b) {
             return a === ROLE_EMOJI_FALLBACK ? 1 : b === ROLE_EMOJI_FALLBACK ? -1 : (inUse[a][0] < inUse[b][0] ? -1 : 1);
         }).map(function (em) { return { emoji: em, names: inUse[em].sort().join(", ") }; });
-        // Two columns of fixed width, so the entries line up whatever the emoji's width.
         var COL = Math.floor((W - 8) / 2), legendLines = [];
         for (var li0 = 0; li0 < legendItems.length; li0 += 2) legendLines.push(legendItems.slice(li0, li0 + 2));
         var legendH = 18 + Math.max(1, legendLines.length) * 15;
         var TOP = legendH + 14;
         var H = TOP + rows.length * ROW + 10;
         var svg = svgEl("svg", { width: W, height: H, viewBox: "0 0 " + W + " " + H, role: "img",
-            "aria-label": "Conversations of " + g.projectId + ": superior to subordinate, and the roles they play" }, box);
+            "aria-label": "Every project's conversations: superior to subordinate, and the roles they play" }, box);
 
         var legend = svgEl("g", { "class": "cg-legend" }, svg);
         svgEl("path", { d: "M4 10 H24", "class": "cg-sup" }, legend);
         svgEl("text", { x: 28, y: 13 }, legend).textContent = "superior → subordinate";
-        if (!legendItems.length) {
-            svgEl("text", { x: 4, y: 28 }, legend).textContent = "no roles set (set_collaborator)";
-        }
+        if (!legendItems.length) svgEl("text", { x: 4, y: 28 }, legend).textContent = "no roles set (set_collaborator)";
         legendLines.forEach(function (items, li) {
             var y = 28 + li * 15;
             items.forEach(function (it, ci) {
@@ -2477,24 +2485,41 @@
 
         var pos = {};
         rows.forEach(function (r, i) {
-            pos[r.id] = { x: 10 + r.depth * 14, y: TOP + i * ROW + ROW / 2, row: i };
+            pos[r.key] = { x: 10 + r.depth * 14, y: TOP + i * ROW + ROW / 2, row: i };
         });
 
-        // Superior edges: an elbow from the superior's dot down and across to the subordinate's.
-        (g.superiorEdges || []).forEach(function (e) {
-            var a = pos[e.from], b = pos[e.to];
-            if (!a || !b) return;
-            svgEl("path", { d: "M" + a.x + " " + (a.y + 6) + " V" + b.y + " H" + (b.x - 6), "class": "cg-sup",
-                "data-from": e.from, "data-to": e.to }, svg).appendChild(svgEl("title", {})).textContent =
-                "chat-" + e.from + " is the superior of chat-" + e.to;
+        // Superior edges, inside each unfolded project: an elbow from the superior's dot to the subordinate's.
+        (all.projects || []).forEach(function (g) {
+            if (graphCollapsed.has(g.projectId)) return;
+            (g.superiorEdges || []).forEach(function (e) {
+                var a = pos[g.projectId + "/" + e.from], b = pos[g.projectId + "/" + e.to];
+                if (!a || !b) return;
+                svgEl("path", { d: "M" + a.x + " " + (a.y + 6) + " V" + b.y + " H" + (b.x - 6), "class": "cg-sup",
+                    "data-project": g.projectId, "data-from": e.from, "data-to": e.to }, svg)
+                    .appendChild(svgEl("title", {})).textContent = "chat-" + e.from + " is the superior of chat-" + e.to;
+            });
         });
 
-        // Rows: the dot, the role emoji, chat-NN and the name.
         rows.forEach(function (r) {
-            var p = pos[r.id];
-            var played = roles[r.id] || [];
+            var p = pos[r.key];
+            if (r.kind === "project") {
+                // The project's row: a fold mark, its name, and its id lighter beside it (the id alone when unnamed).
+                var folded = graphCollapsed.has(r.project);
+                var pg = svgEl("g", { "class": "cg-project" + (folded ? " cg-folded" : ""), "data-project": r.project,
+                    "aria-expanded": folded ? "false" : "true" }, svg);
+                svgEl("text", { x: p.x - 4, y: p.y + 4, "class": "cg-fold" }, pg).textContent = folded ? "▸" : "▾";
+                var pl = svgEl("text", { x: p.x + 10, y: p.y + 4 }, pg);
+                var name = r.g.name;
+                svgEl("tspan", { "class": "cg-project-name" }, pl).textContent = name || r.project;
+                if (name) svgEl("tspan", { "class": "cg-project-id" }, pl).textContent = "  " + r.project;
+                svgEl("title", {}, pg).textContent = (name ? name + " (" + r.project + ")" : r.project)
+                    + " — " + (r.g.nodes || []).length + " conversation(s); click to " + (folded ? "unfold" : "fold");
+                pg.addEventListener("click", function () { toggleGraphProject(r.project); });
+                return;
+            }
+            var played = roles[r.key] || [];
             var cls = "cg-node" + (r.node && r.node.liaison ? " cg-liaison" : "") + (r.external ? " cg-external" : " cg-link");
-            var gEl = svgEl("g", { "class": cls, "data-chat": r.id,
+            var gEl = svgEl("g", { "class": cls, "data-chat": r.key,
                 "data-roles": played.map(function (x) { return x.role + ":" + x.forChat; }).join(",") }, svg);
             svgEl("circle", { cx: p.x, cy: p.y, r: 5 }, gEl);
             var label = svgEl("text", { x: p.x + 10, y: p.y + 4 }, gEl);
@@ -2514,12 +2539,12 @@
                 idX = p.x + 10 + prefixPx;
                 prefixLen = Math.ceil(prefixPx / 7.2);
             }
-            var idText = r.external ? r.project + "/chat-" + r.chatId : "chat-" + r.id;
+            var idText = r.external ? r.project + "/chat-" + r.id : "chat-" + r.id;
             var idAttrs = { "class": "cg-id" };
             if (idX !== null) idAttrs.x = idX;
             svgEl("tspan", idAttrs, label).textContent = idText;
             var room = Math.floor((W - 8 - (p.x + 10)) / 7.2) - idText.length - prefixLen;
-            var extra = r.external ? " (other project)" : ((r.node && r.node.name) ? " " + r.node.name : "");
+            var extra = r.external ? " (not on this instance)" : ((r.node && r.node.name) ? " " + r.node.name : "");
             if (extra && room > 2) {
                 svgEl("tspan", { "class": "cg-name" }, label).textContent =
                     extra.length > room ? extra.substring(0, room - 1) + "…" : extra;
@@ -2527,22 +2552,22 @@
             if (r.node && r.node.liaison) {
                 svgEl("text", { x: p.x + 10, y: p.y - 7, "class": "cg-tag" }, gEl).textContent = "liaison";
             }
-            var tip = idText + (r.node && r.node.name ? " — " + r.node.name : "")
-                + (r.node && r.node.liaison ? " (liaison)" : "") + (r.external ? " (other project)" : "");
-            // What it runs on, as the server read it from the conversation for this refresh. A conversation in
-            // another project, or one whose provider could not be read, is not looked up: "model unknown".
+            var tip = (r.external ? idText : r.project + "/" + idText) + (r.node && r.node.name ? " — " + r.node.name : "")
+                + (r.node && r.node.liaison ? " (liaison)" : "") + (r.external ? " (not on this instance)" : "");
+            // What it runs on, as the server read it from the conversation for this refresh. A conversation not on
+            // this instance, or one whose provider could not be read, is not looked up: "model unknown".
             tip += "\n" + (r.node && r.node.provider
                 ? r.node.provider + ": " + (r.node.model || "(no model chosen yet)")
                 : "model unknown");
             if (played.length) {
-                tip += "\n" + played.map(function (x) { return roleEmoji(x.role) + " " + x.role + " for chat-" + x.forChat; }).join("\n");
+                tip += "\n" + played.map(function (x) { return roleEmoji(x.role) + " " + x.role + " for " + x.forChat; }).join("\n");
             }
             gEl.setAttribute("data-tip", tip);
             gEl.addEventListener("mouseenter", function (ev) { showGraphTip(tip, ev); });
             gEl.addEventListener("mousemove", function (ev) { showGraphTip(tip, ev); });
             gEl.addEventListener("mouseleave", hideGraphTip);
             if (!r.external) {
-                gEl.addEventListener("click", function () { showConversation(g.projectId, r.id); });
+                gEl.addEventListener("click", function () { showConversation(r.project, r.id); });
             }
         });
     }
@@ -2551,24 +2576,21 @@
     function refreshGraph(force) {
         var box = document.getElementById("conv-graph");
         if (!box || graphRefreshing) return Promise.resolve();
-        fillGraphProjectSelect();
-        var projectId = graphProjectId();
         var status = document.getElementById("actors-status");
         graphRefreshing = true;
-        return fetch("api/projects/" + encodeURIComponent(projectId) + "/graph")
+        return fetch("api/graph")
             .then(function (r) {
                 if (!r.ok) throw new Error("HTTP " + r.status);
                 return r.text();
             })
             .then(function (text) {
-                var sig = projectId + "|" + box.clientWidth + "|" + text;
-                if (status) {
-                    var g0 = JSON.parse(text);
-                    status.textContent = (g0.nodes || []).length + " chat(s)";
-                }
+                var all = JSON.parse(text);
+                if (status) status.textContent = (all.projects || []).length + " project(s)";
+                var sig = box.clientWidth + "|" + text;
                 if (!force && sig === graphLastSig) return;
                 graphLastSig = sig;
-                renderGraph(JSON.parse(text), box);
+                graphLastData = all;
+                renderGraph(all, box);
             })
             .catch(function (err) { if (status) status.textContent = "error: " + err.message; })
             .then(function () { graphRefreshing = false; });
@@ -2578,35 +2600,29 @@
     function applyLeftView() {
         var tree = document.getElementById("actors-tree");
         var graph = document.getElementById("conv-graph");
-        var sel = document.getElementById("graph-project");
         var view = document.getElementById("left-view-select");
         var isGraph = leftView === "graph";
         if (tree) tree.hidden = isGraph;
         if (graph) graph.hidden = !isGraph;
-        if (sel) sel.hidden = !isGraph;
         if (view) view.value = leftView;
         var title = document.querySelector("#left-dock .dock-title");
         if (title) title.textContent = isGraph ? "Graph" : "Actors";
         localStorage.setItem(LEFT_VIEW_KEY, leftView);
     }
 
-    // What Refresh and Auto refresh: the view shown. The tree is read in the graph view too, since the
-    // project select lists the projects it holds.
+    // What Refresh and Auto refresh: the view shown.
     function refreshLeftDock() {
-        if (leftView !== "graph") return refreshActors();
-        return refreshActors().then(function () { return refreshGraph(false); });
+        return leftView === "graph" ? refreshGraph(false) : refreshActors();
     }
 
     function initLeftViews() {
         var view = document.getElementById("left-view-select");
-        var sel = document.getElementById("graph-project");
         if (view) view.addEventListener("change", function () {
             leftView = view.value === "graph" ? "graph" : "tree";
             applyLeftView();
             graphLastSig = null;
             refreshLeftDock();
         });
-        if (sel) sel.addEventListener("change", function () { graphProjectChosen = sel.value; graphLastSig = null; refreshGraph(true); });
         applyLeftView();
         if (leftView === "graph") refreshLeftDock();
     }

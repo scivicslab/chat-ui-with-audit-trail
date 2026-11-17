@@ -83,6 +83,30 @@ class ConversationGraphEndpointTest {
     }
 
     @Test
+    void everyProjectComesInOneCallWithItsNameAndACrossProjectEdge() {
+        ChatUiActorSystem system = StartedSystem.start();
+        String second = system.createProject();
+        system.createChat("project1");
+        assertTrue(system.setProjectName("project1", "First project").startsWith("ok"));
+        assertTrue(system.setProjectName(second, "Second project").startsWith("ok"));
+        assertTrue(system.setCollaborator("project1/chat-01", "02", "auditor", second + "/01").startsWith("ok"));
+        ConversationGraphResource r = new ConversationGraphResource();
+        r.actorSystem = system;
+
+        List<ConversationGraph> all = r.all().projects();
+        assertEquals(List.of("project1", second), all.stream().map(ConversationGraph::projectId).toList(),
+                "every project, in the order of their numbers");
+        assertEquals("First project", all.get(0).name());
+        assertEquals("Second project", all.get(1).name());
+        assertEquals(List.of(new ConversationGraph.RoleEdge("02", "auditor", "01", second)), all.get(0).roleEdges(),
+                "the edge into the other project names its project");
+
+        // Read from the actors on each call: a rename shows on the next one.
+        assertTrue(system.setProjectName(second, "Renamed").startsWith("ok"));
+        assertEquals("Renamed", r.all().projects().get(1).name());
+    }
+
+    @Test
     void anUnknownProjectIs404() {
         ChatUiActorSystem system = StartedSystem.start();
         assertEquals(404, resource(system).graph("project99").getStatus());

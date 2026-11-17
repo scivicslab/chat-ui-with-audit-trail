@@ -64,7 +64,7 @@ class ProjectPropertyChatLinkTest {
                 "the tree's click");
         assertTrue(functionBody(js, "projectPropListChats").contains("showConversation(projectId, chatId)"),
                 "the Project Property click");
-        assertTrue(functionBody(js, "renderGraph").contains("showConversation(g.projectId, r.id)"),
+        assertTrue(functionBody(js, "renderGraph").contains("showConversation(r.project, r.id)"),
                 "the graph node's click");
     }
 

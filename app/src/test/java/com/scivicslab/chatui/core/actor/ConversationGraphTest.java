@@ -33,7 +33,7 @@ class ConversationGraphTest {
 
     @Test
     void nodesCarryTheirNameAndTheLiaison() {
-        ConversationGraph graph = ConversationGraph.of("project1", List.of("02", "01", "03"),
+        ConversationGraph graph = ConversationGraph.of("project1", null, List.of("02", "01", "03"),
                 Map.of("01", "liaison desk"), Map.of(), "01", List.of(), Map.of());
         assertEquals("project1", graph.projectId());
         assertEquals("01", graph.liaison());
@@ -45,7 +45,7 @@ class ConversationGraphTest {
 
     @Test
     void superiorEdgesGoFromTheSuperiorToTheSubordinateAndOnlyBetweenNodes() {
-        ConversationGraph graph = ConversationGraph.of("project1", List.of("01", "02", "03"), Map.of(),
+        ConversationGraph graph = ConversationGraph.of("project1", null, List.of("01", "02", "03"), Map.of(),
                 Map.of("02", "01", "03", "02", "09", "01", "03x", "99"), "01", List.of(), Map.of());
         assertEquals(List.of(
                 new ConversationGraph.SuperiorEdge("01", "02"),
@@ -60,7 +60,7 @@ class ConversationGraphTest {
                 new CollaborationGraph.Edge("project1/chat-02", "auditor", "project2/chat-05"),
                 new CollaborationGraph.Edge("project1/chat-09", "worker", "project1/chat-02"),
                 new CollaborationGraph.Edge("project2/chat-01", "worker", "project1/chat-02"));
-        ConversationGraph graph = ConversationGraph.of("project1", List.of("01", "02", "03"), Map.of(), Map.of(),
+        ConversationGraph graph = ConversationGraph.of("project1", null, List.of("01", "02", "03"), Map.of(), Map.of(),
                 "01", edges, Map.of());
         assertEquals(List.of(
                 new ConversationGraph.RoleEdge("02", "auditor", "05", "project2"),
@@ -71,7 +71,7 @@ class ConversationGraphTest {
 
     @Test
     void aLiaisonThatIsNotInTheProjectMarksNoNode() {
-        ConversationGraph graph = ConversationGraph.of("project1", List.of("02"), Map.of(), Map.of(), "01", List.of(), Map.of());
+        ConversationGraph graph = ConversationGraph.of("project1", null, List.of("02"), Map.of(), Map.of(), "01", List.of(), Map.of());
         assertFalse(graph.nodes().get(0).liaison());
         assertNull(graph.nodes().get(0).name());
         assertTrue(graph.superiorEdges().isEmpty() && graph.roleEdges().isEmpty());
@@ -79,7 +79,7 @@ class ConversationGraphTest {
 
     @Test
     void aNodeCarriesWhatItRunsOnAndOneWithoutAnEntryCarriesNothing() {
-        ConversationGraph graph = ConversationGraph.of("project1", List.of("01", "02"), Map.of(), Map.of(), "01", List.of(),
+        ConversationGraph graph = ConversationGraph.of("project1", null, List.of("01", "02"), Map.of(), Map.of(), "01", List.of(),
                 Map.of("01", new ConversationGraph.Model("Claude Code", "opus")));
         assertEquals(new ConversationGraph.Node("01", null, true, "Claude Code", "opus"), graph.nodes().get(0));
         assertEquals(new ConversationGraph.Node("02", null, false, null, null), graph.nodes().get(1));
@@ -94,5 +94,13 @@ class ConversationGraphTest {
         assertEquals("Local LLM", ChatUiActorSystem.providerLabel(options, "openai-compat", "some-other-set"),
                 "no entry with that tool set: the kind's first entry");
         assertEquals("codex", ChatUiActorSystem.providerLabel(options, "codex", "full"), "not in the dropdown: the kind");
+    }
+
+    @Test
+    void theGraphCarriesTheProjectsName() {
+        ConversationGraph graph = ConversationGraph.of("project1", "Graph check", List.of("01"), Map.of(), Map.of(), "01",
+                List.of(), Map.of());
+        assertEquals("Graph check", graph.name());
+        assertNull(ConversationGraph.of("project1", null, List.of("01"), Map.of(), Map.of(), "01", List.of(), Map.of()).name());
     }
 }

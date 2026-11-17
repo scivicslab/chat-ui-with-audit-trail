@@ -13,12 +13,13 @@ import java.util.TreeSet;
  * those two actors hold; nothing is kept.
  *
  * @param projectId     the project
+ * @param name          the name a person gave the project, or {@code null}
  * @param liaison       the project's liaison, as the organization names it
  * @param nodes         the project's conversations, in id order
  * @param superiorEdges superior to subordinate, between conversations of the project, in subordinate order
  * @param roleEdges     role edges whose source is a conversation of the project, by source and role
  */
-public record ConversationGraph(String projectId, String liaison, List<Node> nodes,
+public record ConversationGraph(String projectId, String name, String liaison, List<Node> nodes,
                                 List<SuperiorEdge> superiorEdges, List<RoleEdge> roleEdges) {
 
     /**
@@ -38,6 +39,15 @@ public record ConversationGraph(String projectId, String liaison, List<Node> nod
      * @param model    the model the provider is on, or {@code null}
      */
     public record Model(String provider, String model) {}
+
+    /**
+     * Every project of the instance, each as one {@link ConversationGraph}, for the left pane's single tree
+     * ({@code ConversationGraphInTheLeftPane_261117_oo01}).
+     *
+     * @param projects the projects, in the order of their numbers ({@code project1}, {@code project2}, ...,
+     *                 {@code project10})
+     */
+    public record All(List<ConversationGraph> projects) {}
 
     /** {@code from} is the superior of {@code to}; both are bare ids. */
     public record SuperiorEdge(String from, String to) {}
@@ -60,7 +70,7 @@ public record ConversationGraph(String projectId, String liaison, List<Node> nod
      * @param edges     the collaboration graph's edges; those not from a conversation of the project are dropped
      * @param models    bare id to what it runs on; an id without an entry gets {@code null} provider and model
      */
-    public static ConversationGraph of(String projectId, List<String> chatIds, Map<String, String> names,
+    public static ConversationGraph of(String projectId, String name, List<String> chatIds, Map<String, String> names,
                                        Map<String, String> superiors, String liaison,
                                        List<CollaborationGraph.Edge> edges, Map<String, Model> models) {
         Set<String> ids = new TreeSet<>(chatIds);
@@ -85,7 +95,7 @@ public record ConversationGraph(String projectId, String liaison, List<Node> nod
             roles.add(new RoleEdge(from[1], e.role(), to[1], to[0]));
         }
         roles.sort((a, b) -> a.from().equals(b.from()) ? a.role().compareTo(b.role()) : a.from().compareTo(b.from()));
-        return new ConversationGraph(projectId, liaison, nodes, sup, roles);
+        return new ConversationGraph(projectId, name, liaison, nodes, sup, roles);
     }
 
     /** {@code "project1/chat-02"} to {@code ["project1", "02"]}, or {@code null} for any other form. */

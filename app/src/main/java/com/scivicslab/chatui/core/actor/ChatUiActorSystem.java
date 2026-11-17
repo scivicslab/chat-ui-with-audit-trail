@@ -1845,7 +1845,36 @@ public class ChatUiActorSystem implements ConversationControls {
                 LOG.log(Level.FINE, "Could not read what " + id + " runs on", e);
             }
         }
-        return ConversationGraph.of(projectId, ids, names, superiors, org.liaison(), edges, models);
+        return ConversationGraph.of(projectId, getProjectName(projectId), ids, names, superiors, org.liaison(), edges, models);
+    }
+
+    /**
+     * Every project's graph, for the left pane's single tree: each read from the actors on this call, as
+     * {@link #conversationGraph} reads one ({@code ConversationGraphInTheLeftPane_261117_oo01}).
+     *
+     * @return the projects in the order of their numbers
+     */
+    public ConversationGraph.All conversationGraphs() {
+        List<ConversationGraph> all = new ArrayList<>();
+        for (String projectId : projectsInNumberOrder()) {
+            ConversationGraph g = conversationGraph(projectId);
+            if (g != null) all.add(g);
+        }
+        return new ConversationGraph.All(all);
+    }
+
+    /** project1, project2, ..., project10: by the number at the end, then by name for any other id. */
+    private List<String> projectsInNumberOrder() {
+        List<String> ids = new ArrayList<>(projects.keySet());
+        ids.sort((a, b) -> {
+            String na = a.replaceAll("^\\D*", ""), nb = b.replaceAll("^\\D*", "");
+            if (!na.isEmpty() && !nb.isEmpty() && na.chars().allMatch(Character::isDigit) && nb.chars().allMatch(Character::isDigit)) {
+                int c = Long.compare(Long.parseLong(na), Long.parseLong(nb));
+                if (c != 0) return c;
+            }
+            return a.compareTo(b);
+        });
+        return ids;
     }
 
     /**

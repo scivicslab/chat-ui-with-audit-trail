@@ -894,7 +894,6 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
     flex-shrink: 0;
 }
 #left-view-select { align-self: center; margin: 0; }
-#graph-project { flex: 1; min-width: 0; font-size: 12px; }
 #conv-graph { flex: 1; min-height: 0; overflow: auto; padding: 6px 4px 12px 8px; }
 #conv-graph[hidden], #actors-tree[hidden] { display: none; }
 #conv-graph .cg-note { color: var(--text-secondary, #9aa0a6); font-size: 12px; padding: 4px; }
@@ -919,3 +918,9 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
     background: var(--bg-primary, #1e1e1e); color: var(--text-primary, #e6e6e6);
     border: 1px solid var(--border-color, #444); box-shadow: 0 2px 8px rgba(0, 0, 0, .25);
 }
+#conv-graph .cg-project { cursor: pointer; }
+#conv-graph .cg-project text { fill: var(--text-primary, #e6e6e6); }
+#conv-graph .cg-project .cg-project-name { font-weight: 600; }
+#conv-graph .cg-project .cg-project-id { fill: var(--text-secondary, #9aa0a6); font-size: 11px; }
+#conv-graph .cg-project .cg-fold { fill: var(--text-secondary, #9aa0a6); font-size: 11px; }
+#conv-graph .cg-project:hover .cg-project-name { text-decoration: underline; }
