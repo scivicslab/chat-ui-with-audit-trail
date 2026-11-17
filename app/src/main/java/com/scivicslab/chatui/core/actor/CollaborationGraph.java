@@ -1,6 +1,8 @@
 package com.scivicslab.chatui.core.actor;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -50,5 +52,26 @@ public class CollaborationGraph {
      */
     public Map<String, String> getCollaborators(String fromChatId) {
         return edges.getOrDefault(fromChatId, Map.of());
+    }
+
+    /**
+     * One role assignment: {@code from}'s collaborator for {@code role} is {@code to}. Both are qualified names
+     * ({@code "project1/chat-02"}).
+     */
+    public record Edge(String from, String role, String to) {}
+
+    /**
+     * Every role assignment whose source name starts with {@code prefix}, for the left pane's graph
+     * ({@code ConversationGraphInTheLeftPane_261117_oo01}). Pass {@code "project1/"} for one project.
+     *
+     * @return the assignments, sorted by source and then by role
+     */
+    public List<Edge> edgesFrom(String prefix) {
+        List<Edge> out = new ArrayList<>();
+        edges.forEach((from, byRole) -> {
+            if (from.startsWith(prefix)) byRole.forEach((role, to) -> out.add(new Edge(from, role, to)));
+        });
+        out.sort((a, b) -> a.from().equals(b.from()) ? a.role().compareTo(b.role()) : a.from().compareTo(b.from()));
+        return out;
     }
 }

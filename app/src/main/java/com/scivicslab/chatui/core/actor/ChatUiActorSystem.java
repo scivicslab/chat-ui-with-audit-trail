@@ -35,6 +35,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
@@ -1645,6 +1646,35 @@ public class ChatUiActorSystem implements ConversationControls {
     public boolean isLiaison(String projectId, String chatId) {
         if (!projects.containsKey(projectId)) return false;
         return chatId.equals(askOrDefault(organizationOf(projectId), Organization::liaison, null));
+    }
+
+    /** @return the shared {@link CollaborationGraph}, for the tools that set role edges and for tests */
+    public ActorRef<CollaborationGraph> getCollaborationGraph() {
+        return collaborationGraphRef;
+    }
+
+    /**
+     * The project's conversations with their superior and role edges, for the left pane's graph
+     * ({@code ConversationGraphInTheLeftPane_261117_oo01}). Read from the organization and the collaboration
+     * graph on each call; neither is copied.
+     *
+     * @return the graph, or {@code null} for an unknown project
+     */
+    public ConversationGraph conversationGraph(String projectId) {
+        if (!projects.containsKey(projectId)) return null;
+        List<String> ids = chatIdsOf(projectId);
+        Organization org = organizationSnapshot(projectId);
+        Map<String, String> names = new HashMap<>();
+        Map<String, String> superiors = new HashMap<>();
+        for (String id : ids) {
+            String name = getChatName(projectId, id);
+            if (name != null) names.put(id, name);
+            String sup = org.superiorOf(id);
+            if (sup != null) superiors.put(id, sup);
+        }
+        List<CollaborationGraph.Edge> edges = collaborationGraphRef == null ? List.of()
+                : askOrDefault(collaborationGraphRef, g -> g.edgesFrom(projectId + "/"), List.<CollaborationGraph.Edge>of());
+        return ConversationGraph.of(projectId, ids, names, superiors, org.liaison(), edges);
     }
 
     /** @return the project's organization as JSON, for the Project tab */

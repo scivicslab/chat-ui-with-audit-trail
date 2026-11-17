@@ -28,6 +28,8 @@ import java.util.regex.Pattern;
  * (ViewToggleCheck).</li>
  * <li>{@code SCENARIO-A}: send two requests to chat-02 (one urgent) and register a promised report on chat-03;
  * {@code TASK-WORK} holds chat-02's turn open (TimekeeperViewCheck).</li>
+ * <li>{@code SCENARIO-G}: set superiors and role edges among chat-02..05 (one role target in project2);
+ * {@code SCENARIO-G2}: move chat-05 under chat-01 and give chat-02's "worker" to chat-05 (ConversationGraphCheck).</li>
  * <li>The end-of-turn reminder check registers a reminder only for an answer that says "I will report back".</li>
  * <li>Anything else: "OK. I will report back in 12 minutes."</li>
  * </ul>
@@ -53,6 +55,64 @@ public class ScriptedModelServer {
             <parameter name="requestId">project1/chat-01:s9:t9:r9</parameter>
             <parameter name="minutes">30</parameter>
             <reason>chat-03 promised a report</reason>
+            </invoke>
+            </function_calls>""";
+
+    static final String GRAPH_G = """
+            <function_calls>
+            <invoke name="set_superior">
+            <parameter name="chatId">03</parameter>
+            <parameter name="superiorChatId">02</parameter>
+            <reason>build the graph</reason>
+            </invoke>
+            <invoke name="set_superior">
+            <parameter name="chatId">04</parameter>
+            <parameter name="superiorChatId">02</parameter>
+            <reason>build the graph</reason>
+            </invoke>
+            <invoke name="set_superior">
+            <parameter name="chatId">05</parameter>
+            <parameter name="superiorChatId">03</parameter>
+            <reason>build the graph</reason>
+            </invoke>
+            <invoke name="set_collaborator">
+            <parameter name="chatId">02</parameter>
+            <parameter name="role">worker</parameter>
+            <parameter name="collaboratorChatId">03</parameter>
+            <reason>build the graph</reason>
+            </invoke>
+            <invoke name="set_collaborator">
+            <parameter name="chatId">02</parameter>
+            <parameter name="role">reviewer</parameter>
+            <parameter name="collaboratorChatId">04</parameter>
+            <reason>build the graph</reason>
+            </invoke>
+            <invoke name="set_collaborator">
+            <parameter name="chatId">03</parameter>
+            <parameter name="role">helper</parameter>
+            <parameter name="collaboratorChatId">05</parameter>
+            <reason>build the graph</reason>
+            </invoke>
+            <invoke name="set_collaborator">
+            <parameter name="chatId">05</parameter>
+            <parameter name="role">auditor</parameter>
+            <parameter name="collaboratorChatId">project2/05</parameter>
+            <reason>build the graph</reason>
+            </invoke>
+            </function_calls>""";
+
+    static final String GRAPH_G2 = """
+            <function_calls>
+            <invoke name="set_superior">
+            <parameter name="chatId">05</parameter>
+            <parameter name="superiorChatId">01</parameter>
+            <reason>build the graph</reason>
+            </invoke>
+            <invoke name="set_collaborator">
+            <parameter name="chatId">02</parameter>
+            <parameter name="role">worker</parameter>
+            <parameter name="collaboratorChatId">05</parameter>
+            <reason>build the graph</reason>
             </invoke>
             </function_calls>""";
 
@@ -96,6 +156,8 @@ public class ScriptedModelServer {
             return "finished";
         }
         if (last.contains("SCENARIO-A")) return CALLS_A;
+        if (last.contains("SCENARIO-G2")) return GRAPH_G2;
+        if (last.contains("SCENARIO-G")) return GRAPH_G;
         if (last.contains("SCENARIO-R")) return ASK_03;
         if (last.contains("REPLY-ME")) return "R42 is the result.";
         // The tool preamble quotes "[reply to request ...", so this comes after the markers above.
@@ -106,6 +168,7 @@ public class ScriptedModelServer {
         if (last.contains("Tool result (accept_reply)")) {
             return "FINAL-FOR-PERSON: chat-03 answered R42. Please publish pojo-actor-distributed 1.1.0, then rebuild and restart.";
         }
+        if (last.contains("Tool result (set_")) return "Done: the organization is set.";
         if (last.contains("Tool result (ask_chat)") && whole.contains("SCENARIO-R")) {
             return "Asked chat-03; its reply will start a turn of its own.";
         }

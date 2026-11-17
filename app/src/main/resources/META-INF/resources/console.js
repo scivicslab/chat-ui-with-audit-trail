@@ -2275,12 +2275,275 @@
             });
     }
 
+    // ── Left dock, Graph view (ConversationGraphInTheLeftPane_261117_oo01) ─────────────────────────
+    // One project's conversations, with superior -> subordinate edges from its Organization actor and role
+    // edges from the CollaborationGraph actor, both read by GET api/projects/{p}/graph on every call. The dock
+    // is narrow, so the conversations are rows: indented by depth in the org chart, superior edges as elbows
+    // on the left, role edges as arcs on the right with the role name at the bend.
+    var LEFT_VIEW_KEY = "chat-ui-left-view";
+    var leftView = localStorage.getItem(LEFT_VIEW_KEY) === "graph" ? "graph" : "tree";
+    var graphProjectChosen = null;     // a project picked in the select; otherwise the active chat's project
+    var graphLastSig = null;           // what was last drawn, so an unchanged graph is not redrawn
+    var SVG_NS = "http://www.w3.org/2000/svg";
+
+    function svgEl(tag, attrs, parent) {
+        var e = document.createElementNS(SVG_NS, tag);
+        Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+        if (parent) parent.appendChild(e);
+        return e;
+    }
+
+    // The projects the actor tree last showed, for the select.
+    function graphProjects() {
+        var out = [];
+        (function walk(n) {
+            if (!n) return;
+            if (n.type === "Project") out.push(n.name);
+            (n.children || []).forEach(walk);
+        })(lastActorTree);
+        return out.sort();
+    }
+
+    function graphProjectId() {
+        if (graphProjectChosen) return graphProjectChosen;
+        var c = (typeof window.chatUiGetActiveChat === "function") ? window.chatUiGetActiveChat() : null;
+        return (c && c.projectId) || perspectiveProjectId || DEFAULT_PROJECT_ID;
+    }
+
+    function fillGraphProjectSelect() {
+        var sel = document.getElementById("graph-project");
+        if (!sel) return;
+        var ids = graphProjects();
+        var current = graphProjectId();
+        if (ids.indexOf(current) < 0) ids.push(current);
+        var want = ids.join("\n");
+        if (sel.getAttribute("data-ids") !== want) {
+            sel.textContent = "";
+            ids.forEach(function (id) {
+                var o = document.createElement("option");
+                o.value = id;
+                o.textContent = id;
+                sel.appendChild(o);
+            });
+            sel.setAttribute("data-ids", want);
+        }
+        sel.value = current;
+    }
+
+    // The rows: roots first (the liaison first among them), each followed by its subordinates, depth first.
+    function graphRows(g) {
+        var kids = {}, hasSuperior = {};
+        (g.superiorEdges || []).forEach(function (e) {
+            (kids[e.from] = kids[e.from] || []).push(e.to);
+            hasSuperior[e.to] = true;
+        });
+        var byId = {};
+        (g.nodes || []).forEach(function (n) { byId[n.chatId] = n; });
+        var roots = (g.nodes || []).filter(function (n) { return !hasSuperior[n.chatId]; })
+            .map(function (n) { return n.chatId; })
+            .sort(function (a, b) { return (a === g.liaison ? -1 : b === g.liaison ? 1 : (a < b ? -1 : a > b ? 1 : 0)); });
+        var rows = [], seen = {};
+        function visit(id, depth) {
+            if (seen[id]) return;
+            seen[id] = true;
+            rows.push({ id: id, node: byId[id], depth: depth, project: g.projectId });
+            (kids[id] || []).slice().sort().forEach(function (k) { visit(k, depth + 1); });
+        }
+        roots.forEach(function (r) { visit(r, 0); });
+        // A cycle in the table would leave nodes unvisited; they are drawn as roots rather than lost.
+        (g.nodes || []).forEach(function (n) { visit(n.chatId, 0); });
+        // Role targets in another project get rows of their own at the bottom.
+        (g.roleEdges || []).forEach(function (e) {
+            var key = e.toProject + "/" + e.to;
+            if (e.toProject !== g.projectId && !seen[key]) {
+                seen[key] = true;
+                rows.push({ id: key, node: null, depth: 0, project: e.toProject, external: true, chatId: e.to });
+            }
+        });
+        return rows;
+    }
+
+    function renderGraph(g, box) {
+        box.textContent = "";
+        var rows = graphRows(g);
+        if (!rows.length) {
+            var none = document.createElement("div");
+            none.className = "cg-note";
+            none.textContent = "No conversations in " + g.projectId + ".";
+            box.appendChild(none);
+            return;
+        }
+        var ROW = 26, TOP = 44, W = Math.max(220, box.clientWidth - 12);
+        var PORT_X = W - 108;                      // where role edges leave and enter a row
+        var LABEL_ROOM = 54;                       // kept right of the widest arc for its role name
+        var H = TOP + rows.length * ROW + 10;
+        var svg = svgEl("svg", { width: W, height: H, viewBox: "0 0 " + W + " " + H, role: "img",
+            "aria-label": "Conversations of " + g.projectId + ": superior to subordinate and role edges" }, box);
+        var defs = svgEl("defs", {}, svg);
+        var marker = svgEl("marker", { id: "cg-arrow", viewBox: "0 0 8 8", refX: "7", refY: "4",
+            markerWidth: "7", markerHeight: "7", orient: "auto-start-reverse" }, defs);
+        svgEl("path", { d: "M0,0 L8,4 L0,8 z", "class": "cg-port" }, marker);
+
+        // Legend.
+        var legend = svgEl("g", { "class": "cg-legend" }, svg);
+        svgEl("path", { d: "M4 10 H24", "class": "cg-sup" }, legend);
+        svgEl("text", { x: 28, y: 13 }, legend).textContent = "superior → subordinate";
+        svgEl("path", { d: "M4 25 H24", "class": "cg-role" }, legend);
+        svgEl("text", { x: 28, y: 28 }, legend).textContent = "role edge, labelled with the role";
+
+        var pos = {};
+        rows.forEach(function (r, i) {
+            pos[r.external ? r.id : r.id] = { x: 10 + r.depth * 14, y: TOP + i * ROW + ROW / 2, row: i };
+        });
+
+        // Superior edges: an elbow from the superior's dot down and across to the subordinate's.
+        (g.superiorEdges || []).forEach(function (e) {
+            var a = pos[e.from], b = pos[e.to];
+            if (!a || !b) return;
+            svgEl("path", { d: "M" + a.x + " " + (a.y + 6) + " V" + b.y + " H" + (b.x - 6), "class": "cg-sup",
+                "data-from": e.from, "data-to": e.to }, svg).appendChild(svgEl("title", {})).textContent =
+                "chat-" + e.from + " is the superior of chat-" + e.to;
+        });
+
+        // Rows.
+        rows.forEach(function (r) {
+            var p = pos[r.id];
+            var cls = "cg-node" + (r.node && r.node.liaison ? " cg-liaison" : "") + (r.external ? " cg-external" : " cg-link");
+            var gEl = svgEl("g", { "class": cls, "data-chat": r.external ? r.id : r.id }, svg);
+            svgEl("circle", { cx: p.x, cy: p.y, r: 5 }, gEl);
+            var label = svgEl("text", { x: p.x + 10, y: p.y + 4 }, gEl);
+            var idText = r.external ? r.project + "/chat-" + r.chatId : "chat-" + r.id;
+            var tspan = svgEl("tspan", {}, label);
+            tspan.textContent = idText;
+            var room = Math.floor((PORT_X - 8 - (p.x + 10)) / 7.2) - idText.length;   // characters left before the port
+            var extra = r.external ? " (other project)" : ((r.node && r.node.name) ? " " + r.node.name : "");
+            if (extra && room > 2) {
+                var nm = svgEl("tspan", { "class": "cg-name" }, label);
+                nm.textContent = extra.length > room ? extra.substring(0, room - 1) + "…" : extra;
+            }
+            if (r.node && r.node.liaison) {
+                svgEl("text", { x: p.x + 10, y: p.y - 7, "class": "cg-tag" }, gEl).textContent = "liaison";
+            }
+            svgEl("title", {}, gEl).textContent = idText + (r.node && r.node.name ? " — " + r.node.name : "")
+                + (r.node && r.node.liaison ? " (liaison)" : "") + (r.external ? " (other project)" : "");
+            if (!r.external) {
+                gEl.addEventListener("click", function () { showConversation(g.projectId, r.id); });
+            }
+        });
+
+        // Role edges: arcs to the right of the port column, the role name just right of the bend. A name that
+        // would sit on another is moved down a line.
+        var labelBoxes = [];
+        function freeY(x, y, w) {
+            for (var tries = 0; tries < 12; tries++) {
+                var clash = labelBoxes.some(function (b) {
+                    return x < b.x + b.w && b.x < x + w && Math.abs(b.y - y) < 11;
+                });
+                if (!clash) break;
+                y += 11;
+            }
+            labelBoxes.push({ x: x, y: y, w: w });
+            return y;
+        }
+        (g.roleEdges || []).forEach(function (e, k) {
+            var a = pos[e.from];
+            var b = pos[e.toProject === g.projectId ? e.to : e.toProject + "/" + e.to];
+            if (!a || !b) return;
+            var ya = a.y, yb = b.y;
+            svgEl("circle", { cx: PORT_X, cy: ya, r: 2, "class": "cg-port" }, svg);
+            var path, lx, ly;
+            var most = Math.max(12, W - PORT_X - LABEL_ROOM);
+            if (a.row === b.row) {
+                path = "M" + PORT_X + " " + (ya - 3) + " C" + (PORT_X + 30) + " " + (ya - 16) + " " + (PORT_X + 30) + " " + (ya + 16) + " " + (PORT_X + 2) + " " + (ya + 4);
+                lx = PORT_X + 28; ly = ya + 3;
+            } else {
+                var bulge = Math.min(most, 14 + 8 * Math.abs(a.row - b.row) + 5 * (k % 3));
+                path = "M" + PORT_X + " " + ya + " C" + (PORT_X + bulge) + " " + ya + " " + (PORT_X + bulge) + " " + yb + " " + (PORT_X + 2) + " " + yb;
+                lx = PORT_X + bulge * 0.75 + 4; ly = (ya + yb) / 2 + 3;
+            }
+            ly = freeY(lx, ly, e.role.length * 6.2 + 4);
+            svgEl("path", { d: path, "class": "cg-role", "marker-end": "url(#cg-arrow)",
+                "data-from": e.from, "data-role": e.role, "data-to": e.to }, svg)
+                .appendChild(svgEl("title", {})).textContent = "chat-" + e.from + "'s " + e.role + " is "
+                    + (e.toProject === g.projectId ? "chat-" + e.to : e.toProject + "/chat-" + e.to);
+            var lab = svgEl("text", { x: lx, y: ly, "class": "cg-role-label" }, svg);
+            lab.textContent = e.role;
+        });
+        // The SVG is as tall as its lowest label.
+        var lowest = labelBoxes.reduce(function (m, b) { return Math.max(m, b.y + 8); }, H);
+        if (lowest > H) { svg.setAttribute("height", lowest); svg.setAttribute("viewBox", "0 0 " + W + " " + lowest); }
+    }
+
+    var graphRefreshing = false;
+    function refreshGraph(force) {
+        var box = document.getElementById("conv-graph");
+        if (!box || graphRefreshing) return Promise.resolve();
+        fillGraphProjectSelect();
+        var projectId = graphProjectId();
+        var status = document.getElementById("actors-status");
+        graphRefreshing = true;
+        return fetch("api/projects/" + encodeURIComponent(projectId) + "/graph")
+            .then(function (r) {
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                return r.text();
+            })
+            .then(function (text) {
+                var sig = projectId + "|" + box.clientWidth + "|" + text;
+                if (status) {
+                    var g0 = JSON.parse(text);
+                    status.textContent = (g0.nodes || []).length + " chat(s)";
+                }
+                if (!force && sig === graphLastSig) return;
+                graphLastSig = sig;
+                renderGraph(JSON.parse(text), box);
+            })
+            .catch(function (err) { if (status) status.textContent = "error: " + err.message; })
+            .then(function () { graphRefreshing = false; });
+    }
+
+    // Shows the tree or the graph, and remembers the choice like the theme.
+    function applyLeftView() {
+        var tree = document.getElementById("actors-tree");
+        var graph = document.getElementById("conv-graph");
+        var sel = document.getElementById("graph-project");
+        var bt = document.getElementById("left-view-tree");
+        var bg = document.getElementById("left-view-graph");
+        var isGraph = leftView === "graph";
+        if (tree) tree.hidden = isGraph;
+        if (graph) graph.hidden = !isGraph;
+        if (sel) sel.hidden = !isGraph;
+        if (bt) bt.setAttribute("aria-pressed", isGraph ? "false" : "true");
+        if (bg) bg.setAttribute("aria-pressed", isGraph ? "true" : "false");
+        var title = document.querySelector("#left-dock .dock-title");
+        if (title) title.textContent = isGraph ? "Graph" : "Actors";
+        localStorage.setItem(LEFT_VIEW_KEY, leftView);
+    }
+
+    // What Refresh and Auto refresh: the view shown. The tree is read in the graph view too, since the
+    // project select lists the projects it holds.
+    function refreshLeftDock() {
+        if (leftView !== "graph") return refreshActors();
+        return refreshActors().then(function () { return refreshGraph(false); });
+    }
+
+    function initLeftViews() {
+        var bt = document.getElementById("left-view-tree");
+        var bg = document.getElementById("left-view-graph");
+        var sel = document.getElementById("graph-project");
+        if (bt) bt.addEventListener("click", function () { leftView = "tree"; applyLeftView(); refreshActors(); });
+        if (bg) bg.addEventListener("click", function () { leftView = "graph"; applyLeftView(); graphLastSig = null; refreshLeftDock(); });
+        if (sel) sel.addEventListener("change", function () { graphProjectChosen = sel.value; graphLastSig = null; refreshGraph(true); });
+        applyLeftView();
+        if (leftView === "graph") refreshLeftDock();
+    }
+
     function initActors() {
         var btn = document.getElementById("actors-refresh");
         var auto = document.getElementById("actors-auto");
         var newProjectBtn = document.getElementById("new-project-btn");
-        if (btn) btn.addEventListener("click", refreshActors);
+        if (btn) btn.addEventListener("click", function () { graphLastSig = null; refreshLeftDock(); });
         if (newProjectBtn) newProjectBtn.addEventListener("click", createProject);
+        initLeftViews();
 
         var timer = null;
         function applyAuto() {
@@ -2288,7 +2551,7 @@
                 if (!timer) {
                     timer = setInterval(function () {
                         var dock = document.getElementById("left-dock");
-                        if (dock && !dock.classList.contains("collapsed")) refreshActors();
+                        if (dock && !dock.classList.contains("collapsed")) refreshLeftDock();
                     }, 3000);
                 }
             } else if (timer) {

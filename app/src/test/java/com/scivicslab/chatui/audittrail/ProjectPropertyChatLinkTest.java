@@ -49,6 +49,8 @@ class ProjectPropertyChatLinkTest {
                 "the tree's click goes through showConversation");
         assertTrue(!functionBody(js, "projectPropListChats").contains("chatUiSwitchChat("),
                 "the Project Property click goes through showConversation");
+        assertTrue(!functionBody(js, "renderGraph").contains("chatUiSwitchChat("),
+                "the graph's click goes through showConversation (ConversationGraphInTheLeftPane_261117_oo01)");
         assertTrue(functionBody(js, "showConversation").contains("window.chatUiSwitchChat("),
                 "showConversation is where a conversation is shown");
     }
@@ -56,12 +58,14 @@ class ProjectPropertyChatLinkTest {
     @Test
     void theTreeNameAndTheProjectPropertyNameBothCallShowConversation() throws IOException {
         String js = consoleJs();
-        assertEquals(2, count(js, "showConversation(") - count(js, "function showConversation("),
-                "two callers: the tree and Project Property");
+        assertEquals(3, count(js, "showConversation(") - count(js, "function showConversation("),
+                "three callers: the tree, Project Property and the left pane's graph");
         assertTrue(functionBody(js, "actorNodeEl").contains("showConversation(tabMatch[1], tabMatch[2])"),
                 "the tree's click");
         assertTrue(functionBody(js, "projectPropListChats").contains("showConversation(projectId, chatId)"),
                 "the Project Property click");
+        assertTrue(functionBody(js, "renderGraph").contains("showConversation(g.projectId, r.id)"),
+                "the graph node's click");
     }
 
     @Test

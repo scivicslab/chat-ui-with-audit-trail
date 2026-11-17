@@ -120,6 +120,24 @@ public class ChatResource {
     }
 
     /**
+     * The project's conversations and the edges between them, for the left pane's graph
+     * ({@code ConversationGraphInTheLeftPane_261117_oo01}): superior to subordinate from the project's organization,
+     * and the role edges {@code set_collaborator} made. Read from those two actors on each call; read-only.
+     *
+     * @return the {@link com.scivicslab.chatui.core.actor.ConversationGraph} as JSON, or 404 for an unknown project
+     */
+    @GET
+    @Path("/{projectId}/graph")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response graph(@PathParam("projectId") String projectId) {
+        com.scivicslab.chatui.core.actor.ConversationGraph graph = actorSystem.conversationGraph(projectId);
+        if (graph == null) {
+            return Response.status(404).entity(Map.of("type", "error", "message", "unknown project: " + projectId)).build();
+        }
+        return Response.ok(graph).build();
+    }
+
+    /**
      * Sets the project's liaison, the conversation that talks with the person, and how many subordinates one
      * superior may have ({@code ConversationReportingLines_261108_oo01}).
      *
