@@ -7,14 +7,15 @@ import com.scivicslab.chatui.core.iolog.IoLogStore;
 import com.scivicslab.chatui.core.iolog.IoLogView;
 
 /**
- * A project's recorded settings, as the I/O log keeps them across a restart: its name, its working directory and its
- * organization (who is whose superior, {@code ConversationReportingLines_261108_oo01}). One job: write them as one
- * entry of the project's session, and read the last such entry back ({@code ProjectProperty_260929_oo01}). The role
- * edges, which an entry written before also carried, are recorded by the project's {@link RoleTable}.
+ * A project's recorded settings, as the I/O log keeps them across a restart: its name and its working directory.
+ * One job: write them as one entry of the project's session, and read the last such entry back
+ * ({@code ProjectProperty_260929_oo01}). The organization and the role edges, which an entry written before also
+ * carried, are recorded by the project's {@link Organization} and {@link RoleTable} themselves
+ * ({@code EachActorRecordsItsOwnState_261118_oo01}).
  *
- * <p>All three travel in one entry because the last entry of the session is the current value: an entry carrying
- * only some of them would read back as a project whose other settings had been cleared. The values themselves
- * live in their own actors (the {@code Project}, its {@code Organization}); this
+ * <p>Both travel in one entry because the last entry of the session is the current value: an entry carrying
+ * only one of them would read back as a project whose other setting had been cleared. The values themselves
+ * live in the {@code Project}; this
  * object only writes and reads what they hold, in the entry shape the earlier code wrote, so logs written before
  * it existed read the same.</p>
  *
@@ -30,10 +31,8 @@ public class ProjectSettings {
      *
      * @param name         the name a person gave the project, or {@code null}
      * @param workingDir   its working directory, or {@code null}
-     * @param organization the organization as {@code Organization.toJson} gives it, or {@code null} when the entry
-     *                     holds none (an entry written before the organization was kept)
      */
-    public record Snapshot(String name, String workingDir, org.json.JSONObject organization) {}
+    public record Snapshot(String name, String workingDir) {}
 
     private final IoLogStore log;
     private final IoLogView view;
@@ -55,7 +54,6 @@ public class ProjectSettings {
         org.json.JSONObject o = new org.json.JSONObject();
         o.put("name", s.name() == null ? org.json.JSONObject.NULL : s.name());
         o.put("workingDir", s.workingDir() == null ? org.json.JSONObject.NULL : s.workingDir());
-        o.put("organization", s.organization() == null ? new org.json.JSONObject() : s.organization());
         log.record(session, "agent", IoLogView.SETTINGS_LABEL, o.toString());
     }
 
@@ -75,6 +73,6 @@ public class ProjectSettings {
         org.json.JSONObject o = new org.json.JSONObject(json);
         String name = o.isNull("name") ? null : o.optString("name", null);
         String dir = o.isNull("workingDir") ? null : o.optString("workingDir", null);
-        return new Snapshot(name, dir, o.optJSONObject("organization"));
+        return new Snapshot(name, dir);
     }
 }

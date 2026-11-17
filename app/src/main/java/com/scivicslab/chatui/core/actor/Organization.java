@@ -2,6 +2,9 @@ package com.scivicslab.chatui.core.actor;
 
 import org.json.JSONObject;
 
+import com.scivicslab.chatui.core.iolog.IoLogView;
+import com.scivicslab.chatui.core.iolog.SessionEntries;
+
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -21,6 +24,12 @@ import java.util.function.Function;
  *
  * <p>Every change either succeeds and returns {@code null}, or is refused with the reason and leaves the
  * organization as it was.</p>
+ *
+ * <p>The organization records itself ({@code EachActorRecordsItsOwnState_261118_oo01}): each change that takes
+ * effect writes the whole organization as the project's {@code organization} entry, and {@link #restore} reads the
+ * last one back at start-up. A log written before kept the organization in the project's {@code settings} entry;
+ * that is read when there is no {@code organization} entry, and written straight away as the organization's own.
+ * One made with {@link #Organization()}, as a copy to read from, records nothing.</p>
  */
 public class Organization {
 
@@ -29,9 +38,23 @@ public class Organization {
     /** The subordinates one superior may have when no other limit has been set. */
     public static final int DEFAULT_MAX_SUBORDINATES = 5;
 
+    /** Label of the project's entry that holds its organization. */
+    public static final String ORGANIZATION_LABEL = "organization";
+
+    private final SessionEntries entries;
     private final Map<String, String> superiors = new LinkedHashMap<>();
     private String liaison = DEFAULT_LIAISON;
     private int maxSubordinates = DEFAULT_MAX_SUBORDINATES;
+
+    /** An organization that records nothing: a copy to read from, or one in a test. */
+    public Organization() {
+        this(null);
+    }
+
+    /** @param entries the project's own session, which every change is recorded to; {@code null} records nothing */
+    public Organization(SessionEntries entries) {
+        this.entries = entries;
+    }
 
     /** @return the conversation's superior, or {@code null} when it has none */
     public String superiorOf(String chatId) {
@@ -66,7 +89,7 @@ public class Organization {
      */
     public String setSuperior(String chatId, String superior) {
         if (superior == null || superior.isBlank()) {
-            superiors.remove(chatId);
+            if (superiors.remove(chatId) != null) record();
             return null;
         }
         if (chatId.equals(liaison)) return "chat-" + chatId + " is the liaison, which has no superior";
@@ -80,6 +103,7 @@ public class Organization {
         String full = roomFor(superior);
         if (full != null) return full;
         superiors.put(chatId, superior);
+        record();
         return null;
     }
 
@@ -106,6 +130,7 @@ public class Organization {
         if (chatId == null || chatId.isBlank()) return "a liaison is required";
         liaison = chatId;
         superiors.remove(chatId);
+        record();
         return null;
     }
 
@@ -113,17 +138,57 @@ public class Organization {
     public String setMaxSubordinates(int max) {
         if (max < 1) return "the limit is at least 1";
         maxSubordinates = max;
+        record();
         return null;
     }
 
     /** Forgets a conversation that was deleted. One with subordinates is not deleted, so none point to it. */
     public void remove(String chatId) {
-        superiors.remove(chatId);
+        if (superiors.remove(chatId) != null) record();
     }
 
-    /** Forgets every conversation not in {@code existing}, as after a restart where some did not come back. */
-    public void retainOnly(Collection<String> existing) {
-        superiors.entrySet().removeIf(e -> !existing.contains(e.getKey()) || !existing.contains(e.getValue()));
+    /**
+     * Forgets every conversation not in {@code existing}, as after a restart where some did not come back.
+     *
+     * @return whether anything was forgotten
+     */
+    public boolean retainOnly(Collection<String> existing) {
+        return superiors.entrySet().removeIf(e -> !existing.contains(e.getKey()) || !existing.contains(e.getValue()));
+    }
+
+    /**
+     * Puts back the organization last recorded, at start-up once the project's conversations exist. A conversation
+     * that did not come back is forgotten, and that recorded; what was read from the earlier {@code settings} entry is
+     * recorded as the organization's own entry, so that form is read only once. Nothing recorded leaves the defaults.
+     *
+     * @param existing the bare ids of the project's conversations
+     */
+    public void restore(Collection<String> existing) {
+        if (entries == null) return;
+        boolean earlierForm = false;
+        JSONObject saved = parse(entries.latest(ORGANIZATION_LABEL));
+        if (saved == null) {
+            JSONObject settings = entries.latestWithKey(IoLogView.SETTINGS_LABEL, ORGANIZATION_LABEL);
+            saved = settings == null ? null : settings.optJSONObject(ORGANIZATION_LABEL);
+            earlierForm = saved != null;
+        }
+        if (saved == null) return;
+        loadJson(saved);
+        boolean dropped = retainOnly(existing);
+        if (earlierForm || dropped) record();
+    }
+
+    private static JSONObject parse(String json) {
+        if (json == null || json.isBlank()) return null;
+        try {
+            return new JSONObject(json);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void record() {
+        if (entries != null) entries.write(ORGANIZATION_LABEL, toJson().toString());
     }
 
     /**
@@ -165,7 +230,7 @@ public class Organization {
         return sb.append('.').toString();
     }
 
-    /** @return the organization as the JSON object the project's settings entry carries */
+    /** @return the organization as the JSON object its entry holds, the shape the earlier settings entry carried */
     public JSONObject toJson() {
         return new JSONObject()
                 .put("superiors", new JSONObject(superiors))

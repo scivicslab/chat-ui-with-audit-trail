@@ -441,8 +441,16 @@ public class ChatUiActorSystem implements ConversationControls {
         // Each project's role table puts its edges back once every project is back, since an edge may point into
         // another project; an edge naming a conversation that did not come back is dropped
         // (CollaborationGraph_260828_oo01, EachActorRecordsItsOwnState_261118_oo01).
+        // Each organization puts itself back likewise, from its own entry, forgetting conversations that did not come
+        // back (ConversationReportingLines_261108_oo01).
         java.util.Set<String> existing = java.util.Set.copyOf(chats.keySet());
         for (String projectId : List.copyOf(projects.keySet())) {
+            try {
+                List<String> present = chatIdsOf(projectId);
+                organizationOf(projectId).tell(o -> o.restore(present)).get(10, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                LOG.log(Level.WARNING, "Could not restore the organization of " + projectId, e);
+            }
             try {
                 rolesOf(projectId).tell(t -> t.restore(existing)).get(10, TimeUnit.SECONDS);
             } catch (Exception e) {
@@ -1538,7 +1546,8 @@ public class ChatUiActorSystem implements ConversationControls {
         if (ref != null) return ref;
         ActorRef<Project> projectRef = projects.get(projectId);
         if (projectRef == null) throw new IllegalArgumentException("Unknown project: " + projectId);
-        return projectRef.createChild(name, new Organization());
+        return projectRef.createChild(name,
+                new Organization(com.scivicslab.chatui.core.iolog.SessionEntries.ofProject(ioLogStore, ioLogView, projectId)));
     }
 
     /** @return the bare ids of the project's conversations, in id order */
@@ -1588,7 +1597,6 @@ public class ChatUiActorSystem implements ConversationControls {
         if (sup != null && !present.contains(sup)) return "error: no such conversation: " + chatActorName(projectId, sup);
         String refusal = askOrDefault(organizationOf(projectId), o -> o.setSuperior(chatId, sup), "the organization did not answer");
         if (refusal != null) return "error: refused — " + refusal;
-        recordProjectProperties(projectId);
         return sup == null ? "ok: chat-" + chatId + " has no superior now"
                 : "ok: chat-" + chatId + " now reports to chat-" + sup;
     }
@@ -1702,7 +1710,6 @@ public class ChatUiActorSystem implements ConversationControls {
             return maxSubordinates == null ? null : o.setMaxSubordinates(maxSubordinates);
         }, "the organization did not answer");
         if (refusal != null) return "error: " + refusal;
-        recordProjectProperties(projectId);
         return "ok";
     }
 
@@ -1945,11 +1952,9 @@ public class ChatUiActorSystem implements ConversationControls {
             ActorRef<Project> projectRef = projects.get(projectId);
             String name = getProjectName(projectId);
             Path dir = projectRef == null ? null : projectRef.ask(Project::getWorkingDir).get(5, TimeUnit.SECONDS);
-            // The organization travels in the same entry, for the same reason as the name and the working directory
-            // (ConversationReportingLines_261108_oo01). The role edges no longer do: the role table records them.
-            org.json.JSONObject organization = organizationOf(projectId).ask(Organization::toJson).get(5, TimeUnit.SECONDS);
-            ProjectSettings.Snapshot snapshot = new ProjectSettings.Snapshot(name, dir == null ? null : dir.toString(),
-                    organization);
+            // The organization and the role edges are no longer here: each records itself
+            // (EachActorRecordsItsOwnState_261118_oo01).
+            ProjectSettings.Snapshot snapshot = new ProjectSettings.Snapshot(name, dir == null ? null : dir.toString());
             // Waited for, so the entry is in the log before the caller goes on (a restart right after finds it).
             projectSettingsRef.tell(s -> s.record(projectId, snapshot)).get(10, TimeUnit.SECONDS);
         } catch (Exception e) {
@@ -1973,14 +1978,6 @@ public class ChatUiActorSystem implements ConversationControls {
             if (name != null) {
                 ActorRef<Project> projectRef = projects.get(projectId);
                 if (projectRef != null) projectRef.tell(p -> p.setName(name));
-            }
-            org.json.JSONObject organization = s.organization();
-            if (organization != null) {
-                List<String> present = chatIdsOf(projectId);
-                organizationOf(projectId).tell(org -> {
-                    org.loadJson(organization);
-                    org.retainOnly(present);
-                }).get(5, TimeUnit.SECONDS);
             }
             String dir = s.workingDir();
             if (dir != null && !dir.isBlank()) {

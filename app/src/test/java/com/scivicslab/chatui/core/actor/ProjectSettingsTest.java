@@ -38,22 +38,20 @@ class ProjectSettingsTest {
 
     @Test
     void whatIsRecordedIsReadBack() {
-        org.json.JSONObject org = new org.json.JSONObject()
-                .put("superiors", new org.json.JSONObject().put("02", "01")).put("liaison", "01").put("maxSubordinates", 5);
-        settings.record("project1", new ProjectSettings.Snapshot("my project", "/tmp/work", org));
+        settings.record("project1", new ProjectSettings.Snapshot("my project", "/tmp/work"));
 
         ProjectSettings.Snapshot s = settings.read("project1");
         assertEquals("my project", s.name());
         assertEquals("/tmp/work", s.workingDir());
-        assertEquals("01", s.organization().getJSONObject("superiors").getString("02"));
-        assertTrue(!new org.json.JSONObject(IoLogView.over(log).latestSettingsJson(log.findProjectSession("project1"))).has("roles"),
-                "the role edges are the role table's to record, not this entry's");
+        org.json.JSONObject entry = new org.json.JSONObject(IoLogView.over(log).latestSettingsJson(log.findProjectSession("project1")));
+        assertTrue(!entry.has("roles") && !entry.has("organization"),
+                "the role edges and the organization are their own actors' to record, not this entry's: " + entry);
     }
 
     @Test
     void theLastRecordIsTheCurrentOne() {
-        settings.record("project1", new ProjectSettings.Snapshot("first", null, null));
-        settings.record("project1", new ProjectSettings.Snapshot("second", null, null));
+        settings.record("project1", new ProjectSettings.Snapshot("first", null));
+        settings.record("project1", new ProjectSettings.Snapshot("second", null));
         assertEquals("second", settings.read("project1").name());
     }
 
@@ -69,19 +67,8 @@ class ProjectSettingsTest {
         ProjectSettings.Snapshot s = settings.read("project1");
         assertEquals("old", s.name());
         assertNull(s.workingDir());
-        assertEquals(4, s.organization().getInt("maxSubordinates"));
-        // Its role edges are read by the project's role table (RoleTableTest).
-    }
-
-    @Test
-    void anOlderEntryWithoutOrganizationReadsItAsAbsent() {
-        long session = log.ensureProjectSession("project1");
-        log.record(session, "agent", IoLogView.SETTINGS_LABEL, "{\"name\":\"older\",\"workingDir\":\"/w\"}");
-
-        ProjectSettings.Snapshot s = settings.read("project1");
-        assertEquals("older", s.name());
-        assertEquals("/w", s.workingDir());
-        assertNull(s.organization(), "no organization saved: leave the one in memory as it is");
+        // Its organization and role edges are read by the organization and the role table
+        // (OrganizationRecordTest, RoleTableTest).
     }
 
     @Test
