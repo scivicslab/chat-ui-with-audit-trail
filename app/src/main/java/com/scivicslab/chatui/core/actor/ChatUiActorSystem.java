@@ -373,7 +373,21 @@ public class ChatUiActorSystem implements ConversationControls {
         actorSystem.addIIActor(texts);
         // What a job's workflow does with the conversations: ask, clear, stop, set a model or a provider. It holds
         // nothing that changes, so the jobs of every project use this one, naming each conversation in full.
-        ChatsIIAR chatsActor = new ChatsIIAR(WORKFLOW_CHATS, new Chats(actorSystem, callWatchdogRef, this::changeProviderForPlan), actorSystem);
+        ChatsIIAR chatsActor = new ChatsIIAR(WORKFLOW_CHATS, new Chats(actorSystem, callWatchdogRef, this::changeProviderForPlan,
+                new Chats.SettingsRecorder() {
+                    // A project workflow's model and agent loop changes take the recording path the tools and the
+                    // screen take, so they come back after a restart (ConversationRestoreOnRestart_260904_oo01).
+                    @Override public String setModel(String chatName, String model) {
+                        String[] ids = splitConversationSquadId(chatName);
+                        if (ids == null || !ChatUiActorSystem.this.setModel(ids[0], ids[1], model, true)) return "chat not found: " + chatName;
+                        return null;
+                    }
+                    @Override public String setAgentLoop(String chatName, String file) {
+                        String[] ids = splitConversationSquadId(chatName);
+                        if (ids == null) return "chat not found: " + chatName;
+                        return ChatUiActorSystem.this.setAgentLoopFile(ids[0], ids[1], file);
+                    }
+                }), actorSystem);
         adopt(HOUSEKEEPER, chatsActor);
         actorSystem.addIIActor(chatsActor);
         // What the plugin code of a job's workflow may do to the project's conversations
@@ -2072,9 +2086,19 @@ public class ChatUiActorSystem implements ConversationControls {
      */
     @Override
     public boolean setModel(String projectId, String chatId, String model) {
+        return setModel(projectId, chatId, model, false);
+    }
+
+    /**
+     * @param wait whether to wait until the provider is on the model: a project workflow's next step expects it to
+     *             be (as {@code Chats} always waited), while the screen and the tools return at once, since a turn
+     *             running on the provider would hold them until it ends
+     */
+    private boolean setModel(String projectId, String chatId, String model, boolean wait) {
         ActorRef<LlmProvider> providerRef = getProviderRef(projectId, chatId);
         if (providerRef == null) return false;
-        providerRef.tell(p -> p.setModel(model));
+        java.util.concurrent.CompletableFuture<Void> set = providerRef.tell(p -> p.setModel(model));
+        if (wait) set.join();
         ChatSessionIIAR session = chatSessions.get(chatActorName(projectId, chatId));
         if (session != null) {
             recordSettings(chatActorName(projectId, chatId), session.getProviderIdDirect(),

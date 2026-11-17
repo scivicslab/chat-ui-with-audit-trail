@@ -35,18 +35,49 @@ public final class Chats {
         String change(String chatName, String kind, String tools);
     }
 
+    /**
+     * How a conversation's model and agent loop are changed so that the change is recorded and comes back after a
+     * restart: the same path {@code set_chat_model} and the Agent Loop tab take, which is
+     * {@code ChatUiActorSystem}'s ({@code ConversationRestoreOnRestart_260904_oo01}).
+     */
+    public interface SettingsRecorder {
+        /**
+         * @param chatName the conversation's full actor name
+         * @return what went wrong, or {@code null} when the conversation is on the model and it is recorded
+         */
+        String setModel(String chatName, String model);
+
+        /**
+         * @param chatName the conversation's full actor name
+         * @param file     a workflow file under {@code /workflows/}
+         * @return what went wrong, or {@code null} when the conversation runs the loop and it is recorded
+         */
+        String setAgentLoop(String chatName, String file);
+    }
+
     private final IIActorSystem system;
     private final ActorRef<CallWatchdog> watchdog;
     private final ProviderChanger providerChanger;
+    private final SettingsRecorder recorder;
 
     /**
      * @param watchdog        the {@link CallWatchdog} a question is registered with while it waits
      * @param providerChanger how to change a conversation's provider kind; {@code null} to refuse to
      */
     public Chats(IIActorSystem system, ActorRef<CallWatchdog> watchdog, ProviderChanger providerChanger) {
+        this(system, watchdog, providerChanger, null);
+    }
+
+    /**
+     * @param recorder how a model or an agent loop change is made and recorded; {@code null} changes the actors
+     *                 only, as a system without a log (a test) does
+     */
+    public Chats(IIActorSystem system, ActorRef<CallWatchdog> watchdog, ProviderChanger providerChanger,
+                 SettingsRecorder recorder) {
         this.system = system;
         this.watchdog = watchdog;
         this.providerChanger = providerChanger;
+        this.recorder = recorder;
     }
 
     /**
@@ -99,6 +130,11 @@ public final class Chats {
     public String setModel(String chat, String model) {
         require(chat, "chat");
         if (blank(model)) return "no model named; " + chat.strip() + " stays as it was";
+        if (recorder != null) {
+            String refused = recorder.setModel(chat.strip(), model.strip());
+            if (refused != null) throw new IllegalStateException(refused);
+            return chat.strip() + " runs on " + model.strip();
+        }
         provider(chat).tell(p -> p.setModel(model.strip())).join();
         return chat.strip() + " runs on " + model.strip();
     }
@@ -110,7 +146,8 @@ public final class Chats {
     public String setAgentLoop(String chat, String loop) {
         require(chat, "chat");
         if (blank(loop)) return "no agent loop named; " + chat.strip() + " stays as it was";
-        String refused = session(chat).setAgentLoopWorkflowFile(loop.strip());
+        String refused = recorder != null ? recorder.setAgentLoop(chat.strip(), loop.strip())
+                : session(chat).setAgentLoopWorkflowFile(loop.strip());
         if (refused != null) throw new IllegalStateException(refused);
         return chat.strip() + " runs " + loop.strip();
     }
