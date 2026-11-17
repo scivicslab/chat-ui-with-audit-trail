@@ -114,12 +114,12 @@ public final class AskChatTool {
         String resultKey = requestId;
         CompletableFuture<TurnReply> done = new CompletableFuture<>();
         // done completes inside the target's actor, carrying the answer; the delivery runs elsewhere
-        // so that the target's thread is not held while the caller's queue takes the message.
+        // so that the target's thread is not held while the caller's queue takes the message. It is addressed by
+        // the caller's name and the request id, and the caller's actors are looked up when it is delivered, as a
+        // reply from another instance is (EachActorRecordsItsOwnState_261118_oo01).
         done.whenCompleteAsync((reply, failure) -> {
             // A request its sender took back with cancel_request leaves no message: the sender knows.
-            if (reply != TurnReply.WITHDRAWN) {
-                deliverReply(system, myName, myChat, myQueue, targetName, requestId, urgent, reply, failure);
-            }
+            if (reply != TurnReply.WITHDRAWN) deliverReplyTo(system, myName, targetName, requestId, urgent, reply, failure);
         });
         SENT.put(requestId, new Sent(myName, targetName, targetQueue, done, null));
         Consumer<ChatEvent> targetWatchers = watchersOf(system, targetName);
@@ -245,15 +245,23 @@ public final class AskChatTool {
         }
     }
 
-    /** Puts the target turn's reply, or the reason there is none, in the calling conversation's queue. */
-    private static void deliverReply(IIActorSystem system, String myName, ChatSessionIIAR myChat,
-                                     ActorRef<PromptQueue> myQueue, String targetName, String requestId,
-                                     boolean urgent, TurnReply reply, Throwable failure) {
-        String text = replyMessage(targetName, requestId, reply, failure);
-        Consumer<ChatEvent> myWatchers = watchersOf(system, myName);
-        myQueue.tell(q -> q.enqueue(text, null, "queue", myWatchers, myChat.asChatSessionRef(),
-                ChatSession.ASK_CHAT_REPLY_SOURCE_PREFIX + targetName, null, new CompletableFuture<>(),
-                false, true, java.util.List.of(), requestId, urgent));
+    /**
+     * Puts the reply to a request, or the reason there is none, in the asker's queue, finding the asker by its name
+     * when the reply is delivered ({@code EachActorRecordsItsOwnState_261118_oo01}). Nothing here holds on to the
+     * asker's actors, so a reply finds the asker however its actors were rebuilt in between, and a request put back
+     * after a restart can be answered the same way.
+     *
+     * @param askerName  the asking conversation's qualified name
+     * @param targetName the qualified name of the conversation that answered
+     * @param requestId  the request's id
+     * @param urgent     whether the request was urgent; its reply goes ahead as the request did
+     * @param reply      the answer, or {@code null} when {@code failure} says why there is none
+     * @param failure    why there is no answer, or {@code null}
+     */
+    public static void deliverReplyTo(IIActorSystem system, String askerName, String targetName, String requestId,
+                                      boolean urgent, TurnReply reply, Throwable failure) {
+        enqueueFor(system, askerName, replyMessage(targetName, requestId, reply, failure),
+                ChatSession.ASK_CHAT_REPLY_SOURCE_PREFIX + targetName, requestId, urgent);
     }
 
     /**

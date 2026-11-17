@@ -524,6 +524,41 @@ class ConversationToolsTest {
         assertEquals("the answer", viaPlan);
     }
 
+    /**
+     * A reply is addressed by the asker's name and the request id, and the asker's actors are looked up when the reply
+     * is delivered, not taken when the request was sent ({@code EachActorRecordsItsOwnState_261118_oo01}, step 8): the
+     * asker's queue is replaced while the asked conversation works, as a restart replaces every actor, and the reply
+     * still arrives, in the new queue.
+     */
+    @Test
+    void theReplyFindsTheAskerByNameEvenWhenItsActorsWereReplacedMeanwhile() throws Exception {
+        IIActorSystem system = new IIActorSystem("conversation-tools-ask-by-name");
+        FakeControls controls = new FakeControls();
+        Scripted caller = new Scripted(List.of(invoke("accept_reply"), "thanks"), List.of());
+        Slow callee = new Slow();
+        ChatSessionIIAR one = chat(system, "01", caller, controls);
+        ChatSessionIIAR two = chat(system, "02", callee, controls);
+        ActorRef<PromptQueue> firstQueue = one.createChild("project1/chat-01.queue", new PromptQueue());
+        firstQueue.tellNow(q -> q.setSelf(firstQueue)).join();
+        ActorRef<PromptQueue> queue2 = two.createChild("project1/chat-02.queue", new PromptQueue());
+        queue2.tellNow(q -> q.setSelf(queue2)).join();
+
+        String sent = AskChatTool.send(system, "project1", "01", "02", "question", "project1/chat-01:s9:t1:r1");
+        assertTrue(sent.startsWith("sent to project1/chat-02"), sent);
+        // While chat-02 answers (it takes a second), chat-01's queue is replaced by a new one of the same name.
+        system.removeActor("project1/chat-01.queue");
+        one.getNamesOfChildren().remove("project1/chat-01.queue");
+        ActorRef<PromptQueue> newQueue = one.createChild("project1/chat-01.queue", new PromptQueue());
+        newQueue.tellNow(q -> q.setSelf(newQueue)).join();
+
+        long deadline = System.currentTimeMillis() + 20_000;
+        while (caller.prompts.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(50);
+        assertEquals(1, callee.prompts.size(), "the target got the prompt");
+        assertTrue(!caller.prompts.isEmpty() && caller.prompts.get(0).contains(
+                "[reply to request project1/chat-01:s9:t1:r1, from project1/chat-02:t1]\nthe answer"),
+                "the reply reached chat-01 through the queue it has now: " + caller.prompts);
+    }
+
     /** Answers each prompt after a pause: a short one for the asked prompt, a long one for the next. */
     private static final class Slow extends Scripted {
         Slow() { super(List.of("the answer", "the next turn's answer"), List.of()); }
