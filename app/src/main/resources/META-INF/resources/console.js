@@ -2279,7 +2279,7 @@
     // One project's conversations, with superior -> subordinate edges from its Organization actor and role
     // edges from the CollaborationGraph actor, both read by GET api/projects/{p}/graph on every call. The dock
     // is narrow, so the conversations are rows: indented by depth in the org chart, superior edges as elbows
-    // on the left, role edges as arcs on the right with the role name at the bend.
+    // on the left, and the roles a conversation plays as emoji in front of its label.
     var LEFT_VIEW_KEY = "chat-ui-left-view";
     var leftView = localStorage.getItem(LEFT_VIEW_KEY) === "graph" ? "graph" : "tree";
     var graphProjectChosen = null;     // a project picked in the select; otherwise the active chat's project
@@ -2363,6 +2363,36 @@
         return rows;
     }
 
+    // A conversation that plays a role for another (the collaborator of a set_collaborator edge) carries one
+    // emoji per role in front of its label, instead of an arc to the conversation it serves. Common roles have
+    // their own emoji; any other role name shares the fallback. The legend lists the emoji in use.
+    var ROLE_EMOJI = {
+        worker: "🔧", reviewer: "🔍", helper: "🤝", auditor: "📋", tester: "🧪",
+        writer: "✏️", researcher: "📚", manager: "🧭", checker: "✅", translator: "🌐"
+    };
+    var ROLE_EMOJI_FALLBACK = "🏷️";
+    var ROLE_EMOJI_LIMIT = 3;   // emoji shown in front of one node; the tooltip keeps every role
+
+    function roleEmoji(role) {
+        return Object.prototype.hasOwnProperty.call(ROLE_EMOJI, role) ? ROLE_EMOJI[role] : ROLE_EMOJI_FALLBACK;
+    }
+
+    // Who serves whom: for each node key (a bare id in the project, "project/id" outside it), the roles it plays,
+    // each with the conversation it plays it for. Sorted by role, then by that conversation.
+    function rolesPlayed(g) {
+        var by = {};
+        (g.roleEdges || []).forEach(function (e) {
+            var key = e.toProject === g.projectId ? e.to : e.toProject + "/" + e.to;
+            (by[key] = by[key] || []).push({ role: e.role, forChat: e.from });
+        });
+        Object.keys(by).forEach(function (k) {
+            by[k].sort(function (a, b) {
+                return a.role === b.role ? (a.forChat < b.forChat ? -1 : 1) : (a.role < b.role ? -1 : 1);
+            });
+        });
+        return by;
+    }
+
     function renderGraph(g, box) {
         box.textContent = "";
         var rows = graphRows(g);
@@ -2373,27 +2403,50 @@
             box.appendChild(none);
             return;
         }
-        var ROW = 26, TOP = 44, W = Math.max(220, box.clientWidth - 12);
-        var PORT_X = W - 108;                      // where role edges leave and enter a row
-        var LABEL_ROOM = 54;                       // kept right of the widest arc for its role name
+        var roles = rolesPlayed(g);
+        var W = Math.max(220, box.clientWidth - 12), ROW = 26;
+
+        // The legend: the tree line, then each emoji in use with its role name, as many to a line as fit.
+        var inUse = {};
+        (g.roleEdges || []).forEach(function (e) {
+            var em = roleEmoji(e.role);
+            (inUse[em] = inUse[em] || []);
+            if (inUse[em].indexOf(e.role) < 0) inUse[em].push(e.role);
+        });
+        var legendItems = Object.keys(inUse).sort(function (a, b) {
+            return a === ROLE_EMOJI_FALLBACK ? 1 : b === ROLE_EMOJI_FALLBACK ? -1 : (inUse[a][0] < inUse[b][0] ? -1 : 1);
+        }).map(function (em) { return { emoji: em, names: inUse[em].sort().join(", ") }; });
+        // Two columns of fixed width, so the entries line up whatever the emoji's width.
+        var COL = Math.floor((W - 8) / 2), legendLines = [];
+        for (var li0 = 0; li0 < legendItems.length; li0 += 2) legendLines.push(legendItems.slice(li0, li0 + 2));
+        var legendH = 18 + Math.max(1, legendLines.length) * 15;
+        var TOP = legendH + 14;
         var H = TOP + rows.length * ROW + 10;
         var svg = svgEl("svg", { width: W, height: H, viewBox: "0 0 " + W + " " + H, role: "img",
-            "aria-label": "Conversations of " + g.projectId + ": superior to subordinate and role edges" }, box);
-        var defs = svgEl("defs", {}, svg);
-        var marker = svgEl("marker", { id: "cg-arrow", viewBox: "0 0 8 8", refX: "7", refY: "4",
-            markerWidth: "7", markerHeight: "7", orient: "auto-start-reverse" }, defs);
-        svgEl("path", { d: "M0,0 L8,4 L0,8 z", "class": "cg-port" }, marker);
+            "aria-label": "Conversations of " + g.projectId + ": superior to subordinate, and the roles they play" }, box);
 
-        // Legend.
         var legend = svgEl("g", { "class": "cg-legend" }, svg);
         svgEl("path", { d: "M4 10 H24", "class": "cg-sup" }, legend);
         svgEl("text", { x: 28, y: 13 }, legend).textContent = "superior → subordinate";
-        svgEl("path", { d: "M4 25 H24", "class": "cg-role" }, legend);
-        svgEl("text", { x: 28, y: 28 }, legend).textContent = "role edge, labelled with the role";
+        if (!legendItems.length) {
+            svgEl("text", { x: 4, y: 28 }, legend).textContent = "no roles set (set_collaborator)";
+        }
+        legendLines.forEach(function (items, li) {
+            var y = 28 + li * 15;
+            items.forEach(function (it, ci) {
+                var x = 4 + ci * COL;
+                var room = Math.max(4, Math.floor((COL - 24) / 6.2));
+                var names = it.names.length > room ? it.names.substring(0, room - 1) + "…" : it.names;
+                var t = svgEl("text", { x: x, y: y, "class": "cg-legend-item", "data-emoji": it.emoji }, legend);
+                svgEl("tspan", { "class": "cg-roles" }, t).textContent = it.emoji;
+                svgEl("tspan", { x: x + 20 }, t).textContent = names;
+                if (names !== it.names) svgEl("title", {}, t).textContent = it.emoji + " " + it.names;
+            });
+        });
 
         var pos = {};
         rows.forEach(function (r, i) {
-            pos[r.external ? r.id : r.id] = { x: 10 + r.depth * 14, y: TOP + i * ROW + ROW / 2, row: i };
+            pos[r.id] = { x: 10 + r.depth * 14, y: TOP + i * ROW + ROW / 2, row: i };
         });
 
         // Superior edges: an elbow from the superior's dot down and across to the subordinate's.
@@ -2405,73 +2458,54 @@
                 "chat-" + e.from + " is the superior of chat-" + e.to;
         });
 
-        // Rows.
+        // Rows: the dot, the role emoji, chat-NN and the name.
         rows.forEach(function (r) {
             var p = pos[r.id];
+            var played = roles[r.id] || [];
             var cls = "cg-node" + (r.node && r.node.liaison ? " cg-liaison" : "") + (r.external ? " cg-external" : " cg-link");
-            var gEl = svgEl("g", { "class": cls, "data-chat": r.external ? r.id : r.id }, svg);
+            var gEl = svgEl("g", { "class": cls, "data-chat": r.id,
+                "data-roles": played.map(function (x) { return x.role + ":" + x.forChat; }).join(",") }, svg);
             svgEl("circle", { cx: p.x, cy: p.y, r: 5 }, gEl);
             var label = svgEl("text", { x: p.x + 10, y: p.y + 4 }, gEl);
+            var prefixLen = 0, idX = null;
+            if (played.length) {
+                var emojis = [];
+                played.forEach(function (x) {
+                    var em = roleEmoji(x.role);
+                    if (emojis.indexOf(em) < 0) emojis.push(em);
+                });
+                var shown = emojis.slice(0, ROLE_EMOJI_LIMIT).join("") + (emojis.length > ROLE_EMOJI_LIMIT ? "…" : "");
+                svgEl("tspan", { "class": "cg-roles" }, label).textContent = shown;
+                // The id is placed after the emoji by position, not by the emoji's own advance width, which
+                // differs between emoji fonts and left a gap of several spaces.
+                var nShown = Math.min(emojis.length, ROLE_EMOJI_LIMIT);
+                var prefixPx = nShown * 15 + (emojis.length > ROLE_EMOJI_LIMIT ? 14 : 0) + 4;
+                idX = p.x + 10 + prefixPx;
+                prefixLen = Math.ceil(prefixPx / 7.2);
+            }
             var idText = r.external ? r.project + "/chat-" + r.chatId : "chat-" + r.id;
-            var tspan = svgEl("tspan", {}, label);
-            tspan.textContent = idText;
-            var room = Math.floor((PORT_X - 8 - (p.x + 10)) / 7.2) - idText.length;   // characters left before the port
+            var idAttrs = { "class": "cg-id" };
+            if (idX !== null) idAttrs.x = idX;
+            svgEl("tspan", idAttrs, label).textContent = idText;
+            var room = Math.floor((W - 8 - (p.x + 10)) / 7.2) - idText.length - prefixLen;
             var extra = r.external ? " (other project)" : ((r.node && r.node.name) ? " " + r.node.name : "");
             if (extra && room > 2) {
-                var nm = svgEl("tspan", { "class": "cg-name" }, label);
-                nm.textContent = extra.length > room ? extra.substring(0, room - 1) + "…" : extra;
+                svgEl("tspan", { "class": "cg-name" }, label).textContent =
+                    extra.length > room ? extra.substring(0, room - 1) + "…" : extra;
             }
             if (r.node && r.node.liaison) {
                 svgEl("text", { x: p.x + 10, y: p.y - 7, "class": "cg-tag" }, gEl).textContent = "liaison";
             }
-            svgEl("title", {}, gEl).textContent = idText + (r.node && r.node.name ? " — " + r.node.name : "")
+            var tip = idText + (r.node && r.node.name ? " — " + r.node.name : "")
                 + (r.node && r.node.liaison ? " (liaison)" : "") + (r.external ? " (other project)" : "");
+            if (played.length) {
+                tip += "\n" + played.map(function (x) { return roleEmoji(x.role) + " " + x.role + " for chat-" + x.forChat; }).join("\n");
+            }
+            svgEl("title", {}, gEl).textContent = tip;
             if (!r.external) {
                 gEl.addEventListener("click", function () { showConversation(g.projectId, r.id); });
             }
         });
-
-        // Role edges: arcs to the right of the port column, the role name just right of the bend. A name that
-        // would sit on another is moved down a line.
-        var labelBoxes = [];
-        function freeY(x, y, w) {
-            for (var tries = 0; tries < 12; tries++) {
-                var clash = labelBoxes.some(function (b) {
-                    return x < b.x + b.w && b.x < x + w && Math.abs(b.y - y) < 11;
-                });
-                if (!clash) break;
-                y += 11;
-            }
-            labelBoxes.push({ x: x, y: y, w: w });
-            return y;
-        }
-        (g.roleEdges || []).forEach(function (e, k) {
-            var a = pos[e.from];
-            var b = pos[e.toProject === g.projectId ? e.to : e.toProject + "/" + e.to];
-            if (!a || !b) return;
-            var ya = a.y, yb = b.y;
-            svgEl("circle", { cx: PORT_X, cy: ya, r: 2, "class": "cg-port" }, svg);
-            var path, lx, ly;
-            var most = Math.max(12, W - PORT_X - LABEL_ROOM);
-            if (a.row === b.row) {
-                path = "M" + PORT_X + " " + (ya - 3) + " C" + (PORT_X + 30) + " " + (ya - 16) + " " + (PORT_X + 30) + " " + (ya + 16) + " " + (PORT_X + 2) + " " + (ya + 4);
-                lx = PORT_X + 28; ly = ya + 3;
-            } else {
-                var bulge = Math.min(most, 14 + 8 * Math.abs(a.row - b.row) + 5 * (k % 3));
-                path = "M" + PORT_X + " " + ya + " C" + (PORT_X + bulge) + " " + ya + " " + (PORT_X + bulge) + " " + yb + " " + (PORT_X + 2) + " " + yb;
-                lx = PORT_X + bulge * 0.75 + 4; ly = (ya + yb) / 2 + 3;
-            }
-            ly = freeY(lx, ly, e.role.length * 6.2 + 4);
-            svgEl("path", { d: path, "class": "cg-role", "marker-end": "url(#cg-arrow)",
-                "data-from": e.from, "data-role": e.role, "data-to": e.to }, svg)
-                .appendChild(svgEl("title", {})).textContent = "chat-" + e.from + "'s " + e.role + " is "
-                    + (e.toProject === g.projectId ? "chat-" + e.to : e.toProject + "/chat-" + e.to);
-            var lab = svgEl("text", { x: lx, y: ly, "class": "cg-role-label" }, svg);
-            lab.textContent = e.role;
-        });
-        // The SVG is as tall as its lowest label.
-        var lowest = labelBoxes.reduce(function (m, b) { return Math.max(m, b.y + 8); }, H);
-        if (lowest > H) { svg.setAttribute("height", lowest); svg.setAttribute("viewBox", "0 0 " + W + " " + lowest); }
     }
 
     var graphRefreshing = false;
@@ -2506,14 +2540,12 @@
         var tree = document.getElementById("actors-tree");
         var graph = document.getElementById("conv-graph");
         var sel = document.getElementById("graph-project");
-        var bt = document.getElementById("left-view-tree");
-        var bg = document.getElementById("left-view-graph");
+        var view = document.getElementById("left-view-select");
         var isGraph = leftView === "graph";
         if (tree) tree.hidden = isGraph;
         if (graph) graph.hidden = !isGraph;
         if (sel) sel.hidden = !isGraph;
-        if (bt) bt.setAttribute("aria-pressed", isGraph ? "false" : "true");
-        if (bg) bg.setAttribute("aria-pressed", isGraph ? "true" : "false");
+        if (view) view.value = leftView;
         var title = document.querySelector("#left-dock .dock-title");
         if (title) title.textContent = isGraph ? "Graph" : "Actors";
         localStorage.setItem(LEFT_VIEW_KEY, leftView);
@@ -2527,11 +2559,14 @@
     }
 
     function initLeftViews() {
-        var bt = document.getElementById("left-view-tree");
-        var bg = document.getElementById("left-view-graph");
+        var view = document.getElementById("left-view-select");
         var sel = document.getElementById("graph-project");
-        if (bt) bt.addEventListener("click", function () { leftView = "tree"; applyLeftView(); refreshActors(); });
-        if (bg) bg.addEventListener("click", function () { leftView = "graph"; applyLeftView(); graphLastSig = null; refreshLeftDock(); });
+        if (view) view.addEventListener("change", function () {
+            leftView = view.value === "graph" ? "graph" : "tree";
+            applyLeftView();
+            graphLastSig = null;
+            refreshLeftDock();
+        });
         if (sel) sel.addEventListener("change", function () { graphProjectChosen = sel.value; graphLastSig = null; refreshGraph(true); });
         applyLeftView();
         if (leftView === "graph") refreshLeftDock();

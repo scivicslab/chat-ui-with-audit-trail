@@ -29,7 +29,8 @@ import java.util.regex.Pattern;
  * <li>{@code SCENARIO-A}: send two requests to chat-02 (one urgent) and register a promised report on chat-03;
  * {@code TASK-WORK} holds chat-02's turn open (TimekeeperViewCheck).</li>
  * <li>{@code SCENARIO-G}: set superiors and role edges among chat-02..05 (one role target in project2);
- * {@code SCENARIO-G2}: move chat-05 under chat-01 and give chat-02's "worker" to chat-05 (ConversationGraphCheck).</li>
+ * {@code SCENARIO-G2}: move chat-05 under chat-01, give chat-02's "worker" to chat-05, and make chat-05 chat-04's
+ * "tester" and chat-01's "archivist" (a role with no emoji of its own), so chat-05 plays four roles (ConversationGraphCheck).</li>
  * <li>The end-of-turn reminder check registers a reminder only for an answer that says "I will report back".</li>
  * <li>Anything else: "OK. I will report back in 12 minutes."</li>
  * </ul>
@@ -113,6 +114,18 @@ public class ScriptedModelServer {
             <parameter name="role">worker</parameter>
             <parameter name="collaboratorChatId">05</parameter>
             <reason>build the graph</reason>
+            </invoke>
+            <invoke name="set_collaborator">
+            <parameter name="chatId">04</parameter>
+            <parameter name="role">tester</parameter>
+            <parameter name="collaboratorChatId">05</parameter>
+            <reason>build the graph</reason>
+            </invoke>
+            <invoke name="set_collaborator">
+            <parameter name="chatId">01</parameter>
+            <parameter name="role">archivist</parameter>
+            <parameter name="collaboratorChatId">05</parameter>
+            <reason>a role name with no emoji of its own</reason>
             </invoke>
             </function_calls>""";
 

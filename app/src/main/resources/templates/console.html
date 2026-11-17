@@ -91,10 +91,11 @@
             <!-- What the dock shows: the actor tree, or one project's conversations with their superior and
                  role edges (ConversationGraphInTheLeftPane_261117_oo01). Refresh and Auto apply to the one shown. -->
             <div class="dock-views">
-                <button id="left-view-tree" type="button" class="dock-view-btn" aria-pressed="true"
-                        title="Show every actor of this instance as a tree">Actor Tree</button>
-                <button id="left-view-graph" type="button" class="dock-view-btn" aria-pressed="false"
-                        title="Show one project's conversations: superior to subordinate, and the role edges set with set_collaborator">Graph</button>
+                <!-- One menu, as the right pane has (#right-tab-select). -->
+                <select id="left-view-select" aria-label="Left pane">
+                    <option value="tree" title="Every actor of this instance, as a tree">Actor Tree</option>
+                    <option value="graph" title="One project's conversations: superior to subordinate, and the roles set with set_collaborator">Graph</option>
+                </select>
                 <select id="graph-project" aria-label="Project shown in the graph" title="Project shown in the graph" hidden></select>
             </div>
             <div id="actors-tree"></div>

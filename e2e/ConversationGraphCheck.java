@@ -52,9 +52,30 @@ public class ConversationGraphCheck {
         throw new IllegalStateException("chat " + chat + " stayed busy");
     }
 
+    /** The emoji in front of a node's label, or "" when it plays no role. */
+    static String prefix(Page page, String chat) {
+        Object v = page.evaluate("(c) => { const e = document.querySelector(\"#conv-graph .cg-node[data-chat='\" + c + \"'] .cg-roles\");"
+                + " return e ? e.textContent.trim() : ''; }", chat);
+        return v == null ? "" : v.toString();
+    }
+
+    /** A node's tooltip. */
+    static String tooltip(Page page, String chat) {
+        Object v = page.evaluate("(c) => { const e = document.querySelector(\"#conv-graph .cg-node[data-chat='\" + c + \"'] > title\");"
+                + " return e ? e.textContent : ''; }", chat);
+        return v == null ? "" : v.toString();
+    }
+
+    /** The legend's role entries, as "emoji names". */
     @SuppressWarnings("unchecked")
-    static List<String> roleLabels(Page page) {
-        return (List<String>) page.evaluate("() => Array.from(document.querySelectorAll('#conv-graph .cg-role-label')).map(e => e.textContent)");
+    static List<String> legend(Page page) {
+        return (List<String>) page.evaluate("() => Array.from(document.querySelectorAll('#conv-graph .cg-legend-item'))"
+                + ".map(e => { const s = e.querySelectorAll('tspan'); return s[0].textContent + ' ' + s[1].textContent; })");
+    }
+
+    static void chooseView(Page page, String value) {
+        page.selectOption("#left-view-select", value);
+        page.waitForTimeout(600);
     }
 
     static String attr(Page page, String selector, String name) {
@@ -86,7 +107,12 @@ public class ConversationGraphCheck {
             page.waitForSelector("#actors-tree .actor-name");
             check(page.isVisible("#actors-tree") && !page.isVisible("#conv-graph"), "the dock opens on the Actor Tree");
 
-            page.click("#left-view-graph");
+            check(page.isVisible("#left-view-select") && "tree".equals(page.inputValue("#left-view-select")),
+                    "the view menu shows Actor Tree");
+            @SuppressWarnings("unchecked")
+            List<String> options = (List<String>) page.evaluate("() => Array.from(document.querySelectorAll('#left-view-select option')).map(o => o.textContent.trim())");
+            check(options.equals(List.of("Actor Tree", "Graph")), "the menu offers Actor Tree and Graph: " + options);
+            chooseView(page, "graph");
             page.waitForSelector("#conv-graph svg .cg-node");
             check(page.isVisible("#conv-graph") && !page.isVisible("#actors-tree") && page.isVisible("#graph-project"),
                     "Graph replaces the tree and shows the project select");
@@ -102,25 +128,39 @@ public class ConversationGraphCheck {
                     "chat-01 is marked as the liaison");
             int sup = page.querySelectorAll("#conv-graph path.cg-sup[data-to]").size();
             check(sup == superiorEdges, "one elbow per superior edge: " + sup + " of " + superiorEdges);
-            Set<String> labels = new TreeSet<>(roleLabels(page));
-            check(labels.equals(new TreeSet<>(List.of("auditor", "helper", "reviewer", "worker")))
-                            && page.querySelectorAll("#conv-graph path.cg-role[data-role]").size() == 4,
-                    "four role edges, each labelled with its role: " + roleLabels(page));
-            check("03".equals(attr(page, "#conv-graph path.cg-role[data-from='02'][data-role='worker']", "data-to")),
-                    "chat-02's worker is chat-03");
+            check(page.querySelectorAll("#conv-graph path.cg-role, #conv-graph .cg-role-label").isEmpty(),
+                    "no role arcs are drawn");
+            check("🔧".equals(prefix(page, "03")) && "🔍".equals(prefix(page, "04")) && "🤝".equals(prefix(page, "05"))
+                            && "📋".equals(prefix(page, "project2/05")) && "".equals(prefix(page, "02")) && "".equals(prefix(page, "01")),
+                    "each collaborator carries its role's emoji: 03=" + prefix(page, "03") + " 04=" + prefix(page, "04")
+                            + " 05=" + prefix(page, "05") + " project2/05=" + prefix(page, "project2/05"));
+            check(tooltip(page, "03").contains("worker for chat-02") && tooltip(page, "project2/05").contains("auditor for chat-05"),
+                    "the tooltip states the relation: " + tooltip(page, "03").replace('\n', '|'));
+            Set<String> leg = new TreeSet<>(legend(page));
+            check(leg.equals(new TreeSet<>(List.of("📋 auditor", "🤝 helper", "🔍 reviewer", "🔧 worker"))),
+                    "the legend maps each emoji in use to its role: " + legend(page));
             page.screenshot(new Page.ScreenshotOptions().setPath(Path.of("/tmp/uitest/graph-1.png")));
 
             // A change in the organization reaches the drawing on the next refresh (every 3 s with Auto on).
             long t0 = System.currentTimeMillis();
             turn("01", "SCENARIO-G2 move chat-05");
-            page.waitForFunction("() => { const w = document.querySelector(\"#conv-graph path.cg-role[data-from='02'][data-role='worker']\");"
+            page.waitForFunction("() => { const n = document.querySelector(\"#conv-graph .cg-node[data-chat='05']\");"
                     + " const s = document.querySelector(\"#conv-graph path.cg-sup[data-to='05']\");"
-                    + " return w && w.getAttribute('data-to') === '05' && s && s.getAttribute('data-from') === '01'; }",
+                    + " return n && (n.getAttribute('data-roles') || '').includes('worker:02') && s && s.getAttribute('data-from') === '01'; }",
                     null, new Page.WaitForFunctionOptions().setTimeout(15_000));
             long waited = System.currentTimeMillis() - t0;
             check(true, "after set_superior and set_collaborator the drawing changed by itself (" + waited
                     + " ms from sending the turn, the turn included)");
-            check(page.querySelectorAll("#conv-graph path.cg-role[data-role]").size() == 4, "the worker edge was moved, not added");
+            check("".equals(prefix(page, "03")), "chat-03 is no longer chat-02's worker, so it has no emoji: '" + prefix(page, "03") + "'");
+            String five = prefix(page, "05");
+            check("🏷️🤝🧪…".equals(five),
+                    "chat-05 plays four roles: three emoji shown, in role order (archivist, helper, tester), then …: " + five);
+            String tip5 = tooltip(page, "05");
+            check(tip5.contains("archivist for chat-01") && tip5.contains("helper for chat-03") && tip5.contains("tester for chat-04")
+                            && tip5.contains("worker for chat-02"),
+                    "chat-05's tooltip keeps all four: " + tip5.replace('\n', '|'));
+            check(legend(page).contains("🏷️ archivist") && legend(page).contains("🧪 tester"),
+                    "a role with no emoji of its own takes the fallback, and the legend says so: " + legend(page));
             page.screenshot(new Page.ScreenshotOptions().setPath(Path.of("/tmp/uitest/graph-2-changed.png")));
 
             // A node opens its conversation, as the tree does.
@@ -133,10 +173,9 @@ public class ConversationGraphCheck {
             page.reload();
             page.waitForLoadState(LoadState.DOMCONTENTLOADED);
             page.waitForSelector("#conv-graph svg .cg-node");
-            check("true".equals(page.getAttribute("#left-view-graph", "aria-pressed")) && page.isVisible("#conv-graph"),
+            check("graph".equals(page.inputValue("#left-view-select")) && page.isVisible("#conv-graph"),
                     "after reload the dock is still on the graph");
-            page.click("#left-view-tree");
-            page.waitForTimeout(500);
+            chooseView(page, "tree");
             check(page.isVisible("#actors-tree") && !page.isVisible("#conv-graph") && !page.isVisible("#graph-project")
                             && "Actors".equals(page.textContent("#left-dock .dock-title").strip()),
                     "Actor Tree brings the tree back");
