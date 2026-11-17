@@ -91,8 +91,8 @@ public class ConversationGraphCheck {
             return;
         }
         for (int i = 0; i < 4; i++) rest("POST", "/api/projects/project1/chats", null);
-        // One turn each, so that each has a session in the log and comes back after a restart (after-restart mode).
-        for (String c : List.of("02", "03", "04", "05")) turn(c, "HELLO-ONLY say hello");
+        // chat-02..05 never run a turn: after a restart (after-restart mode) they come back because creating them
+        // recorded them (ConversationRestoreOnRestart_260904_oo01).
         turn("01", "SCENARIO-G build the organization");
         String g = rest("GET", "/api/projects/project1/graph", null);
         System.out.println("graph: " + g);
@@ -232,6 +232,9 @@ public class ConversationGraphCheck {
                         && g.contains("\"role\":\"tester\",\"to\":\"05\"") && g.contains("\"role\":\"reviewer\",\"to\":\"04\""),
                 "the REST graph still has the role edges after the restart");
         check(!g.contains("project2"), "the edge to project2/chat-05, a conversation that never existed, was dropped at start-up");
+        String chats = rest("GET", "/api/projects/project1/chats", null);
+        check(chats.contains("\"02\"") && chats.contains("\"03\"") && chats.contains("\"04\"") && chats.contains("\"05\""),
+                "chat-02..05, which never ran a turn, came back: " + chats);
         try (Playwright pw = Playwright.create()) {
             Browser browser = pw.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
             BrowserContext ctx = browser.newContext(new Browser.NewContextOptions().setViewportSize(1400, 900));
