@@ -12,24 +12,9 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The graph the left pane draws (ConversationGraphInTheLeftPane_261117_oo01): built from the organization's superior
- * table and the collaboration graph's role edges, without actors.
+ * table and the role table's edges, without actors.
  */
 class ConversationGraphTest {
-
-    @Test
-    void edgesFromReturnsTheRoleEdgesOfOneProjectInOrder() {
-        CollaborationGraph g = new CollaborationGraph();
-        g.setCollaborator("project1/chat-02", "worker", "project1/chat-03");
-        g.setCollaborator("project1/chat-02", "reviewer", "project1/chat-04");
-        g.setCollaborator("project10/chat-01", "worker", "project10/chat-02");
-        g.setCollaborator("project2/chat-01", "worker", "project1/chat-02");
-
-        List<CollaborationGraph.Edge> edges = g.edgesFrom("project1/");
-        assertEquals(List.of(
-                new CollaborationGraph.Edge("project1/chat-02", "reviewer", "project1/chat-04"),
-                new CollaborationGraph.Edge("project1/chat-02", "worker", "project1/chat-03")), edges,
-                "only edges whose source is in project1, sorted by source then role; project10 is not project1");
-    }
 
     @Test
     void nodesCarryTheirNameAndTheLiaison() {
@@ -55,11 +40,11 @@ class ConversationGraphTest {
 
     @Test
     void roleEdgesNameTheTargetAndItsProject() {
-        List<CollaborationGraph.Edge> edges = List.of(
-                new CollaborationGraph.Edge("project1/chat-02", "worker", "project1/chat-03"),
-                new CollaborationGraph.Edge("project1/chat-02", "auditor", "project2/chat-05"),
-                new CollaborationGraph.Edge("project1/chat-09", "worker", "project1/chat-02"),
-                new CollaborationGraph.Edge("project2/chat-01", "worker", "project1/chat-02"));
+        List<RoleTable.Edge> edges = List.of(
+                new RoleTable.Edge("project1/chat-02", "worker", "project1/chat-03"),
+                new RoleTable.Edge("project1/chat-02", "auditor", "project2/chat-05"),
+                new RoleTable.Edge("project1/chat-09", "worker", "project1/chat-02"),
+                new RoleTable.Edge("project2/chat-01", "worker", "project1/chat-02"));
         ConversationGraph graph = ConversationGraph.of("project1", null, List.of("01", "02", "03"), Map.of(), Map.of(),
                 "01", edges, Map.of());
         assertEquals(List.of(

@@ -9,7 +9,7 @@ import java.util.TreeSet;
 /**
  * One project's conversations and the two kinds of edge between them, as the left pane draws them
  * ({@code ConversationGraphInTheLeftPane_261117_oo01}): superior to subordinate, from the project's
- * {@link Organization}, and role edges, from the {@link CollaborationGraph}. Built on each request from what
+ * {@link Organization}, and role edges, from the project's {@link RoleTable}. Built on each request from what
  * those two actors hold; nothing is kept.
  *
  * @param projectId     the project
@@ -72,7 +72,7 @@ public record ConversationGraph(String projectId, String name, String liaison, L
      */
     public static ConversationGraph of(String projectId, String name, List<String> chatIds, Map<String, String> names,
                                        Map<String, String> superiors, String liaison,
-                                       List<CollaborationGraph.Edge> edges, Map<String, Model> models) {
+                                       List<RoleTable.Edge> edges, Map<String, Model> models) {
         Set<String> ids = new TreeSet<>(chatIds);
         List<Node> nodes = new ArrayList<>();
         for (String id : ids) {
@@ -88,7 +88,7 @@ public record ConversationGraph(String projectId, String name, String liaison, L
         }
 
         List<RoleEdge> roles = new ArrayList<>();
-        for (CollaborationGraph.Edge e : edges) {
+        for (RoleTable.Edge e : edges) {
             String[] from = split(e.from());
             String[] to = split(e.to());
             if (from == null || to == null || !projectId.equals(from[0]) || !ids.contains(from[1])) continue;

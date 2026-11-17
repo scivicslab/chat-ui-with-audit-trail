@@ -30,14 +30,13 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Top-level grouping actor for one project — a {@code createChild} parent, exactly like
- * {@link CallWatchdog}/{@link CollaborationGraph}, that additionally carries the project's
+ * Top-level grouping actor for one project — a {@code createChild} parent that additionally carries the project's
  * working directory and the instructions found there.
  *
- * <p>Everything one project's execution needs — its ConversationSquads ({@code chat-...}) — lives
- * as a descendant of one {@code Project} instance. {@code outputMultiplexer}, {@code callWatchdog}
- * and {@code collaborationGraph} deliberately stay outside this tree — see
- * {@code ProjectScopedActorTree_260829_oo01}.</p>
+ * <p>Everything one project's execution needs lives as a descendant of one {@code Project} instance: its
+ * ConversationSquads ({@code chat-...}), its organization ({@code <project>/organization}) and its role table
+ * ({@code <project>/roles}, {@code EachActorRecordsItsOwnState_261118_oo01}). {@code outputMultiplexer} and
+ * {@code callWatchdog} deliberately stay outside this tree — see {@code ProjectScopedActorTree_260829_oo01}.</p>
  *
  * <p>The working directory is what gives a conversation a position in the file tree, which
  * {@code AGENTS.md} needs and this system otherwise lacks: an agent editing a file resolves

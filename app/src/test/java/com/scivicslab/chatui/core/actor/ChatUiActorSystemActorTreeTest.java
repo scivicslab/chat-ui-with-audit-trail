@@ -39,12 +39,15 @@ class ChatUiActorSystemActorTreeTest {
                 .filter(n -> ChatUiActorSystem.HOUSEKEEPER.equals(n.name())).findFirst().orElseThrow();
         List<String> keptNames = housekeeper.children().stream().map(ActorNode::name).toList();
         assertTrue(keptNames.contains("callWatchdog"), "expected callWatchdog under housekeeper, got " + keptNames);
-        assertTrue(keptNames.contains("collaborationGraph"), "expected collaborationGraph under housekeeper, got " + keptNames);
+        // Role edges are kept per project, by the project's own role table (EachActorRecordsItsOwnState_261118_oo01).
+        assertTrue(!keptNames.contains("collaborationGraph"), "no system-wide role graph under housekeeper, got " + keptNames);
         assertTrue(keptNames.contains("skillRegistry"), "expected skillRegistry under housekeeper, got " + keptNames);
 
         ActorNode project1 = root.children().stream()
                 .filter(n -> "project1".equals(n.name())).findFirst().orElseThrow();
         List<String> project1ChildNames = project1.children().stream().map(ActorNode::name).toList();
+        assertTrue(project1ChildNames.contains("project1/roles"),
+                "expected the role table project1/roles under project1, got " + project1ChildNames);
         assertTrue(project1ChildNames.contains("project1/chat-01"),
                 "expected project1/chat-01 under project1, got " + project1ChildNames);
         // chat-02 no longer pre-seeded — only created lazily once actual work needs it.

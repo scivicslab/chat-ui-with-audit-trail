@@ -336,7 +336,7 @@ public final class AskChatTool {
     /**
      * Same call, but with both conversations already named in full ({@code project1/chat-03}) —
      * for callers that hold qualified names rather than what a user typed, such as the babysitter
-     * phases resolving their {@code "worker"} through {@link com.scivicslab.chatui.core.actor.CollaborationGraph}
+     * phases resolving their {@code "worker"} through {@link com.scivicslab.chatui.core.actor.RoleTable}
      * (which stores qualified names). Resolving such a name a second time would mangle it.
      *
      * @param system     the actor system used to resolve the target's actors

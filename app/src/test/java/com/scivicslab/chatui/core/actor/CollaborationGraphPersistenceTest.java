@@ -6,19 +6,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Role edges survive a restart, saved with the project's settings as the organization is, and go away with a
- * deleted conversation or project ({@code CollaborationGraph_260828_oo01}).
+ * Role edges survive a restart, saved by each project's role table as its {@code roles} entry, and go away with a
+ * deleted conversation or project ({@code CollaborationGraph_260828_oo01}, {@code EachActorRecordsItsOwnState_261118_oo01}).
  */
 class CollaborationGraphPersistenceTest {
 
     private static String collaborator(ChatUiActorSystem system, String from, String role) throws Exception {
-        return system.getCollaborationGraph().ask(g -> g.getCollaborator(from, role)).get(5, TimeUnit.SECONDS);
+        return system.collaboratorOf(from, role);
     }
 
     /** Conversations come back after a restart only when the log holds a session for them. */

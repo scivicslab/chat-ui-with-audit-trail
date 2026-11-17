@@ -114,9 +114,9 @@ public class ChatSession extends Interpreter {
     /** The shared {@link CallWatchdog}, consulted by the {@code ask_chat} tool before it waits on
      *  another ConversationSquad — distinct from {@link #watchdogName} (an unrelated, unported StallMonitor field). */
     private ActorRef<CallWatchdog> watchdogRef;
-    /** The shared {@link CollaborationGraph}, consulted (and updated) by the {@code set_collaborator}
+    /** This conversation's project's {@link RoleTable}, consulted (and updated) by the {@code set_collaborator}
      *  tool and by babysitter-loop methods resolving a role (e.g. {@code "worker"}) to a chat id. */
-    private ActorRef<CollaborationGraph> collaborationGraphRef;
+    private ActorRef<RoleTable> roleTableRef;
     private ConversationControls conversationControls;
     /** The shared {@link SkillRegistry}, backing the {@code load_skill} tool and the skill catalog
      *  carried in this session's system prompt ({@code SkillAndAgentsFile_260830_oo01}). */
@@ -848,9 +848,9 @@ public class ChatSession extends Interpreter {
         this.conversationControls = conversationControls;
     }
 
-    /** @param collaborationGraphRef the shared {@link CollaborationGraph} */
-    public void setCollaborationGraphRef(ActorRef<CollaborationGraph> collaborationGraphRef) {
-        this.collaborationGraphRef = collaborationGraphRef;
+    /** @param roleTableRef the role table of this conversation's project */
+    public void setRoleTableRef(ActorRef<RoleTable> roleTableRef) {
+        this.roleTableRef = roleTableRef;
     }
 
     /** @param fileScope the range of the file system {@code read}/{@code write} may touch */
@@ -2420,7 +2420,7 @@ public class ChatSession extends Interpreter {
 
     /**
      * Entry point of a phase: resolves this conversation's {@code "worker"} collaborator via
-     * {@link CollaborationGraph} and sends it {@code instruction}. Resets the redo budget, so each
+     * its project's {@link RoleTable} and sends it {@code instruction}. Resets the redo budget, so each
      * phase gets its own (a phase that used up its redos does not starve the next one).
      *
      * @param instruction what to ask the worker to do in this phase
@@ -2527,13 +2527,13 @@ public class ChatSession extends Interpreter {
         return new ActionResult(true, "reported failure");
     }
 
-    /** Resolves this ConversationSquad's {@code "worker"} collaborator via {@link CollaborationGraph}, or {@code null}. */
+    /** Resolves this ConversationSquad's {@code "worker"} collaborator via its project's {@link RoleTable}, or {@code null}. */
     private String resolveWorker() {
-        if (collaborationGraphRef == null) return null;
+        if (roleTableRef == null) return null;
         try {
-            return collaborationGraphRef.ask(g -> g.getCollaborator(myChatName(), "worker")).get(5, TimeUnit.SECONDS);
+            return roleTableRef.ask(t -> t.collaborator(myChatName(), "worker")).get(5, TimeUnit.SECONDS);
         } catch (Exception e) {
-            logger.log(Level.WARNING, "resolveWorker: CollaborationGraph lookup failed", e);
+            logger.log(Level.WARNING, "resolveWorker: role table lookup failed", e);
             return null;
         }
     }
@@ -2749,7 +2749,7 @@ public class ChatSession extends Interpreter {
      * its {@code turnN/conversation} row, so the turn appeared in no list and its trace could not
      * be opened — the judgement that accepted the worker's text was in nobody's record.
      *
-     * @param workerChatName the worker's full name, as {@code CollaborationGraph} holds it
+     * @param workerChatName the worker's full name, as the {@link RoleTable} holds it
      * @param prompt         what was sent to it
      * @param reply          what came back, or an {@code error:} line when nothing did
      */
@@ -3137,7 +3137,7 @@ public class ChatSession extends Interpreter {
             case "set_collaborator" -> conversationControls != null
                     ? conversationControls.setCollaborator(myChatName(), extractInput(args, "chatId"),
                             extractInput(args, "role"), extractInput(args, "collaboratorChatId"))
-                    : SetCollaboratorTool.setCollaborator(collaborationGraphRef,
+                    : SetCollaboratorTool.setCollaborator(roleTableRef,
                             myChatName(), extractInput(args, "chatId"), extractInput(args, "role"),
                             extractInput(args, "collaboratorChatId"));
             case "get_chat_status" -> GetChatStatusTool.get(system, projectId, extractInput(args, "chatId"));

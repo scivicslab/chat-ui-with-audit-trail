@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 
 import com.scivicslab.chatui.agent.OrganizationTools;
-import com.scivicslab.chatui.agent.SetCollaboratorTool;
 import com.scivicslab.chatui.core.actor.ChatUiActorSystem;
 import com.scivicslab.chatui.core.actor.ConversationGraph;
 import com.scivicslab.chatui.core.actor.StartedSystem;
@@ -42,8 +41,7 @@ class ConversationGraphEndpointTest {
         system.createChat("project1");
         assertTrue(OrganizationTools.setSuperior(system, "project1", "01", "02", "01").startsWith("ok"));
         assertTrue(OrganizationTools.setSuperior(system, "project1", "01", "03", "02").startsWith("ok"));
-        assertTrue(SetCollaboratorTool.setCollaborator(system.getCollaborationGraph(), "project1/chat-01",
-                "02", "worker", "03").startsWith("ok"));
+        assertTrue(system.setCollaborator("project1/chat-01", "02", "worker", "03").startsWith("ok"));
         ChatResource r = resource(system);
 
         ConversationGraph g = graph(r, "project1");
@@ -55,8 +53,7 @@ class ConversationGraphEndpointTest {
 
         // A change made after the first call shows on the next one.
         assertTrue(OrganizationTools.setSuperior(system, "project1", "01", "04", "02").startsWith("ok"));
-        assertTrue(SetCollaboratorTool.setCollaborator(system.getCollaborationGraph(), "project1/chat-01",
-                "02", "worker", "04").startsWith("ok"));
+        assertTrue(system.setCollaborator("project1/chat-01", "02", "worker", "04").startsWith("ok"));
         ConversationGraph after = graph(r, "project1");
         assertTrue(after.superiorEdges().contains(new ConversationGraph.SuperiorEdge("02", "04")), after.toString());
         assertEquals(List.of(new ConversationGraph.RoleEdge("02", "worker", "04", "project1")), after.roleEdges(),
