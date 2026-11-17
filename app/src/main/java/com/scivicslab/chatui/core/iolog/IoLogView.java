@@ -227,6 +227,49 @@ public class IoLogView {
                 .orElse(null);
     }
 
+    /** @return the message of the session's last entry with {@code label}, as written, or {@code null} when it has none */
+    public String latestOf(long sessionId, String label) {
+        return latestOf(allLogs(sessionId), label);
+    }
+
+    static String latestOf(List<LogEntry> raw, String label) {
+        return raw.stream()
+                .filter(e -> label.equals(e.getLabel()))
+                .max(Comparator.comparingLong(LogEntry::getId))
+                .map(LogEntry::getMessage)
+                .orElse(null);
+    }
+
+    /**
+     * The session's last entry with {@code label} whose message is a JSON object holding {@code key}, parsed; an
+     * entry that is not a JSON object is passed over. This reads a value out of an older entry shape that carried
+     * several owners' values at once, behind later entries that no longer carry it.
+     *
+     * @return the entry, or {@code null} when no entry with that label holds the key
+     */
+    public org.json.JSONObject latestWithKey(long sessionId, String label, String key) {
+        return latestWithKey(allLogs(sessionId), label, key);
+    }
+
+    static org.json.JSONObject latestWithKey(List<LogEntry> raw, String label, String key) {
+        return raw.stream()
+                .filter(e -> label.equals(e.getLabel()))
+                .sorted(Comparator.comparingLong(LogEntry::getId).reversed())
+                .map(e -> jsonObject(e.getMessage()))
+                .filter(o -> o != null && o.has(key))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static org.json.JSONObject jsonObject(String message) {
+        if (message == null || !message.stripLeading().startsWith("{")) return null;
+        try {
+            return new org.json.JSONObject(message);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     /**
      * Label of the entry that holds the name a person gave a conversation. Kept out of the
      * {@link #SETTINGS_LABEL} record, whose every entry carries the whole provider state: a rename
