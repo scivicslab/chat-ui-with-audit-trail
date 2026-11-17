@@ -53,6 +53,12 @@ public final class Chats {
          * @return what went wrong, or {@code null} when the conversation runs the loop and it is recorded
          */
         String setAgentLoop(String chatName, String file);
+
+        /** @return what went wrong, or {@code null} when it is set and recorded */
+        String setNoThink(String chatName, boolean noThink);
+
+        /** @return what went wrong, or {@code null} when it is set and recorded */
+        String setEffort(String chatName, String effort);
     }
 
     private final IIActorSystem system;
@@ -160,7 +166,12 @@ public final class Chats {
         require(chat, "chat");
         if (blank(value)) return "nothing said about thinking; " + chat.strip() + " stays as it was";
         boolean noThink = Boolean.parseBoolean(value.strip());
-        session(chat).tell(a -> ((ChatSession) a).setNoThink(noThink)).join();
+        if (recorder != null) {
+            String refused = recorder.setNoThink(chat.strip(), noThink);
+            if (refused != null) throw new IllegalStateException(refused);
+        } else {
+            session(chat).tell(a -> ((ChatSession) a).setNoThink(noThink)).join();
+        }
         return chat.strip() + (noThink ? " answers without thinking" : " thinks as it did");
     }
 
@@ -168,7 +179,12 @@ public final class Chats {
     public String setEffort(String chat, String effort) {
         require(chat, "chat");
         if (blank(effort)) return "no effort named; " + chat.strip() + " stays as it was";
-        provider(chat).tell(p -> p.setEffort(effort.strip())).join();
+        if (recorder != null) {
+            String refused = recorder.setEffort(chat.strip(), effort.strip());
+            if (refused != null) throw new IllegalStateException(refused);
+        } else {
+            provider(chat).tell(p -> p.setEffort(effort.strip())).join();
+        }
         return chat.strip() + " works at " + effort.strip();
     }
 

@@ -199,6 +199,12 @@ public class ChatUiActorSystem implements ConversationControls {
     private ActorRef<com.scivicslab.chatui.audittrail.ActivityWatcher> activityWatcherRef;
     private FileAccessScope fileScope;
     private PluginRegistry pluginRegistry;
+    /**
+     * Provider kinds given before {@link #init} without a plugin jar, registered beside the jars' kinds, so that a
+     * restart's restore finds them. Empty in the application; a test that restarts a system on a provider of its
+     * own puts its factory here.
+     */
+    final List<com.scivicslab.chatui.plugin.LlmProviderFactory> extraProviderFactories = new ArrayList<>();
 
     /** One {@link Project} grouping actor per project id. Purely an actor-tree grouping plus a
      *  naming prefix: a project is not a behavioral boundary
@@ -352,6 +358,7 @@ public class ChatUiActorSystem implements ConversationControls {
         pluginRegistry.register(new OpenAiCompatProviderFactory(servers, defaultModel));
         pluginRegistry.loadJars(pluginJars.orElse(List.of()).stream()
                 .map(String::trim).filter(p -> !p.isEmpty()).map(Path::of).toList());
+        extraProviderFactories.forEach(pluginRegistry::register);
         housekeeperRef.createChild("plugins", pluginRegistry);
 
         // Skill catalog (SkillAndAgentsFile_260830_oo01): likewise one for the whole system. A skill
@@ -386,6 +393,16 @@ public class ChatUiActorSystem implements ConversationControls {
                         String[] ids = splitConversationSquadId(chatName);
                         if (ids == null) return "chat not found: " + chatName;
                         return ChatUiActorSystem.this.setAgentLoopFile(ids[0], ids[1], file);
+                    }
+                    @Override public String setNoThink(String chatName, boolean noThink) {
+                        String[] ids = splitConversationSquadId(chatName);
+                        if (ids == null || !ChatUiActorSystem.this.setNoThink(ids[0], ids[1], noThink)) return "chat not found: " + chatName;
+                        return null;
+                    }
+                    @Override public String setEffort(String chatName, String effort) {
+                        String[] ids = splitConversationSquadId(chatName);
+                        if (ids == null || !ChatUiActorSystem.this.setEffort(ids[0], ids[1], effort)) return "chat not found: " + chatName;
+                        return null;
                     }
                 }), actorSystem);
         adopt(HOUSEKEEPER, chatsActor);
@@ -2123,9 +2140,12 @@ public class ChatUiActorSystem implements ConversationControls {
      * @return {@code false} when there is no such conversation
      */
     public boolean setNoThink(String projectId, String chatId, boolean value) {
-        ChatSessionIIAR session = chatSessions.get(chatActorName(projectId, chatId));
+        String name = chatActorName(projectId, chatId);
+        ChatSessionIIAR session = chatSessions.get(name);
         if (session == null) return false;
         session.tell(a -> ((ChatSession) a).setNoThink(value)).join();
+        // Recorded with the rest of its settings, so a restart puts it back.
+        recordSettings(name, session.getProviderIdDirect(), session.getToolSetDirect(), session.getModelDirect());
         return true;
     }
 
@@ -2139,6 +2159,12 @@ public class ChatUiActorSystem implements ConversationControls {
         ActorRef<LlmProvider> providerRef = getProviderRef(projectId, chatId);
         if (providerRef == null) return false;
         providerRef.tell(p -> p.setEffort(effort)).join();
+        // Recorded with the rest of its settings, so a restart puts it back.
+        String name = chatActorName(projectId, chatId);
+        ChatSessionIIAR session = chatSessions.get(name);
+        if (session != null) {
+            recordSettings(name, session.getProviderIdDirect(), session.getToolSetDirect(), session.getModelDirect());
+        }
         return true;
     }
 
@@ -2262,6 +2288,14 @@ public class ChatUiActorSystem implements ConversationControls {
                 o.put("urgentWaitMinutes", limits[0]);
                 o.put("childReplyWarnMinutes", limits[1]);
             }
+            // Whether it answers without thinking, and its effort, read from it now like the limits above, so
+            // every settings record carries the whole state (ConversationSettingsRecord_260913_oo01).
+            ChatSessionIIAR session = chatSessions.get(conversationSquadName);
+            if (session != null) {
+                o.put("noThink", session.isNoThinkDirect());
+                String effort = session.getEffortDirect();
+                o.put("effort", effort == null ? org.json.JSONObject.NULL : effort);
+            }
             ioLogStore.record(sessionId, "agent", IoLogView.SETTINGS_LABEL, o.toString());
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Could not record the settings of " + conversationSquadName, e);
@@ -2316,6 +2350,17 @@ public class ChatUiActorSystem implements ConversationControls {
                 Double t = s.temperature();
                 providerRef.tell(p -> p.setTemperature(t));
             }
+        }
+        // Absent in a record written before they were kept: left at their defaults.
+        if (s.noThink() != null) {
+            ChatSessionIIAR session = chatSessions.get(conversationSquadName);
+            boolean noThink = s.noThink();
+            if (session != null) session.tell(a -> ((ChatSession) a).setNoThink(noThink));
+        }
+        if (s.effort() != null && !s.effort().isBlank()) {
+            ActorRef<LlmProvider> providerRef = getProviderRef(projectId, chatId);
+            String effort = s.effort();
+            if (providerRef != null) providerRef.tell(p -> p.setEffort(effort));
         }
         if (s.urgentWaitMinutes() != null || s.childReplyWarnMinutes() != null) {
             ActorRef<Timekeeper> keeper = actorSystem.getActor(conversationSquadName + ".timekeeper");

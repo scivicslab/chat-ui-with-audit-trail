@@ -25,7 +25,17 @@ final class SystemsOnOneLog implements AutoCloseable {
 
     /** @return a newly initialised system on this log */
     ChatUiActorSystem start() {
+        return start(s -> { });
+    }
+
+    /**
+     * @param beforeInit what to do to the system before its start-up, e.g. add a provider kind a recorded
+     *                   conversation is on, so its restore finds it
+     * @return a newly initialised system on this log
+     */
+    ChatUiActorSystem start(java.util.function.Consumer<ChatUiActorSystem> beforeInit) {
         ChatUiActorSystem system = new ChatUiActorSystem();
+        beforeInit.accept(system);
         system.ioLogStore = log;
         // What reads the settings back on start-up; without it a restarted system restores no project settings.
         system.ioLogView = com.scivicslab.chatui.core.iolog.IoLogView.over(log);

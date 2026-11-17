@@ -187,10 +187,19 @@ public class IoLogView {
 
     /** A conversation's provider kind, tool set and model, as one settings record holds them. */
     public record Settings(String provider, String tools, String model, Double temperature,
-                           Long urgentWaitMinutes, Long childReplyWarnMinutes) {
+                           Long urgentWaitMinutes, Long childReplyWarnMinutes, Boolean noThink, String effort) {
         /** A record written before the timekeeper's limits were kept: neither is set. */
         public Settings(String provider, String tools, String model, Double temperature) {
             this(provider, tools, model, temperature, null, null);
+        }
+
+        /**
+         * A record written before noThink and the effort were kept: neither is set, and a restore leaves both at
+         * their defaults (thinking on, no effort).
+         */
+        public Settings(String provider, String tools, String model, Double temperature,
+                        Long urgentWaitMinutes, Long childReplyWarnMinutes) {
+            this(provider, tools, model, temperature, urgentWaitMinutes, childReplyWarnMinutes, null, null);
         }
     }
 
@@ -297,7 +306,9 @@ public class IoLogView {
                     o.has("temperature") && !o.isNull("temperature") ? o.optDouble("temperature") : null,
                     o.has("urgentWaitMinutes") && !o.isNull("urgentWaitMinutes") ? o.optLong("urgentWaitMinutes") : null,
                     o.has("childReplyWarnMinutes") && !o.isNull("childReplyWarnMinutes")
-                            ? o.optLong("childReplyWarnMinutes") : null);
+                            ? o.optLong("childReplyWarnMinutes") : null,
+                    o.has("noThink") && !o.isNull("noThink") ? o.optBoolean("noThink") : null,
+                    o.has("effort") && !o.isNull("effort") ? o.optString("effort") : null);
         } catch (Exception e) {
             return null;
         }
