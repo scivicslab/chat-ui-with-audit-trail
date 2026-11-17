@@ -190,8 +190,6 @@ public class ChatUiActorSystem implements ConversationControls {
     private ActorRef<AutonomousTurnWatcher> autonomousTurnWatcherRef;
     private ActorRef<TimekeeperTicker> timekeeperTickerRef;
     private ActorRef<CallWatchdog> callWatchdogRef;
-    /** Which conversations exist across a restart, kept in the I/O log ({@code ConversationRestoreOnRestart_260904_oo01}). */
-    private ActorRef<ConversationRegistry> conversationRegistryRef;
     private ActorRef<SkillRegistry> skillRegistryRef;
     private ActorRef<com.scivicslab.chatui.audittrail.ActivityWatcher> activityWatcherRef;
     private FileAccessScope fileScope;
@@ -323,10 +321,6 @@ public class ChatUiActorSystem implements ConversationControls {
         // "なぜCallWatchdog・CollaborationGraphもプロジェクトごとに分離しないか").
         callWatchdogRef = housekeeperRef.createChild("callWatchdog", new CallWatchdog());
 
-        // Which conversations come back after a restart; created before any conversation is, since creating one
-        // records it there (ConversationRestoreOnRestart_260904_oo01).
-        conversationRegistryRef = housekeeperRef.createChild("conversationRegistry",
-                new ConversationRegistry(ioLogStore, ioLogView));
 
         // The loader a job's workflow calls to create and remove actors, and to bring in a Turing
         // Workflow plugin (WorkflowPluginLoader_260913_oo01). Always present: creating and removing
@@ -371,31 +365,8 @@ public class ChatUiActorSystem implements ConversationControls {
         actorSystem.addIIActor(texts);
         // What a job's workflow does with the conversations: ask, clear, stop, set a model or a provider. It holds
         // nothing that changes, so the jobs of every project use this one, naming each conversation in full.
-        ChatsIIAR chatsActor = new ChatsIIAR(WORKFLOW_CHATS, new Chats(actorSystem, callWatchdogRef, this::changeProviderForPlan,
-                new Chats.SettingsRecorder() {
-                    // A project workflow's model and agent loop changes take the recording path the tools and the
-                    // screen take, so they come back after a restart (ConversationRestoreOnRestart_260904_oo01).
-                    @Override public String setModel(String chatName, String model) {
-                        String[] ids = splitConversationSquadId(chatName);
-                        if (ids == null || !ChatUiActorSystem.this.setModel(ids[0], ids[1], model, true)) return "chat not found: " + chatName;
-                        return null;
-                    }
-                    @Override public String setAgentLoop(String chatName, String file) {
-                        String[] ids = splitConversationSquadId(chatName);
-                        if (ids == null) return "chat not found: " + chatName;
-                        return ChatUiActorSystem.this.setAgentLoopFile(ids[0], ids[1], file);
-                    }
-                    @Override public String setNoThink(String chatName, boolean noThink) {
-                        String[] ids = splitConversationSquadId(chatName);
-                        if (ids == null || !ChatUiActorSystem.this.setNoThink(ids[0], ids[1], noThink)) return "chat not found: " + chatName;
-                        return null;
-                    }
-                    @Override public String setEffort(String chatName, String effort) {
-                        String[] ids = splitConversationSquadId(chatName);
-                        if (ids == null || !ChatUiActorSystem.this.setEffort(ids[0], ids[1], effort)) return "chat not found: " + chatName;
-                        return null;
-                    }
-                }), actorSystem);
+        ChatsIIAR chatsActor = new ChatsIIAR(WORKFLOW_CHATS,
+                new Chats(actorSystem, callWatchdogRef, this::changeProviderForPlan), actorSystem);
         adopt(HOUSEKEEPER, chatsActor);
         actorSystem.addIIActor(chatsActor);
         // What the plugin code of a job's workflow may do to the project's conversations
@@ -1347,13 +1318,23 @@ public class ChatUiActorSystem implements ConversationControls {
                             return new Timekeeper.TargetState(true, since != null, since == null ? 0 : since);
                         }));
 
+        // Each actor that holds part of the conversation's state records it in the conversation's own session
+        // (EachActorRecordsItsOwnState_261118_oo01): the squad its name, the chat session its settings and agent loop,
+        // the timekeeper its limits.
+        com.scivicslab.chatui.core.iolog.SessionEntries own =
+                com.scivicslab.chatui.core.iolog.SessionEntries.ofConversation(ioLogStore, ioLogView, qualifiedName);
+        conversationSquadRef.tell(s -> s.recordsTo(own));
+        chatSessionIIAR.tell(a -> ((ChatSession) a).recordsTo(own));
+        ActorRef<Timekeeper> keeperRef = actorSystem.getActor(qualifiedName + ".timekeeper");
+        if (keeperRef != null) keeperRef.tell(k -> k.recordsTo(own));
         restoreConversation(qualifiedName, chatSessionIIAR, providerRef);
-        // Recorded, so that it comes back after a restart even if it never runs a turn; the registry leaves a
-        // conversation that is being brought back as it was recorded (ConversationRestoreOnRestart_260904_oo01).
-        String createdProvider = chatSessionIIAR.getProviderIdDirect();
-        String createdTools = chatSessionIIAR.getToolSetDirect();
-        String createdModel = chatSessionIIAR.getModelDirect();
-        tellRegistry(r -> r.created(qualifiedName, createdProvider, createdTools, createdModel));
+        // Its first settings, so that it comes back as it was made even if it never runs a turn; one being brought
+        // back already has them and writes nothing (ConversationRestoreOnRestart_260904_oo01).
+        try {
+            chatSessionIIAR.tell(a -> ((ChatSession) a).recordIfNew()).get(10, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not record the settings of " + qualifiedName, e);
+        }
 
         return conversationSquadRef;
     }
@@ -1398,14 +1379,20 @@ public class ChatUiActorSystem implements ConversationControls {
             chatSessionIIAR.tell(a -> ((ChatSession) a).resumeTurnNumbering(lastTurn));
         }
 
-        String recordedName = ioLogView.latestName(sessionId);
-        if (recordedName != null) {
-            ActorRef<ConversationSquad> squadRef = chats.get(conversationSquadName);
-            if (squadRef != null) squadRef.tell(c -> c.setName(recordedName));
-        }
+        // Each part puts back what it recorded itself: the name, the timekeeper's limits, the agent loop.
+        ActorRef<ConversationSquad> squadRef = chats.get(conversationSquadName);
+        if (squadRef != null) squadRef.tell(ConversationSquad::restore);
+        ActorRef<Timekeeper> keeperRef = actorSystem.getActor(conversationSquadName + ".timekeeper");
+        if (keeperRef != null) keeperRef.tell(Timekeeper::restore);
 
         // The agent loop put on it, by file or as YAML, whether or not it has run a turn.
-        String recordedLoop = askRegistry(r -> r.agentLoopOf(conversationSquadName), null);
+        String recordedLoop;
+        try {
+            recordedLoop = chatSessionIIAR.<String>ask(a -> ((ChatSession) a).recordedAgentLoop()).get(10, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not read the agent loop of " + conversationSquadName, e);
+            recordedLoop = null;
+        }
         if (recordedLoop != null) applyRecordedAgentLoop(conversationSquadName, chatSessionIIAR, recordedLoop);
 
         if (turns.isEmpty()) {
@@ -1570,17 +1557,8 @@ public class ChatUiActorSystem implements ConversationControls {
             LOG.log(Level.WARNING, "Failed to set the name of " + qualifiedName, e);
             return "error: " + e.getMessage();
         }
+        // The squad records the name itself (EachActorRecordsItsOwnState_261118_oo01).
         String applied = getChatName(projectId, chatId);
-        if (ioLogStore != null) {
-            try {
-                long sessionId = ioLogStore.ensureSession(qualifiedName);
-                if (sessionId >= 0) {
-                    ioLogStore.record(sessionId, "agent", IoLogView.NAME_LABEL, applied == null ? "" : applied);
-                }
-            } catch (Exception e) {
-                LOG.log(Level.WARNING, "Could not record the name of " + qualifiedName, e);
-            }
-        }
         return applied == null ? "ok: name cleared" : "ok: name set to " + applied;
     }
 
@@ -1781,9 +1759,8 @@ public class ChatUiActorSystem implements ConversationControls {
         String name = chatActorName(projectId, chatId);
         ChatSessionIIAR session = chatSessions.get(name);
         if (session == null) return "error: no such conversation: " + name;
-        String error = session.setAgentLoopWorkflowFile(file);
-        if (error == null) tellRegistry(r -> r.agentLoopSet(name, ConversationRegistry.AGENT_LOOP_FILE + file));
-        return error;
+        // The conversation records the loop itself (EachActorRecordsItsOwnState_261118_oo01).
+        return session.setAgentLoopWorkflowFile(file);
     }
 
     /**
@@ -1795,36 +1772,19 @@ public class ChatUiActorSystem implements ConversationControls {
     public String setAgentLoop(String myProjectId, String target, String yaml) {
         String outcome = com.scivicslab.chatui.agent.SetAgentLoopTool.setAgentLoop(actorSystem, myProjectId, target, yaml);
         if (outcome.startsWith("ok")) {
-            String name = resolveChatName(myProjectId, target);
-            tellRegistry(r -> r.agentLoopSet(name, ConversationRegistry.AGENT_LOOP_YAML + yaml));
+            ChatSessionIIAR session = chatSessions.get(resolveChatName(myProjectId, target));
+            if (session != null) session.recordAgentLoopDirect(ChatSession.AGENT_LOOP_YAML + yaml);
         }
         return outcome;
     }
 
-    /**
-     * Sends the conversation registry a message and waits for it to be handled, so that what it writes is in the
-     * log before the caller goes on (a restart right after must find it).
-     */
-    private void tellRegistry(java.util.function.Consumer<ConversationRegistry> message) {
-        if (conversationRegistryRef == null) return;
-        try {
-            conversationRegistryRef.tell(message).get(10, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            LOG.log(Level.WARNING, "The conversation registry did not answer", e);
-        }
-    }
-
-    private <R> R askRegistry(java.util.function.Function<ConversationRegistry, R> question, R fallback) {
-        return conversationRegistryRef == null ? fallback : askOrDefault(conversationRegistryRef, question, fallback);
-    }
-
     private void applyRecordedAgentLoop(String conversationSquadName, ChatSessionIIAR session, String entry) {
         try {
-            if (entry.startsWith(ConversationRegistry.AGENT_LOOP_FILE)) {
-                String error = session.setAgentLoopWorkflowFile(entry.substring(ConversationRegistry.AGENT_LOOP_FILE.length()));
+            if (entry.startsWith(ChatSession.AGENT_LOOP_FILE)) {
+                String error = session.setAgentLoopWorkflowFile(entry.substring(ChatSession.AGENT_LOOP_FILE.length()), false);
                 if (error != null) LOG.warning("Restoring the agent loop of " + conversationSquadName + ": " + error);
-            } else if (entry.startsWith(ConversationRegistry.AGENT_LOOP_YAML)) {
-                byte[] yaml = entry.substring(ConversationRegistry.AGENT_LOOP_YAML.length()).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            } else if (entry.startsWith(ChatSession.AGENT_LOOP_YAML)) {
+                byte[] yaml = entry.substring(ChatSession.AGENT_LOOP_YAML.length()).getBytes(java.nio.charset.StandardCharsets.UTF_8);
                 session.<Void>ask(i -> {
                     ChatSession chat = (ChatSession) i;
                     chat.reset();
@@ -2133,9 +2093,10 @@ public class ChatUiActorSystem implements ConversationControls {
             c.setProvider(provider, Optional.empty());
             c.setToolSet(toolSet);
             c.setProviderName(providerRef.getName());
+            // The conversation records its new provider with the change; a restore writes nothing.
+            if (record) c.recordSettings(null);
         });
         LOG.info("Provider of " + qualifiedName + " is now " + kind + " with tool set " + toolSet.id());
-        if (record) recordSettings(qualifiedName, kind == null ? "" : kind.trim().toLowerCase(), toolSet.id(), provider.getCurrentModel());
     }
 
     /**
@@ -2164,10 +2125,7 @@ public class ChatUiActorSystem implements ConversationControls {
         java.util.concurrent.CompletableFuture<Void> set = providerRef.tell(p -> p.setModel(model));
         if (wait) set.join();
         ChatSessionIIAR session = chatSessions.get(chatActorName(projectId, chatId));
-        if (session != null) {
-            recordSettings(chatActorName(projectId, chatId), session.getProviderIdDirect(),
-                    session.getToolSetDirect(), model);
-        }
+        if (session != null) session.recordSettingsDirect(model);
         return true;
     }
 
@@ -2190,9 +2148,12 @@ public class ChatUiActorSystem implements ConversationControls {
         String name = chatActorName(projectId, chatId);
         ChatSessionIIAR session = chatSessions.get(name);
         if (session == null) return false;
-        session.tell(a -> ((ChatSession) a).setNoThink(value)).join();
-        // Recorded with the rest of its settings, so a restart puts it back.
-        recordSettings(name, session.getProviderIdDirect(), session.getToolSetDirect(), session.getModelDirect());
+        // The conversation records it with the change, so a restart puts it back.
+        session.tell(a -> {
+            ChatSession c = (ChatSession) a;
+            c.setNoThink(value);
+            c.recordSettings(null);
+        }).join();
         return true;
     }
 
@@ -2206,12 +2167,9 @@ public class ChatUiActorSystem implements ConversationControls {
         ActorRef<LlmProvider> providerRef = getProviderRef(projectId, chatId);
         if (providerRef == null) return false;
         providerRef.tell(p -> p.setEffort(effort)).join();
-        // Recorded with the rest of its settings, so a restart puts it back.
-        String name = chatActorName(projectId, chatId);
-        ChatSessionIIAR session = chatSessions.get(name);
-        if (session != null) {
-            recordSettings(name, session.getProviderIdDirect(), session.getToolSetDirect(), session.getModelDirect());
-        }
+        // The conversation, which holds the provider, records it, so a restart puts it back.
+        ChatSessionIIAR session = chatSessions.get(chatActorName(projectId, chatId));
+        if (session != null) session.recordSettingsDirect(null);
         return true;
     }
 
@@ -2242,7 +2200,7 @@ public class ChatUiActorSystem implements ConversationControls {
         } catch (Exception e) {
             throw new IllegalStateException("the timekeeper of " + name + " did not answer: " + e.getMessage(), e);
         }
-        recordSettings(name, session.getProviderIdDirect(), session.getToolSetDirect(), session.getModelDirect());
+        // The timekeeper records its limits itself (EachActorRecordsItsOwnState_261118_oo01).
         return limits;
     }
 
@@ -2251,10 +2209,7 @@ public class ChatUiActorSystem implements ConversationControls {
         if (providerRef == null) return false;
         providerRef.tell(p -> p.setTemperature(temperature)).join();
         ChatSessionIIAR session = chatSessions.get(chatActorName(projectId, chatId));
-        if (session != null) {
-            recordSettings(chatActorName(projectId, chatId), session.getProviderIdDirect(),
-                    session.getToolSetDirect(), session.getModelDirect(), temperature);
-        }
+        if (session != null) session.recordSettingsDirect(null);
         return true;
     }
 
@@ -2295,15 +2250,6 @@ public class ChatUiActorSystem implements ConversationControls {
         return temperatureOf(chatActorName(projectId, chatId));
     }
 
-    /**
-     * Writes the conversation's current provider kind, tool set and model to its I/O log session
-     * as one {@code settings} record ({@code ConversationSettingsRecord_260913_oo01}). All three
-     * every time, so the last record is the whole state; nothing is written without a log.
-     */
-    private void recordSettings(String conversationSquadName, String provider, String tools, String model) {
-        recordSettings(conversationSquadName, provider, tools, model, temperatureOf(conversationSquadName));
-    }
-
     /** @return what that conversation asks to sample at, or {@code null} when it asks for nothing */
     private Double temperatureOf(String conversationSquadName) {
         ActorRef<LlmProvider> providerRef = actorSystem.getActor(conversationSquadName + CHAT_SESSION_SUFFIX + PROVIDER_SUFFIX);
@@ -2312,40 +2258,6 @@ public class ChatUiActorSystem implements ConversationControls {
             return providerRef.ask(LlmProvider::getTemperature).join();
         } catch (Exception e) {
             return null;
-        }
-    }
-
-    private void recordSettings(String conversationSquadName, String provider, String tools, String model,
-                                Double temperature) {
-        if (ioLogStore == null) return;
-        try {
-            long sessionId = ioLogStore.ensureSession(conversationSquadName);
-            if (sessionId < 0) return;
-            org.json.JSONObject o = new org.json.JSONObject();
-            o.put("provider", provider == null ? org.json.JSONObject.NULL : provider);
-            o.put("tools", tools == null ? org.json.JSONObject.NULL : tools);
-            o.put("model", model == null ? org.json.JSONObject.NULL : model);
-            o.put("temperature", temperature == null ? org.json.JSONObject.NULL : temperature);
-            // The timekeeper's limits, so a restart puts them back too
-            // (TimekeeperPausesATurnForAnUrgentRequest_261107_oo01).
-            ActorRef<Timekeeper> keeper = actorSystem.getActor(conversationSquadName + ".timekeeper");
-            if (keeper != null) {
-                long[] limits = keeper.ask(k -> new long[] {k.urgentWaitMinutes(), k.childReplyWarnMinutes()})
-                        .get(5, TimeUnit.SECONDS);
-                o.put("urgentWaitMinutes", limits[0]);
-                o.put("childReplyWarnMinutes", limits[1]);
-            }
-            // Whether it answers without thinking, and its effort, read from it now like the limits above, so
-            // every settings record carries the whole state (ConversationSettingsRecord_260913_oo01).
-            ChatSessionIIAR session = chatSessions.get(conversationSquadName);
-            if (session != null) {
-                o.put("noThink", session.isNoThinkDirect());
-                String effort = session.getEffortDirect();
-                o.put("effort", effort == null ? org.json.JSONObject.NULL : effort);
-            }
-            ioLogStore.record(sessionId, "agent", IoLogView.SETTINGS_LABEL, o.toString());
-        } catch (Exception e) {
-            LOG.log(Level.WARNING, "Could not record the settings of " + conversationSquadName, e);
         }
     }
 
@@ -2358,7 +2270,8 @@ public class ChatUiActorSystem implements ConversationControls {
     private void applyRecordedSettings(String conversationSquadName, long sessionId, String projectId, String chatId) {
         IoLogView.Settings s;
         try {
-            s = ioLogView.latestSettings(sessionId);
+            ChatSessionIIAR own = chatSessions.get(conversationSquadName);
+            s = own == null ? null : own.<IoLogView.Settings>ask(a -> ((ChatSession) a).recordedSettings()).get(10, TimeUnit.SECONDS);
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Could not read the recorded settings of " + conversationSquadName, e);
             return;
@@ -2408,14 +2321,6 @@ public class ChatUiActorSystem implements ConversationControls {
             ActorRef<LlmProvider> providerRef = getProviderRef(projectId, chatId);
             String effort = s.effort();
             if (providerRef != null) providerRef.tell(p -> p.setEffort(effort));
-        }
-        if (s.urgentWaitMinutes() != null || s.childReplyWarnMinutes() != null) {
-            ActorRef<Timekeeper> keeper = actorSystem.getActor(conversationSquadName + ".timekeeper");
-            if (keeper != null) {
-                Long urgent = s.urgentWaitMinutes();
-                Long warn = s.childReplyWarnMinutes();
-                keeper.tell(k -> k.setLimits(urgent, warn));
-            }
         }
         LOG.info("Restored settings of " + conversationSquadName + ": provider=" + kind + ", tools=" + toolSet.id()
                 + ", model=" + s.model() + ", temperature=" + s.temperature());

@@ -10,7 +10,7 @@ package com.scivicslab.chatui.core.actor;
  * holds the prompts waiting their turn, {@link SseConnection} pushes events to the browser, and a
  * log multiplexer collects the conversation's log entries.</p>
  *
- * <p>Holds only the name a person gave the conversation, and does nothing. It exists so that
+ * <p>Holds only the name a person gave the conversation, which it records itself, and does nothing else. It exists so that
  * {@code ActorRef<ConversationSquad>.createChild(...)} can register those actors as tracked
  * children, and so that the conversation has one name to be addressed by. References to the
  * children are never stored here; callers resolve them through
@@ -31,7 +31,33 @@ public class ConversationSquad {
      * change whenever the work does, as a project's name is ({@link Project#setName}).</p>
      */
     public void setName(String newName) {
-        name = newName == null || newName.isBlank() ? null : newName.strip();
+        String before = name;
+        name = cleaned(newName);
+        if (entries != null && !java.util.Objects.equals(before, name)) {
+            entries.write(com.scivicslab.chatui.core.iolog.IoLogView.NAME_LABEL, name == null ? "" : name);
+        }
+    }
+
+    private static String cleaned(String newName) {
+        return newName == null || newName.isBlank() ? null : newName.strip();
+    }
+
+    /** The conversation's own session of the I/O log; {@code null} records nothing. */
+    private com.scivicslab.chatui.core.iolog.SessionEntries entries;
+
+    /**
+     * Records the name, from now on, to the conversation's own session, as its {@code name} entry
+     * ({@code EachActorRecordsItsOwnState_261118_oo01}).
+     */
+    public void recordsTo(com.scivicslab.chatui.core.iolog.SessionEntries entries) {
+        this.entries = entries;
+    }
+
+    /** Puts back the name last recorded, and writes nothing; an empty entry is a name that was cleared. */
+    public void restore() {
+        if (entries == null) return;
+        String recorded = entries.latest(com.scivicslab.chatui.core.iolog.IoLogView.NAME_LABEL);
+        if (recorded != null) name = cleaned(recorded);
     }
 
     /** @return the name a person reads, or {@code null} when none has been set */

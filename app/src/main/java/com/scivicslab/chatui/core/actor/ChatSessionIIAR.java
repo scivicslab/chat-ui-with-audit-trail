@@ -109,6 +109,19 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      * @return {@code null} on success, or an {@code error: ...} string
      */
     public String setAgentLoopWorkflowFile(String file) {
+        return setAgentLoopWorkflowFile(file, true);
+    }
+
+    /**
+     * @param record whether the conversation records the loop; a restore puts back what it recorded and writes nothing
+     */
+    public String setAgentLoopWorkflowFile(String file, boolean record) {
+        String error = putAgentLoopWorkflowFile(file);
+        if (error == null && record) chatSession().recordAgentLoop(ChatSession.AGENT_LOOP_FILE + file);
+        return error;
+    }
+
+    private String putAgentLoopWorkflowFile(String file) {
         String previous = agentLoopWorkflowFile;
         agentLoopWorkflowFile = file;
         try {
@@ -180,6 +193,17 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      * @return the model name, or {@code null} when none has been settled on yet
      */
     public String getModelDirect() { return chatSession().getModel(); }
+
+    /**
+     * Has the conversation write its settings now, without waiting for a running turn: a change made on the provider
+     * (model, effort, temperature) is recorded at once, as it was before the conversation recorded itself.
+     *
+     * @param model the model just set, which the provider may not be on yet, or {@code null}
+     */
+    public void recordSettingsDirect(String model) { chatSession().recordSettings(model); }
+
+    /** Has the conversation write the agent loop just put on it, without waiting for a running turn. */
+    public void recordAgentLoopDirect(String entry) { chatSession().recordAgentLoop(entry); }
 
     /** The conversation's provider kind ({@code openai-compat}, {@code claude}, {@code codex}), read directly. */
     public String getProviderIdDirect() { return chatSession().getProviderId(); }

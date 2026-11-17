@@ -116,8 +116,53 @@ public class Timekeeper {
      * @param childReplyWarnMinutes how long a sent request may go without a reply, or {@code null} to keep it
      */
     public void setLimits(Long urgentWaitMinutes, Long childReplyWarnMinutes) {
+        applyLimits(urgentWaitMinutes, childReplyWarnMinutes);
+        recordLimits();
+    }
+
+    private void applyLimits(Long urgentWaitMinutes, Long childReplyWarnMinutes) {
         if (urgentWaitMinutes != null) urgentWaitMillis = TimeUnit.MINUTES.toMillis(urgentWaitMinutes);
         if (childReplyWarnMinutes != null) childReplyWarnMillis = TimeUnit.MINUTES.toMillis(childReplyWarnMinutes);
+    }
+
+    /** Label of the conversation's entry that holds its timekeeper's limits. */
+    public static final String TIMEKEEPER_LABEL = "timekeeper";
+
+    /** The conversation's own session of the I/O log; {@code null} records nothing. */
+    private com.scivicslab.chatui.core.iolog.SessionEntries entries;
+
+    /**
+     * Records the limits, from now on, to the conversation's own session ({@code EachActorRecordsItsOwnState_261118_oo01}).
+     */
+    public void recordsTo(com.scivicslab.chatui.core.iolog.SessionEntries entries) {
+        this.entries = entries;
+    }
+
+    /**
+     * Puts back the limits last recorded, and writes nothing. A log written before kept them in the conversation's
+     * {@code settings} entry; they are read from the last one that holds them when there is no {@code timekeeper}
+     * entry, and then written as this timekeeper's own, so that form is read only once.
+     */
+    public void restore() {
+        if (entries == null) return;
+        org.json.JSONObject saved = entries.latestWithKey(TIMEKEEPER_LABEL, "urgentWaitMinutes");
+        boolean earlierForm = false;
+        if (saved == null) {
+            saved = entries.latestWithKey(com.scivicslab.chatui.core.iolog.IoLogView.SETTINGS_LABEL, "urgentWaitMinutes");
+            earlierForm = saved != null;
+        }
+        if (saved == null) return;
+        Long urgent = saved.isNull("urgentWaitMinutes") ? null : saved.optLong("urgentWaitMinutes");
+        Long warn = saved.has("childReplyWarnMinutes") && !saved.isNull("childReplyWarnMinutes")
+                ? saved.optLong("childReplyWarnMinutes") : null;
+        applyLimits(urgent != null && urgent >= 1 ? urgent : null, warn != null && warn >= 1 ? warn : null);
+        if (earlierForm) recordLimits();
+    }
+
+    private void recordLimits() {
+        if (entries == null) return;
+        entries.write(TIMEKEEPER_LABEL, new org.json.JSONObject().put("urgentWaitMinutes", urgentWaitMinutes())
+                .put("childReplyWarnMinutes", childReplyWarnMinutes()).toString());
     }
 
     /** @return how long, in minutes, an urgent request may wait at the front of a running turn */

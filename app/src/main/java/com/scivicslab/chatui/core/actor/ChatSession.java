@@ -3540,6 +3540,76 @@ public class ChatSession extends Interpreter {
         return noThinkAlways;
     }
 
+    // ── What this conversation records of itself (EachActorRecordsItsOwnState_261118_oo01) ──────────────
+
+    /** Prefix of an agent-loop entry that names a workflow file under {@code /workflows/}. */
+    public static final String AGENT_LOOP_FILE = "file:";
+    /** Prefix of an agent-loop entry that holds the YAML itself, as {@code set_agent_loop} gave it. */
+    public static final String AGENT_LOOP_YAML = "yaml:\n";
+
+    /** This conversation's own session of the I/O log; {@code null} records nothing. */
+    private volatile com.scivicslab.chatui.core.iolog.SessionEntries entries;
+
+    /** Records this conversation's settings and agent loop, from now on, to its own session. */
+    public void recordsTo(com.scivicslab.chatui.core.iolog.SessionEntries entries) {
+        this.entries = entries;
+    }
+
+    /**
+     * Writes the conversation's settings as one {@code settings} entry: the provider kind, the tool set, the model,
+     * the temperature, whether it answers without thinking, and the effort, all of them every time, so the last
+     * entry is the whole state ({@code ConversationSettingsRecord_260913_oo01}). The provider holds some of them and
+     * is replaced whenever the provider changes, so this conversation, which holds the provider, reads them from it
+     * and writes them. Safe from another thread: it only reads.
+     *
+     * @param model the model just set, when the provider may not be on it yet; {@code null} reads the provider's
+     */
+    public void recordSettings(String model) {
+        com.scivicslab.chatui.core.iolog.SessionEntries e = entries;
+        if (e == null) return;
+        org.json.JSONObject o = new org.json.JSONObject();
+        String kind = getProviderId();
+        String m = model != null ? model : getModel();
+        Double temperature = provider.getTemperature();
+        String effort = getEffort();
+        o.put("provider", kind == null ? org.json.JSONObject.NULL : kind);
+        o.put("tools", toolSet == null ? org.json.JSONObject.NULL : toolSet.id());
+        o.put("model", m == null ? org.json.JSONObject.NULL : m);
+        o.put("temperature", temperature == null ? org.json.JSONObject.NULL : temperature);
+        o.put("noThink", noThinkAlways);
+        o.put("effort", effort == null ? org.json.JSONObject.NULL : effort);
+        e.write(com.scivicslab.chatui.core.iolog.IoLogView.SETTINGS_LABEL, o.toString());
+    }
+
+    /** Writes the settings once, for a conversation that has none recorded yet: one just made. */
+    public void recordIfNew() {
+        com.scivicslab.chatui.core.iolog.SessionEntries e = entries;
+        if (e != null && e.latest(com.scivicslab.chatui.core.iolog.IoLogView.SETTINGS_LABEL) == null) recordSettings(null);
+    }
+
+    /**
+     * Writes the agent loop put on this conversation; the last one is the loop a restart puts back.
+     *
+     * @param entry {@link #AGENT_LOOP_FILE} and a file name, or {@link #AGENT_LOOP_YAML} and the YAML
+     */
+    public void recordAgentLoop(String entry) {
+        com.scivicslab.chatui.core.iolog.SessionEntries e = entries;
+        if (e != null) e.write(com.scivicslab.chatui.core.iolog.IoLogView.AGENT_LOOP_LABEL, entry);
+    }
+
+    /** @return the settings this conversation last recorded, or {@code null} when it recorded none */
+    public com.scivicslab.chatui.core.iolog.IoLogView.Settings recordedSettings() {
+        com.scivicslab.chatui.core.iolog.SessionEntries e = entries;
+        return e == null ? null : com.scivicslab.chatui.core.iolog.IoLogView.parseSettings(e.latest(com.scivicslab.chatui.core.iolog.IoLogView.SETTINGS_LABEL));
+    }
+
+    /** @return the agent loop this conversation last recorded, or {@code null} when it recorded none */
+    public String recordedAgentLoop() {
+        com.scivicslab.chatui.core.iolog.SessionEntries e = entries;
+        String loop = e == null ? null : e.latest(com.scivicslab.chatui.core.iolog.IoLogView.AGENT_LOOP_LABEL);
+        return loop == null || loop.isBlank() ? null : loop;
+    }
+
     /**
      * Tells the provider how hard to work on one answer, where it has such a setting
      * ({@code ThinkingAndEffortAreConversationSettings_260917_oo01}).

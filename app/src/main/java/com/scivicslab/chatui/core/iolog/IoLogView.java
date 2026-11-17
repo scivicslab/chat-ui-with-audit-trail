@@ -340,7 +340,7 @@ public class IoLogView {
                 .orElse(null);
     }
 
-    static Settings parseSettings(String message) {
+    public static Settings parseSettings(String message) {
         if (message == null || message.isBlank()) return null;
         try {
             org.json.JSONObject o = new org.json.JSONObject(message);
