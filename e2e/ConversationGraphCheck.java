@@ -61,8 +61,8 @@ public class ConversationGraphCheck {
 
     /** A node's tooltip. */
     static String tooltip(Page page, String chat) {
-        Object v = page.evaluate("(c) => { const e = document.querySelector(\"#conv-graph .cg-node[data-chat='\" + c + \"'] > title\");"
-                + " return e ? e.textContent : ''; }", chat);
+        Object v = page.evaluate("(c) => { const e = document.querySelector(\"#conv-graph .cg-node[data-chat='\" + c + \"']\");"
+                + " return e ? (e.getAttribute('data-tip') || '') : ''; }", chat);
         return v == null ? "" : v.toString();
     }
 
@@ -168,6 +168,34 @@ public class ConversationGraphCheck {
             check(legend(page).contains("🏷️ archivist") && legend(page).contains("🧪 tester"),
                     "a role with no emoji of its own takes the fallback, and the legend says so: " + legend(page));
             page.screenshot(new Page.ScreenshotOptions().setPath(Path.of("/tmp/uitest/graph-2-changed.png")));
+
+            // What each conversation runs on, in its tooltip, as the REST graph read it from the conversation.
+            String g2 = rest("GET", "/api/projects/project1/graph", null);
+            String provider = g2.replaceAll("(?s).*\"chatId\":\"03\",\"name\":null,\"liaison\":false,\"provider\":\"([^\"]*)\".*", "$1");
+            check(!provider.equals(g2) && !provider.isBlank() && g2.contains("\"model\":\"fake\""),
+                    "the REST graph gives each local conversation its provider and model: " + provider + " / fake");
+            check(tooltip(page, "03").startsWith("chat-03\n" + provider + ": fake"),
+                    "chat-03's tooltip names what it runs on: " + tooltip(page, "03").replace('\n', '|'));
+            check(tooltip(page, "05").contains(provider + ": fake\n🏷️ archivist for chat-01"),
+                    "the model line comes before the role lines: " + tooltip(page, "05").replace('\n', '|'));
+            check(tooltip(page, "project2/05").contains("model unknown"),
+                    "a conversation in another project says model unknown: " + tooltip(page, "project2/05").replace('\n', '|'));
+
+            // A model change shows on the next refresh, read again from the conversation.
+            rest("POST", "/api/projects/project1/chats/03/model", "{\"model\":\"fake-2\"}");
+            page.waitForFunction("() => { const n = document.querySelector(\"#conv-graph .cg-node[data-chat='03']\");"
+                    + " return n && (n.getAttribute('data-tip') || '').includes(': fake-2'); }",
+                    null, new Page.WaitForFunctionOptions().setTimeout(15_000));
+            check(tooltip(page, "03").contains(provider + ": fake-2"), "after set model, chat-03's tooltip says fake-2");
+
+            // The tooltip itself, as the person sees it on hovering a node.
+            page.hover("#conv-graph .cg-node[data-chat='05'] .cg-id");
+            page.waitForSelector("#cg-tip", new Page.WaitForSelectorOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.VISIBLE));
+            String shown = page.textContent("#cg-tip");
+            check(shown.contains(provider + ": fake") && shown.contains("worker for chat-02"),
+                    "hovering chat-05 shows its tooltip: " + shown.replace('\n', '|'));
+            page.screenshot(new Page.ScreenshotOptions().setPath(Path.of("/tmp/uitest/graph-4-tooltip.png")));
+            page.mouse().move(900, 700);
 
             // A node opens its conversation, as the tree does.
             page.click("#conv-graph .cg-node[data-chat='03'] text");

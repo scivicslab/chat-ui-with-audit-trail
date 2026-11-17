@@ -1724,7 +1724,37 @@ public class ChatUiActorSystem implements ConversationControls {
         }
         List<CollaborationGraph.Edge> edges = collaborationGraphRef == null ? List.of()
                 : askOrDefault(collaborationGraphRef, g -> g.edgesFrom(projectId + "/"), List.<CollaborationGraph.Edge>of());
-        return ConversationGraph.of(projectId, ids, names, superiors, org.liaison(), edges);
+        // What each conversation runs on, read from it now as get_chat_status reads it (without waiting for a
+        // running turn), so a set_chat_model or set_chat_provider shows on the next call.
+        Map<String, ConversationGraph.Model> models = new HashMap<>();
+        List<ConversationControls.ProviderOption> options = providerOptions();
+        for (String id : ids) {
+            ChatSessionIIAR session = chatSessions.get(chatActorName(projectId, id));
+            if (session == null) continue;
+            try {
+                models.put(id, new ConversationGraph.Model(
+                        providerLabel(options, session.getProviderIdDirect(), session.getToolSetDirect()),
+                        session.getModelDirect()));
+            } catch (RuntimeException e) {
+                LOG.log(Level.FINE, "Could not read what " + id + " runs on", e);
+            }
+        }
+        return ConversationGraph.of(projectId, ids, names, superiors, org.liaison(), edges, models);
+    }
+
+    /**
+     * The name the screen's provider dropdown gives a provider kind with a tool set; the kind's first entry when
+     * no entry has that tool set; the kind itself when the dropdown does not list it.
+     */
+    static String providerLabel(List<ConversationControls.ProviderOption> options, String kind, String toolSetId) {
+        if (kind == null) return null;
+        ConversationControls.ProviderOption first = null;
+        for (ConversationControls.ProviderOption o : options) {
+            if (!kind.equals(o.kind())) continue;
+            if (o.toolSet() != null && o.toolSet().id().equals(toolSetId)) return o.label();
+            if (first == null) first = o;
+        }
+        return first != null ? first.label() : kind;
     }
 
     /** @return the project's organization as JSON, for the Project tab */

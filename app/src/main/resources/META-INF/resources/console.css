@@ -911,3 +911,11 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
 #conv-graph .cg-legend text { fill: var(--text-secondary, #9aa0a6); font-size: 10px; }
 #conv-graph .cg-roles { font-family: "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", sans-serif; }
 #conv-graph .cg-legend .cg-roles { font-size: 11px; }
+/* The Graph node's tooltip: what it runs on and the roles it plays, one per line. */
+#cg-tip {
+    display: none; position: fixed; z-index: 1000; max-width: 360px;
+    padding: 6px 9px; border-radius: 4px; white-space: pre; pointer-events: none;
+    font-size: 12px; line-height: 1.45;
+    background: var(--bg-primary, #1e1e1e); color: var(--text-primary, #e6e6e6);
+    border: 1px solid var(--border-color, #444); box-shadow: 0 2px 8px rgba(0, 0, 0, .25);
+}

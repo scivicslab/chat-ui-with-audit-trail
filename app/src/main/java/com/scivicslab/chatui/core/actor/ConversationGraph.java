@@ -22,11 +22,22 @@ public record ConversationGraph(String projectId, String liaison, List<Node> nod
                                 List<SuperiorEdge> superiorEdges, List<RoleEdge> roleEdges) {
 
     /**
-     * @param chatId  the bare id, e.g. {@code "02"}
-     * @param name    the name a person gave it, or {@code null}
-     * @param liaison whether it is the project's liaison
+     * @param chatId   the bare id, e.g. {@code "02"}
+     * @param name     the name a person gave it, or {@code null}
+     * @param liaison  whether it is the project's liaison
+     * @param provider the provider as the screen's dropdown names it, e.g. {@code "Claude Code"}, or {@code null}
+     *                 when it could not be read
+     * @param model    the model the provider is on now, or {@code null} when none is settled yet
      */
-    public record Node(String chatId, String name, boolean liaison) {}
+    public record Node(String chatId, String name, boolean liaison, String provider, String model) {}
+
+    /**
+     * What a conversation runs on, read from it at the time of the call.
+     *
+     * @param provider the provider's label, as the screen's dropdown shows it
+     * @param model    the model the provider is on, or {@code null}
+     */
+    public record Model(String provider, String model) {}
 
     /** {@code from} is the superior of {@code to}; both are bare ids. */
     public record SuperiorEdge(String from, String to) {}
@@ -47,13 +58,18 @@ public record ConversationGraph(String projectId, String liaison, List<Node> nod
      * @param superiors bare id to its superior's bare id, as the organization's table holds them
      * @param liaison   the liaison's bare id
      * @param edges     the collaboration graph's edges; those not from a conversation of the project are dropped
+     * @param models    bare id to what it runs on; an id without an entry gets {@code null} provider and model
      */
     public static ConversationGraph of(String projectId, List<String> chatIds, Map<String, String> names,
                                        Map<String, String> superiors, String liaison,
-                                       List<CollaborationGraph.Edge> edges) {
+                                       List<CollaborationGraph.Edge> edges, Map<String, Model> models) {
         Set<String> ids = new TreeSet<>(chatIds);
         List<Node> nodes = new ArrayList<>();
-        for (String id : ids) nodes.add(new Node(id, names.get(id), id.equals(liaison)));
+        for (String id : ids) {
+            Model m = models.get(id);
+            nodes.add(new Node(id, names.get(id), id.equals(liaison), m == null ? null : m.provider(),
+                    m == null ? null : m.model()));
+        }
 
         List<SuperiorEdge> sup = new ArrayList<>();
         for (String id : ids) {

@@ -64,6 +64,25 @@ class ConversationGraphEndpointTest {
     }
 
     @Test
+    void eachLocalConversationCarriesItsProviderAndModelAndAChangeShowsOnTheNextRead() {
+        ChatUiActorSystem system = StartedSystem.start();
+        system.createChat("project1");
+        ChatResource r = resource(system);
+        String label = system.providerOptions().stream()
+                .filter(o -> o.kind().equals(system.getChatSession("project1", "02").getProviderIdDirect()))
+                .findFirst().orElseThrow().label();
+
+        ConversationGraph.Node two = graph(r, "project1").nodes().get(1);
+        assertEquals("02", two.chatId());
+        assertEquals(label, two.provider(), "the provider as the dropdown names it");
+
+        assertTrue(system.setModel("project1", "02", "model-b"));
+        ConversationGraph.Node after = graph(r, "project1").nodes().get(1);
+        assertEquals("model-b", after.model(), "the model set a moment ago, read again from the conversation");
+        assertEquals(label, after.provider());
+    }
+
+    @Test
     void anUnknownProjectIs404() {
         ChatUiActorSystem system = StartedSystem.start();
         assertEquals(404, resource(system).graph("project99").getStatus());

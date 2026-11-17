@@ -2393,7 +2393,38 @@
         return by;
     }
 
+    // The node's tooltip: the pane's own box rather than the SVG <title>, which shows only after the browser's
+    // delay and cannot be styled. One box for the page, placed beside the pointer.
+    function graphTipEl() {
+        var el = document.getElementById("cg-tip");
+        if (!el) {
+            el = document.createElement("div");
+            el.id = "cg-tip";
+            el.setAttribute("role", "tooltip");
+            document.body.appendChild(el);
+        }
+        return el;
+    }
+
+    function showGraphTip(text, ev) {
+        var el = graphTipEl();
+        el.textContent = text;
+        el.style.display = "block";
+        var x = ev.clientX + 14, y = ev.clientY + 12;
+        var w = el.offsetWidth, h = el.offsetHeight;
+        if (x + w > window.innerWidth - 4) x = Math.max(4, window.innerWidth - w - 4);
+        if (y + h > window.innerHeight - 4) y = Math.max(4, ev.clientY - h - 8);
+        el.style.left = x + "px";
+        el.style.top = y + "px";
+    }
+
+    function hideGraphTip() {
+        var el = document.getElementById("cg-tip");
+        if (el) el.style.display = "none";
+    }
+
     function renderGraph(g, box) {
+        hideGraphTip();   // the node under the pointer may be redrawn away
         box.textContent = "";
         var rows = graphRows(g);
         if (!rows.length) {
@@ -2498,10 +2529,18 @@
             }
             var tip = idText + (r.node && r.node.name ? " — " + r.node.name : "")
                 + (r.node && r.node.liaison ? " (liaison)" : "") + (r.external ? " (other project)" : "");
+            // What it runs on, as the server read it from the conversation for this refresh. A conversation in
+            // another project, or one whose provider could not be read, is not looked up: "model unknown".
+            tip += "\n" + (r.node && r.node.provider
+                ? r.node.provider + ": " + (r.node.model || "(no model chosen yet)")
+                : "model unknown");
             if (played.length) {
                 tip += "\n" + played.map(function (x) { return roleEmoji(x.role) + " " + x.role + " for chat-" + x.forChat; }).join("\n");
             }
-            svgEl("title", {}, gEl).textContent = tip;
+            gEl.setAttribute("data-tip", tip);
+            gEl.addEventListener("mouseenter", function (ev) { showGraphTip(tip, ev); });
+            gEl.addEventListener("mousemove", function (ev) { showGraphTip(tip, ev); });
+            gEl.addEventListener("mouseleave", hideGraphTip);
             if (!r.external) {
                 gEl.addEventListener("click", function () { showConversation(g.projectId, r.id); });
             }
