@@ -28,9 +28,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Ending a conversation a job is about to remove.
  *
- * <p>Removing a conversation's actor leaves its session running in the I/O log, and
- * {@code reopenRecordedConversationSquads} builds a ConversationSquad for every running session at start-up — so the
- * conversation comes back at the next restart. A job that means to be rid of one ends its session
+ * <p>Removing a conversation's actor leaves its session running in the I/O log, and a log with no project list of its
+ * own yet builds a ConversationSquad for every running session at start-up — so the conversation would come back at the
+ * next restart. Ending it also takes it out of its project's list (ConversationListSurvivesRestartTest). A job that means to be rid of one ends its session
  * first ({@code RemovingActorsFromAWorkflow_260913_oo01}). What it wrote stays in the database,
  * where the log search still finds it.</p>
  */

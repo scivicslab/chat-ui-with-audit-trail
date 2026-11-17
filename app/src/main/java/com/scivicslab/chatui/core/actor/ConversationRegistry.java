@@ -1,6 +1,5 @@
 package com.scivicslab.chatui.core.actor;
 
-import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -8,9 +7,9 @@ import com.scivicslab.chatui.core.iolog.IoLogStore;
 import com.scivicslab.chatui.core.iolog.IoLogView;
 
 /**
- * Which conversations this instance has, as the I/O log keeps them across a restart
- * ({@code ConversationRestoreOnRestart_260904_oo01}). One job: record a conversation when it is created, record
- * the agent loop put on it, forget it when it is deleted, and say at start-up which conversations to bring back.
+ * What a conversation was created with and the agent loop put on it, as the I/O log keeps them across a restart
+ * ({@code ConversationRestoreOnRestart_260904_oo01}). Which conversations a project has is the project's own list
+ * ({@code EachActorRecordsItsOwnState_261118_oo01}); what is left here moves to the conversation's own actors next.
  *
  * <p>A conversation comes back when the log holds a running session for it. Before, a conversation got a session
  * only when it ran a turn or one of its settings was recorded, so one made by {@code create_chat} or REST and given
@@ -87,23 +86,5 @@ public class ConversationRegistry {
             LOG.log(Level.WARNING, "Could not read the agent loop of " + name, e);
             return null;
         }
-    }
-
-    /**
-     * Forgets a deleted conversation: its session is ended, so it does not come back. Nothing it wrote is removed,
-     * and its name stays taken ({@link #everRecorded}).
-     */
-    public void deleted(String name) {
-        if (log != null) log.resetSession(name);
-    }
-
-    /** @return the conversations to bring back at start-up, most recently recorded first */
-    public List<String> toRestore() {
-        return log == null ? List.of() : log.resumableConversationSquads();
-    }
-
-    /** @return every conversation the log has ever held, deleted ones included, so their numbers are not reused */
-    public List<String> everRecorded() {
-        return log == null ? List.of() : log.recordedConversationSquads();
     }
 }

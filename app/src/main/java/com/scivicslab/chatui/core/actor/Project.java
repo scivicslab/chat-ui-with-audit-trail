@@ -70,6 +70,119 @@ public class Project {
     /** The project's own session, where its name and working directory are recorded; {@code null} records nothing. */
     private com.scivicslab.chatui.core.iolog.SessionEntries entries;
 
+    /** Label of the project's entry that lists its conversations ({@code EachActorRecordsItsOwnState_261118_oo01}). */
+    public static final String CONVERSATIONS_LABEL = "conversations";
+
+    /**
+     * One conversation of the project, as its list holds it.
+     *
+     * @param chatId       its bare id, e.g. {@code "03"}
+     * @param parentChatId the bare id of the conversation it is nested under, or {@code null} when it is directly under
+     *                     the project ({@code NestedConversationTree_260830_oo01})
+     */
+    public record Member(String chatId, String parentChatId) {}
+
+    /** The project's conversations, in the order they were made, so a parent comes before those nested under it. */
+    private final java.util.List<Member> members = new java.util.ArrayList<>();
+
+    /** Adds a conversation just made to the project's list, and records the list. One already listed is left as it is. */
+    public void conversationAdded(String chatId, String parentChatId) {
+        for (Member m : members) if (m.chatId().equals(chatId)) return;
+        members.add(new Member(chatId, parentChatId == null || parentChatId.isBlank() ? null : parentChatId));
+        recordConversations();
+    }
+
+    /**
+     * Takes a conversation out of the project's list, records the list, and ends the conversation's session in the
+     * I/O log, which keeps everything it wrote and keeps its name taken ({@code ConversationDeletion_261011_oo01}).
+     */
+    public void conversationRemoved(String chatId) {
+        if (members.removeIf(m -> m.chatId().equals(chatId))) recordConversations();
+        endSession(chatId);
+    }
+
+    /** Ends the session of every conversation of the project and records an empty list: the project is being deleted. */
+    public void endEveryConversation() {
+        for (Member m : members) endSession(m.chatId());
+        members.clear();
+        recordConversations();
+    }
+
+    private void endSession(String chatId) {
+        if (ioLogStore != null && projectId != null) ioLogStore.resetSession(projectId + "/chat-" + chatId);
+    }
+
+    /** @return the project's conversations, in the order they were made */
+    public java.util.List<Member> conversations() {
+        return java.util.List.copyOf(members);
+    }
+
+    /** Set while a restore is between {@link #conversationsToBuild} and {@link #conversationsBuilt}: the list came from the running sessions. */
+    private boolean listFromRunningSessions;
+
+    /**
+     * Says which conversations to build again at start-up, in the order the project's list holds them, so a parent
+     * comes before those nested under it ({@code EachActorRecordsItsOwnState_261118_oo01}). The project decides which
+     * and where; the caller builds them, as the project's children, on its own thread, because building one asks this
+     * project for its working directory and instructions, which it could not answer while it was busy building.
+     *
+     * <p>A log written before the list was kept has no {@code conversations} entry. Then the conversations whose
+     * sessions are still running are built, directly under the project, as the earlier code did, and
+     * {@link #conversationsBuilt} records them as this project's own list, so the running sessions are read only
+     * once.</p>
+     *
+     * @param running the bare ids of this project's conversations with a running session, oldest first
+     * @return what to build, in order
+     */
+    public java.util.List<Member> conversationsToBuild(java.util.List<String> running) {
+        java.util.List<Member> listed = readConversations();
+        listFromRunningSessions = listed == null;
+        if (listed == null) listed = running.stream().map(id -> new Member(id, null)).toList();
+        members.clear();
+        members.addAll(listed);
+        return java.util.List.copyOf(listed);
+    }
+
+    /**
+     * Ends a restore: the conversations that could not be built are left out of the list, and that is recorded, as
+     * is a list that came from the running sessions.
+     *
+     * @param built the bare ids of the conversations that were built
+     */
+    public void conversationsBuilt(java.util.Collection<String> built) {
+        boolean dropped = members.removeIf(m -> !built.contains(m.chatId()));
+        if (listFromRunningSessions || dropped) recordConversations();
+        listFromRunningSessions = false;
+    }
+
+    private java.util.List<Member> readConversations() {
+        if (entries == null) return null;
+        org.json.JSONObject saved = entries.latestWithKey(CONVERSATIONS_LABEL, CONVERSATIONS_LABEL);
+        if (saved == null) return null;
+        java.util.List<Member> out = new java.util.ArrayList<>();
+        org.json.JSONArray list = saved.optJSONArray(CONVERSATIONS_LABEL);
+        for (int i = 0; list != null && i < list.length(); i++) {
+            org.json.JSONObject o = list.optJSONObject(i);
+            String id = o == null ? null : o.optString("id", null);
+            if (id == null || id.isBlank()) continue;
+            String parent = o.isNull("parent") ? null : o.optString("parent", null);
+            out.add(new Member(id, parent == null || parent.isBlank() ? null : parent));
+        }
+        return out;
+    }
+
+    /** Writes the whole list as one entry: the last one is the list. */
+    private void recordConversations() {
+        if (entries == null) return;
+        org.json.JSONArray list = new org.json.JSONArray();
+        for (Member m : members) {
+            org.json.JSONObject o = new org.json.JSONObject().put("id", m.chatId());
+            if (m.parentChatId() != null) o.put("parent", m.parentChatId());
+            list.put(o);
+        }
+        entries.write(CONVERSATIONS_LABEL, new org.json.JSONObject().put(CONVERSATIONS_LABEL, list).toString());
+    }
+
     /**
      * Records this project's name and working directory, from now on, to {@code entries}, the project's own session
      * ({@code EachActorRecordsItsOwnState_261118_oo01}).

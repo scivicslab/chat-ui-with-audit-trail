@@ -1,7 +1,6 @@
 package com.scivicslab.chatui.core.actor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -43,7 +42,6 @@ class ConversationRegistryTest {
     void aCreatedConversationIsListedForRestoreWithTheSettingsItWasCreatedWith() {
         registry.created("project1/chat-02", "openai-compat", "full", "model-a");
 
-        assertEquals(java.util.List.of("project1/chat-02"), registry.toRestore());
         long session = log.findResumableSession("project1/chat-02");
         assertTrue(session >= 0, "it has a session, which is what start-up reopens");
         IoLogView.Settings s = view.latestSettings(session);
@@ -62,14 +60,7 @@ class ConversationRegistryTest {
         assertEquals("model-a", view.latestSettings(log.findResumableSession("project1/chat-02")).model());
     }
 
-    @Test
-    void aDeletedConversationIsNoLongerListedButItsNameStaysTaken() {
-        registry.created("project1/chat-02", "openai-compat", "full", null);
-        registry.deleted("project1/chat-02");
-
-        assertTrue(registry.toRestore().isEmpty(), "it does not come back");
-        assertTrue(registry.everRecorded().contains("project1/chat-02"), "its number is not handed out again");
-    }
+    // Which conversations come back, and that a deleted one does not, is the project's list (ProjectConversationsTest).
 
     @Test
     void theAgentLoopPutOnAConversationIsReadBack() {
@@ -83,8 +74,7 @@ class ConversationRegistryTest {
     }
 
     @Test
-    void anUnknownConversationHasNoLoopAndListsNothing() {
+    void anUnknownConversationHasNoLoop() {
         assertNull(registry.agentLoopOf("project1/chat-09"));
-        assertFalse(registry.toRestore().contains("project1/chat-09"));
     }
 }

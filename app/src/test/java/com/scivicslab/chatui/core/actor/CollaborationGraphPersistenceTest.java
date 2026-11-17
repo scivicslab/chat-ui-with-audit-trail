@@ -102,9 +102,11 @@ class CollaborationGraphPersistenceTest {
             recorded(systems, "project1", "01", "02");
             assertTrue(first.setCollaborator("project1/chat-01", "01", "worker", "03").startsWith("ok"));
             assertTrue(first.setCollaborator("project1/chat-01", "01", "reviewer", "02").startsWith("ok"));
-            // chat-03's session is ended outside deleteChat (as an old log, or a conversation ended by hand,
-            // leaves it), so it does not come back while the edge naming it is still saved.
-            systems.log.resetSession(ChatUiActorSystem.chatActorName("project1", "03"));
+            // The project's list no longer holds chat-03 (as a log can say when the conversation was taken out of it
+            // some other way), so it does not come back while the edge naming it is still saved.
+            com.scivicslab.chatui.core.iolog.SessionEntries.ofProject(systems.log,
+                    com.scivicslab.chatui.core.iolog.IoLogView.over(systems.log), "project1")
+                    .write(Project.CONVERSATIONS_LABEL, "{\"conversations\":[{\"id\":\"01\"},{\"id\":\"02\"}]}");
 
             ChatUiActorSystem second = systems.start();
             assertNull(second.getChatSession("project1", "03"), "chat-03 did not come back");

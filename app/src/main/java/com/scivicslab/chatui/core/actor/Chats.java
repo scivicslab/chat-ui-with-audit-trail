@@ -120,6 +120,12 @@ public final class Chats {
      */
     public String end(String chat) {
         session(chat).tell(a -> ((ChatSession) a).clearHistory()).join();
+        // Out of its project's list, so the project does not build it again (EachActorRecordsItsOwnState_261118_oo01).
+        String[] parts = ChatUiActorSystem.splitConversationSquadId(chat.strip());
+        if (parts != null) {
+            ActorRef<Project> project = system.getActor(parts[0]);
+            if (project != null) project.tell(p -> p.conversationRemoved(parts[1])).join();
+        }
         return "ended the conversation " + chat.strip();
     }
 

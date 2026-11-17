@@ -426,8 +426,13 @@ public class ChatUiActorSystem implements ConversationControls {
                 new ActionCatalog(actorSystem, new ActionSchemaRegistry()));
         LOG.info("Action catalog available as actor '" + catalogRef.getName() + "'");
 
-        createChat(DEFAULT_PROJECT_ID, "01");
-        reopenRecordedConversationSquads();
+        // Each project builds its own conversations from its own list (EachActorRecordsItsOwnState_261118_oo01);
+        // project1's chat-01, which every start has, is made when the list did not bring it back.
+        Map<String, List<String>> running = reopenRecordedProjects();
+        for (String projectId : List.copyOf(projects.keySet())) {
+            restoreConversationsOf(projectId, running.getOrDefault(projectId, List.of()));
+        }
+        if (!chats.containsKey(chatActorName(DEFAULT_PROJECT_ID, "01"))) createChat(DEFAULT_PROJECT_ID, "01");
         // After every project exists, whether init created it or the log brought it back. Hanging
         // this off the "create it if absent" branch of the loop above left out the one project that
         // is always created here (ProjectProperty_260929_oo01).
@@ -579,38 +584,28 @@ public class ChatUiActorSystem implements ConversationControls {
     }
 
     /**
-     * Re-opens every project and conversation the I/O log still holds an unfinished session for.
+     * Re-opens every project the I/O log still holds a conversation with an unfinished session for, and says which of
+     * its conversations those are.
      *
      * <p>The actor tree lives only in memory. Without this, a restart came up with one project and
      * one conversation however many were open when it stopped, and the rest existed only as rows
-     * in the database. They were not gone — pressing "+" generated the next project name, which
-     * happened to collide with a recorded one, and that conversation reappeared — but reappearing
-     * by collision is not the same as being restored: with several projects the generated name
-     * lands on whichever one it lands on, and a conversation nobody guesses the name of stays
-     * invisible. What was open before the restart is what should be open after it.</p>
+     * in the database. What was open before the restart is what should be open after it. Each project then builds its
+     * own conversations ({@link #restoreConversationsOf}); the running sessions are what it builds from when its log
+     * has no list of its own yet. The project counter is moved past every recorded name, so a later "+" cannot hand
+     * out a name that is already in use.</p>
      *
-     * <p>{@link #createChat} restores each conversation's own contents, so this only has to make
-     * the ConversationSquads exist. The project counter is moved past every recorded name, so a later "+" cannot
-     * hand out a name that is already in use.</p>
+     * @return for each project, the bare ids of its conversations with a running session, oldest first
      */
-    private void reopenRecordedConversationSquads() {
-        if (ioLogStore == null) return;
-        List<String> conversationSquads;
-        try {
-            conversationSquads = askRegistry(ConversationRegistry::toRestore, List.<String>of());
-        } catch (Exception e) {
-            LOG.log(Level.WARNING, "Could not list the recorded ConversationSquads", e);
-            return;
-        }
+    private Map<String, List<String>> reopenRecordedProjects() {
+        Map<String, List<String>> running = new java.util.LinkedHashMap<>();
+        if (ioLogStore == null) return running;
+        List<String> ordered = new ArrayList<>(ioLogStore.resumableConversationSquads());
         // Oldest first, so projects and conversations come back in the order they were created.
-        List<String> ordered = new ArrayList<>(conversationSquads);
         java.util.Collections.reverse(ordered);
-        int reopened = 0;
         for (String conversationSquadId : ordered) {
             String[] parts = splitConversationSquadId(conversationSquadId);
             if (parts == null) continue;
             String projectId = parts[0];
-            String chatId = parts[1];
             try {
                 if (!projects.containsKey(projectId)) {
                     // Wired as well as created. A project that came back from the log but was never
@@ -621,21 +616,48 @@ public class ChatUiActorSystem implements ConversationControls {
                     wireProject(projectId);
                 }
                 advanceProjectCounterPast(projectId);
-                if (chats.containsKey(chatActorName(projectId, chatId))) continue;
-                createChat(projectId, chatId);
-                reopened++;
+                running.computeIfAbsent(projectId, k -> new ArrayList<>()).add(parts[1]);
             } catch (Exception e) {
-                LOG.log(Level.WARNING, "Could not re-open conversation " + conversationSquadId, e);
+                LOG.log(Level.WARNING, "Could not re-open project " + projectId, e);
             }
         }
-        if (reopened > 0) LOG.info("Re-opened " + reopened + " recorded conversation(s)");
-
         // A project whose conversations were all ended -- it was deleted -- is not reopened, but its
         // name is still on those sessions, and a new project must not take it
         // (ProjectDeletion_261011_oo01).
-        for (String conversationSquadId : askRegistry(ConversationRegistry::everRecorded, List.<String>of())) {
+        for (String conversationSquadId : ioLogStore.recordedConversationSquads()) {
             String[] parts = splitConversationSquadId(conversationSquadId);
             if (parts != null) advanceProjectCounterPast(parts[0]);
+        }
+        return running;
+    }
+
+    /**
+     * Builds a project's conversations again from its list, each under the conversation it was nested under
+     * ({@code EachActorRecordsItsOwnState_261118_oo01}). The project decides which and where, and is told which were
+     * built; building one ({@link #buildConversation}) runs here rather than on the project's thread, since it asks the
+     * project for its working directory and instructions.
+     *
+     * @param running the project's conversations with a running session, for a log that has no list yet
+     */
+    private void restoreConversationsOf(String projectId, List<String> running) {
+        ActorRef<Project> projectRef = projects.get(projectId);
+        if (projectRef == null) return;
+        try {
+            List<Project.Member> toBuild = projectRef.ask(p -> p.conversationsToBuild(running)).get(10, TimeUnit.SECONDS);
+            String instructions = readProjectInstructions(projectRef);
+            List<String> built = new ArrayList<>();
+            for (Project.Member m : toBuild) {
+                try {
+                    buildConversation(projectId, m.chatId(), m.parentChatId(), instructions);
+                    built.add(m.chatId());
+                } catch (RuntimeException e) {
+                    LOG.log(Level.WARNING, "Could not re-open conversation " + m.chatId() + " of " + projectId, e);
+                }
+            }
+            projectRef.tell(p -> p.conversationsBuilt(built)).get(10, TimeUnit.SECONDS);
+            LOG.info("Re-opened " + built.size() + " conversation(s) of " + projectId);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not re-open the conversations of " + projectId, e);
         }
     }
 
@@ -755,7 +777,12 @@ public class ChatUiActorSystem implements ConversationControls {
                 }
             }
         }
-        tellRegistry(r -> r.deleted(name));
+        // Out of the project's list, and its session ended, so it does not come back (EachActorRecordsItsOwnState_261118_oo01).
+        try {
+            projects.get(projectId).tell(p -> p.conversationRemoved(chatId)).get(10, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not take " + name + " out of its project's list", e);
+        }
         actorSystem.removeActorRecursively(name);
         chats.remove(name);
         chatSessions.remove(name);
@@ -841,7 +868,12 @@ public class ChatUiActorSystem implements ConversationControls {
                     }
                 }
             }
-            tellRegistry(r -> r.deleted(name));
+        }
+        // Every conversation's session ended, so none comes back (ProjectDeletion_261011_oo01).
+        try {
+            projectRef.tell(Project::endEveryConversation).get(10, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not end the conversations of " + projectId, e);
         }
         projectRef.tell(Project::stopWatching);
         actorSystem.removeActorRecursively(projectId);
@@ -1144,7 +1176,7 @@ public class ChatUiActorSystem implements ConversationControls {
         // conversation's session keeps its name, and a new one must not take it
         // (ConversationDeletion_261011_oo01).
         List<String> named = new ArrayList<>(chats.keySet());
-        named.addAll(askRegistry(ConversationRegistry::everRecorded, List.<String>of()));
+        if (ioLogStore != null) named.addAll(ioLogStore.recordedConversationSquads());
         int highest = 0;
         for (String name : named) {
             if (!name.startsWith(prefix)) continue;
@@ -1179,6 +1211,29 @@ public class ChatUiActorSystem implements ConversationControls {
      */
     public synchronized ActorRef<ConversationSquad> createChat(String projectId, String chatId,
                                                               String parentChatId) {
+        ActorRef<Project> projectRef = projects.get(projectId);
+        if (projectRef == null) {
+            throw new IllegalArgumentException("Unknown project: " + projectId);
+        }
+        ActorRef<ConversationSquad> made = buildConversation(projectId, chatId, parentChatId, readProjectInstructions(projectRef));
+        // In the project's list, with its parent, so it comes back after a restart where it was
+        // (EachActorRecordsItsOwnState_261118_oo01). Waited for: a restart right after must find it.
+        try {
+            projectRef.tell(p -> p.conversationAdded(chatId, parentChatId)).get(10, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not add " + chatActorName(projectId, chatId) + " to its project's list", e);
+        }
+        return made;
+    }
+
+    /**
+     * Builds one conversation's actors under its project or under another conversation. Records nothing in the
+     * project's list: {@link #createChat} adds it there, and a project restoring its list already has it.
+     *
+     * @param projectInstructions the project's instructions, read once by the caller
+     */
+    private synchronized ActorRef<ConversationSquad> buildConversation(String projectId, String chatId,
+                                                                       String parentChatId, String projectInstructions) {
         String qualifiedName = chatActorName(projectId, chatId);
         ActorRef<ConversationSquad> existing = chats.get(qualifiedName);
         if (existing != null) {
@@ -1233,9 +1288,8 @@ public class ChatUiActorSystem implements ConversationControls {
         chatSessionIIAR.tell(a -> ((ChatSession) a).setMaxObservationChars(maxObservationChars));
         chatSessionIIAR.tell(a -> ((ChatSession) a).setPluginTools(pluginRegistry.tools()));
         // A conversation created after its project's working directory was set must still receive
-        // that project's instructions, so they are pulled from the Project actor here rather than
-        // pushed only at the moment setProjectWorkingDir runs.
-        String projectInstructions = readProjectInstructions(projectRef);
+        // that project's instructions, so they are handed in here rather than pushed only at the
+        // moment setProjectWorkingDir runs.
         chatSessionIIAR.tell(a -> ((ChatSession) a).setProjectInstructions(projectInstructions));
 
         // provider child — created by the generating side, not by ChatSession itself
