@@ -193,6 +193,8 @@ public class ChatUiActorSystem implements ConversationControls {
     private ActorRef<CollaborationGraph> collaborationGraphRef;
     /** Which conversations exist across a restart, kept in the I/O log ({@code ConversationRestoreOnRestart_260904_oo01}). */
     private ActorRef<ConversationRegistry> conversationRegistryRef;
+    /** Each project's recorded settings in the I/O log: name, working directory, organization, role edges. */
+    private ActorRef<ProjectSettings> projectSettingsRef;
     private ActorRef<SkillRegistry> skillRegistryRef;
     private ActorRef<com.scivicslab.chatui.audittrail.ActivityWatcher> activityWatcherRef;
     private FileAccessScope fileScope;
@@ -326,6 +328,8 @@ public class ChatUiActorSystem implements ConversationControls {
         // records it there (ConversationRestoreOnRestart_260904_oo01).
         conversationRegistryRef = housekeeperRef.createChild("conversationRegistry",
                 new ConversationRegistry(ioLogStore, ioLogView));
+        // Each project's recorded settings; created before any project is restored (ProjectProperty_260929_oo01).
+        projectSettingsRef = housekeeperRef.createChild("projectSettings", new ProjectSettings(ioLogStore, ioLogView));
 
         // The loader a job's workflow calls to create and remove actors, and to bring in a Turing
         // Workflow plugin (WorkflowPluginLoader_260913_oo01). Always present: creating and removing
@@ -1769,17 +1773,6 @@ public class ChatUiActorSystem implements ConversationControls {
         for (String p : projectIds) if (projects.containsKey(p)) recordProjectProperties(p);
     }
 
-    /** @return the project's role edges as the JSON array its settings entry carries */
-    private org.json.JSONArray rolesJson(String projectId) {
-        org.json.JSONArray out = new org.json.JSONArray();
-        if (collaborationGraphRef == null) return out;
-        for (CollaborationGraph.Edge e : askOrDefault(collaborationGraphRef, g -> g.edgesFrom(projectId + "/"),
-                List.<CollaborationGraph.Edge>of())) {
-            out.put(new org.json.JSONObject().put("from", e.from()).put("role", e.role()).put("to", e.to()));
-        }
-        return out;
-    }
-
     /** @return the shared {@link CollaborationGraph}, for the tools that set role edges and for tests */
     public ActorRef<CollaborationGraph> getCollaborationGraph() {
         return collaborationGraphRef;
@@ -1868,23 +1861,20 @@ public class ChatUiActorSystem implements ConversationControls {
      * cleared ({@code ProjectProperty_260929_oo01}).</p>
      */
     private void recordProjectProperties(String projectId) {
-        if (ioLogStore == null) return;
+        if (projectSettingsRef == null) return;
         try {
-            long sessionId = ioLogStore.ensureProjectSession(projectId);
-            if (sessionId < 0) return;
             ActorRef<Project> projectRef = projects.get(projectId);
             String name = getProjectName(projectId);
             Path dir = projectRef == null ? null : projectRef.ask(Project::getWorkingDir).get(5, TimeUnit.SECONDS);
-            org.json.JSONObject o = new org.json.JSONObject();
-            o.put("name", name == null ? org.json.JSONObject.NULL : name);
-            o.put("workingDir", dir == null ? org.json.JSONObject.NULL : dir.toString());
-            // The organization travels in the same entry, for the same reason as the two above
-            // (ConversationReportingLines_261108_oo01).
-            o.put("organization", organizationOf(projectId).ask(Organization::toJson).get(5, TimeUnit.SECONDS));
-            // The role edges whose source is in this project, beside the organization and for the same reason
-            // (CollaborationGraph_260828_oo01).
-            o.put("roles", rolesJson(projectId));
-            ioLogStore.record(sessionId, "agent", IoLogView.SETTINGS_LABEL, o.toString());
+            // The organization and the role edges travel in the same entry, for the same reason as the name and
+            // the working directory (ConversationReportingLines_261108_oo01, CollaborationGraph_260828_oo01).
+            org.json.JSONObject organization = organizationOf(projectId).ask(Organization::toJson).get(5, TimeUnit.SECONDS);
+            List<CollaborationGraph.Edge> roles = collaborationGraphRef == null ? List.of()
+                    : askOrDefault(collaborationGraphRef, g -> g.edgesFrom(projectId + "/"), List.<CollaborationGraph.Edge>of());
+            ProjectSettings.Snapshot snapshot = new ProjectSettings.Snapshot(name, dir == null ? null : dir.toString(),
+                    organization, roles);
+            // Waited for, so the entry is in the log before the caller goes on (a restart right after finds it).
+            projectSettingsRef.tell(s -> s.record(projectId, snapshot)).get(10, TimeUnit.SECONDS);
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Could not record the properties of " + projectId, e);
         }
@@ -1897,20 +1887,17 @@ public class ChatUiActorSystem implements ConversationControls {
      * conversations exactly as they are when a person sets it.
      */
     private void restoreProjectProperties(String projectId) {
-        if (ioLogStore == null || ioLogView == null) return;
+        if (projectSettingsRef == null) return;
         restoringProperties = true;
         try {
-            long sessionId = ioLogStore.findProjectSession(projectId);
-            if (sessionId < 0) return;
-            String json = ioLogView.latestSettingsJson(sessionId);
-            if (json == null) return;
-            org.json.JSONObject o = new org.json.JSONObject(json);
-            String name = o.isNull("name") ? null : o.getString("name");
+            ProjectSettings.Snapshot s = askOrDefault(projectSettingsRef, ps -> ps.read(projectId), null);
+            if (s == null) return;
+            String name = s.name();
             if (name != null) {
                 ActorRef<Project> projectRef = projects.get(projectId);
                 if (projectRef != null) projectRef.tell(p -> p.setName(name));
             }
-            org.json.JSONObject organization = o.optJSONObject("organization");
+            org.json.JSONObject organization = s.organization();
             if (organization != null) {
                 List<String> present = chatIdsOf(projectId);
                 organizationOf(projectId).tell(org -> {
@@ -1918,23 +1905,14 @@ public class ChatUiActorSystem implements ConversationControls {
                     org.retainOnly(present);
                 }).get(5, TimeUnit.SECONDS);
             }
-            org.json.JSONArray roles = o.optJSONArray("roles");
-            if (roles != null && collaborationGraphRef != null) {
+            if (s.roles() != null && collaborationGraphRef != null) {
                 // Only edges whose source came back; a target in another project is kept as saved.
                 java.util.Set<String> present = new java.util.HashSet<>();
                 for (String id : chatIdsOf(projectId)) present.add(chatActorName(projectId, id));
-                List<CollaborationGraph.Edge> saved = new ArrayList<>();
-                for (int i = 0; i < roles.length(); i++) {
-                    org.json.JSONObject e = roles.optJSONObject(i);
-                    if (e == null) continue;
-                    String from = e.optString("from", null), role = e.optString("role", null), to = e.optString("to", null);
-                    if (from != null && role != null && to != null && present.contains(from)) {
-                        saved.add(new CollaborationGraph.Edge(from, role, to));
-                    }
-                }
+                List<CollaborationGraph.Edge> saved = s.roles().stream().filter(e -> present.contains(e.from())).toList();
                 collaborationGraphRef.tell(g -> g.replaceEdgesFrom(projectId + "/", saved)).get(5, TimeUnit.SECONDS);
             }
-            String dir = o.isNull("workingDir") ? null : o.getString("workingDir");
+            String dir = s.workingDir();
             if (dir != null && !dir.isBlank()) {
                 String outcome = setProjectWorkingDir(projectId, Path.of(dir));
                 if (outcome.startsWith("error:")) {
