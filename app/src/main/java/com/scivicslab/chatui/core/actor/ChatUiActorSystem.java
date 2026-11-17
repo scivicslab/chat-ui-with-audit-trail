@@ -191,6 +191,8 @@ public class ChatUiActorSystem implements ConversationControls {
     private ActorRef<TimekeeperTicker> timekeeperTickerRef;
     private ActorRef<CallWatchdog> callWatchdogRef;
     private ActorRef<CollaborationGraph> collaborationGraphRef;
+    /** Which conversations exist across a restart, kept in the I/O log ({@code ConversationRestoreOnRestart_260904_oo01}). */
+    private ActorRef<ConversationRegistry> conversationRegistryRef;
     private ActorRef<SkillRegistry> skillRegistryRef;
     private ActorRef<com.scivicslab.chatui.audittrail.ActivityWatcher> activityWatcherRef;
     private FileAccessScope fileScope;
@@ -320,6 +322,10 @@ public class ChatUiActorSystem implements ConversationControls {
         // whole system — split per project, a set_collaborator naming another project's ConversationSquad would be
         // written to one graph and read from another, silently losing the assignment.
         collaborationGraphRef = housekeeperRef.createChild("collaborationGraph", new CollaborationGraph());
+        // Which conversations come back after a restart; created before any conversation is, since creating one
+        // records it there (ConversationRestoreOnRestart_260904_oo01).
+        conversationRegistryRef = housekeeperRef.createChild("conversationRegistry",
+                new ConversationRegistry(ioLogStore, ioLogView));
 
         // The loader a job's workflow calls to create and remove actors, and to bring in a Turing
         // Workflow plugin (WorkflowPluginLoader_260913_oo01). Always present: creating and removing
@@ -554,7 +560,7 @@ public class ChatUiActorSystem implements ConversationControls {
         if (ioLogStore == null) return;
         List<String> conversationSquads;
         try {
-            conversationSquads = ioLogStore.resumableConversationSquads();
+            conversationSquads = askRegistry(ConversationRegistry::toRestore, List.<String>of());
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Could not list the recorded ConversationSquads", e);
             return;
@@ -590,7 +596,7 @@ public class ChatUiActorSystem implements ConversationControls {
         // A project whose conversations were all ended -- it was deleted -- is not reopened, but its
         // name is still on those sessions, and a new project must not take it
         // (ProjectDeletion_261011_oo01).
-        for (String conversationSquadId : ioLogStore.recordedConversationSquads()) {
+        for (String conversationSquadId : askRegistry(ConversationRegistry::everRecorded, List.<String>of())) {
             String[] parts = splitConversationSquadId(conversationSquadId);
             if (parts != null) advanceProjectCounterPast(parts[0]);
         }
@@ -712,7 +718,7 @@ public class ChatUiActorSystem implements ConversationControls {
                 }
             }
         }
-        if (ioLogStore != null) ioLogStore.resetSession(name);
+        tellRegistry(r -> r.deleted(name));
         actorSystem.removeActorRecursively(name);
         chats.remove(name);
         chatSessions.remove(name);
@@ -801,7 +807,7 @@ public class ChatUiActorSystem implements ConversationControls {
                     }
                 }
             }
-            if (ioLogStore != null) ioLogStore.resetSession(name);
+            tellRegistry(r -> r.deleted(name));
         }
         projectRef.tell(Project::stopWatching);
         actorSystem.removeActorRecursively(projectId);
@@ -1100,7 +1106,7 @@ public class ChatUiActorSystem implements ConversationControls {
         // conversation's session keeps its name, and a new one must not take it
         // (ConversationDeletion_261011_oo01).
         List<String> named = new ArrayList<>(chats.keySet());
-        if (ioLogStore != null) named.addAll(ioLogStore.recordedConversationSquads());
+        named.addAll(askRegistry(ConversationRegistry::everRecorded, List.<String>of()));
         int highest = 0;
         for (String name : named) {
             if (!name.startsWith(prefix)) continue;
@@ -1249,6 +1255,12 @@ public class ChatUiActorSystem implements ConversationControls {
                         }));
 
         restoreConversation(qualifiedName, chatSessionIIAR, providerRef);
+        // Recorded, so that it comes back after a restart even if it never runs a turn; the registry leaves a
+        // conversation that is being brought back as it was recorded (ConversationRestoreOnRestart_260904_oo01).
+        String createdProvider = chatSessionIIAR.getProviderIdDirect();
+        String createdTools = chatSessionIIAR.getToolSetDirect();
+        String createdModel = chatSessionIIAR.getModelDirect();
+        tellRegistry(r -> r.created(qualifiedName, createdProvider, createdTools, createdModel));
 
         return conversationSquadRef;
     }
@@ -1298,6 +1310,10 @@ public class ChatUiActorSystem implements ConversationControls {
             ActorRef<ConversationSquad> squadRef = chats.get(conversationSquadName);
             if (squadRef != null) squadRef.tell(c -> c.setName(recordedName));
         }
+
+        // The agent loop put on it, by file or as YAML, whether or not it has run a turn.
+        String recordedLoop = askRegistry(r -> r.agentLoopOf(conversationSquadName), null);
+        if (recordedLoop != null) applyRecordedAgentLoop(conversationSquadName, chatSessionIIAR, recordedLoop);
 
         if (turns.isEmpty()) {
             LOG.info("I/O log session " + sessionId + " holds no restorable turn for " + conversationSquadName
@@ -1662,6 +1678,72 @@ public class ChatUiActorSystem implements ConversationControls {
     public boolean isLiaison(String projectId, String chatId) {
         if (!projects.containsKey(projectId)) return false;
         return chatId.equals(askOrDefault(organizationOf(projectId), Organization::liaison, null));
+    }
+
+    /**
+     * Puts a conversation on a bundled agent loop and records it, so a restart puts it back
+     * ({@code ConversationRestoreOnRestart_260904_oo01}). What {@code POST .../agent-loop-workflow} calls.
+     *
+     * @return {@code null} on success, or {@code "error: ..."} with the conversation left on its loop
+     */
+    public String setAgentLoopFile(String projectId, String chatId, String file) {
+        String name = chatActorName(projectId, chatId);
+        ChatSessionIIAR session = chatSessions.get(name);
+        if (session == null) return "error: no such conversation: " + name;
+        String error = session.setAgentLoopWorkflowFile(file);
+        if (error == null) tellRegistry(r -> r.agentLoopSet(name, ConversationRegistry.AGENT_LOOP_FILE + file));
+        return error;
+    }
+
+    /**
+     * {@code set_agent_loop}: puts the YAML on the target conversation and records it, so a restart puts it back.
+     *
+     * @return {@code "ok: ..."}, or {@code "error: ..."} with nothing changed
+     */
+    @Override
+    public String setAgentLoop(String myProjectId, String target, String yaml) {
+        String outcome = com.scivicslab.chatui.agent.SetAgentLoopTool.setAgentLoop(actorSystem, myProjectId, target, yaml);
+        if (outcome.startsWith("ok")) {
+            String name = resolveChatName(myProjectId, target);
+            tellRegistry(r -> r.agentLoopSet(name, ConversationRegistry.AGENT_LOOP_YAML + yaml));
+        }
+        return outcome;
+    }
+
+    /**
+     * Sends the conversation registry a message and waits for it to be handled, so that what it writes is in the
+     * log before the caller goes on (a restart right after must find it).
+     */
+    private void tellRegistry(java.util.function.Consumer<ConversationRegistry> message) {
+        if (conversationRegistryRef == null) return;
+        try {
+            conversationRegistryRef.tell(message).get(10, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "The conversation registry did not answer", e);
+        }
+    }
+
+    private <R> R askRegistry(java.util.function.Function<ConversationRegistry, R> question, R fallback) {
+        return conversationRegistryRef == null ? fallback : askOrDefault(conversationRegistryRef, question, fallback);
+    }
+
+    private void applyRecordedAgentLoop(String conversationSquadName, ChatSessionIIAR session, String entry) {
+        try {
+            if (entry.startsWith(ConversationRegistry.AGENT_LOOP_FILE)) {
+                String error = session.setAgentLoopWorkflowFile(entry.substring(ConversationRegistry.AGENT_LOOP_FILE.length()));
+                if (error != null) LOG.warning("Restoring the agent loop of " + conversationSquadName + ": " + error);
+            } else if (entry.startsWith(ConversationRegistry.AGENT_LOOP_YAML)) {
+                byte[] yaml = entry.substring(ConversationRegistry.AGENT_LOOP_YAML.length()).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                session.<Void>ask(i -> {
+                    ChatSession chat = (ChatSession) i;
+                    chat.reset();
+                    chat.readYaml(new java.io.ByteArrayInputStream(yaml));
+                    return null;
+                }).get(10, TimeUnit.SECONDS);
+            }
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not restore the agent loop of " + conversationSquadName, e);
+        }
     }
 
     /**

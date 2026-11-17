@@ -387,7 +387,8 @@ public class ChatResource {
         if (name.isEmpty()) {
             return Response.status(400).entity(Map.of("type", "error", "message", "file name required")).build();
         }
-        String error = session.setAgentLoopWorkflowFile(name);
+        // Recorded too, so a restart puts the conversation back on this loop (ConversationRestoreOnRestart_260904_oo01).
+        String error = actorSystem.setAgentLoopFile(projectId, chatId, name);
         if (error != null) {
             return Response.status(400).entity(Map.of("type", "error", "message", error)).build();
         }

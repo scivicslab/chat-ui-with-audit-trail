@@ -100,9 +100,12 @@ class CollaborationGraphPersistenceTest {
             ChatUiActorSystem first = systems.start();
             first.createChat("project1");
             first.createChat("project1");
-            recorded(systems, "project1", "01", "02");   // chat-03 has no session, so it does not come back
+            recorded(systems, "project1", "01", "02");
             assertTrue(first.setCollaborator("project1/chat-01", "01", "worker", "03").startsWith("ok"));
             assertTrue(first.setCollaborator("project1/chat-01", "01", "reviewer", "02").startsWith("ok"));
+            // chat-03's session is ended outside deleteChat (as an old log, or a conversation ended by hand,
+            // leaves it), so it does not come back while the edge naming it is still saved.
+            systems.log.resetSession(ChatUiActorSystem.chatActorName("project1", "03"));
 
             ChatUiActorSystem second = systems.start();
             assertNull(second.getChatSession("project1", "03"), "chat-03 did not come back");

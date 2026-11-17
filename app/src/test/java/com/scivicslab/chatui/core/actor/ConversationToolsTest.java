@@ -96,6 +96,9 @@ class ConversationToolsTest {
             nameCalls.add(projectId + "/" + chatId + "=" + name);
             return name == null ? "ok: name cleared" : "ok: name set to " + name;
         }
+        @Override public String setAgentLoop(String myProjectId, String target, String yaml) {
+            return "ok: agent loop installed on chat " + target;
+        }
         @Override public String setCollaborator(String myChatName, String target, String role, String collaborator) {
             return "ok: " + target + "'s '" + role + "' collaborator set to " + collaborator;
         }

@@ -226,6 +226,22 @@ public class IoLogView {
     public static final String NAME_LABEL = "name";
 
     /**
+     * Label of the entry that holds the agent loop put on a conversation: {@code file:<name>} for a bundled
+     * workflow, or {@code yaml:} and the YAML for one given by {@code set_agent_loop}. The last one is the loop.
+     */
+    public static final String AGENT_LOOP_LABEL = "agent-loop";
+
+    /** @return the session's last {@link #AGENT_LOOP_LABEL} entry, or {@code null} when it has none */
+    public String latestAgentLoop(long sessionId) {
+        return allLogs(sessionId).stream()
+                .filter(e -> AGENT_LOOP_LABEL.equals(e.getLabel()))
+                .max(Comparator.comparingLong(LogEntry::getId))
+                .map(LogEntry::getMessage)
+                .filter(m -> m != null && !m.isBlank())
+                .orElse(null);
+    }
+
+    /**
      * The name a session's last {@link #NAME_LABEL} entry gives, or {@code null} when it has none or
      * the last one cleared it (an empty message).
      */

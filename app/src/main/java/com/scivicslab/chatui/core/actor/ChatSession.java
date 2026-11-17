@@ -3128,8 +3128,10 @@ public class ChatSession extends Interpreter {
                 }
                 yield sent;
             }
-            case "set_agent_loop" -> SetAgentLoopTool.setAgentLoop(system, projectId,
-                    extractInput(args, "chatId"), extractInput(args, "yaml"));
+            // Through the controls, which also record the loop; a ChatSession without them (a test) only installs it.
+            case "set_agent_loop" -> conversationControls != null
+                    ? conversationControls.setAgentLoop(projectId, extractInput(args, "chatId"), extractInput(args, "yaml"))
+                    : SetAgentLoopTool.setAgentLoop(system, projectId, extractInput(args, "chatId"), extractInput(args, "yaml"));
             case "load_skill" -> LoadSkillTool.load(skillRegistryRef, extractInput(args, "name"));
             // Through the controls, which also save the edge; a ChatSession without them (a test) writes the graph only.
             case "set_collaborator" -> conversationControls != null

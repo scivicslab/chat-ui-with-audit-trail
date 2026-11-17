@@ -123,4 +123,12 @@ public interface ConversationControls {
      * @return {@code "ok: ..."}, or {@code "error: ..."} with nothing changed
      */
     String setCollaborator(String myChatName, String target, String role, String collaboratorChatId);
+
+    /**
+     * {@code set_agent_loop}: puts the YAML on the target conversation and records it, so that a restart puts it
+     * back ({@code ConversationRestoreOnRestart_260904_oo01}).
+     *
+     * @return {@code "ok: ..."}, or {@code "error: ..."} with nothing changed
+     */
+    String setAgentLoop(String myProjectId, String target, String yaml);
 }
