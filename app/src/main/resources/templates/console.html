@@ -81,22 +81,21 @@
     <div id="app-body">
         <!-- (2) Collapsible left dock: the actor tree (html-saurus-style). -->
         <aside id="left-dock">
+            <!-- Row 1: what the dock shows (the menu names the view, so there is no title), then the controls.
+                 The actor tree, or every project's conversations with their superior and role edges
+                 (ConversationGraphInTheLeftPane_261117_oo01). Refresh and Auto apply to the view shown. -->
             <div class="dock-head">
-                <span class="dock-title">Actors</span>
-                <button id="new-project-btn" type="button" title="Create a new project">+</button>
-                <button id="actors-refresh" type="button" title="Refresh">&#x21bb;</button>
-                <label class="tab-auto"><input type="checkbox" id="actors-auto" checked> Auto</label>
-                <span id="actors-status"></span>
-            </div>
-            <!-- What the dock shows: the actor tree, or one project's conversations with their superior and
-                 role edges (ConversationGraphInTheLeftPane_261117_oo01). Refresh and Auto apply to the one shown. -->
-            <div class="dock-views">
                 <!-- One menu, as the right pane has (#right-tab-select). -->
                 <select id="left-view-select" aria-label="Left pane">
                     <option value="tree" title="Every actor of this instance, as a tree">Actor Tree</option>
-                    <option value="graph" title="One project's conversations: superior to subordinate, and the roles set with set_collaborator">Graph</option>
+                    <option value="graph" title="Every project's conversations: superior to subordinate, and the roles set with set_collaborator">Graph</option>
                 </select>
+                <button id="new-project-btn" type="button" title="Create a new project">+</button>
+                <button id="actors-refresh" type="button" title="Refresh">&#x21bb;</button>
+                <label class="tab-auto"><input type="checkbox" id="actors-auto" checked> Auto</label>
             </div>
+            <!-- Row 2: how much the view shows, small and muted. -->
+            <div id="actors-status" class="dock-status"></div>
             <div id="actors-tree"></div>
             <div id="conv-graph" hidden></div>
         </aside>

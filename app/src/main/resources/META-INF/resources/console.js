@@ -2241,7 +2241,9 @@
             })
             .then(function (root) {
                 renderActorTree(root);
-                if (status) status.textContent = countActors(root) + " actor(s)";
+                // Only while the tree is shown: other code refreshes the tree too (opening a conversation), and the
+                // Graph view's count must not be overwritten.
+                if (status && leftView !== "graph") status.textContent = countActors(root) + " actor(s)";
             })
             .catch(function (err) {
                 if (status) status.textContent = "error: " + err.message;
@@ -2585,7 +2587,11 @@
             })
             .then(function (text) {
                 var all = JSON.parse(text);
-                if (status) status.textContent = (all.projects || []).length + " project(s)";
+                if (status) {
+                    var np = (all.projects || []).length;
+                    var nc = (all.projects || []).reduce(function (s, g) { return s + (g.nodes || []).length; }, 0);
+                    status.textContent = np + (np === 1 ? " project, " : " projects, ") + nc + (nc === 1 ? " conversation" : " conversations");
+                }
                 var sig = box.clientWidth + "|" + text;
                 if (!force && sig === graphLastSig) return;
                 graphLastSig = sig;
@@ -2605,8 +2611,9 @@
         if (tree) tree.hidden = isGraph;
         if (graph) graph.hidden = !isGraph;
         if (view) view.value = leftView;
-        var title = document.querySelector("#left-dock .dock-title");
-        if (title) title.textContent = isGraph ? "Graph" : "Actors";
+        // The count under the menu belongs to the view; cleared until the view's own refresh writes it.
+        var status = document.getElementById("actors-status");
+        if (status) status.textContent = "";
         localStorage.setItem(LEFT_VIEW_KEY, leftView);
     }
 

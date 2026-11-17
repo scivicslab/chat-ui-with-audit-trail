@@ -119,6 +119,22 @@ public class ConversationGraphCheck {
                 + ".map(e => { const s = e.querySelectorAll('tspan'); return s[0].textContent + ' ' + s[1].textContent; })");
     }
 
+    static final String ROW_ONE = "['#left-view-select', '#new-project-btn', '#actors-refresh', '.tab-auto']"
+            + ".map(s => document.querySelector('#left-dock .dock-head ' + s).getBoundingClientRect())";
+
+    /** The menu, +, refresh and Auto share one line of the dock's head, and the head does not overflow. */
+    static boolean rowOneOnOneLine(Page page) {
+        return (Boolean) page.evaluate("() => { const b = " + ROW_ONE + "; const h = document.querySelector('#left-dock .dock-head');"
+                + " const top = Math.min(...b.map(r => r.top)), bottom = Math.max(...b.map(r => r.bottom));"
+                + " return b.every(r => r.width > 0) && bottom - top < 2 * Math.min(...b.map(r => r.height))"
+                + " && h.scrollWidth <= h.clientWidth && b.every(r => r.right <= h.getBoundingClientRect().right); }");
+    }
+
+    static String rowOneBoxes(Page page) {
+        return String.valueOf(page.evaluate("() => JSON.stringify({dock: document.getElementById('left-dock').clientWidth, boxes: "
+                + ROW_ONE + ".map(r => [Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)])})"));
+    }
+
     static void chooseView(Page page, String value) {
         page.selectOption("#left-view-select", value);
         page.waitForTimeout(600);
@@ -173,7 +189,11 @@ public class ConversationGraphCheck {
             check(page.isVisible("#conv-graph") && !page.isVisible("#actors-tree")
                             && page.querySelectorAll("#graph-project").isEmpty(),
                     "Graph replaces the tree; there is no project selector");
-            check("Graph".equals(page.textContent("#left-dock .dock-title").strip()), "the dock title reads Graph");
+            check(page.querySelectorAll("#left-dock .dock-title").isEmpty(), "no separate title: the menu names the view");
+            page.waitForFunction("() => /conversation/.test(document.getElementById('actors-status').textContent)");
+            check("2 projects, 6 conversations".equals(page.textContent("#actors-status").strip()),
+                    "row 2 counts the projects and their conversations: " + page.textContent("#actors-status"));
+            check(rowOneOnOneLine(page), "the menu, +, refresh and Auto sit on one line: " + rowOneBoxes(page));
             check(page.querySelectorAll("#conv-graph .cg-project").size() == 2
                             && page.textContent("#conv-graph .cg-project[data-project='project1']").contains("Graph check")
                             && page.textContent("#conv-graph .cg-project[data-project='project1']").contains("project1")
@@ -324,8 +344,12 @@ public class ConversationGraphCheck {
                     "after reload the dock is still on the graph");
             chooseView(page, "tree");
             check(page.isVisible("#actors-tree") && !page.isVisible("#conv-graph") && !page.isVisible("#graph-project")
-                            && "Actors".equals(page.textContent("#left-dock .dock-title").strip()),
+                            && "tree".equals(page.inputValue("#left-view-select")),
                     "Actor Tree brings the tree back");
+            page.waitForFunction("() => /actor\\(s\\)/.test(document.getElementById('actors-status').textContent)");
+            check(page.textContent("#actors-status").strip().matches("\\d+ actor\\(s\\)"),
+                    "row 2 counts the actors: " + page.textContent("#actors-status"));
+            check(rowOneOnOneLine(page), "row 1 is still one line in the tree: " + rowOneBoxes(page));
             browser.close();
         }
         System.out.println(failures == 0 ? "ALL PASSED" : failures + " FAILED");

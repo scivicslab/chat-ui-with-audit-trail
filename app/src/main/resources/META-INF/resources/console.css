@@ -456,15 +456,13 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
 .dock-head {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     flex-shrink: 0;
-    padding: 8px 10px;
-    border-bottom: 1px solid var(--border-color, #2c2c2c);
+    padding: 6px 10px 4px;
     font-size: 12px;
     color: var(--text-secondary, #b8b8b8);
     white-space: nowrap;
 }
-.dock-title { font-weight: 600; color: var(--text-primary, #e6e6e6); margin-right: auto; }
 .dock-head button {
     background: var(--bg-primary, #2a2a2a);
     color: var(--text-primary, #e6e6e6);
@@ -887,13 +885,17 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
 .projectprop-org { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 12px; }
 
 /* ── Left dock: Actor Tree / Graph (ConversationGraphInTheLeftPane_261117_oo01) ── */
-.dock-views {
-    display: flex; align-items: center; gap: 4px;
-    padding: 4px 12px 6px;
-    border-bottom: 1px solid var(--border-color, #2c2c2c);
+/* Row 1 holds the view menu and the controls; it must fit the dock's usual width (260 px), so the menu is a
+   little tighter than the right pane's. Row 2 is the count. */
+.dock-head #left-view-select { align-self: center; margin: 0; padding: 2px 4px; font-size: 12px; min-width: 0; }
+.dock-status {
     flex-shrink: 0;
+    padding: 0 10px 4px;
+    font-size: 11px;
+    color: var(--text-secondary, #9aa0a6);
+    border-bottom: 1px solid var(--border-color, #2c2c2c);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-#left-view-select { align-self: center; margin: 0; }
 #conv-graph { flex: 1; min-height: 0; overflow: auto; padding: 6px 4px 12px 8px; }
 #conv-graph[hidden], #actors-tree[hidden] { display: none; }
 #conv-graph .cg-note { color: var(--text-secondary, #9aa0a6); font-size: 12px; padding: 4px; }
