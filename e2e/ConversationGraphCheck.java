@@ -250,6 +250,25 @@ public class ConversationGraphCheck {
             page.screenshot(new Page.ScreenshotOptions().setPath(Path.of("/tmp/uitest/graph-4-tooltip.png")));
             page.mouse().move(900, 700);
 
+            // Thinking and effort, set with the pane's own controls: chat-03's Think box, and chat-05's Effort field
+            // (chat-05 is moved to the Claude Code provider, the one that keeps an effort; no prompt is sent).
+            rest("POST", "/api/projects/project1/chats/05/provider", "{\"provider\":\"claude\"}");
+            page.evaluate("window.chatUiSwitchChat('project1','03')");
+            page.waitForTimeout(1500);
+            page.uncheck("#think-check");
+            page.waitForTimeout(800);
+            check(rest("GET", "/api/projects/project1/chats/03/status", null).contains("\"noThink\":true"),
+                    "unticking Think on chat-03 set it to answer without thinking");
+            page.evaluate("window.chatUiSwitchChat('project1','05')");
+            page.waitForTimeout(1500);
+            page.fill("#effort-input", "high");
+            page.dispatchEvent("#effort-input", "change");
+            page.waitForTimeout(800);
+            String st5 = rest("GET", "/api/projects/project1/chats/05/status", null);
+            check(st5.contains("\"provider\":\"claude\"") && st5.contains("\"effort\":\"high\""),
+                    "typing high into chat-05's Effort field set it: " + st5);
+            page.screenshot(new Page.ScreenshotOptions().setPath(Path.of("/tmp/uitest/think-effort-1.png")));
+
             // A node opens its conversation, as the tree does.
             page.click("#conv-graph .cg-node[data-chat='03'] text");
             page.waitForTimeout(800);
@@ -317,6 +336,21 @@ public class ConversationGraphCheck {
             check(project.contains("\"workingDir\":\"" + WORKING_DIR + "\""),
                     "project1's working directory came back through its settings record: " + project.substring(0, Math.min(200, project.length())));
             page.screenshot(new Page.ScreenshotOptions().setPath(Path.of("/tmp/uitest/graph-3-after-restart.png")));
+
+            // Thinking and effort came back, as the pane's controls show them.
+            String st3 = rest("GET", "/api/projects/project1/chats/03/status", null);
+            String st5 = rest("GET", "/api/projects/project1/chats/05/status", null);
+            check(st3.contains("\"noThink\":true"), "chat-03 still answers without thinking: " + st3);
+            check(st5.contains("\"provider\":\"claude\"") && st5.contains("\"effort\":\"high\""),
+                    "chat-05 is still on Claude Code at effort high: " + st5);
+            page.evaluate("window.chatUiSwitchChat('project1','03')");
+            page.waitForTimeout(1500);
+            check(!page.isChecked("#think-check"), "chat-03's Think box comes back unticked");
+            page.evaluate("window.chatUiSwitchChat('project1','05')");
+            page.waitForTimeout(1500);
+            check("high".equals(page.inputValue("#effort-input")), "chat-05's Effort field comes back with high: '"
+                    + page.inputValue("#effort-input") + "'");
+            page.screenshot(new Page.ScreenshotOptions().setPath(Path.of("/tmp/uitest/think-effort-after-restart.png")));
             browser.close();
         }
         System.out.println(failures == 0 ? "ALL PASSED" : failures + " FAILED");
