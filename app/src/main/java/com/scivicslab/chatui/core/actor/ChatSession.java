@@ -3131,9 +3131,13 @@ public class ChatSession extends Interpreter {
             case "set_agent_loop" -> SetAgentLoopTool.setAgentLoop(system, projectId,
                     extractInput(args, "chatId"), extractInput(args, "yaml"));
             case "load_skill" -> LoadSkillTool.load(skillRegistryRef, extractInput(args, "name"));
-            case "set_collaborator" -> SetCollaboratorTool.setCollaborator(collaborationGraphRef,
-                    myChatName(), extractInput(args, "chatId"), extractInput(args, "role"),
-                    extractInput(args, "collaboratorChatId"));
+            // Through the controls, which also save the edge; a ChatSession without them (a test) writes the graph only.
+            case "set_collaborator" -> conversationControls != null
+                    ? conversationControls.setCollaborator(myChatName(), extractInput(args, "chatId"),
+                            extractInput(args, "role"), extractInput(args, "collaboratorChatId"))
+                    : SetCollaboratorTool.setCollaborator(collaborationGraphRef,
+                            myChatName(), extractInput(args, "chatId"), extractInput(args, "role"),
+                            extractInput(args, "collaboratorChatId"));
             case "get_chat_status" -> GetChatStatusTool.get(system, projectId, extractInput(args, "chatId"));
             case "list_chat_models" -> ListChatModelsTool.list(system, projectId, extractInput(args, "chatId"));
             case "set_chat_model" -> SetChatModelTool.set(system, conversationControls, projectId,

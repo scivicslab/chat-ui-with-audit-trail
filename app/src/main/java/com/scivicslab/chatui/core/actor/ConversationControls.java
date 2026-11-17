@@ -114,4 +114,13 @@ public interface ConversationControls {
      *         of its turns, or {@code null} when it has no superior, no subordinates and is not the liaison
      */
     String positionOf(String projectId, String chatId);
+
+    /**
+     * Sets {@code target}'s collaborator for {@code role}, and saves it with the project's settings so that a
+     * restart finds it ({@code CollaborationGraph_260828_oo01}).
+     *
+     * @param myChatName the calling conversation's qualified name
+     * @return {@code "ok: ..."}, or {@code "error: ..."} with nothing changed
+     */
+    String setCollaborator(String myChatName, String target, String role, String collaboratorChatId);
 }

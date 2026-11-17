@@ -96,6 +96,9 @@ class ConversationToolsTest {
             nameCalls.add(projectId + "/" + chatId + "=" + name);
             return name == null ? "ok: name cleared" : "ok: name set to " + name;
         }
+        @Override public String setCollaborator(String myChatName, String target, String role, String collaborator) {
+            return "ok: " + target + "'s '" + role + "' collaborator set to " + collaborator;
+        }
         final List<String> timekeeperCalls = new ArrayList<>();
         @Override public long[] setTimekeeperLimits(String projectId, String chatId, Long urgent, Long warn) {
             if ((urgent != null && urgent < 1) || (warn != null && warn < 1)) {

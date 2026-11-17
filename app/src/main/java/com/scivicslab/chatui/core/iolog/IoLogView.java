@@ -32,6 +32,16 @@ public class IoLogView {
     @Inject
     IoLogStore ioLog;
 
+    /**
+     * A view over {@code store}, for an actor system started without Quarkus (a test that restarts one on
+     * the same log), where nothing injects the store.
+     */
+    public static IoLogView over(IoLogStore store) {
+        IoLogView view = new IoLogView();
+        view.ioLog = store;
+        return view;
+    }
+
     /** One agent (actor / AI agent) in a session, with its log-line count. The agent-axis index. */
     public record AgentInfo(String agent, long lines) {}
 

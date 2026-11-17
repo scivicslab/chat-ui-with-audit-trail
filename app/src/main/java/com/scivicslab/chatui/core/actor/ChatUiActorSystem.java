@@ -710,7 +710,11 @@ public class ChatUiActorSystem implements ConversationControls {
         chatSessions.remove(name);
         chatLogBuffers.remove(name);
         organizationOf(projectId).tell(o -> o.remove(chatId));
-        recordProjectProperties(projectId);
+        // Its role edges, and every edge that names it, go with it (CollaborationGraph_260828_oo01).
+        java.util.Set<String> touched = new java.util.TreeSet<>(collaborationGraphRef == null ? java.util.Set.of()
+                : askOrDefault(collaborationGraphRef, g -> g.forgetConversation(name), java.util.Set.<String>of()));
+        touched.add(projectId);
+        recordRolesOf(touched);
         LOG.info("Deleted conversation " + name);
         return new ChatDeletion(ChatDeletion.Kind.DELETED, "");
     }
@@ -799,6 +803,10 @@ public class ChatUiActorSystem implements ConversationControls {
             chatLogBuffers.remove(name);
         }
         projects.remove(projectId);
+        // The project's role edges, and edges of other projects that name its conversations, go with it.
+        if (collaborationGraphRef != null) {
+            recordRolesOf(askOrDefault(collaborationGraphRef, g -> g.forgetProject(projectId + "/"), java.util.Set.<String>of()));
+        }
         LOG.info("Deleted project " + projectId + " with " + conversations.size() + " conversation(s)");
         return new ProjectDeletion(ProjectDeletion.Kind.DELETED, conversations.size(), "");
     }
@@ -1648,6 +1656,40 @@ public class ChatUiActorSystem implements ConversationControls {
         return chatId.equals(askOrDefault(organizationOf(projectId), Organization::liaison, null));
     }
 
+    /**
+     * Sets a role edge and saves it at once with the project's settings, where the organization is saved
+     * ({@code CollaborationGraph_260828_oo01}), so that a restart finds it.
+     *
+     * @param myChatName         the calling conversation's qualified name
+     * @param target             whose role table to set, as {@code set_collaborator} takes it
+     * @param role               the role name
+     * @param collaboratorChatId who plays the role, as {@code set_collaborator} takes it
+     * @return {@code "ok: ..."}, or {@code "error: ..."} with nothing changed
+     */
+    @Override
+    public String setCollaborator(String myChatName, String target, String role, String collaboratorChatId) {
+        String outcome = com.scivicslab.chatui.agent.SetCollaboratorTool.setCollaborator(collaborationGraphRef,
+                myChatName, target, role, collaboratorChatId);
+        if (outcome.startsWith("ok")) recordProjectProperties(myChatName.substring(0, myChatName.indexOf('/')));
+        return outcome;
+    }
+
+    /** Saves again every project whose role edges changed; one that no longer exists is skipped. */
+    private void recordRolesOf(java.util.Collection<String> projectIds) {
+        for (String p : projectIds) if (projects.containsKey(p)) recordProjectProperties(p);
+    }
+
+    /** @return the project's role edges as the JSON array its settings entry carries */
+    private org.json.JSONArray rolesJson(String projectId) {
+        org.json.JSONArray out = new org.json.JSONArray();
+        if (collaborationGraphRef == null) return out;
+        for (CollaborationGraph.Edge e : askOrDefault(collaborationGraphRef, g -> g.edgesFrom(projectId + "/"),
+                List.<CollaborationGraph.Edge>of())) {
+            out.put(new org.json.JSONObject().put("from", e.from()).put("role", e.role()).put("to", e.to()));
+        }
+        return out;
+    }
+
     /** @return the shared {@link CollaborationGraph}, for the tools that set role edges and for tests */
     public ActorRef<CollaborationGraph> getCollaborationGraph() {
         return collaborationGraphRef;
@@ -1719,6 +1761,9 @@ public class ChatUiActorSystem implements ConversationControls {
             // The organization travels in the same entry, for the same reason as the two above
             // (ConversationReportingLines_261108_oo01).
             o.put("organization", organizationOf(projectId).ask(Organization::toJson).get(5, TimeUnit.SECONDS));
+            // The role edges whose source is in this project, beside the organization and for the same reason
+            // (CollaborationGraph_260828_oo01).
+            o.put("roles", rolesJson(projectId));
             ioLogStore.record(sessionId, "agent", IoLogView.SETTINGS_LABEL, o.toString());
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Could not record the properties of " + projectId, e);
@@ -1752,6 +1797,22 @@ public class ChatUiActorSystem implements ConversationControls {
                     org.loadJson(organization);
                     org.retainOnly(present);
                 }).get(5, TimeUnit.SECONDS);
+            }
+            org.json.JSONArray roles = o.optJSONArray("roles");
+            if (roles != null && collaborationGraphRef != null) {
+                // Only edges whose source came back; a target in another project is kept as saved.
+                java.util.Set<String> present = new java.util.HashSet<>();
+                for (String id : chatIdsOf(projectId)) present.add(chatActorName(projectId, id));
+                List<CollaborationGraph.Edge> saved = new ArrayList<>();
+                for (int i = 0; i < roles.length(); i++) {
+                    org.json.JSONObject e = roles.optJSONObject(i);
+                    if (e == null) continue;
+                    String from = e.optString("from", null), role = e.optString("role", null), to = e.optString("to", null);
+                    if (from != null && role != null && to != null && present.contains(from)) {
+                        saved.add(new CollaborationGraph.Edge(from, role, to));
+                    }
+                }
+                collaborationGraphRef.tell(g -> g.replaceEdgesFrom(projectId + "/", saved)).get(5, TimeUnit.SECONDS);
             }
             String dir = o.isNull("workingDir") ? null : o.getString("workingDir");
             if (dir != null && !dir.isBlank()) {

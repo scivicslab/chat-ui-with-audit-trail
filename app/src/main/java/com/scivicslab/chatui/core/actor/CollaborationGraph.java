@@ -2,8 +2,12 @@ package com.scivicslab.chatui.core.actor;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.function.Predicate;
 
 /**
  * Holds each ConversationSquad's role -> collaborator ConversationSquad id assignments (e.g. ConversationSquad "02" mapping
@@ -52,6 +56,58 @@ public class CollaborationGraph {
      */
     public Map<String, String> getCollaborators(String fromChatId) {
         return edges.getOrDefault(fromChatId, Map.of());
+    }
+
+    /**
+     * Puts back the assignments saved for one project, replacing whatever is held for sources under
+     * {@code prefix}. Called when the project's settings are read at start-up, before any turn runs.
+     *
+     * @param prefix the project's prefix, e.g. {@code "project1/"}
+     * @param saved  the assignments as {@link #edgesFrom} gave them when they were saved
+     */
+    public void replaceEdgesFrom(String prefix, List<Edge> saved) {
+        edges.keySet().removeIf(from -> from.startsWith(prefix));
+        for (Edge e : saved) {
+            if (e.from().startsWith(prefix)) setCollaborator(e.from(), e.role(), e.to());
+        }
+    }
+
+    /**
+     * Forgets a deleted conversation: its own assignments and every assignment that names it.
+     *
+     * @param qualifiedName e.g. {@code "project1/chat-03"}
+     * @return the projects whose sources lost an assignment, to be saved again
+     */
+    public Set<String> forgetConversation(String qualifiedName) {
+        return forget(qualifiedName::equals);
+    }
+
+    /**
+     * Forgets a deleted project: the assignments of its conversations and every assignment that names one of them.
+     *
+     * @param prefix the project's prefix, e.g. {@code "project2/"}
+     * @return the projects whose sources lost an assignment, the deleted one included
+     */
+    public Set<String> forgetProject(String prefix) {
+        return forget(name -> name.startsWith(prefix));
+    }
+
+    private Set<String> forget(Predicate<String> gone) {
+        Set<String> touched = new TreeSet<>();
+        for (Iterator<Map.Entry<String, Map<String, String>>> it = edges.entrySet().iterator(); it.hasNext(); ) {
+            Map.Entry<String, Map<String, String>> entry = it.next();
+            String from = entry.getKey();
+            boolean changed;
+            if (gone.test(from)) {
+                it.remove();
+                changed = true;
+            } else {
+                changed = entry.getValue().values().removeIf(gone);
+                if (entry.getValue().isEmpty()) it.remove();
+            }
+            if (changed) touched.add(from.contains("/") ? from.substring(0, from.indexOf('/')) : from);
+        }
+        return touched;
     }
 
     /**
