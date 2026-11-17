@@ -117,7 +117,7 @@ public class Timekeeper {
      */
     public void setLimits(Long urgentWaitMinutes, Long childReplyWarnMinutes) {
         applyLimits(urgentWaitMinutes, childReplyWarnMinutes);
-        recordLimits();
+        record();
     }
 
     private void applyLimits(Long urgentWaitMinutes, Long childReplyWarnMinutes) {
@@ -139,9 +139,10 @@ public class Timekeeper {
     }
 
     /**
-     * Puts back the limits last recorded, and writes nothing. A log written before kept them in the conversation's
-     * {@code settings} entry; they are read from the last one that holds them when there is no {@code timekeeper}
-     * entry, and then written as this timekeeper's own, so that form is read only once.
+     * Puts back the limits and the promised reports last recorded, and writes nothing. A promise whose time came
+     * while the instance was down is given at the first check. A log written before kept the limits in the
+     * conversation's {@code settings} entry, and no promises; the limits are read from the last one that holds them when
+     * there is no {@code timekeeper} entry, and then written as this timekeeper's own, so that form is read only once.
      */
     public void restore() {
         if (entries == null) return;
@@ -156,13 +157,19 @@ public class Timekeeper {
         Long warn = saved.has("childReplyWarnMinutes") && !saved.isNull("childReplyWarnMinutes")
                 ? saved.optLong("childReplyWarnMinutes") : null;
         applyLimits(urgent != null && urgent >= 1 ? urgent : null, warn != null && warn >= 1 ? warn : null);
-        if (earlierForm) recordLimits();
+        org.json.JSONObject savedPromises = saved.optJSONObject("promised");
+        if (!earlierForm && savedPromises != null) promised.load(savedPromises);
+        if (earlierForm) record();
     }
 
-    private void recordLimits() {
+    /**
+     * Writes the timekeeper's state as one {@code timekeeper} entry: its two limits, and the promised reports waiting
+     * with how many times each request has been asked for. All of it every time, so the last entry is the state.
+     */
+    private void record() {
         if (entries == null) return;
         entries.write(TIMEKEEPER_LABEL, new org.json.JSONObject().put("urgentWaitMinutes", urgentWaitMinutes())
-                .put("childReplyWarnMinutes", childReplyWarnMinutes()).toString());
+                .put("childReplyWarnMinutes", childReplyWarnMinutes()).put("promised", promised.toJson()).toString());
     }
 
     /** @return how long, in minutes, an urgent request may wait at the front of a running turn */
@@ -185,7 +192,9 @@ public class Timekeeper {
      * @return which reminder this will be for the request, counting from 1
      */
     public int expectReport(String requestId, String asker, long minutes) {
-        return promised.expect(requestId, asker, System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(minutes));
+        int number = promised.expect(requestId, asker, System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(minutes));
+        record();
+        return number;
     }
 
     /** @return the promised reports waiting for their time, soonest first, for the record and for tests */
@@ -329,7 +338,10 @@ public class Timekeeper {
                             new CompletableFuture<>(), false, true, List.of(), null, false));
                 }
             }
-            for (PromisedReports.Reminder r : promised.due(now)) {
+            List<PromisedReports.Reminder> given = promised.due(now);
+            // Recorded before they are queued: a reminder given is not given again after a restart.
+            if (!given.isEmpty()) record();
+            for (PromisedReports.Reminder r : given) {
                 String text = reminderText(r);
                 String source = ChatSession.REMINDER_SOURCE_PREFIX + r.number() + ":"
                         + (r.toScreen() ? ChatSession.REMINDER_TO_SCREEN : r.asker());

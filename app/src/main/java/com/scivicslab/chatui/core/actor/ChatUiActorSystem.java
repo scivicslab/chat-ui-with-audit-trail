@@ -1815,6 +1815,11 @@ public class ChatUiActorSystem implements ConversationControls {
                 myChatName, target, role, collaboratorChatId);
     }
 
+    /** @return the conversation's timekeeper, or {@code null} when there is no such conversation */
+    ActorRef<Timekeeper> timekeeperOf(String projectId, String chatId) {
+        return actorSystem.getActor(chatActorName(projectId, chatId) + ".timekeeper");
+    }
+
     /** The name of a project's role table, its child ({@code EachActorRecordsItsOwnState_261118_oo01}). */
     public static String rolesActorName(String projectId) {
         return projectId + "/roles";

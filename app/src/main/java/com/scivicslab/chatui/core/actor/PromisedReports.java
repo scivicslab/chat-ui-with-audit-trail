@@ -93,6 +93,38 @@ public final class PromisedReports {
         return all;
     }
 
+    /**
+     * The registrations waiting and how many times each request has been asked for, as the timekeeper records them
+     * ({@code EachActorRecordsItsOwnState_261118_oo01}). Times are absolute, so a restart keeps them.
+     */
+    public org.json.JSONObject toJson() {
+        org.json.JSONArray list = new org.json.JSONArray();
+        for (Promise p : promises.values()) {
+            list.put(new org.json.JSONObject()
+                    .put("requestId", p.requestId() == null ? org.json.JSONObject.NULL : p.requestId())
+                    .put("asker", p.asker() == null ? org.json.JSONObject.NULL : p.asker())
+                    .put("dueAt", p.dueAt()).put("number", p.number()));
+        }
+        return new org.json.JSONObject().put("promises", list).put("counts", new org.json.JSONObject(counts));
+    }
+
+    /** Puts back what {@link #toJson} gave, replacing what is held. */
+    public void load(org.json.JSONObject saved) {
+        promises.clear();
+        counts.clear();
+        org.json.JSONObject savedCounts = saved.optJSONObject("counts");
+        if (savedCounts != null) for (String k : savedCounts.keySet()) counts.put(k, savedCounts.optInt(k));
+        org.json.JSONArray list = saved.optJSONArray("promises");
+        for (int i = 0; list != null && i < list.length(); i++) {
+            org.json.JSONObject o = list.optJSONObject(i);
+            if (o == null || !o.has("dueAt")) continue;
+            String requestId = o.isNull("requestId") ? null : o.optString("requestId", null);
+            String asker = o.isNull("asker") ? null : o.optString("asker", null);
+            promises.put(requestId == null ? SCREEN : requestId,
+                    new Promise(requestId, asker, o.optLong("dueAt"), Math.max(1, o.optInt("number", 1))));
+        }
+    }
+
     /** @return how many registrations are waiting for their time */
     public int pending() {
         return promises.size();
