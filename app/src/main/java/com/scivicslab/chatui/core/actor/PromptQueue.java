@@ -50,6 +50,109 @@ public class PromptQueue {
 
     public void setSelf(ActorRef<PromptQueue> self) { this.self = self; }
 
+    // ── What the queue records of itself (EachActorRecordsItsOwnState_261118_oo01, decision 4) ──────────
+
+    /** Label of the conversation's entries that record what happened in its queue, one event each. */
+    public static final String QUEUE_LABEL = "queue";
+
+    /** The conversation's own session of the I/O log; {@code null} records nothing. */
+    private com.scivicslab.chatui.core.iolog.SessionEntries entries;
+    /** The conversation's qualified name, which a request put back after a restart answers as. */
+    private String conversation;
+
+    /** Records the queue's events, from now on, to the conversation's own session. */
+    public void recordsTo(com.scivicslab.chatui.core.iolog.SessionEntries entries, String conversation) {
+        this.entries = entries;
+        this.conversation = conversation;
+    }
+
+    /**
+     * Writes that a prompt entered the queue, with all of it, images as data URLs included. The text of a prompt is
+     * written this once; the queue as a whole is never written. Each entry stands alone, keyed by the prompt's id.
+     */
+    private void recordEnqueued(QueueItem item) {
+        if (entries == null) return;
+        JSONObject o = new JSONObject().put("event", "enqueued").put("id", item.id()).put("prompt", item.prompt())
+                .put("model", item.model() == null ? JSONObject.NULL : item.model())
+                .put("source", item.source() == null ? JSONObject.NULL : item.source())
+                .put("requestId", item.requestId() == null ? JSONObject.NULL : item.requestId())
+                .put("urgent", item.urgent()).put("auto", item.auto()).put("noThink", item.noThink())
+                .put("queuedAt", item.queuedAt())
+                .put("images", new org.json.JSONArray(item.images() == null ? List.of() : item.images()));
+        entries.write(QUEUE_LABEL, o.toString());
+    }
+
+    /** Writes that a prompt left the queue: {@code started} when it was sent, {@code cancelled} when taken out. */
+    private void recordLeft(QueueItem item, String event) {
+        if (entries != null) entries.write(QUEUE_LABEL, new JSONObject().put("event", event).put("id", item.id()).toString());
+    }
+
+    /**
+     * Puts back, after a restart, the prompts that entered the queue and were neither started nor cancelled, in the
+     * order they entered it (an urgent one ahead, as it went then), and writes nothing. A prompt that ran is in the
+     * conversation's own record; a cancelled one is not put back. A request from another conversation answers that
+     * conversation by name when its work is done ({@code AskChatTool.deliverReplyTo}). The key an MCP caller waited
+     * under is not put back: that caller cannot wait across the restart. Then the queue runs as it would have.
+     *
+     * @param emitter where what the conversation says goes, as for any prompt queued now
+     */
+    public void restore(ActorRef<ChatSession> chatSessionRef, Consumer<ChatEvent> emitter) {
+        if (entries == null) return;
+        java.util.LinkedHashMap<String, JSONObject> waiting = new java.util.LinkedHashMap<>();
+        for (String entry : entries.all(QUEUE_LABEL)) {
+            JSONObject o;
+            try {
+                o = new JSONObject(entry);
+            } catch (Exception e) {
+                continue;
+            }
+            String id = o.optString("id", "");
+            if (id.isBlank()) continue;
+            if ("enqueued".equals(o.optString("event"))) waiting.put(id, o);
+            else waiting.remove(id);
+        }
+        for (JSONObject o : waiting.values()) {
+            String source = o.isNull("source") ? null : o.optString("source", null);
+            String requestId = o.isNull("requestId") ? null : o.optString("requestId", null);
+            boolean urgent = o.optBoolean("urgent", false);
+            CompletableFuture<TurnReply> done = new CompletableFuture<>();
+            if (requestId != null && source != null && source.startsWith(ChatSession.ASK_CHAT_SOURCE_PREFIX) && conversation != null) {
+                String asker = source.substring(ChatSession.ASK_CHAT_SOURCE_PREFIX.length());
+                done.whenCompleteAsync((reply, failure) -> {
+                    if (reply != TurnReply.WITHDRAWN) {
+                        com.scivicslab.chatui.agent.AskChatTool.deliverReplyTo(system, asker, conversation, requestId,
+                                urgent, reply, failure);
+                    }
+                });
+            }
+            List<String> images = new ArrayList<>();
+            org.json.JSONArray saved = o.optJSONArray("images");
+            for (int i = 0; saved != null && i < saved.length(); i++) images.add(saved.getString(i));
+            QueueItem item = new QueueItem(o.optString("prompt", ""), o.isNull("model") ? null : o.optString("model", null),
+                    emitter, done, source, null, o.optBoolean("noThink", false), o.optBoolean("auto", true), images,
+                    requestId, urgent, o.optLong("queuedAt", System.currentTimeMillis()), o.getString("id"));
+            place(item);
+        }
+        if (!waiting.isEmpty()) {
+            LOG.info("queue: put back " + waiting.size() + " prompt(s) of " + conversation);
+            emitter.accept(ChatEvent.queueChanged());
+            requestDispatch(chatSessionRef, false);
+        }
+    }
+
+    /** Puts an item in its place: an urgent one ahead of every waiting item that is not urgent, any other at the end. */
+    private int place(QueueItem item) {
+        if (!item.urgent()) {
+            queue.add(item);
+            return 0;
+        }
+        int rank = rankOf(item);
+        int at = 0;
+        while (at < queue.size() && rankOf(queue.get(at)) <= rank) at++;
+        queue.add(at, item);
+        return queue.size() - 1 - at;
+    }
+
     /** Actor system + this queue's ConversationSquad log actor name, for {@link #logToConversationSquad}. Both null until wired. */
     private IIActorSystem system;
     private String conversationSquadLogActorName;
@@ -210,8 +313,9 @@ public class PromptQueue {
         switch (mode) {
             case "cancel_and_send" -> {
                 QueueItem item = new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, auto, images,
-                        requestId, urgent, System.currentTimeMillis());
+                        requestId, urgent, System.currentTimeMillis(), java.util.UUID.randomUUID().toString());
                 queue.add(0, item);
+                recordEnqueued(item);
                 // tellNow, not tell: the running turn blocks the ChatSession's own thread, so a
                 // queued cancel would be delivered only after that turn ended (ChatSession.cancel).
                 chatSessionRef.tellNow(ChatSession::cancel);
@@ -222,16 +326,9 @@ public class PromptQueue {
             default -> {
                 // "queue" mode (default)
                 QueueItem item = new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, auto, images,
-                        requestId, urgent, System.currentTimeMillis());
-                if (urgent) {
-                    int rank = rankOf(item);
-                    int at = 0;
-                    while (at < queue.size() && rankOf(queue.get(at)) <= rank) at++;
-                    passed = queue.size() - at;
-                    queue.add(at, item);
-                } else {
-                    queue.add(item);
-                }
+                        requestId, urgent, System.currentTimeMillis(), java.util.UUID.randomUUID().toString());
+                passed = place(item);
+                recordEnqueued(item);
                 emitter.accept(ChatEvent.info(auto
                         ? "Queued. Your message will be sent when the current prompt finishes."
                         : "Held in the queue. Turn its Auto on, or advance the queue, to send it."));
@@ -260,6 +357,7 @@ public class PromptQueue {
         queue.removeIf(e -> {
             if (e.source() == null || !e.source().startsWith("agent:")) return false;
             abandon(e, "cleared from the queue when the conversation's turn was cancelled");
+            recordLeft(e, "cancelled");
             return true;
         });
         int removed = before - queue.size();
@@ -346,7 +444,9 @@ public class PromptQueue {
      */
     public boolean removeAt(int index) {
         if (index < 0 || index >= queue.size()) return false;
-        abandon(queue.remove(index), "removed from the queue before it ran");
+        QueueItem removed = queue.remove(index);
+        abandon(removed, "removed from the queue before it ran");
+        recordLeft(removed, "cancelled");
         return true;
     }
 
@@ -367,6 +467,7 @@ public class PromptQueue {
             QueueItem item = queue.get(i);
             if (requestId.equals(item.requestId()) && source.equals(item.source())) {
                 queue.remove(i);
+                recordLeft(item, "cancelled");
                 if (item.done() != null) item.done().complete(TurnReply.WITHDRAWN);
                 item.emitter().accept(ChatEvent.queueChanged());
                 logToConversationSquad("queue: request " + requestId + " withdrawn by its sender");
@@ -543,6 +644,7 @@ public class PromptQueue {
         if (queue.isEmpty()) return null;
         if (respectAuto && !queue.get(0).auto()) return null;
         QueueItem item = queue.remove(0);
+        recordLeft(item, "started");
         sent.add(new QueueEntry(item.prompt(), item.source(), item.auto(), item.urgent()));
         trimSent();
         // Show the prompt in the pane now that it is actually being sent. The browser used to draw
@@ -584,11 +686,12 @@ public class PromptQueue {
             List<String> images, // data URLs attached to this prompt, or empty
             String requestId,    // the ask_chat request this item is, or answers; null otherwise
             boolean urgent,      // goes ahead of every waiting item that is not urgent
-            long queuedAt        // when it entered the queue, in milliseconds since the epoch
+            long queuedAt,       // when it entered the queue, in milliseconds since the epoch
+            String id            // this item's own id, which the queue's recorded events are keyed by
     ) {
         QueueItem withAuto(boolean newAuto) {
             return new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, newAuto, images, requestId,
-                    urgent, queuedAt);
+                    urgent, queuedAt, id);
         }
     }
 }

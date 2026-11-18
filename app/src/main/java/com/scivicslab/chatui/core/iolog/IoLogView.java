@@ -240,6 +240,15 @@ public class IoLogView {
                 .orElse(null);
     }
 
+    /** @return the messages of every entry of the session with {@code label}, oldest first */
+    public List<String> allOf(long sessionId, String label) {
+        return allLogs(sessionId).stream()
+                .filter(e -> label.equals(e.getLabel()))
+                .sorted(Comparator.comparingLong(LogEntry::getId))
+                .map(LogEntry::getMessage)
+                .toList();
+    }
+
     /**
      * The session's last entry with {@code label} whose message is a JSON object holding {@code key}, parsed; an
      * entry that is not a JSON object is passed over. This reads a value out of an older entry shape that carried

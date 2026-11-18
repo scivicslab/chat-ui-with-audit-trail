@@ -96,6 +96,24 @@ public final class SessionEntries {
         }
     }
 
+    /**
+     * Every entry under {@code label}, oldest first: for an owner that records events rather than its whole state, so
+     * that its state is what all of them together say (a conversation's queue, decision 4 of
+     * {@code EachActorRecordsItsOwnState_261118_oo01}).
+     *
+     * @return the entries as written, empty when there are none
+     */
+    public java.util.List<String> all(String label) {
+        long session = sessionToRead();
+        if (session < 0) return java.util.List.of();
+        try {
+            return view.allOf(session, label);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not read the " + label + " of " + owner, e);
+            return java.util.List.of();
+        }
+    }
+
     private long sessionToRead() {
         return log == null || view == null ? -1 : toRead.getAsLong();
     }

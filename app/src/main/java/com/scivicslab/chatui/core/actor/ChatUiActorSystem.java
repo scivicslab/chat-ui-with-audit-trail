@@ -404,6 +404,20 @@ public class ChatUiActorSystem implements ConversationControls {
             restoreConversationsOf(projectId, running.getOrDefault(projectId, List.of()));
         }
         if (!chats.containsKey(chatActorName(DEFAULT_PROJECT_ID, "01"))) createChat(DEFAULT_PROJECT_ID, "01");
+        // Each queue puts back the prompts that were waiting, once every conversation exists, so a request put back
+        // and run at once can answer its asker (EachActorRecordsItsOwnState_261118_oo01, decision 4).
+        for (Map.Entry<String, ChatSessionIIAR> chat : new java.util.ArrayList<>(chatSessions.entrySet())) {
+            ActorRef<PromptQueue> queue = actorSystem.getActor(chat.getKey() + ".queue");
+            ActorRef<SseConnection> sse = actorSystem.getActor(chat.getKey() + ".sse");
+            if (queue == null) continue;
+            java.util.function.Consumer<com.scivicslab.chatui.core.rest.ChatEvent> toScreen = sse == null ? e -> { } : e -> sse.tell(c -> c.emit(e));
+            ActorRef<ChatSession> ref = chat.getValue().asChatSessionRef();
+            try {
+                queue.tell(q -> q.restore(ref, toScreen)).get(10, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                LOG.log(Level.WARNING, "Could not put back the queue of " + chat.getKey(), e);
+            }
+        }
         // After every project exists, whether init created it or the log brought it back. Hanging
         // this off the "create it if absent" branch of the loop above left out the one project that
         // is always created here (ProjectProperty_260929_oo01).
@@ -1327,6 +1341,7 @@ public class ChatUiActorSystem implements ConversationControls {
         chatSessionIIAR.tell(a -> ((ChatSession) a).recordsTo(own));
         ActorRef<Timekeeper> keeperRef = actorSystem.getActor(qualifiedName + ".timekeeper");
         if (keeperRef != null) keeperRef.tell(k -> k.recordsTo(own));
+        promptQueueRef.tell(q -> q.recordsTo(own, qualifiedName));
         restoreConversation(qualifiedName, chatSessionIIAR, providerRef);
         // Its first settings, so that it comes back as it was made even if it never runs a turn; one being brought
         // back already has them and writes nothing (ConversationRestoreOnRestart_260904_oo01).
