@@ -926,3 +926,12 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
 #conv-graph .cg-project .cg-project-id { fill: var(--text-secondary, #9aa0a6); font-size: 11px; }
 #conv-graph .cg-project .cg-fold { fill: var(--text-secondary, #9aa0a6); font-size: 11px; }
 #conv-graph .cg-project:hover .cg-project-name { text-decoration: underline; }
+
+/* Which build is running, beside the app's name: small and muted, so the name still reads first. */
+#app-version {
+    margin-left: 8px;
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-secondary, #9aa0a6);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}

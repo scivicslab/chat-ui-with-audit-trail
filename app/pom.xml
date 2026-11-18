@@ -153,7 +153,42 @@
   </dependencies>
 
   <build>
+    <!-- Every resource as it is, and one directory of its own filtered: chat-ui-build.properties, which says which
+         build this is. Only that directory is filtered, so a ${...} in a script or template is left alone. -->
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+        <filtering>false</filtering>
+      </resource>
+      <resource>
+        <directory>src/main/resources-filtered</directory>
+        <filtering>true</filtering>
+      </resource>
+    </resources>
     <plugins>
+      <!-- The short git commit the build is made from, as the property git.commit.id.abbrev, for the filtered
+           chat-ui-build.properties. A build without git (a source tarball) goes on, and shows the version alone. -->
+      <plugin>
+        <groupId>io.github.git-commit-id</groupId>
+        <artifactId>git-commit-id-maven-plugin</artifactId>
+        <version>9.0.1</version>
+        <executions>
+          <execution>
+            <id>build-commit</id>
+            <phase>initialize</phase>
+            <goals><goal>revision</goal></goals>
+          </execution>
+        </executions>
+        <configuration>
+          <failOnNoGitDirectory>false</failOnNoGitDirectory>
+          <failOnUnableToExtractRepoInfo>false</failOnUnableToExtractRepoInfo>
+          <abbrevLength>7</abbrevLength>
+          <generateGitPropertiesFile>false</generateGitPropertiesFile>
+          <includeOnlyProperties>
+            <includeOnlyProperty>^git.commit.id.abbrev$</includeOnlyProperty>
+          </includeOnlyProperties>
+        </configuration>
+      </plugin>
       <!-- Turns every @Action(argsType = ...) into a JSON Schema under
            target/classes/action-schemas, so ActionSchemaRegistry can load it at runtime and
            ActionCatalog can hand it to a caller in another process
