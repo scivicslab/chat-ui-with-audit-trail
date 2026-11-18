@@ -151,7 +151,7 @@ class BookStructureWorkflowTest {
         assertNull(system.getIIActor("plan.books"), "the books actor is removed at the end");
         String sections = run("book-sections.yaml");
         assertTrue(sections.startsWith("4 section(s) of core; 1 with no text of their own; 1 spanning more than one file"), sections);
-        try (BookStore s = new BookStore("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
+        try (BookStore s = BookStore.forWriting("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
             assertEquals(4, s.outline("core").size());
             var by = new java.util.LinkedHashMap<String, String>();
             for (var x : s.sections("core")) by.put(x.number(), x.text());

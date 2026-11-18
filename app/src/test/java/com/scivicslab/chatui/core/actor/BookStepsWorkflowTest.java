@@ -121,7 +121,7 @@ class BookStepsWorkflowTest {
     void step5JudgesAndStep7ReviewsWhatIsInTheDatabase() throws Exception {
         run("book-toc.yaml");
         run("book-sections.yaml");
-        try (BookStore s = new BookStore("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
+        try (BookStore s = BookStore.forWriting("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
             s.saveSectionRules("core", new BookStore.SectionRules("10.1.1", """
                     (defrule s1 -> p1 :heading "## 10.1.1. Threads")
                     (defrule p1 -> :nucleus p1/1 :example p1/2)
@@ -133,7 +133,7 @@ class BookStepsWorkflowTest {
         }
         String judged = run("book-judge.yaml");
         assertTrue(judged.contains("judged: 2 concept(s) kept, 1 dropped"), judged);
-        try (BookStore s = new BookStore("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
+        try (BookStore s = BookStore.forWriting("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
             s.saveRelations("core", "10.1.1", List.of(
                     new BookStore.Relation("part-of", "multithreading", "concurrent programming", List.of(1)),
                     new BookStore.Relation("feature", "Java", "concurrent programming", List.of(2))));
@@ -141,7 +141,7 @@ class BookStepsWorkflowTest {
         String reviewed = run("book-review.yaml");
         assertEquals("1 section(s) of core reviewed: {drop=1, is-a=1}, 0 failed", reviewed);
         assertTrue(asked.get(0).contains("R1: multithreading | part-of | concurrent programming"), asked.get(0));
-        try (BookStore s = new BookStore("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
+        try (BookStore s = BookStore.forWriting("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
             List<BookStore.Relation> after = s.relations("core").get("10.1.1");
             assertEquals("is-a", after.get(0).reviewed().kind());
             assertNull(after.get(1).reviewed(), "Java feature of concurrent programming is dropped");
@@ -150,21 +150,21 @@ class BookStepsWorkflowTest {
         assertEquals("1 section(s) of core asked, 3 rule(s) collected, 0 failed", collected,
                 "the list is the two concepts of the relation that stands; Java's relation was dropped");
         assertEquals("1 section(s) of core: 1 concept(s) stay, 1 taken off (fewer than 2 rule(s))", run("book-frame-prune.yaml"));
-        try (BookStore s = new BookStore("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
+        try (BookStore s = BookStore.forWriting("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
             var list = s.frameConcepts("core").get("10.1.1");
             assertEquals(List.of("multithreading", "concurrent programming"), list.stream().map(BookStore.FrameConcept::concept).toList());
             assertEquals(List.of(false, true), list.stream().map(BookStore.FrameConcept::kept).toList());
         }
         assertEquals("1 concept(s) of core given 1 item(s), 0 failed", run("book-frame-items.yaml"),
                 "only the concept that stays on the list is asked; a question no rule answers is no item");
-        try (BookStore s = new BookStore("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
+        try (BookStore s = BookStore.forWriting("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
             var items = s.frameItems("core").get("10.1.1").get("concurrent programming");
             assertEquals("What is concurrent programming?", items.get(0).question());
         }
         assertEquals("1 concrete frame(s) of core placed: 0 into frames already made, 1 new; 1 generalized frame(s) in the registry, 0 failed; "
                 + "0 relation(s) between generalized frames from core: {}; 0 generalized frame(s) named, 0 failed; 0 generalized frame(s) given 0 item(s), 0 failed", run("book-generalize.yaml"),
                 "one concrete frame starts the registry with a new id; a frame of one concrete frame keeps its items");
-        try (BookStore s = new BookStore("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
+        try (BookStore s = BookStore.forWriting("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
             assertEquals(List.of("F0001 concurrent programming"), s.registry().stream().map(f -> f.id() + " " + f.name()).toList());
             assertEquals("What is concurrent programming?", s.registryItems().get("F0001").get(0).question());
             // a second block, so the section's blocks have something to say of each other
@@ -177,7 +177,7 @@ class BookStepsWorkflowTest {
                     """, Map.of(), 2));
         }
         assertEquals("1 section(s) of core given a pattern: {partition=1}, 0 failed", run("book-patterns.yaml"));
-        try (BookStore s = new BookStore("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
+        try (BookStore s = BookStore.forWriting("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
             var p = s.patterns("core").get("10.1.1");
             assertEquals("concurrent programming", p.concept(), "the concept the model names");
             assertEquals(List.of("p1", "p2"), p.members().stream().map(m -> m.block()).toList());
@@ -185,7 +185,7 @@ class BookStepsWorkflowTest {
         assertEquals("1 section(s) of core split into groups: {sequence=1}, 0 failed; 1 section(s) of core asked: 0 cause(s), 0 motive(s), "
                 + "0 failed; 1 section(s) of core asked for relations: {example of=1}, 0 failed; 1 section(s) of core asked: {is=1}, 0 failed", run("book-frame-data.yaml"),
                 "the section has no sentence of cause or motive; its example is read as a relation, and one property");
-        try (BookStore s = new BookStore("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
+        try (BookStore s = BookStore.forWriting("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
             var g = s.groups("core").get("10.1.1");
             assertEquals("concurrent programming", g.get(0).concept());
             assertEquals("one way to program concurrently", s.properties("core").get("10.1.1").get(0).property());
