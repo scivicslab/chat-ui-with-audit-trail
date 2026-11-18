@@ -78,6 +78,25 @@ class OpenRequestsSurviveRestartTest {
         assertTrue(done.getAsBoolean(), what);
     }
 
+    /** The link back to a sender on another instance is part of the received request, recorded and put back with it. */
+    @Test
+    void theLinkToASenderOnAnotherInstanceIsRecordedWithTheRequest() {
+        OpenRequests first = new OpenRequests();
+        first.received("a|project1/chat-01:s1:t1:r1", "project1/chat-01", new java.util.concurrent.CompletableFuture<>(),
+                true, new OpenRequests.RemoteLink("a", "project1/chat-01:s1:t1:r1"));
+        first.received("project1/chat-03:t1:r1", "project1/chat-03", new java.util.concurrent.CompletableFuture<>(),
+                false, null);
+        List<String> made = new ArrayList<>();
+        OpenRequests second = new OpenRequests();
+        second.load(new org.json.JSONObject(first.toJson().toString()), (id, asker, urgent, link) -> {
+            made.add(id + " " + asker + " " + urgent + " " + (link == null ? "local" : link.node() + ":" + link.requestId()));
+            return new java.util.concurrent.CompletableFuture<>();
+        });
+        made.sort(null);
+        assertEquals(List.of("a|project1/chat-01:s1:t1:r1 project1/chat-01 true a:project1/chat-01:s1:t1:r1",
+                "project1/chat-03:t1:r1 project1/chat-03 false local"), made);
+    }
+
     @Test
     void aWaitingRequestComesBackAndItsAnswerReachesTheAskerWhenTheReplyComes(@TempDir Path dir) throws Exception {
         IoLogStore log = new IoLogStore();

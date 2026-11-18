@@ -78,6 +78,8 @@ public class PromptQueue {
                 .put("requestId", item.requestId() == null ? JSONObject.NULL : item.requestId())
                 .put("urgent", item.urgent()).put("auto", item.auto()).put("noThink", item.noThink())
                 .put("queuedAt", item.queuedAt())
+                .put("link", item.link() == null ? JSONObject.NULL
+                        : new JSONObject().put("node", item.link().node()).put("requestId", item.link().requestId()))
                 .put("images", new org.json.JSONArray(item.images() == null ? List.of() : item.images()));
         entries.write(QUEUE_LABEL, o.toString());
     }
@@ -115,11 +117,17 @@ public class PromptQueue {
             String source = o.isNull("source") ? null : o.optString("source", null);
             String requestId = o.isNull("requestId") ? null : o.optString("requestId", null);
             boolean urgent = o.optBoolean("urgent", false);
+            JSONObject l = o.optJSONObject("link");
+            OpenRequests.RemoteLink link = l == null ? null : new OpenRequests.RemoteLink(l.getString("node"), l.getString("requestId"));
             CompletableFuture<TurnReply> done = new CompletableFuture<>();
             if (requestId != null && source != null && source.startsWith(ChatSession.ASK_CHAT_SOURCE_PREFIX) && conversation != null) {
                 String asker = source.substring(ChatSession.ASK_CHAT_SOURCE_PREFIX.length());
                 done.whenCompleteAsync((reply, failure) -> {
-                    if (reply != TurnReply.WITHDRAWN) {
+                    if (reply == TurnReply.WITHDRAWN) return;
+                    if (link != null) {
+                        com.scivicslab.chatui.agent.AskChatTool.deliverRemoteReply(system, link, asker, conversation,
+                                urgent, reply, failure);
+                    } else {
                         com.scivicslab.chatui.agent.AskChatTool.deliverReplyTo(system, asker, conversation, requestId,
                                 urgent, reply, failure);
                     }
@@ -130,7 +138,7 @@ public class PromptQueue {
             for (int i = 0; saved != null && i < saved.length(); i++) images.add(saved.getString(i));
             QueueItem item = new QueueItem(o.optString("prompt", ""), o.isNull("model") ? null : o.optString("model", null),
                     emitter, done, source, null, o.optBoolean("noThink", false), o.optBoolean("auto", true), images,
-                    requestId, urgent, o.optLong("queuedAt", System.currentTimeMillis()), o.getString("id"));
+                    requestId, urgent, o.optLong("queuedAt", System.currentTimeMillis()), o.getString("id"), link);
             place(item);
         }
         if (!waiting.isEmpty()) {
@@ -309,11 +317,25 @@ public class PromptQueue {
                        String source, String resultKey,
                        CompletableFuture<TurnReply> done, boolean noThink, boolean auto,
                        List<String> images, String requestId, boolean urgent) {
+        return enqueue(prompt, model, mode, emitter, chatSessionRef, source, resultKey, done, noThink, auto, images,
+                requestId, urgent, null);
+    }
+
+    /**
+     * @param link the way back to the sender of a request from another chat-ui instance, or {@code null}; it goes with
+     *             the item into the turn and into the record, so the request's reply survives a restart
+     */
+    public int enqueue(String prompt, String model, String mode,
+                       Consumer<ChatEvent> emitter,
+                       ActorRef<ChatSession> chatSessionRef,
+                       String source, String resultKey,
+                       CompletableFuture<TurnReply> done, boolean noThink, boolean auto,
+                       List<String> images, String requestId, boolean urgent, OpenRequests.RemoteLink link) {
         int passed = 0;
         switch (mode) {
             case "cancel_and_send" -> {
                 QueueItem item = new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, auto, images,
-                        requestId, urgent, System.currentTimeMillis(), java.util.UUID.randomUUID().toString());
+                        requestId, urgent, System.currentTimeMillis(), java.util.UUID.randomUUID().toString(), link);
                 queue.add(0, item);
                 recordEnqueued(item);
                 // tellNow, not tell: the running turn blocks the ChatSession's own thread, so a
@@ -326,7 +348,7 @@ public class PromptQueue {
             default -> {
                 // "queue" mode (default)
                 QueueItem item = new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, auto, images,
-                        requestId, urgent, System.currentTimeMillis(), java.util.UUID.randomUUID().toString());
+                        requestId, urgent, System.currentTimeMillis(), java.util.UUID.randomUUID().toString(), link);
                 passed = place(item);
                 recordEnqueued(item);
                 emitter.accept(ChatEvent.info(auto
@@ -627,7 +649,7 @@ public class PromptQueue {
         if (item == null) return;
 
         chat.start(item.prompt(), item.model(), item.emitter(), chatSessionRef, item.done(), item.resultKey(),
-                item.noThink(), item.images(), item.source(), item.requestId());
+                item.noThink(), item.images(), item.source(), item.requestId(), item.link());
         com.scivicslab.pojoactor.action.ActionResult result = chat.runUntilEnd();
         if (!result.isSuccess()) {
             LOG.warning("Agent loop did not reach 'end': " + result.getResult());
@@ -687,11 +709,12 @@ public class PromptQueue {
             String requestId,    // the ask_chat request this item is, or answers; null otherwise
             boolean urgent,      // goes ahead of every waiting item that is not urgent
             long queuedAt,       // when it entered the queue, in milliseconds since the epoch
-            String id            // this item's own id, which the queue's recorded events are keyed by
+            String id,           // this item's own id, which the queue's recorded events are keyed by
+            OpenRequests.RemoteLink link // the way back to a sender on another chat-ui instance, or null
     ) {
         QueueItem withAuto(boolean newAuto) {
             return new QueueItem(prompt, model, emitter, done, source, resultKey, noThink, newAuto, images, requestId,
-                    urgent, queuedAt, id);
+                    urgent, queuedAt, id, link);
         }
     }
 }

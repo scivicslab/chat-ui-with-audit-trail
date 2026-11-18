@@ -1319,6 +1319,17 @@ public class ChatSession extends Interpreter {
     public void start(String prompt, String model, Consumer<ChatEvent> emitter,
                        ActorRef<ChatSession> self, CompletableFuture<TurnReply> done, String resultKey,
                        boolean noThink, List<String> images, String source, String requestId) {
+        start(prompt, model, emitter, self, done, resultKey, noThink, images, source, requestId, null);
+    }
+
+    /**
+     * @param link the way back to the sender when the request came from another chat-ui instance, or {@code null};
+     *             recorded with the received request, so its reply survives a restart
+     */
+    public void start(String prompt, String model, Consumer<ChatEvent> emitter,
+                       ActorRef<ChatSession> self, CompletableFuture<TurnReply> done, String resultKey,
+                       boolean noThink, List<String> images, String source, String requestId,
+                       OpenRequests.RemoteLink link) {
         if (busy) {
             emitter.accept(ChatEvent.error("Already processing a prompt. Please wait or cancel."));
             done.complete(TurnReply.NONE);
@@ -1339,7 +1350,7 @@ public class ChatSession extends Interpreter {
         if (requestId != null && source != null && source.startsWith(ASK_CHAT_SOURCE_PREFIX)) {
             // Whether it is urgent is in the heading this instance put on it ("[urgent request ...").
             openRequests.received(requestId, source.substring(ASK_CHAT_SOURCE_PREFIX.length()), done,
-                    prompt != null && prompt.startsWith("[urgent request "));
+                    prompt != null && prompt.startsWith("[urgent request "), link);
             this.turnOriginal = requestId;
         } else if (requestId != null && source != null && source.startsWith(ASK_CHAT_REPLY_SOURCE_PREFIX)) {
             this.turnOriginal = openRequests.replyArrived(requestId);
@@ -3634,10 +3645,13 @@ public class ChatSession extends Interpreter {
         String json = e == null ? null : e.latest(OPEN_REQUESTS_LABEL);
         if (json == null || json.isBlank()) return;
         try {
-            openRequests.load(new org.json.JSONObject(json), (id, asker, urgent) -> {
+            openRequests.load(new org.json.JSONObject(json), (id, asker, urgent, link) -> {
                 CompletableFuture<TurnReply> done = new CompletableFuture<>();
                 done.whenCompleteAsync((reply, failure) -> {
-                    if (reply != TurnReply.WITHDRAWN && asker != null) {
+                    if (reply == TurnReply.WITHDRAWN || asker == null) return;
+                    if (link != null) {
+                        com.scivicslab.chatui.agent.AskChatTool.deliverRemoteReply(system, link, asker, myChatName(), urgent, reply, failure);
+                    } else {
                         com.scivicslab.chatui.agent.AskChatTool.deliverReplyTo(system, asker, myChatName(), id, urgent, reply, failure);
                     }
                 });

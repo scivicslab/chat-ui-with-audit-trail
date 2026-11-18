@@ -163,6 +163,64 @@ class RemoteAskChatTest {
         waitUntil(() -> one.chat().outstandingChildrenDirect().isEmpty(), "the request closed on a");
     }
 
+    /**
+     * A request from another instance survives a restart of the instance it went to, with the link back to its sender
+     * ({@code EachActorRecordsItsOwnState_261118_oo01}): the request waits in b's queue behind a long turn, b restarts
+     * (new actors, a new remote path on the same port, the same log), puts the request back, runs it, and the reply
+     * goes to a over the remote path.
+     */
+    @Test
+    void aRequestFromAnotherInstanceWaitingInTheQueueIsAnsweredAfterThatInstanceRestarts() throws Exception {
+        com.scivicslab.chatui.core.iolog.IoLogStore log = new com.scivicslab.chatui.core.iolog.IoLogStore();
+        log.useDatabaseAt(dir.resolve("b-log").toString());
+        com.scivicslab.chatui.core.iolog.SessionEntries bEntries = com.scivicslab.chatui.core.iolog.SessionEntries
+                .ofConversation(log, com.scivicslab.chatui.core.iolog.IoLogView.over(log), "project1/chat-01");
+        try {
+            IIActorSystem a = new IIActorSystem("instance-a-restart");
+            IIActorSystem b = new IIActorSystem("instance-b-before");
+            Scripted asker = new Scripted(false, invoke("ask_chat", "chatId", "01", "node", "b", "prompt", "do the job"),
+                    "Handed it out.", invoke("accept_reply"), "Done.");
+            Scripted busy = new Scripted(true, "the long job is done");
+            Squad aOne = squad(a, asker);
+            Squad bOne = squad(b, busy);
+            bOne.chat().tellNow(x -> ((ChatSession) x).recordsTo(bEntries)).join();
+            bOne.queue().tellNow(q -> q.recordsTo(bEntries, "project1/chat-01")).join();
+            startNodes(a, b);
+            personTypes(bOne, "a long job");
+            assertTrue(busy.started.await(10, TimeUnit.SECONDS), "b is in a long turn");
+
+            personTypes(aOne, "have the other instance do the job");
+            waitUntil(() -> {
+                try {
+                    return bOne.queue().ask(PromptQueue::snapshot).get(5, TimeUnit.SECONDS).size() == 1;
+                } catch (Exception e) {
+                    return false;
+                }
+            }, "a's request waits in b's queue");
+
+            // b restarts: the old actors and remote path go, new ones come up on the same port and the same log.
+            remoteB.close();
+            b.terminate();
+            IIActorSystem bAgain = new IIActorSystem("instance-b-after");
+            Scripted worker = new Scripted(false, "the job is done after the restart");
+            Squad bOneAgain = squad(bAgain, worker);
+            bOneAgain.chat().tellNow(x -> ((ChatSession) x).recordsTo(bEntries)).join();
+            bOneAgain.queue().tellNow(q -> {
+                q.recordsTo(bEntries, "project1/chat-01");
+                q.setLogging(bAgain, "project1/chat-01.log");   // as the instance wires every queue
+            }).join();
+            remoteB = RemoteNodes.start(bAgain, "a=127.0.0.1:" + portA, "b", portB, dir.resolve("b-ids.txt"));
+            bOneAgain.queue().tell(q -> q.restore(bOneAgain.chat().asChatSessionRef(), e -> { })).get(5, TimeUnit.SECONDS);
+
+            waitUntil(() -> worker.prompts.stream().anyMatch(p -> p.contains("do the job")), "b ran the request after the restart");
+            waitUntil(() -> asker.prompts.stream().anyMatch(p -> p.contains("[reply to request project1/chat-01:")
+                    && p.contains("the job is done after the restart")), "the reply reached a over the remote path");
+            busy.release.countDown();
+        } finally {
+            if (log.store() != null) log.store().close();
+        }
+    }
+
     @Test
     void theSameMessageSentTwiceRunsOnce() throws Exception {
         IIActorSystem a = new IIActorSystem("instance-a-dup");

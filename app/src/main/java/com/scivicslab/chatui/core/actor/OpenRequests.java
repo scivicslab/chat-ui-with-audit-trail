@@ -31,15 +31,17 @@ public final class OpenRequests {
     private static final class Original {
         final String asker;
         final boolean urgent;
+        final RemoteLink link;
         final CompletableFuture<TurnReply> done;
         final Set<String> outstanding = new LinkedHashSet<>();
         /** The answers of the turns that ended while a child request was still out, oldest first. */
         final List<TurnReply> earlier = new ArrayList<>();
         boolean answered;
 
-        Original(String asker, boolean urgent, CompletableFuture<TurnReply> done) {
+        Original(String asker, boolean urgent, RemoteLink link, CompletableFuture<TurnReply> done) {
             this.asker = asker;
             this.urgent = urgent;
+            this.link = link;
             this.done = done;
         }
     }
@@ -75,7 +77,7 @@ public final class OpenRequests {
     /** @param urgent whether the request was urgent, so that its reply goes ahead in the asker's queue as it did */
     public void received(String requestId, String asker, CompletableFuture<TurnReply> done, boolean urgent) {
         forgetLastIfAnswered();
-        originals.put(requestId, new Original(asker, urgent, done));
+        originals.put(requestId, new Original(asker, urgent, null, done));
         last = requestId;
     }
 
@@ -83,7 +85,21 @@ public final class OpenRequests {
 
     /** Makes the future a request put back after a restart is answered through: who asked, and how. */
     public interface Answering {
-        CompletableFuture<TurnReply> doneFor(String requestId, String asker, boolean urgent);
+        CompletableFuture<TurnReply> doneFor(String requestId, String asker, boolean urgent, RemoteLink link);
+    }
+
+    /**
+     * The way back to a sender on another chat-ui instance ({@code ConversationSquadsAcrossInstances_261115_oo01}):
+     * the node it is on and the request id it gave, which this instance keeps the request under with the node in
+     * front. Part of the received request's own state, recorded with it, so its reply survives a restart.
+     */
+    public record RemoteLink(String node, String requestId) {}
+
+    /** @param link the way back to a sender on another instance, or {@code null} for a sender on this one */
+    public void received(String requestId, String asker, CompletableFuture<TurnReply> done, boolean urgent, RemoteLink link) {
+        forgetLastIfAnswered();
+        originals.put(requestId, new Original(asker, urgent, link, done));
+        last = requestId;
     }
 
     /**
@@ -103,6 +119,8 @@ public final class OpenRequests {
             received.put(new org.json.JSONObject().put("id", id)
                     .put("asker", o.asker == null ? org.json.JSONObject.NULL : o.asker)
                     .put("urgent", o.urgent).put("answered", o.answered)
+                    .put("link", o.link == null ? org.json.JSONObject.NULL
+                            : new org.json.JSONObject().put("node", o.link.node()).put("requestId", o.link.requestId()))
                     .put("outstanding", new org.json.JSONArray(o.outstanding)).put("earlier", earlier));
         });
         org.json.JSONArray sent = new org.json.JSONArray();
@@ -133,9 +151,11 @@ public final class OpenRequests {
             String asker = r.isNull("asker") ? null : r.optString("asker", null);
             boolean urgent = r.optBoolean("urgent", false);
             boolean answered = r.optBoolean("answered", false);
+            org.json.JSONObject l = r.optJSONObject("link");
+            RemoteLink link = l == null ? null : new RemoteLink(l.getString("node"), l.getString("requestId"));
             CompletableFuture<TurnReply> done = answered
-                    ? CompletableFuture.completedFuture(TurnReply.NONE) : answering.doneFor(id, asker, urgent);
-            Original o = new Original(asker, urgent, done);
+                    ? CompletableFuture.completedFuture(TurnReply.NONE) : answering.doneFor(id, asker, urgent, link);
+            Original o = new Original(asker, urgent, link, done);
             o.answered = answered;
             org.json.JSONArray out = r.optJSONArray("outstanding");
             for (int k = 0; out != null && k < out.length(); k++) o.outstanding.add(out.getString(k));

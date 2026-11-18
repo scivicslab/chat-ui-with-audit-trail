@@ -2,6 +2,7 @@ package com.scivicslab.chatui.agent;
 
 import com.scivicslab.chatui.core.actor.CallWatchdog;
 import com.scivicslab.chatui.core.actor.ChatSession;
+import com.scivicslab.chatui.core.actor.OpenRequests;
 import com.scivicslab.chatui.core.actor.ChatSessionIIAR;
 import com.scivicslab.chatui.core.actor.ChatUiActorSystem;
 import com.scivicslab.chatui.core.actor.Organization;
@@ -606,11 +607,10 @@ public final class AskChatTool {
         CompletableFuture<TurnReply> done = new CompletableFuture<>();
         String localId = localIdOf(senderNode, requestId);
         RECEIVED.put(localId, new Received(nodes, senderNode, requestId, sender, target, done));
+        OpenRequests.RemoteLink link = new OpenRequests.RemoteLink(senderNode, requestId);
         done.whenCompleteAsync((reply, failure) -> {
             if (reply == TurnReply.WITHDRAWN) return;
-            sendOrLog(nodes, senderNode, "enqueueReply", new JSONObject().put("requestId", requestId).put("asker", sender)
-                    .put("from", target).put("urgent", urgent).put("text", replyMessage(target, requestId, reply, failure)),
-                    "reply to request " + requestId);
+            deliverRemoteReply(nodes, link, sender, target, urgent, reply, failure);
         });
         String headed = "[" + (urgent ? "urgent request " : "request ") + requestId + " from " + sender
                 + " on node " + senderNode + "]\n" + m.getString("prompt");
@@ -618,13 +618,40 @@ public final class AskChatTool {
         try {
             targetQueue.ask(q -> q.enqueue(headed, null, "queue", watchers, targetChat.asChatSessionRef(),
                     ChatSession.ASK_CHAT_SOURCE_PREFIX + sender, localId, done, false, true, java.util.List.of(),
-                    localId, urgent)).get(5, TimeUnit.SECONDS);
+                    localId, urgent, link)).get(5, TimeUnit.SECONDS);
         } catch (Exception e) {
             RECEIVED.remove(localId);
             LOG.log(Level.WARNING, "remote request " + requestId + " could not be queued for " + target, e);
             return new ActionResult(false, "could not queue the request: " + e.getClass().getSimpleName());
         }
         return new ActionResult(true, "queued for " + target);
+    }
+
+    /**
+     * Sends the reply to a request from another chat-ui instance back to its sender, over this instance's remote path,
+     * from the link the request carries ({@code EachActorRecordsItsOwnState_261118_oo01}). Used by a request answered
+     * as it arrived and by one put back after a restart alike.
+     *
+     * @param link       the sender's node and the request id it gave
+     * @param askerName  the sender's qualified name on its node
+     * @param targetName the qualified name of the conversation here that answered
+     */
+    public static void deliverRemoteReply(IIActorSystem system, OpenRequests.RemoteLink link, String askerName,
+                                          String targetName, boolean urgent, TurnReply reply, Throwable failure) {
+        RemoteNodes nodes = RemoteNodes.of(system);
+        if (nodes == null) {
+            LOG.warning("reply to request " + link.requestId() + " from node " + link.node()
+                    + " not sent: this instance has no remote path");
+            return;
+        }
+        deliverRemoteReply(nodes, link, askerName, targetName, urgent, reply, failure);
+    }
+
+    private static void deliverRemoteReply(RemoteNodes nodes, OpenRequests.RemoteLink link, String askerName,
+                                           String targetName, boolean urgent, TurnReply reply, Throwable failure) {
+        sendOrLog(nodes, link.node(), "enqueueReply", new JSONObject().put("requestId", link.requestId()).put("asker", askerName)
+                .put("from", targetName).put("urgent", urgent)
+                .put("text", replyMessage(targetName, link.requestId(), reply, failure)), "reply to request " + link.requestId());
     }
 
     /** On the sender's instance: the reply goes into the sender's queue, as a reply inside one instance does. */
