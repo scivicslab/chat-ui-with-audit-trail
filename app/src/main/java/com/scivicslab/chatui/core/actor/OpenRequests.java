@@ -30,14 +30,16 @@ public final class OpenRequests {
     /** One original request. */
     private static final class Original {
         final String asker;
+        final boolean urgent;
         final CompletableFuture<TurnReply> done;
         final Set<String> outstanding = new LinkedHashSet<>();
         /** The answers of the turns that ended while a child request was still out, oldest first. */
         final List<TurnReply> earlier = new ArrayList<>();
         boolean answered;
 
-        Original(String asker, CompletableFuture<TurnReply> done) {
+        Original(String asker, boolean urgent, CompletableFuture<TurnReply> done) {
             this.asker = asker;
+            this.urgent = urgent;
             this.done = done;
         }
     }
@@ -67,9 +69,98 @@ public final class OpenRequests {
      * @param done      the future the asker waits on; completed when the request is answered
      */
     public void received(String requestId, String asker, CompletableFuture<TurnReply> done) {
+        received(requestId, asker, done, false);
+    }
+
+    /** @param urgent whether the request was urgent, so that its reply goes ahead in the asker's queue as it did */
+    public void received(String requestId, String asker, CompletableFuture<TurnReply> done, boolean urgent) {
         forgetLastIfAnswered();
-        originals.put(requestId, new Original(asker, done));
+        originals.put(requestId, new Original(asker, urgent, done));
         last = requestId;
+    }
+
+    // ── As the conversation records it (EachActorRecordsItsOwnState_261118_oo01) ─────────────────────
+
+    /** Makes the future a request put back after a restart is answered through: who asked, and how. */
+    public interface Answering {
+        CompletableFuture<TurnReply> doneFor(String requestId, String asker, boolean urgent);
+    }
+
+    /**
+     * Everything held, as the conversation records it: the requests received (who asked, whether urgent, whether
+     * answered, the requests still out for each, the answers of earlier turns) and the requests sent and not yet
+     * replied to (where they went, when, and for which received request). Times are absolute.
+     */
+    public org.json.JSONObject toJson() {
+        org.json.JSONArray received = new org.json.JSONArray();
+        originals.forEach((id, o) -> {
+            org.json.JSONArray earlier = new org.json.JSONArray();
+            for (TurnReply r : o.earlier) {
+                earlier.put(new org.json.JSONObject().put("reply", r.reply() == null ? org.json.JSONObject.NULL : r.reply())
+                        .put("ending", r.ending() == null ? org.json.JSONObject.NULL : r.ending())
+                        .put("turnId", r.turnId() == null ? org.json.JSONObject.NULL : r.turnId()));
+            }
+            received.put(new org.json.JSONObject().put("id", id)
+                    .put("asker", o.asker == null ? org.json.JSONObject.NULL : o.asker)
+                    .put("urgent", o.urgent).put("answered", o.answered)
+                    .put("outstanding", new org.json.JSONArray(o.outstanding)).put("earlier", earlier));
+        });
+        org.json.JSONArray sent = new org.json.JSONArray();
+        for (Outstanding s : outstandingChildren()) {
+            sent.put(new org.json.JSONObject().put("requestId", s.requestId())
+                    .put("target", s.target() == null ? org.json.JSONObject.NULL : s.target()).put("sentAt", s.sentAt()));
+        }
+        return new org.json.JSONObject().put("received", received).put("sent", sent)
+                .put("originalOfChild", new org.json.JSONObject(originalOfChild))
+                .put("originalOfSent", new org.json.JSONObject(originalOfSent))
+                .put("last", last == null ? org.json.JSONObject.NULL : last);
+    }
+
+    /**
+     * Puts back what {@link #toJson} gave, after a restart. A received request not yet answered gets a new future from
+     * {@code answering}, which is how its answer reaches the asker; one already answered gets a completed one.
+     */
+    public void load(org.json.JSONObject saved, Answering answering) {
+        originals.clear();
+        originalOfChild.clear();
+        originalOfSent.clear();
+        outstandingChildren.clear();
+        org.json.JSONArray received = saved.optJSONArray("received");
+        for (int i = 0; received != null && i < received.length(); i++) {
+            org.json.JSONObject r = received.optJSONObject(i);
+            if (r == null || r.optString("id", "").isBlank()) continue;
+            String id = r.getString("id");
+            String asker = r.isNull("asker") ? null : r.optString("asker", null);
+            boolean urgent = r.optBoolean("urgent", false);
+            boolean answered = r.optBoolean("answered", false);
+            CompletableFuture<TurnReply> done = answered
+                    ? CompletableFuture.completedFuture(TurnReply.NONE) : answering.doneFor(id, asker, urgent);
+            Original o = new Original(asker, urgent, done);
+            o.answered = answered;
+            org.json.JSONArray out = r.optJSONArray("outstanding");
+            for (int k = 0; out != null && k < out.length(); k++) o.outstanding.add(out.getString(k));
+            org.json.JSONArray earlier = r.optJSONArray("earlier");
+            for (int k = 0; earlier != null && k < earlier.length(); k++) {
+                org.json.JSONObject e = earlier.getJSONObject(k);
+                o.earlier.add(new TurnReply(e.isNull("reply") ? null : e.optString("reply"),
+                        e.isNull("ending") ? null : e.optString("ending"), e.isNull("turnId") ? null : e.optString("turnId")));
+            }
+            originals.put(id, o);
+        }
+        org.json.JSONArray sent = saved.optJSONArray("sent");
+        for (int i = 0; sent != null && i < sent.length(); i++) {
+            org.json.JSONObject s = sent.optJSONObject(i);
+            if (s == null || s.optString("requestId", "").isBlank()) continue;
+            outstandingChildren.put(s.getString("requestId"), new Outstanding(s.getString("requestId"),
+                    s.isNull("target") ? null : s.optString("target", null), s.optLong("sentAt")));
+        }
+        copy(saved.optJSONObject("originalOfChild"), originalOfChild);
+        copy(saved.optJSONObject("originalOfSent"), originalOfSent);
+        last = saved.isNull("last") ? null : saved.optString("last", null);
+    }
+
+    private static void copy(org.json.JSONObject from, Map<String, String> to) {
+        if (from != null) for (String k : from.keySet()) to.put(k, from.getString(k));
     }
 
     /**

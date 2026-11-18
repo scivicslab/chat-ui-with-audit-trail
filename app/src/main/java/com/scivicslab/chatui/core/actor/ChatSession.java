@@ -1229,6 +1229,7 @@ public class ChatSession extends Interpreter {
             // A paused turn has not finished the work: the request waits for the turn that resumes it.
             if (!paused) {
                 openRequests.turnEnded(turnOriginal, turnAnswer != null ? turnAnswer : new TurnReply(null, null, turnId()));
+                recordOpenRequests();
             }
         }
         // The answer of a turn a reminder started goes to whoever waits for the report, as a follow-up
@@ -1336,7 +1337,9 @@ public class ChatSession extends Interpreter {
         this.askCount = 0;
         this.turnAnswer = null;
         if (requestId != null && source != null && source.startsWith(ASK_CHAT_SOURCE_PREFIX)) {
-            openRequests.received(requestId, source.substring(ASK_CHAT_SOURCE_PREFIX.length()), done);
+            // Whether it is urgent is in the heading this instance put on it ("[urgent request ...").
+            openRequests.received(requestId, source.substring(ASK_CHAT_SOURCE_PREFIX.length()), done,
+                    prompt != null && prompt.startsWith("[urgent request "));
             this.turnOriginal = requestId;
         } else if (requestId != null && source != null && source.startsWith(ASK_CHAT_REPLY_SOURCE_PREFIX)) {
             this.turnOriginal = openRequests.replyArrived(requestId);
@@ -1345,6 +1348,10 @@ public class ChatSession extends Interpreter {
             this.turnOriginal = openRequests.isOpen(requestId) ? requestId : null;
         } else {
             this.turnOriginal = null;
+        }
+        if (requestId != null && source != null
+                && (source.startsWith(ASK_CHAT_SOURCE_PREFIX) || source.startsWith(ASK_CHAT_REPLY_SOURCE_PREFIX))) {
+            recordOpenRequests();
         }
         this.turnTranscript.setLength(0);
         this.pauseRequested = false;
@@ -3384,6 +3391,7 @@ public class ChatSession extends Interpreter {
     /** Publishes the child requests still out for the timekeeper to read. */
     private void publishOutstanding() {
         outstandingSnapshot = List.copyOf(openRequests.outstandingChildren());
+        recordOpenRequests();
     }
 
     /** @return the child requests still out; readable from any thread */
@@ -3601,6 +3609,45 @@ public class ChatSession extends Interpreter {
     public com.scivicslab.chatui.core.iolog.IoLogView.Settings recordedSettings() {
         com.scivicslab.chatui.core.iolog.SessionEntries e = entries;
         return e == null ? null : com.scivicslab.chatui.core.iolog.IoLogView.parseSettings(e.latest(com.scivicslab.chatui.core.iolog.IoLogView.SETTINGS_LABEL));
+    }
+
+    /** Label of the conversation's entry that holds its open requests. */
+    public static final String OPEN_REQUESTS_LABEL = "open-requests";
+
+    /**
+     * Writes the requests this conversation received and has not answered, and those it sent and is waiting on, as
+     * one {@code open-requests} entry ({@code EachActorRecordsItsOwnState_261118_oo01}). All of them every time.
+     */
+    private void recordOpenRequests() {
+        com.scivicslab.chatui.core.iolog.SessionEntries e = entries;
+        if (e != null) e.write(OPEN_REQUESTS_LABEL, openRequests.toJson().toString());
+    }
+
+    /**
+     * Puts back the open requests last recorded, after a restart, and writes nothing. A received request not yet
+     * answered is answered, when its work is done, to its asker by name ({@code AskChatTool.deliverReplyTo}); the
+     * requests still out are watched again by the timekeeper. A turn that was running at the restart is not run again:
+     * its request stays received, and the asker's own reply watch tells the asker.
+     */
+    public void restoreOpenRequests() {
+        com.scivicslab.chatui.core.iolog.SessionEntries e = entries;
+        String json = e == null ? null : e.latest(OPEN_REQUESTS_LABEL);
+        if (json == null || json.isBlank()) return;
+        try {
+            openRequests.load(new org.json.JSONObject(json), (id, asker, urgent) -> {
+                CompletableFuture<TurnReply> done = new CompletableFuture<>();
+                done.whenCompleteAsync((reply, failure) -> {
+                    if (reply != TurnReply.WITHDRAWN && asker != null) {
+                        com.scivicslab.chatui.agent.AskChatTool.deliverReplyTo(system, asker, myChatName(), id, urgent, reply, failure);
+                    }
+                });
+                return done;
+            });
+        } catch (RuntimeException ex) {
+            logger.log(Level.WARNING, "Could not restore the open requests of " + myChatName(), ex);
+            return;
+        }
+        outstandingSnapshot = List.copyOf(openRequests.outstandingChildren());
     }
 
     /** @return the agent loop this conversation last recorded, or {@code null} when it recorded none */

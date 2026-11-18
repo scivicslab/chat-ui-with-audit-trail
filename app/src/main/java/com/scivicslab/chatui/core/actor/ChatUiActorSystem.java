@@ -1384,6 +1384,8 @@ public class ChatUiActorSystem implements ConversationControls {
         if (squadRef != null) squadRef.tell(ConversationSquad::restore);
         ActorRef<Timekeeper> keeperRef = actorSystem.getActor(conversationSquadName + ".timekeeper");
         if (keeperRef != null) keeperRef.tell(Timekeeper::restore);
+        // The requests it received and has not answered, and those it sent and waits on (step 9).
+        chatSessionIIAR.tell(a -> ((ChatSession) a).restoreOpenRequests());
 
         // The agent loop put on it, by file or as YAML, whether or not it has run a turn.
         String recordedLoop;
