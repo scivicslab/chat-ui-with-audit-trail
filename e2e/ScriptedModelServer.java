@@ -33,6 +33,8 @@ import java.util.regex.Pattern;
  * "tester" and chat-01's "archivist" (a role with no emoji of its own), so chat-05 plays four roles;
  * {@code SCENARIO-G3}: make project2/chat-01 chat-02's "translator", a role edge into another project;
  * {@code SCENARIO-G4}: make chat-01 on node b chat-03's "reviewer", a role on another chat-ui instance (ConversationGraphCheck).</li>
+ * <li>{@code SCENARIO-T}: call {@code list_running_tools} and {@code search_docs}, which reach the AI-workspace and
+ * html-saurus as nodes; the turn ends with {@code TOOLS-DONE} followed by their results (ToolNodesCheck).</li>
  * <li>The end-of-turn reminder check registers a reminder only for an answer that says "I will report back".</li>
  * <li>Anything else: "OK. I will report back in 12 minutes."</li>
  * </ul>
@@ -152,6 +154,17 @@ public class ScriptedModelServer {
             </invoke>
             </function_calls>""";
 
+    static final String TOOLS_T = """
+            <function_calls>
+            <invoke name="list_running_tools">
+            <reason>see what the AI-workspace runs</reason>
+            </invoke>
+            <invoke name="search_docs">
+            <parameter name="query">abstraction</parameter>
+            <reason>search the documentation through the html-saurus node</reason>
+            </invoke>
+            </function_calls>""";
+
     static final String ASK_03 = """
             <function_calls>
             <invoke name="ask_chat">
@@ -198,6 +211,9 @@ public class ScriptedModelServer {
         if (last.contains("SCENARIO-G2")) return GRAPH_G2;
         if (last.contains("SCENARIO-G")) return GRAPH_G;
         if (last.contains("SCENARIO-R")) return ASK_03;
+        if (last.contains("SCENARIO-T")) return TOOLS_T;
+        // Echoes the tool results, so the check reads them in the final answer the conversation keeps.
+        if (last.contains("Tool result (") && whole.contains("SCENARIO-T")) return "TOOLS-DONE\n" + last;
         if (last.contains("REPLY-ME")) return "R42 is the result.";
         // The tool preamble quotes "[reply to request ...", so this comes after the markers above.
         if (last.contains("[reply to request ") && !last.contains("Tool result")) {

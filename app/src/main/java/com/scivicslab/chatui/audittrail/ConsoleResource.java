@@ -45,6 +45,7 @@ public class ConsoleResource {
     @GET
     @Produces(MediaType.TEXT_HTML)
     public TemplateInstance get() {
-        return console.data("assetVersion", assetVersion);
+        // Which build is running, beside the app's name and in the tab's title.
+        return console.data("assetVersion", assetVersion).data("buildVersion", BuildInfo.current());
     }
 }

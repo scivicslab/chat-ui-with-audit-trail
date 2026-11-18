@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chat UI with audit trail</title>
+    <title>Chat UI with audit trail {buildVersion}</title>
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <!-- Hallmark redesign (modern-minimal · Cobalt): Space Grotesk display, Inter body, JetBrains Mono code. -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -43,7 +43,7 @@
          Settings of one chat live in that chat's header below. -->
     <div id="app-header">
         <button id="dock-toggle" title="Toggle the actor panel">&#9776;</button>
-        <h1 id="app-title">Chat UI with Audit Trail</h1>
+        <h1 id="app-title">Chat UI with Audit Trail <span id="app-version" title="The version this chat-ui was built as, and the git commit it was built from">{buildVersion}</span></h1>
         <div id="status-bar">
             <label id="theme-label">Theme:
                 <select id="theme-select">

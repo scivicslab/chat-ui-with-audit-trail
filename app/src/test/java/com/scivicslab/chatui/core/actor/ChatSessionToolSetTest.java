@@ -89,7 +89,7 @@ class ChatSessionToolSetTest {
     void firstStepPrompt_fullToolSet_listsEveryToolAndExecutesRead() {
         RecordingProvider p = runTurn(ToolSet.FULL);
         String first = p.prompts.get(0);
-        for (String name : List.of("read", "calc", "search_docs", "list_references", "write", "ask_chat",
+        for (String name : List.of("read", "calc", "search_docs", "list_references", "list_running_tools", "write", "ask_chat",
                 "set_agent_loop", "load_skill", "set_collaborator")) {
             assertTrue(first.contains("- " + name + "("), "full prompt lists " + name);
         }

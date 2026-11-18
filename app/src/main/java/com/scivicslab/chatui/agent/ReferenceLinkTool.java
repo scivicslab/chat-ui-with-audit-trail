@@ -2,8 +2,6 @@ package com.scivicslab.chatui.agent;
 
 import com.fasterxml.jackson.databind.JsonNode;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -53,6 +51,14 @@ public final class ReferenceLinkTool {
      * @return the related documents as the Observation text, or a message saying there are none
      */
     public static String list(String id, String direction, String relation) {
+        return list(id, direction, relation, DocsSource.http(DocSearchTool.baseUrl()));
+    }
+
+    /**
+     * The same, asking {@code source}: an html-saurus node, or the HTTP API
+     * ({@code ActorNodesForWorkspaceAndPortal_261118_oo01}). The answer does not depend on which.
+     */
+    public static String list(String id, String direction, String relation, DocsSource source) {
         if (id == null || id.isBlank()) return "error: id required";
         String docId = id.strip();
         String which = (direction == null || direction.isBlank()) ? FORWARD : direction.strip();
@@ -61,11 +67,8 @@ public final class ReferenceLinkTool {
         }
         String wanted = (relation == null) ? "" : relation.strip();
 
-        String endpoint = FORWARD.equals(which) ? "prerequisites" : "prerequisite-of";
-        String url = DocSearchTool.baseUrl() + "/api/" + endpoint
-                + "?id=" + URLEncoder.encode(docId, StandardCharsets.UTF_8);
-        LOG.info("list_references (" + which + (wanted.isEmpty() ? "" : ", " + wanted) + "): " + docId);
-        List<JsonNode> hits = DocSearchTool.hitsFrom(url, "list_references/" + which, docId);
+        LOG.info("list_references (" + which + (wanted.isEmpty() ? "" : ", " + wanted) + ") at " + source.where() + ": " + docId);
+        List<JsonNode> hits = source.references(docId, FORWARD.equals(which));
 
         if (!wanted.isEmpty()) {
             List<JsonNode> kept = new ArrayList<>();

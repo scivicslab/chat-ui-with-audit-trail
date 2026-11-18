@@ -523,6 +523,9 @@ public class ChatUiActorSystem implements ConversationControls {
             String workspaceUrl = configValue("chat-ui.workspace-url").orElse("");
             remoteNodes = com.scivicslab.chatui.core.remote.RemoteNodes.start(actorSystem, peers, workspaceUrl, name, actorPort,
                     java.nio.file.Path.of(dbPath + "-" + httpPort + "-remote-message-ids.txt"));
+            // Every tool that joins the distributed actor system announces itself to the AI-workspace that runs it
+            // (ActorNodesForWorkspaceAndPortal_261118_oo01, decision 4).
+            if (remoteNodes != null) remoteNodes.announceTo(System.getenv("AI_WORKSPACE_NODE"), httpPort);
         } catch (Exception e) {
             LOG.log(Level.WARNING, "The path to other chat-ui instances could not start; it stays off", e);
             remoteNodes = null;

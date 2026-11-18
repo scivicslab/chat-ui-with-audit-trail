@@ -94,6 +94,14 @@ public final class DocSearchTool {
      * @return the merged list as the Observation text, or a message saying nothing was found
      */
     static String search(String query, int maxResults, String route) {
+        return search(query, maxResults, route, DocsSource.http(BASE_URL));
+    }
+
+    /**
+     * The same, asking {@code source}: an html-saurus node, or the HTTP API
+     * ({@code ActorNodesForWorkspaceAndPortal_261118_oo01}). The answer does not depend on which.
+     */
+    public static String search(String query, int maxResults, String route, DocsSource source) {
         if (query == null || query.isBlank()) return "error: query required";
         int limit = maxResults > 0 ? maxResults : DEFAULT_MAX_RESULTS;
         String q = URLEncoder.encode(query.trim(), StandardCharsets.UTF_8);
@@ -101,15 +109,13 @@ public final class DocSearchTool {
 
         Map<String, List<JsonNode>> byRoute = new LinkedHashMap<>();
         if (which.equals("all") || which.equals("fulltext")) {
-            byRoute.put("fulltext",
-                    fetchHits(BASE_URL + "/api/search?q=" + q + "&lang=ja", "fulltext", query));
+            byRoute.put("fulltext", source.fullText(query));
         }
         if (which.equals("all") || which.equals("tfidf")) {
-            byRoute.put("tfidf", postHits(BASE_URL + "/api/find-related", query));
+            byRoute.put("tfidf", source.related(query));
         }
         if (which.equals("all") || which.equals("semantic")) {
-            byRoute.put("semantic",
-                    fetchHits(BASE_URL + "/api/search-semantic?q=" + q, "semantic", query));
+            byRoute.put("semantic", source.semantic(query));
         }
         if (byRoute.isEmpty()) {
             return "error: unknown route '" + route + "' (use all, fulltext, tfidf or semantic)";
@@ -118,10 +124,12 @@ public final class DocSearchTool {
         List<JsonNode> merged = interleave(byRoute, limit);
         if (merged.isEmpty()) {
             // Last resort for an old html-saurus without the JSON APIs: scrape the /search HTML page.
-            String scraped = scrapeSearchPage(BASE_URL + "/search?q=" + q, limit, query);
-            if (scraped != null) return scraped;
+            if (source instanceof HttpDocs http) {
+                String scraped = scrapeSearchPage(http.baseUrl() + "/search?q=" + q, limit, query);
+                if (scraped != null) return scraped;
+            }
             return "No documents found for '" + query + "' (the internal doc-search server returned nothing "
-                 + "or is unavailable at " + BASE_URL + ").";
+                 + "or is unavailable at " + source.where() + ").";
         }
         return formatHits(merged);
     }
@@ -162,7 +170,7 @@ public final class DocSearchTool {
     }
 
     /** POSTs {@code body} as plain text and reads the hit array (the MoreLikeThis route's shape). */
-    private static List<JsonNode> postHits(String url, String body) {
+    static List<JsonNode> postHitsTo(String url, String body) {
         List<JsonNode> hits = new ArrayList<>();
         try {
             LOG.info("search_docs (tfidf): " + body);
@@ -229,8 +237,8 @@ public final class DocSearchTool {
         return hits;
     }
 
-    /** The html-saurus base URL both this tool and {@link ReferenceLinkTool} call. */
-    static String baseUrl() {
+    /** The html-saurus base URL both this tool and {@link ReferenceLinkTool} call when no html-saurus node is known. */
+    public static String baseUrl() {
         return BASE_URL;
     }
 
