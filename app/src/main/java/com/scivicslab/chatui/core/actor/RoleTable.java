@@ -35,12 +35,23 @@ public class RoleTable {
      * One role edge: {@code from}'s collaborator for {@code role} is {@code to}. Both are qualified names
      * ({@code "project1/chat-02"}).
      */
-    public record Edge(String from, String role, String to) {}
+    public record Edge(String from, String role, String to, String node) {
+        /** An edge to a conversation of this instance. */
+        public Edge(String from, String role, String to) { this(from, role, to, null); }
+    }
+
+    /**
+     * Who plays a role: a conversation's qualified name, and the chat-ui instance it is on when that is another one.
+     *
+     * @param name the qualified name, as that instance names it
+     * @param node the other instance's node name, or {@code null} for a conversation of this instance
+     */
+    public record Collaborator(String name, String node) {}
 
     private final String prefix;
     private final SessionEntries entries;
     /** Source, then role, then who plays it; sorted, so {@link #edges} and the entry come in a fixed order. */
-    private final Map<String, Map<String, String>> bySource = new TreeMap<>();
+    private final Map<String, Map<String, Collaborator>> bySource = new TreeMap<>();
 
     /**
      * @param projectId the project whose conversations are the sources
@@ -57,28 +68,47 @@ public class RoleTable {
      * @return {@code null} when set, or why it was refused with nothing changed
      */
     public String set(String from, String role, String to) {
+        return set(from, role, to, null);
+    }
+
+    /**
+     * As {@link #set(String, String, String)}, with the role played by a conversation on another chat-ui instance.
+     *
+     * @param node that instance's node name, as {@code ask_chat} takes it, or {@code null} for this instance
+     */
+    public String set(String from, String role, String to, String node) {
         if (!from.startsWith(prefix)) return from + " is not a conversation of " + prefix.substring(0, prefix.length() - 1);
-        bySource.computeIfAbsent(from, k -> new TreeMap<>()).put(role, to);
+        bySource.computeIfAbsent(from, k -> new TreeMap<>()).put(role,
+                new Collaborator(to, node == null || node.isBlank() ? null : node.strip()));
         record();
         return null;
     }
 
-    /** @return who plays {@code role} for {@code from}, or {@code null} when nobody does */
+    /** @return the qualified name of who plays {@code role} for {@code from}, or {@code null} when nobody does */
     public String collaborator(String from, String role) {
-        Map<String, String> roles = bySource.get(from);
+        Collaborator c = collaboratorAt(from, role);
+        return c == null ? null : c.name();
+    }
+
+    /** @return who plays {@code role} for {@code from}, with the instance it is on, or {@code null} when nobody does */
+    public Collaborator collaboratorAt(String from, String role) {
+        Map<String, Collaborator> roles = bySource.get(from);
         return roles == null ? null : roles.get(role);
     }
 
-    /** @return {@code from}'s roles and who plays each, empty when it has none */
+    /** @return {@code from}'s roles and the qualified name of who plays each, empty when it has none */
     public Map<String, String> collaboratorsOf(String from) {
-        Map<String, String> roles = bySource.get(from);
-        return roles == null ? Map.of() : Map.copyOf(roles);
+        Map<String, Collaborator> roles = bySource.get(from);
+        if (roles == null) return Map.of();
+        Map<String, String> out = new TreeMap<>();
+        roles.forEach((role, c) -> out.put(role, c.name()));
+        return Map.copyOf(out);
     }
 
     /** @return every edge, sorted by source and then by role */
     public List<Edge> edges() {
         List<Edge> out = new ArrayList<>();
-        bySource.forEach((from, roles) -> roles.forEach((role, to) -> out.add(new Edge(from, role, to))));
+        bySource.forEach((from, roles) -> roles.forEach((role, c) -> out.add(new Edge(from, role, c.name(), c.node()))));
         return out;
     }
 
@@ -123,8 +153,9 @@ public class RoleTable {
             org.json.JSONObject e = edges.optJSONObject(i);
             if (e == null) continue;
             String from = e.optString("from", null), role = e.optString("role", null), to = e.optString("to", null);
+            String node = e.isNull("node") ? null : e.optString("node", null);
             if (from != null && role != null && to != null && from.startsWith(prefix)) {
-                bySource.computeIfAbsent(from, k -> new TreeMap<>()).put(role, to);
+                bySource.computeIfAbsent(from, k -> new TreeMap<>()).put(role, new Collaborator(to, node));
             }
         }
         boolean dropped = forget(name -> !existing.contains(name));
@@ -137,16 +168,21 @@ public class RoleTable {
         return changed;
     }
 
+    /**
+     * Forgets the edges from a conversation of this project {@code gone} names, and the edges to a conversation of this
+     * instance it names. An edge to another instance's conversation stays: a name here says nothing about that one, and
+     * whether it still exists cannot be told from here; using it says so ("conversation not found on node").
+     */
     private boolean forget(Predicate<String> gone) {
         boolean changed = false;
-        for (Iterator<Map.Entry<String, Map<String, String>>> it = bySource.entrySet().iterator(); it.hasNext(); ) {
-            Map.Entry<String, Map<String, String>> source = it.next();
+        for (Iterator<Map.Entry<String, Map<String, Collaborator>>> it = bySource.entrySet().iterator(); it.hasNext(); ) {
+            Map.Entry<String, Map<String, Collaborator>> source = it.next();
             if (gone.test(source.getKey())) {
                 it.remove();
                 changed = true;
                 continue;
             }
-            if (source.getValue().values().removeIf(gone)) changed = true;
+            if (source.getValue().values().removeIf(c -> c.node() == null && gone.test(c.name()))) changed = true;
             if (source.getValue().isEmpty()) it.remove();
         }
         return changed;
@@ -155,7 +191,11 @@ public class RoleTable {
     /** Writes the whole table as one entry, in the shape the earlier settings entry held it, under a key of the same name. */
     private void record() {
         org.json.JSONArray edges = new org.json.JSONArray();
-        for (Edge e : edges()) edges.put(new org.json.JSONObject().put("from", e.from()).put("role", e.role()).put("to", e.to()));
+        for (Edge e : edges()) {
+            org.json.JSONObject o = new org.json.JSONObject().put("from", e.from()).put("role", e.role()).put("to", e.to());
+            if (e.node() != null) o.put("node", e.node());
+            edges.put(o);
+        }
         entries.write(ROLES_LABEL, new org.json.JSONObject().put(ROLES_LABEL, edges).toString());
     }
 }

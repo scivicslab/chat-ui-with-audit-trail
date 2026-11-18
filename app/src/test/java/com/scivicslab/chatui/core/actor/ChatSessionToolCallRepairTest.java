@@ -163,6 +163,8 @@ class ChatSessionToolCallRepairTest {
         assertEquals(List.of("chatId", "prompt"), ChatSession.requiredParameters("ask_chat"));
         assertEquals(List.of(), ChatSession.requiredParameters("create_chat"));
         assertEquals(List.of("chatId"), ChatSession.requiredParameters("get_chat_log"));
+        assertEquals(List.of("chatId", "role", "collaboratorChatId"), ChatSession.requiredParameters("set_collaborator"),
+                "node is optional: without it the role is played on this instance");
         assertEquals(List.of(), ChatSession.requiredParameters("no_such_tool"));
         // Every optional argument named is one its tool's signature has, so the table cannot drift unseen.
         ChatSession.OPTIONAL_PARAMETERS.forEach((tool, optional) -> assertTrue(

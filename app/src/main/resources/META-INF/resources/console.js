@@ -2343,6 +2343,12 @@
         return rows;
     }
 
+    // Where a role edge points: a conversation here is "<project>/<id>"; one on another chat-ui instance
+    // (set_collaborator with node) is "<node>:<project>/<id>", since the same name there is another conversation.
+    function roleTargetKey(e) {
+        return (e.node ? e.node + ":" : "") + e.toProject + "/" + e.to;
+    }
+
     // Every row of the tree: each project's row, then (unless folded) its conversations. A role target that is
     // not a conversation of any project here (it lives on another chat-ui instance, or is gone) gets a placeholder
     // row at the bottom.
@@ -2358,10 +2364,11 @@
         var placed = {};
         (all.projects || []).forEach(function (g) {
             (g.roleEdges || []).forEach(function (e) {
-                var key = e.toProject + "/" + e.to;
-                if (!present[key] && !placed[key]) {
+                var key = roleTargetKey(e);
+                if ((e.node || !present[key]) && !placed[key]) {
                     placed[key] = true;
-                    rows.push({ kind: "chat", key: key, id: e.to, node: null, depth: 0, project: e.toProject, external: true });
+                    rows.push({ kind: "chat", key: key, id: e.to, node: null, depth: 0, project: e.toProject, external: true,
+                        remoteNode: e.node || null });
                 }
             });
         });
@@ -2391,8 +2398,8 @@
         var by = {};
         (all.projects || []).forEach(function (g) {
             (g.roleEdges || []).forEach(function (e) {
-                var key = e.toProject + "/" + e.to;
-                var forChat = e.toProject === g.projectId ? "chat-" + e.from : g.projectId + "/chat-" + e.from;
+                var key = roleTargetKey(e);
+                var forChat = !e.node && e.toProject === g.projectId ? "chat-" + e.from : g.projectId + "/chat-" + e.from;
                 (by[key] = by[key] || []).push({ role: e.role, forChat: forChat });
             });
         });
@@ -2520,7 +2527,8 @@
                 return;
             }
             var played = roles[r.key] || [];
-            var cls = "cg-node" + (r.node && r.node.liaison ? " cg-liaison" : "") + (r.external ? " cg-external" : " cg-link");
+            var cls = "cg-node" + (r.node && r.node.liaison ? " cg-liaison" : "") + (r.external ? " cg-external" : " cg-link")
+                + (r.remoteNode ? " cg-remote" : "");
             var gEl = svgEl("g", { "class": cls, "data-chat": r.key,
                 "data-roles": played.map(function (x) { return x.role + ":" + x.forChat; }).join(",") }, svg);
             svgEl("circle", { cx: p.x, cy: p.y, r: 5 }, gEl);
@@ -2541,12 +2549,12 @@
                 idX = p.x + 10 + prefixPx;
                 prefixLen = Math.ceil(prefixPx / 7.2);
             }
-            var idText = r.external ? r.project + "/chat-" + r.id : "chat-" + r.id;
+            var idText = r.external ? r.project + "/chat-" + r.id + (r.remoteNode ? " @" + r.remoteNode : "") : "chat-" + r.id;
             var idAttrs = { "class": "cg-id" };
             if (idX !== null) idAttrs.x = idX;
             svgEl("tspan", idAttrs, label).textContent = idText;
             var room = Math.floor((W - 8 - (p.x + 10)) / 7.2) - idText.length - prefixLen;
-            var extra = r.external ? " (not on this instance)" : ((r.node && r.node.name) ? " " + r.node.name : "");
+            var extra = r.external ? (r.remoteNode ? "" : " (not on this instance)") : ((r.node && r.node.name) ? " " + r.node.name : "");
             if (extra && room > 2) {
                 svgEl("tspan", { "class": "cg-name" }, label).textContent =
                     extra.length > room ? extra.substring(0, room - 1) + "…" : extra;
@@ -2555,7 +2563,8 @@
                 svgEl("text", { x: p.x + 10, y: p.y - 7, "class": "cg-tag" }, gEl).textContent = "liaison";
             }
             var tip = (r.external ? idText : r.project + "/" + idText) + (r.node && r.node.name ? " — " + r.node.name : "")
-                + (r.node && r.node.liaison ? " (liaison)" : "") + (r.external ? " (not on this instance)" : "");
+                + (r.node && r.node.liaison ? " (liaison)" : "")
+                + (r.external ? (r.remoteNode ? "\non node " + r.remoteNode + " (another chat-ui instance)" : " (not on this instance)") : "");
             // What it runs on, as the server read it from the conversation for this refresh. A conversation not on
             // this instance, or one whose provider could not be read, is not looked up: "model unknown".
             tip += "\n" + (r.node && r.node.provider

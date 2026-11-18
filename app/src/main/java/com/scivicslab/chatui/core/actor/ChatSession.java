@@ -245,6 +245,7 @@ public class ChatSession extends Interpreter {
             Map.entry("set_chat_name", List.of("name")),
             Map.entry("expect_report", List.of("chatId", "node")),
             Map.entry("set_superior", List.of("superiorChatId")),
+            Map.entry("set_collaborator", List.of("node")),
             Map.entry("write", List.of("content")));
 
     /**
@@ -417,11 +418,13 @@ public class ChatSession extends Interpreter {
               applies to the task at hand, load it before you act rather than after.
             """);
         m.put("set_collaborator", """
-            - set_collaborator(chatId, role, collaboratorChatId): record that, for ConversationSquad "chatId",
+            - set_collaborator(chatId, role, collaboratorChatId, node): record that, for ConversationSquad "chatId",
               the ConversationSquad playing role "role" (e.g. "worker") is "collaboratorChatId". Requires THREE
-              <parameter> tags: "chatId", "role", "collaboratorChatId". An agent loop installed via
-              set_agent_loop can then resolve that role instead of a hardcoded chat id, and you can
-              reassign it again later by calling this a second time.
+              <parameter> tags: "chatId", "role", "collaboratorChatId". Give "node" only when the one playing the
+              role is a conversation of another chat-ui instance: the node's name as this instance is configured
+              with it, as ask_chat takes it; then collaboratorChatId names the conversation there, and the agent
+              loop sends its work there. An agent loop installed via set_agent_loop can then resolve that role
+              instead of a hardcoded chat id, and you can reassign it again later by calling this a second time.
             """);
         m.put("get_chat_status", """
             - get_chat_status(chatId): report which model, provider and tool set another conversation
@@ -2457,15 +2460,15 @@ public class ChatSession extends Interpreter {
     public ActionResult requestFromWorker(String instruction) {
         redoCount = 0;
         redoNote = null;
-        String workerChatId = resolveWorker();
-        if (workerChatId == null) {
+        RoleTable.Collaborator worker = resolveWorker();
+        if (worker == null) {
             lastCollaborationError = "no collaborator with role 'worker' set for " + myChatName()
                     + " (use set_collaborator first)";
             return new ActionResult(false, lastCollaborationError);
         }
+        String workerChatId = worker.name();
         String prompt = (instruction == null || instruction.isBlank()) ? pendingPrompt : instruction;
-        String reply = AskChatTool.askQualified(system, watchdogRef, myChatName(), workerChatId, prompt,
-                WORKER_WAIT_TIMEOUT_SECONDS, nextRequestId());
+        String reply = askWorker(worker, prompt);
         recordWorkerRequestIo(workerChatId, prompt, reply);
         if (reply == null || reply.startsWith("error:")) {
             lastCollaborationError = reply != null ? reply : "no reply from worker";
@@ -2522,15 +2525,15 @@ public class ChatSession extends Interpreter {
      * @return {@link ActionResult} with {@code success=true} iff the worker replied
      */
     public ActionResult requestRedo() {
-        String workerChatId = resolveWorker();
-        if (workerChatId == null) {
+        RoleTable.Collaborator worker = resolveWorker();
+        if (worker == null) {
             lastCollaborationError = "no collaborator with role 'worker' set for " + myChatName()
                     + " (use set_collaborator first)";
             return new ActionResult(false, lastCollaborationError);
         }
+        String workerChatId = worker.name();
         String prompt = "Please revise your previous answer to address this feedback:\n" + redoNote;
-        String reply = AskChatTool.askQualified(system, watchdogRef, myChatName(), workerChatId, prompt,
-                WORKER_WAIT_TIMEOUT_SECONDS, nextRequestId());
+        String reply = askWorker(worker, prompt);
         recordWorkerRequestIo(workerChatId, prompt, reply);
         if (reply == null || reply.startsWith("error:")) {
             lastCollaborationError = reply != null ? reply : "no reply from worker";
@@ -2555,11 +2558,28 @@ public class ChatSession extends Interpreter {
         return new ActionResult(true, "reported failure");
     }
 
+    /** @return the last reply a worker gave this conversation's agent loop, or {@code null} */
+    public String lastWorkerReply() {
+        return lastWorkerReply;
+    }
+
+    /**
+     * Asks the worker and waits for its reply: on this instance as {@code ask_chat}'s plan path does, on another one over
+     * the remote path when the role names a node ({@code set_collaborator} with {@code node}).
+     */
+    private String askWorker(RoleTable.Collaborator worker, String prompt) {
+        return worker.node() == null
+                ? AskChatTool.askQualified(system, watchdogRef, myChatName(), worker.name(), prompt,
+                        WORKER_WAIT_TIMEOUT_SECONDS, nextRequestId())
+                : AskChatTool.askRemoteQualified(system, myChatName(), worker.node(), worker.name(), prompt,
+                        WORKER_WAIT_TIMEOUT_SECONDS, nextRequestId());
+    }
+
     /** Resolves this ConversationSquad's {@code "worker"} collaborator via its project's {@link RoleTable}, or {@code null}. */
-    private String resolveWorker() {
+    private RoleTable.Collaborator resolveWorker() {
         if (roleTableRef == null) return null;
         try {
-            return roleTableRef.ask(t -> t.collaborator(myChatName(), "worker")).get(5, TimeUnit.SECONDS);
+            return roleTableRef.ask(t -> t.collaboratorAt(myChatName(), "worker")).get(5, TimeUnit.SECONDS);
         } catch (Exception e) {
             logger.log(Level.WARNING, "resolveWorker: role table lookup failed", e);
             return null;
@@ -3165,12 +3185,17 @@ public class ChatSession extends Interpreter {
                     : SetAgentLoopTool.setAgentLoop(system, projectId, extractInput(args, "chatId"), extractInput(args, "yaml"));
             case "load_skill" -> LoadSkillTool.load(skillRegistryRef, extractInput(args, "name"));
             // Through the controls, which also save the edge; a ChatSession without them (a test) writes the graph only.
-            case "set_collaborator" -> conversationControls != null
-                    ? conversationControls.setCollaborator(myChatName(), extractInput(args, "chatId"),
-                            extractInput(args, "role"), extractInput(args, "collaboratorChatId"))
-                    : SetCollaboratorTool.setCollaborator(roleTableRef,
-                            myChatName(), extractInput(args, "chatId"), extractInput(args, "role"),
-                            extractInput(args, "collaboratorChatId"));
+            case "set_collaborator" -> {
+                String node = extractInput(args, "node");
+                yield conversationControls != null
+                        ? conversationControls.setCollaborator(myChatName(), extractInput(args, "chatId"),
+                                extractInput(args, "role"), extractInput(args, "collaboratorChatId"), node)
+                        : SetCollaboratorTool.setCollaborator(roleTableRef,
+                                myChatName(), extractInput(args, "chatId"), extractInput(args, "role"),
+                                extractInput(args, "collaboratorChatId"), node,
+                                n -> com.scivicslab.chatui.core.remote.RemoteNodes.of(system) != null
+                                        && com.scivicslab.chatui.core.remote.RemoteNodes.of(system).knows(n));
+            }
             case "get_chat_status" -> GetChatStatusTool.get(system, projectId, extractInput(args, "chatId"));
             case "list_chat_models" -> ListChatModelsTool.list(system, projectId, extractInput(args, "chatId"));
             case "set_chat_model" -> SetChatModelTool.set(system, conversationControls, projectId,

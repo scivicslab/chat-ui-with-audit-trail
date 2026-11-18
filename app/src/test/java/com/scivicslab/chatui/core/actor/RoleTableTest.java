@@ -157,4 +157,32 @@ class RoleTableTest {
             log.store().close();
         }
     }
+
+    /**
+     * A role played by a conversation on another chat-ui instance: the edge keeps the node, which is recorded and comes
+     * back after a restart; it is not dropped at start-up (whether it still exists cannot be told from here), and a
+     * conversation of the same name deleted here does not take it away.
+     */
+    @Test
+    void anEdgeToAConversationOnAnotherInstanceKeepsItsNodeAcrossARestart(@TempDir Path dir) throws Exception {
+        IoLogStore log = open(dir);
+        try {
+            IoLogView view = IoLogView.over(log);
+            RoleTable first = new RoleTable("project1", SessionEntries.ofProject(log, view, "project1"));
+            assertNull(first.set("project1/chat-02", "worker", "project1/chat-01", "b"));
+            assertNull(first.set("project1/chat-02", "reviewer", "project1/chat-03"));
+            assertEquals(new RoleTable.Collaborator("project1/chat-01", "b"), first.collaboratorAt("project1/chat-02", "worker"));
+            assertEquals(new RoleTable.Collaborator("project1/chat-03", null), first.collaboratorAt("project1/chat-02", "reviewer"));
+            assertFalse(first.forgetConversation("project1/chat-01"), "chat-01 here is not chat-01 on node b");
+
+            RoleTable second = new RoleTable("project1", SessionEntries.ofProject(log, view, "project1"));
+            second.restore(Set.of("project1/chat-02", "project1/chat-03"));
+            assertEquals(List.of(
+                    new RoleTable.Edge("project1/chat-02", "reviewer", "project1/chat-03", null),
+                    new RoleTable.Edge("project1/chat-02", "worker", "project1/chat-01", "b")), second.edges(),
+                    "the edge to node b came back with its node, though no project1/chat-01 exists here");
+        } finally {
+            log.store().close();
+        }
+    }
 }

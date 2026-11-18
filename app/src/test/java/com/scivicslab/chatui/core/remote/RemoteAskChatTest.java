@@ -334,6 +334,33 @@ class RemoteAskChatTest {
         }
     }
 
+    /**
+     * A role played by a conversation on another instance ({@code set_collaborator} with {@code node}): the agent loop
+     * resolves its worker to b's chat-01, asks it over the remote path and waits for the reply, as it waits for a worker
+     * on its own instance.
+     */
+    @Test
+    void aWorkerOnAnotherInstanceIsAskedOverTheRemotePathAndItsReplyComesBackToTheWaitingLoop() throws Exception {
+        IIActorSystem a = new IIActorSystem("instance-a-worker");
+        IIActorSystem b = new IIActorSystem("instance-b-worker");
+        Squad manager = squad(a, new Scripted(false, "unused"));
+        Scripted worker = new Scripted(false, "the checked result");
+        squad(b, worker);
+        startNodes(a, b);
+        ActorRef<com.scivicslab.chatui.core.actor.RoleTable> roles = a.actorOf("project1/roles",
+                new com.scivicslab.chatui.core.actor.RoleTable("project1",
+                        com.scivicslab.chatui.core.iolog.SessionEntries.ofProject(null, null, "project1")));
+        assertEquals(null, roles.ask(t -> t.set("project1/chat-01", "worker", "project1/chat-01", "b")).get(5, TimeUnit.SECONDS));
+        manager.chat().tellNow(x -> ((ChatSession) x).setRoleTableRef(roles)).join();
+
+        com.scivicslab.pojoactor.action.ActionResult result = manager.chat().asChatSessionRef()
+                .ask(c -> c.requestFromWorker("check it")).get(30, TimeUnit.SECONDS);
+        assertTrue(result.isSuccess(), result.getResult());
+        assertTrue(worker.prompts.stream().anyMatch(p -> p.contains("check it")), "b's conversation got the work: " + worker.prompts);
+        String reply = manager.chat().asChatSessionRef().ask(ChatSession::lastWorkerReply).get(5, TimeUnit.SECONDS);
+        assertEquals("the checked result", reply);
+    }
+
     @Test
     void theSameMessageSentTwiceRunsOnce() throws Exception {
         IIActorSystem a = new IIActorSystem("instance-a-dup");

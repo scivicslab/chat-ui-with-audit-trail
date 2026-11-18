@@ -1826,10 +1826,17 @@ public class ChatUiActorSystem implements ConversationControls {
      */
     @Override
     public String setCollaborator(String myChatName, String target, String role, String collaboratorChatId) {
+        return setCollaborator(myChatName, target, role, collaboratorChatId, null);
+    }
+
+    /** As above; {@code node} names another chat-ui instance this one knows, as {@code ask_chat} takes it. */
+    @Override
+    public String setCollaborator(String myChatName, String target, String role, String collaboratorChatId, String node) {
         String projectId = myChatName.substring(0, myChatName.indexOf('/'));
         if (!projects.containsKey(projectId)) return "error: unknown project: " + projectId;
+        com.scivicslab.chatui.core.remote.RemoteNodes nodes = com.scivicslab.chatui.core.remote.RemoteNodes.of(actorSystem);
         return com.scivicslab.chatui.agent.SetCollaboratorTool.setCollaborator(rolesOf(projectId),
-                myChatName, target, role, collaboratorChatId);
+                myChatName, target, role, collaboratorChatId, node, n -> nodes != null && nodes.knows(n));
     }
 
     /** @return the conversation's timekeeper, or {@code null} when there is no such conversation */

@@ -157,7 +157,12 @@ public final class AskChatTool {
      * @param node        the node the target is on, or {@code null} for this instance
      */
     private record Sent(String sender, String targetName, ActorRef<PromptQueue> targetQueue,
-                        CompletableFuture<TurnReply> done, String node) {}
+                        CompletableFuture<TurnReply> done, String node, boolean waiting) {
+        Sent(String sender, String targetName, ActorRef<PromptQueue> targetQueue, CompletableFuture<TurnReply> done,
+             String node) {
+            this(sender, targetName, targetQueue, done, node, false);
+        }
+    }
 
     /** How many sent requests are remembered; the oldest go first. */
     private static final int MAX_SENT = 2000;
@@ -546,6 +551,48 @@ public final class AskChatTool {
     }
 
     /**
+     * Asks a conversation of another chat-ui instance and waits for its reply, as {@link #askQualified} waits for one of
+     * this instance: what an agent loop does with a role played on another instance ({@code set_collaborator} with
+     * {@code node}). The request goes as any request across instances; its reply, when it comes, completes this wait
+     * instead of going into the sender's queue.
+     *
+     * @param myName         the waiting conversation's qualified name
+     * @param node           the other instance's node name
+     * @param targetName     the conversation's qualified name there
+     * @param timeoutSeconds how long to wait, or {@code null}/non-positive for the default
+     * @return the reply text, or an {@code error: ...} string
+     */
+    public static String askRemoteQualified(IIActorSystem system, String myName, String node, String targetName,
+                                            String prompt, Integer timeoutSeconds, String requestId) {
+        RemoteNodes nodes = RemoteNodes.of(system);
+        if (nodes == null) return "error: node " + node + " is not available: this instance has no other chat-ui instance configured";
+        if (!nodes.knows(node)) return "error: " + nodes.notKnown(node);
+        int wait = (timeoutSeconds != null && timeoutSeconds > 0) ? timeoutSeconds : DEFAULT_WAIT_TIMEOUT_SECONDS;
+        CompletableFuture<TurnReply> done = new CompletableFuture<>();
+        SENT.put(requestId, new Sent(myName, targetName, null, done, node, true));
+        JSONObject m = new JSONObject().put("requestId", requestId).put("sender", myName)
+                .put("senderNode", nodes.myName()).put("target", targetName).put("prompt", prompt).put("urgent", false);
+        Receipt receipt = nodes.send(node, "enqueueRequest", m.toString());
+        if (!receipt.accepted()) {
+            SENT.remove(requestId);
+            return "error: node " + node + " did not receive the request: " + receipt.detail();
+        }
+        TurnReply turn;
+        try {
+            turn = done.get(wait, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            return "error: chat " + targetName + " on node " + node + " did not respond within " + wait + "s";
+        } catch (Exception e) {
+            return "error: ask_chat to node " + node + " failed: " + e.getClass().getSimpleName() + ": " + e.getMessage();
+        }
+        if (turn == null || turn.reply() == null) {
+            return "error: no result from chat " + targetName + " on node " + node
+                    + (turn != null && turn.ending() != null ? ": " + turn.ending() : "");
+        }
+        return turn.reply();
+    }
+
+    /**
      * {@code expect_report} with a {@code node}: registers the report a conversation of another instance promised
      * with that conversation's timekeeper. The reminder's answer comes back as a follow-up.
      *
@@ -648,13 +695,25 @@ public final class AskChatTool {
                                            String targetName, boolean urgent, TurnReply reply, Throwable failure) {
         sendOrLog(nodes, link.node(), "enqueueReply", new JSONObject().put("requestId", link.requestId()).put("asker", askerName)
                 .put("from", targetName).put("urgent", urgent)
-                .put("text", replyMessage(targetName, link.requestId(), reply, failure)), "reply to request " + link.requestId());
+                .put("text", replyMessage(targetName, link.requestId(), reply, failure))
+                // The answer alone too, for a sender whose agent loop waits for it rather than reading a message.
+                .put("reply", failure == null && reply != null && reply.reply() != null ? reply.reply() : JSONObject.NULL)
+                .put("ending", failure == null && reply != null && reply.ending() != null ? reply.ending() : JSONObject.NULL)
+                .put("turnId", failure == null && reply != null && reply.turnId() != null ? reply.turnId() : JSONObject.NULL),
+                "reply to request " + link.requestId());
     }
 
     /** On the sender's instance: the reply goes into the sender's queue, as a reply inside one instance does. */
     public static ActionResult remoteReplyArrived(IIActorSystem local, JSONObject m) {
         String requestId = m.getString("requestId");
         String from = m.getString("from");
+        Sent waiting = SENT.get(requestId);
+        if (waiting != null && waiting.waiting()) {
+            // An agent loop waits for this reply in its turn (askRemoteQualified): it is the result of that wait.
+            waiting.done().complete(new TurnReply(m.isNull("reply") ? null : m.optString("reply", null),
+                    m.isNull("ending") ? null : m.optString("ending", null), m.isNull("turnId") ? null : m.optString("turnId", null)));
+            return new ActionResult(true, "handed to the waiting " + waiting.sender());
+        }
         ActionResult queued = enqueueFor(local, m.getString("asker"), m.getString("text"),
                 ChatSession.ASK_CHAT_REPLY_SOURCE_PREFIX + from, requestId, m.optBoolean("urgent", false));
         Sent sent = SENT.get(requestId);

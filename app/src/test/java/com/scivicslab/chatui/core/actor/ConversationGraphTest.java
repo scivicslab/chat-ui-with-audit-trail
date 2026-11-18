@@ -88,4 +88,11 @@ class ConversationGraphTest {
         assertEquals("Graph check", graph.name());
         assertNull(ConversationGraph.of("project1", null, List.of("01"), Map.of(), Map.of(), "01", List.of(), Map.of()).name());
     }
+
+    @Test
+    void aRoleEdgeToAnotherInstanceCarriesTheNode() {
+        ConversationGraph graph = ConversationGraph.of("project1", null, List.of("01", "02"), Map.of(), Map.of(), "01",
+                List.of(new RoleTable.Edge("project1/chat-02", "worker", "project1/chat-01", "b")), Map.of());
+        assertEquals(List.of(new ConversationGraph.RoleEdge("02", "worker", "01", "project1", "b")), graph.roleEdges());
+    }
 }

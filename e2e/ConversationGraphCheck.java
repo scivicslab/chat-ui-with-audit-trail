@@ -293,6 +293,21 @@ public class ConversationGraphCheck {
                     "project2's chat-01 carries the translator emoji, for project1/chat-02: " + tooltip(page, project2 + "/01").replace('\n', '|'));
             page.screenshot(new Page.ScreenshotOptions().setPath(Path.of("/tmp/uitest/graph-5-all-projects.png")));
 
+            // A role played by a conversation of another chat-ui instance (set_collaborator with node): a row of its
+            // own, named with its node, carrying the role's emoji; the tooltip says which node.
+            turn("01", "SCENARIO-G4 a role on another instance");
+            page.waitForFunction("() => { const n = document.querySelector(\"#conv-graph .cg-node[data-chat='b:project1/01']\");"
+                            + " return n && (n.getAttribute('data-roles') || '').includes('reviewer'); }",
+                    null, new Page.WaitForFunctionOptions().setTimeout(15_000));
+            String remoteTip = tooltip(page, "b:project1/01");
+            check("🔍".equals(prefix(page, "b:project1/01")) && remoteTip.contains("on node b")
+                            && remoteTip.contains("reviewer for project1/chat-03")
+                            && page.textContent("#conv-graph .cg-node[data-chat='b:project1/01'] .cg-id").contains("@b"),
+                    "chat-01 on node b carries the reviewer emoji, its node in the label and the tooltip: " + remoteTip.replace('\n', '|'));
+            check(rest("GET", "/api/graph", null).contains("\"role\":\"reviewer\",\"to\":\"01\",\"toProject\":\"project1\",\"node\":\"b\""),
+                    "the graph's edge carries the node");
+            page.screenshot(new Page.ScreenshotOptions().setPath(Path.of("/tmp/uitest/graph-6-other-instance.png")));
+
             // Folding a project hides its conversations, and stays folded after a reload.
             page.click("#conv-graph .cg-project[data-project='" + project2 + "']");
             page.waitForTimeout(400);
@@ -372,6 +387,8 @@ public class ConversationGraphCheck {
                 "the edge to project2/chat-05, a conversation that never existed, was dropped at start-up");
         check(g.contains("\"role\":\"translator\",\"to\":\"01\",\"toProject\":\"project2\""),
                 "the edge into project2/chat-01, which exists, came back");
+        check(g.contains("\"role\":\"reviewer\",\"to\":\"01\",\"toProject\":\"project1\",\"node\":\"b\""),
+                "the edge to chat-01 on node b came back with its node");
         String chats = rest("GET", "/api/projects/project1/chats", null);
         check(chats.contains("\"02\"") && chats.contains("\"03\"") && chats.contains("\"04\"") && chats.contains("\"05\""),
                 "chat-02..05, which never ran a turn, came back: " + chats);
@@ -392,7 +409,7 @@ public class ConversationGraphCheck {
                     "after the restart both projects carry their names");
             check("🌐".equals(prefix(page, "project2/01")), "and project2's chat-01 still carries the translator emoji");
             check("🔍".equals(prefix(page, "project1/04")) && "🏷️🤝🧪…".equals(prefix(page, "project1/05"))
-                            && page.querySelectorAll("#conv-graph .cg-node.cg-external").isEmpty() && "".equals(prefix(page, "project1/03")),
+                            && page.querySelectorAll("#conv-graph .cg-node.cg-external:not(.cg-remote)").isEmpty() && "".equals(prefix(page, "project1/03")),
                     "after the restart the nodes carry the same roles: 04=" + prefix(page, "project1/04") + " 05=" + prefix(page, "project1/05")
                             + " project2/05=" + prefix(page, "project2/05"));
             check(tooltip(page, "project1/05").contains("worker for chat-02"), "and chat-05 is still chat-02's worker: "

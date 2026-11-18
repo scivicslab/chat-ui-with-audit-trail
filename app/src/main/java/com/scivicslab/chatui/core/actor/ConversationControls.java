@@ -125,6 +125,16 @@ public interface ConversationControls {
     String setCollaborator(String myChatName, String target, String role, String collaboratorChatId);
 
     /**
+     * As above, with the role played by a conversation on another chat-ui instance.
+     *
+     * @param node that instance's node name, or {@code null} for this instance
+     */
+    default String setCollaborator(String myChatName, String target, String role, String collaboratorChatId, String node) {
+        if (node != null && !node.isBlank()) return "error: node " + node.strip() + " is not known to this instance";
+        return setCollaborator(myChatName, target, role, collaboratorChatId);
+    }
+
+    /**
      * {@code set_agent_loop}: puts the YAML on the target conversation and records it, so that a restart puts it
      * back ({@code ConversationRestoreOnRestart_260904_oo01}).
      *

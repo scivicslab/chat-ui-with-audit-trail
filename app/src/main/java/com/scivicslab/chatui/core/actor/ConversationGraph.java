@@ -59,8 +59,13 @@ public record ConversationGraph(String projectId, String name, String liaison, L
      * @param role      the role name
      * @param to        the target's bare id
      * @param toProject the target's project, which may be another project
+     * @param node      the chat-ui instance the target is on when that is another one ({@code set_collaborator} with
+     *                  {@code node}), or {@code null}
      */
-    public record RoleEdge(String from, String role, String to, String toProject) {}
+    public record RoleEdge(String from, String role, String to, String toProject, String node) {
+        /** An edge to a conversation of this instance. */
+        public RoleEdge(String from, String role, String to, String toProject) { this(from, role, to, toProject, null); }
+    }
 
     /**
      * @param chatIds   the project's conversations, bare ids
@@ -92,7 +97,7 @@ public record ConversationGraph(String projectId, String name, String liaison, L
             String[] from = split(e.from());
             String[] to = split(e.to());
             if (from == null || to == null || !projectId.equals(from[0]) || !ids.contains(from[1])) continue;
-            roles.add(new RoleEdge(from[1], e.role(), to[1], to[0]));
+            roles.add(new RoleEdge(from[1], e.role(), to[1], to[0], e.node()));
         }
         roles.sort((a, b) -> a.from().equals(b.from()) ? a.role().compareTo(b.role()) : a.from().compareTo(b.from()));
         return new ConversationGraph(projectId, name, liaison, nodes, sup, roles);

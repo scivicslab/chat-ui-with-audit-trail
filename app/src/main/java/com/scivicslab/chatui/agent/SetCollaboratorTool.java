@@ -31,6 +31,20 @@ public final class SetCollaboratorTool {
      */
     public static String setCollaborator(ActorRef<RoleTable> roles, String myChatName,
                                           String target, String role, String collaboratorChatId) {
+        return setCollaborator(roles, myChatName, target, role, collaboratorChatId, null, n -> false);
+    }
+
+    /**
+     * As above, with the role played by a conversation on another chat-ui instance, named as {@code ask_chat} names one
+     * there ({@code ConversationSquadsAcrossInstances_261115_oo01}). The node goes into the edge's own record, so the
+     * agent loop sends there over the remote path, and it survives a restart.
+     *
+     * @param node      that instance's node name, or {@code null}/blank for this instance
+     * @param nodeKnown whether this instance knows a node by that name; an unknown one is refused with nothing changed
+     */
+    public static String setCollaborator(ActorRef<RoleTable> roles, String myChatName, String target, String role,
+                                          String collaboratorChatId, String node,
+                                          java.util.function.Predicate<String> nodeKnown) {
         if (target == null || target.isBlank()) return "error: chatId is required";
         if (role == null || role.isBlank()) return "error: role is required";
         if (collaboratorChatId == null || collaboratorChatId.isBlank()) {
@@ -43,12 +57,18 @@ public final class SetCollaboratorTool {
             return "error: refused — " + target + " belongs to another project; set_collaborator"
                     + " across projects must go through that project's gateway (not implemented yet)";
         }
+        String onNode = node == null || node.isBlank() ? null : node.strip();
+        if (onNode != null && !nodeKnown.test(onNode)) {
+            return "error: node " + onNode + " is not known to this instance; give a node ask_chat can reach, "
+                    + "or leave node out for a conversation of this instance";
+        }
         String collaboratorName = ChatUiActorSystem.resolveChatName(myProjectId, collaboratorChatId);
         try {
             if (roles == null) return "error: set_collaborator failed: no role table";
-            String refusal = roles.ask(t -> t.set(targetName, role, collaboratorName)).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            String refusal = roles.ask(t -> t.set(targetName, role, collaboratorName, onNode)).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
             if (refusal != null) return "error: " + refusal;
-            return "ok: " + targetName + "'s '" + role + "' collaborator set to " + collaboratorName;
+            return "ok: " + targetName + "'s '" + role + "' collaborator set to " + collaboratorName
+                    + (onNode == null ? "" : " on node " + onNode);
         } catch (Exception e) {
             LOG.log(Level.WARNING, "set_collaborator: failed", e);
             return "error: set_collaborator failed: " + e.getMessage();
