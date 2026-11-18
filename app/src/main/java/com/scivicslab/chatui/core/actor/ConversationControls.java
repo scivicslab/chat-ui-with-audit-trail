@@ -116,6 +116,15 @@ public interface ConversationControls {
     String positionOf(String projectId, String chatId);
 
     /**
+     * @return the bare id of the superior a conversation's {@code ask_person} question goes to when no request
+     *         waits for its answer, or {@code null} when the conversation is the liaison or has no superior
+     *         ({@code AskThePersonEndsTheTurn_261119_oo01})
+     */
+    default String superiorToAsk(String projectId, String chatId) {
+        return null;
+    }
+
+    /**
      * Sets {@code target}'s collaborator for {@code role}, and saves it with the project's settings so that a
      * restart finds it ({@code CollaborationGraph_260828_oo01}).
      *

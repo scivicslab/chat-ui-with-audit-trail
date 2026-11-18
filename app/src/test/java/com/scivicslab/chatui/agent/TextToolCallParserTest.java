@@ -207,6 +207,26 @@ class TextToolCallParserTest {
                 TextToolCallParser.stripToolCallBlocks(text));
     }
 
+    /**
+     * The measured shape of project9/chat-01, session 140, turn 44, step 6, with ask_person before its bash call: two
+     * calls glued one after the other to the end of a finished sentence are two calls, each with its own arguments.
+     */
+    @Test
+    void twoGlmCallsGluedToTheEndOfASentenceAreTwoCalls() {
+        String text = "どうしますか？ A/B/C、または章立て自体の修正からでもどうぞ。"
+                + "<tool_call>ask_person<arg_key>question</arg_key><arg_value>A, B or C?</arg_value></tool_call>"
+                + "<tool_call>bash<arg_key>command</arg_key><arg_value>sed -n '1,80p' instance.h</arg_value>"
+                + "<arg_key>reason</arg_key><arg_value>read the Instance class</arg_value></tool_call>";
+        List<ToolCall> calls = TextToolCallParser.parse(text);
+        assertEquals(2, calls.size(), calls.toString());
+        assertEquals("ask_person", calls.get(0).name());
+        assertEquals("{\"question\":\"A, B or C?\"}", calls.get(0).argumentsJson());
+        assertEquals("bash", calls.get(1).name());
+        assertEquals("{\"command\":\"sed -n '1,80p' instance.h\",\"reason\":\"read the Instance class\"}",
+                calls.get(1).argumentsJson());
+        assertEquals("どうしますか？ A/B/C、または章立て自体の修正からでもどうぞ。", TextToolCallParser.stripToolCallBlocks(text));
+    }
+
     /** What the glued form must not take for a call: a quotation in prose, which is not a finished sentence's tail. */
     @Test
     void glmSpellingQuotedMidSentenceOrNotLastIsNotACall() {

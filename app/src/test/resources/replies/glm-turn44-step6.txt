@@ -1,0 +1,53 @@
+# fcitx5ソースコードからTeXbookを作る話 — 進め方の提案
+
+ここまでの調査で、fcitx5本体の構造把握が完了しました。まず重要な現状認識を共有します。
+
+## 調査で分かったこと
+
+**fcitx5のコアは約8万行のC++**で、構造は明快です:
+
+| ディレクトリ | 行数 | 役割 |
+|---|---|---|
+| `src/lib/fcitx/` | 約59千行 | コア。instance(メインループ)、addon機構、inputcontext管理 |
+| `src/lib/fcitx-utils/` | (libに含む) | eventloop、ログ、文字列処理。**他プロジェクトにも使える部品庫** |
+| `src/frontend/` | 約6.7千行 | gtk/qt/ximの接続 |
+| `src/im/keyboard/` | 約2.5千行 | 標準IMEの実装。**アドオンの模範例** |
+| `src/modules/` | 約12.6千行 | 付属機能(clipboard, emoji等) |
+
+核心のファイルは `instance.cpp` (2706行)です。**イベントループ+アドオン管理+フォーカス管理**がここに集約され、あなたが指摘された「メインループの上で処理を流す」の正体です。
+
+## TeXbook化の提案： 読む順序の設計
+
+TeXbook(文芸的プログミングの原典)の精神は「**読みたい順に並べ替えたソース+その解説**」でした。fcitx5版でこれを実現すると：
+
+**第1章： インスタンスの誕生**
+`main() → Application → Instance` の構築順。設定ファイルの読み込みからイベントループ起動まで
+
+**第2章： イベントループの一周**
+`EventLoop::exec()` の1周で何が起きるか。ファイルディスクリプタ、タイマー、DBusシグナルがどうdispatchされるか
+
+**第3章： キーイベントの旅**
+`KeyPress → keyEvent() → IMの処理 → Preedit → Commit` の一本の流れ。あなたのIMEが通る道です
+
+**第4章： アドオンのロードとライフサイクル**
+`AddonLoader → AddonFactory → AddonInstance`。遅延ロードの仕組みと依存解決
+
+**第5章： 状態はInputContextに宿る**
+`InputContext` がなぜ存在し、プロパティ機構でIME固有状態を保持するか
+
+**第6章： 我々のslm-imeを読み直す**
+上記の観点で、`llm-ime-engine.cpp` の非同期処理(`EventDispatcher::schedule`でメインループに戻る構造)を検証する
+
+各章の構成はあなたが好む形式——**(1)直観的説明 (2)形式的主張 (3)実例——**で書きます。ソース引用は行番号付きの抜粋とし、文芸的再構成はしない(普通のソースのまま)です。
+
+## 進め方の選択肢
+
+**A案(私が書く)**： 上の章立てで第1章から書き始める。1章あたり1〜2ターン。完成は6ターン後
+
+**B案(workerに分割)**： 第1〜2章をworker1へ(instance解析)、第3章をworker2(keyboard追跡)、第4〜5章をworker3(アドオン機構)へ。並行で進み私は統合。速いが、文体の統一が必要
+
+**C案(まず第1章だけ試作)**： 第1章のみ書いて見せる。方向性が合っていれば残りを継続
+
+私のおすすめは**C案**です。「TeXbookのようなもの」の具体形は、実際に一章見ないと判断できない部分が大きいので。第1章(instance誕生まで)なら、ソース読解+執筆でこの場で完結します。
+
+どうしますか？ A/B/C、または章立て自体の修正からでもどうぞ。<tool_call>bash<arg_key>command</arg_key><arg_value>cd /home/devteam/works/fcitx5-src && sed -n '1,80p' src/lib/fcitx/instance.h</arg_value><arg_key>reason</arg_key><arg_value>第1章の核となるInstanceクラスの定義を確認する</arg_value></tool_call>

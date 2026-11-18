@@ -1661,6 +1661,12 @@ public class ChatUiActorSystem implements ConversationControls {
         return organizationSnapshot(projectId).positionText(projectId, chatId, c -> labelOf(projectId, c));
     }
 
+    @Override
+    public String superiorToAsk(String projectId, String chatId) {
+        if (!projects.containsKey(projectId) || isLiaison(projectId, chatId)) return null;
+        return organizationSnapshot(projectId).superiorOf(chatId);
+    }
+
     // ── What the team desk needs (TeamBuiltByProjectWorkflow_261108_oo01) ──────────────────────────────
 
     /** @return the bare id of the project's liaison */

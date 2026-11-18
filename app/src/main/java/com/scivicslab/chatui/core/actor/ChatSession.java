@@ -163,6 +163,14 @@ public class ChatSession extends Interpreter {
     private int turnToolCalls;
     /** Whether this turn stopped at the workflow's step limit. Reset in {@code start}. */
     private boolean stepLimitHit;
+    /**
+     * The question the latest step put to the person with {@code ask_person}, or {@code null}. Set by
+     * {@code stepExpectingAction}, read by {@code askedThePerson}; once set, the turn ends
+     * ({@code AskThePersonEndsTheTurn_261119_oo01}). Reset in {@code start}.
+     */
+    private String personQuestion;
+    /** Where this turn's prompt came from, as {@code PromptQueue} gave it. Set in {@code start}. */
+    private String turnSource;
     // UUIDs that have been registered (via submitPrompt) but not yet started processing
     private final Set<String> pendingResultKeys = new HashSet<>();
     // UUID of the prompt currently being processed, or null
@@ -192,6 +200,9 @@ public class ChatSession extends Interpreter {
      */
     private FileAccessScope fileScope = FileAccessScope.processDirectory();
 
+    /** The tool a conversation calls to ask the person and end its turn ({@code AskThePersonEndsTheTurn_261119_oo01}). */
+    public static final String ASK_PERSON = "ask_person";
+
     private static final String SYSTEM_PROMPT_HEAD = """
             You are a helpful assistant with access to tools. To call a tool, write EXACTLY this format \
             in your reply (nothing else on those lines). Every parameter, without exception, uses a \
@@ -213,6 +224,12 @@ public class ChatSession extends Interpreter {
 
             When an answer shows a call block as an example, write its angle brackets as square \
             brackets, e.g. [invoke name="calc"] ... [/invoke], so that it is not run.
+
+            Asking the person ends your turn. When you need the person's answer or decision before you go \
+            on — choosing between options you offer, approving a plan, confirming something you are unsure \
+            of — call ask_person with the question, and put no other tool call in that reply. A reply that \
+            asks a question or waits for a decision must not also start the work it asks about: anything \
+            else it calls is not run, and the turn ends. The answer arrives as your next message.
 
             Available tools:
             """;
@@ -280,6 +297,16 @@ public class ChatSession extends Interpreter {
 
     private static Map<String, String> toolDescriptions() {
         Map<String, String> m = new LinkedHashMap<>();
+        // First in the list: it is read before any tool a model might reach for instead of asking
+        // (AskThePersonEndsTheTurn_261119_oo01). Never run by runTool: stepExpectingAction reads it.
+        m.put(ASK_PERSON, """
+            - ask_person(question): ask the person a question and end your turn at once. Use it whenever
+              you need a decision or an answer before you can go on. Write what the person needs to know
+              before the call, in the same reply; put the question itself in "question". No other tool in
+              that reply runs. In a conversation that is not the liaison, the question goes to whoever sent
+              the request you are working on, or to your superior when no request did. Requires a
+              "question" <parameter> tag.
+            """);
         m.put("read", """
             - read(path): read a file, or a whole directory recursively, under the working directory.
               To read several files at once, put one path per line in the same "path" parameter —
@@ -353,8 +380,9 @@ public class ChatSession extends Interpreter {
               with "[reply to request <request id>, from <the turn that wrote it>]" — match the id
               against the one you were given to tell which request it answers — followed by one
               line, [ended: answered; model calls: N; tool calls: M], saying how its turn ended:
-              "answered", or "step-limit" when it ran out of steps (then the reply is only a notice,
-              not an answer). If its turn left no reply, the message says so and why. So once you
+              "answered", "step-limit" when it ran out of steps (then the reply is only a notice,
+              not an answer), or "asked" when it ended with ask_person (then the reply is a question
+              that waits for your decision: answer it with ask_chat, or ask_person yourself). If its turn left no reply, the message says so and why. So once you
               have sent your instructions, end your turn and wait; do not call get_chat_log or
               get_chat_status over and over to look for the reply, since it cannot arrive while
               your turn goes on. Several replies wait in order and come to you one per turn. Use
@@ -1358,6 +1386,7 @@ public class ChatSession extends Interpreter {
         }
 
         busy = true;
+        this.turnSource = source;
         this.ioSession = (ioLog != null) ? ioLog.ensureSession(myChatName()) : -1;
         this.ioTurnNo = ++ioTurn;
         this.turnRequestId = requestId;
@@ -1427,6 +1456,7 @@ public class ChatSession extends Interpreter {
         this.stepCount = 0;
         this.turnToolCalls = 0;
         this.stepLimitHit = false;
+        this.personQuestion = null;
         this.cancelled = false;
         this.constructedPrompts.clear();
         this.cutOffPending = false;
@@ -1554,6 +1584,8 @@ public class ChatSession extends Interpreter {
      * @return {@link ActionResult} with {@code success=true} iff prompts remain queued
      */
     public ActionResult hasMoreConstructedPrompts() {
+        // A question to the person ends the turn; the prompts still queued wait for the answer.
+        if (personQuestion != null) return new ActionResult(false, "asked the person");
         boolean more = !constructedPrompts.isEmpty();
         return new ActionResult(more, more ? "more queued" : "empty");
     }
@@ -1786,6 +1818,24 @@ public class ChatSession extends Interpreter {
         cutOffRun = 0;
         cutOffText.setLength(0);
 
+        // A reply that asks the person ends the turn, whatever else it calls: the other calls are work the
+        // person has not decided on yet, so none of them runs (AskThePersonEndsTheTurn_261119_oo01).
+        ToolCall ask = outcome.analysis().calls().stream()
+                .filter(tc -> ASK_PERSON.equals(tc.name()) && !questionOf(tc).isBlank())
+                .findFirst().orElse(null);
+        if (ask != null) {
+            repairRun = 0;
+            personQuestion = questionOf(ask);
+            String prose = TextToolCallParser.stripToolCallBlocks(outcome.text());
+            finalAnswer = prose.isBlank() ? personQuestion
+                    : prose.contains(personQuestion) ? prose : prose + "\n\n" + personQuestion;
+            List<String> dropped = outcome.analysis().calls().stream().filter(tc -> tc != ask).map(ToolCall::name).toList();
+            recordAskPerson(dropped);
+            turnEmitter.accept(ChatEvent.thinking("\n→ ask_person: the turn ends with a question to the person"
+                    + (dropped.isEmpty() ? "" : "; not run: " + String.join(", ", dropped)) + "\n"));
+            return new ActionResult(false, "asked the person");
+        }
+
         if (outcome.analysis().broken()) {
             // The reply tried to call a tool, but the call cannot be run as written. Nothing in it runs;
             // the think-repair transition decides whether the turn goes on with a note saying what was
@@ -1840,6 +1890,75 @@ public class ChatSession extends Interpreter {
         } catch (Exception e) {
             logger.log(Level.WARNING, "I/O log repair record failed", e);
         }
+    }
+
+    /** @return the {@code question} argument of an {@code ask_person} call, or {@code ""} */
+    private static String questionOf(ToolCall call) {
+        try {
+            return new JSONObject(call.argumentsJson()).optString("question", "").strip();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /**
+     * Records a step that asked the person to the I/O log ({@code turn{N}/step{M}/ask-person}) and the
+     * conversation's own log: the question, and the other calls of the same reply, which did not run.
+     */
+    private void recordAskPerson(List<String> dropped) {
+        String notRun = dropped.isEmpty() ? "none" : String.join(", ", dropped);
+        logToConversationSquad(dropped.isEmpty() ? "INFO" : "WARNING", "turn" + ioTurnNo + "/step" + stepCount
+                + "/llm: ask_person ends the turn; other tool calls in the reply, not run: " + notRun);
+        if (ioLog == null || ioSession < 0) return;
+        try {
+            ioLog.record(ioSession, "agent", "turn" + ioTurnNo + "/step" + stepCount + "/ask-person",
+                    "QUESTION: " + personQuestion + "\nNOT RUN: " + notRun);
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "I/O log ask-person record failed", e);
+        }
+    }
+
+    /**
+     * The {@code think-asks-person} transition's first step: succeeds only when the step that just ran
+     * asked the person with {@code ask_person}, so the turn ends without another model call
+     * ({@code AskThePersonEndsTheTurn_261119_oo01}).
+     *
+     * <p>The question is the turn's answer, and it goes where the answer goes: to the sender of the
+     * request the turn works for, or to the screen when the person's own message began the turn. A turn
+     * that neither answers a request nor began with the person's message (a timekeeper notice, a job's
+     * message) has no one to read it, so in a conversation that is not the liaison and has a superior the
+     * question is sent to the superior with {@code ask_chat}; the superior's answer arrives as a new
+     * message.</p>
+     */
+    public ActionResult askedThePerson() {
+        if (personQuestion == null) return new ActionResult(false, "did not ask the person");
+        if (turnOriginal == null && !startedByThePerson(turnSource) && conversationControls != null) {
+            String superior = null;
+            try {
+                superior = conversationControls.superiorToAsk(projectId, chatId);
+            } catch (Exception e) {
+                logger.log(Level.WARNING, "Could not read this conversation's superior", e);
+            }
+            if (superior != null) {
+                String requestId = nextRequestId();
+                String sent = AskChatTool.send(system, projectId, chatId, superior,
+                        "[question from " + myChatName() + ", asked with ask_person while no request was waiting"
+                                + " for its answer]\n" + finalAnswer, requestId);
+                logToConversationSquad(sent.startsWith("sent to ") ? "INFO" : "WARNING",
+                        "ask_person: the question went to the superior chat-" + superior + ": " + sent);
+                if (sent.startsWith("sent to ")) {
+                    openRequests.sentWithoutAnOriginal(requestId,
+                            ChatUiActorSystem.resolveChatName(projectId, superior), System.currentTimeMillis());
+                    publishOutstanding();
+                }
+            }
+        }
+        return new ActionResult(true, "asked the person");
+    }
+
+    /** @return whether a prompt from {@code source} was written by the person, on the screen or through the API */
+    static boolean startedByThePerson(String source) {
+        return source == null || source.isBlank() || "human".equals(source) || "screen".equals(source);
     }
 
     /**
@@ -2411,7 +2530,8 @@ public class ChatSession extends Interpreter {
             recordHistory("assistant", answer, null, provider.getCurrentModel(), answeredIn);
             recordConversationIo(question, answer, provider.getCurrentModel(), answeredIn);
             String ending = ChatInspection.endingLine(
-                    stepLimitHit ? ChatInspection.ENDED_STEP_LIMIT : ChatInspection.ENDED_ANSWERED,
+                    personQuestion != null ? ChatInspection.ENDED_ASKED
+                            : stepLimitHit ? ChatInspection.ENDED_STEP_LIMIT : ChatInspection.ENDED_ANSWERED,
                     stepCount, turnToolCalls);
             turnAnswer = new TurnReply(answer, ending, turnId());
             if (activeResultKey != null) {
@@ -2717,6 +2837,11 @@ public class ChatSession extends Interpreter {
      * @return always {@code success=true}: a failure here must not stop the turn from ending
      */
     public ActionResult decideReminder() {
+        // A turn that ends with a question promises nothing: the answer comes back as a new message.
+        if (personQuestion != null) {
+            noteReminderDecision("NONE | the turn ended with a question to the person (ask_person)", null, null);
+            return new ActionResult(true, "asked the person");
+        }
         try {
             decideReminderNow();
         } catch (Exception e) {
@@ -3086,6 +3211,8 @@ public class ChatSession extends Interpreter {
     public ActionResult replyLeftUndecided() {
         // A turn being paused or cancelled is not ending: the decision, if still owed, is asked for when it resumes.
         if (cancelled || pauseRequested) return new ActionResult(false, "paused or cancelled");
+        // Asking the person is how this turn ends; the decision on the reply follows the person's answer.
+        if (personQuestion != null) return new ActionResult(false, "asked the person");
         if (undecidedRequest == null) return new ActionResult(false, "no reply waiting for a decision");
         if (decisionAsked) {
             logToConversationSquad("WARNING", "turn" + ioTurnNo + ": no decision was recorded on the reply to request "

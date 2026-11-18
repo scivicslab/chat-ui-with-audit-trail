@@ -69,6 +69,25 @@ steps:
         method: stepExpectingAction
         execution: direct
 
+  - states: ["think", "end"]
+    label: think-asks-person
+    note: |
+      The step that just ran called ask_person: it asked the person a question, and the turn ends here,
+      with the question as its answer, without another model call. Any other tool call in that reply was
+      not run (AskThePersonEndsTheTurn_261119_oo01). askedThePerson fails when the step did not ask, and the
+      scan goes on to think-cut-off. A question from a turn that answers no request and was not begun by
+      the person goes to the superior of a conversation that is not the liaison.
+    actions:
+      - actor: this
+        method: askedThePerson
+        execution: direct
+      - actor: this
+        method: rearmReplyWatches
+        execution: direct
+      - actor: this
+        method: finish
+        execution: direct
+
   - states: ["think", "think"]
     label: think-cut-off
     note: |

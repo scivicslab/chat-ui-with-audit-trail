@@ -421,6 +421,18 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     }
 
     /**
+     * The first step of {@code think-asks-person}: succeeds only when the step that just ran asked the person
+     * with {@code ask_person}, so the turn ends there ({@code AskThePersonEndsTheTurn_261119_oo01}).
+     *
+     * @param arg unused
+     * @return successful when the person was asked
+     */
+    @Action("askedThePerson")
+    public ActionResult askedThePersonAction(String arg) {
+        return chatSession().askedThePerson();
+    }
+
+    /**
      * The step at the end of a turn that decides whether the timekeeper must remind the conversation
      * ({@code ReminderDecidedAtTheEndOfTheTurn_261114_oo01}).
      *

@@ -127,11 +127,15 @@ public final class TextToolCallParser {
     // The same call glued to the end of the reply, as GLM appends accept_reply to a finished answer (measured on
     // project9/chat-01: "...完了済みです。<tool_call>accept_reply<arg_key>...</tool_call>" with no line break). A
     // quotation in prose is not this: it is not the last thing in the reply, and does not follow a finished
-    // sentence (a colon, a space, a backtick or a quote mark before it).
-    private static final String GLM_TRAILING_START = "(?<=[。．.!?！？)）」』\\]】])<tool_call>[ \\t]*"
+    // sentence (a colon, a space, a backtick or a quote mark before it). Several calls may be glued one after
+    // another (measured on project9/chat-01, turn 44: "...どうぞ。<tool_call>ask_person...</tool_call><tool_call>bash
+    // ...</tool_call>"): each is its own call, read up to its own </tool_call>, as long as only such calls follow it
+    // to the end of the reply (AskThePersonEndsTheTurn_261119_oo01).
+    private static final String GLM_TRAILING_START = "(?<=[。．.!?！？)）」』\\]】]|</tool_call>)<tool_call>[ \\t]*"
             + "([A-Za-z_][\\w.\\-]*+)\\s*(?=<arg_key>|</tool_call>)";
-    private static final Pattern GLM_TRAILING =
-            Pattern.compile(GLM_TRAILING_START + "(.*?)</tool_call>\\s*\\z", Pattern.DOTALL);
+    private static final Pattern GLM_TRAILING = Pattern.compile(GLM_TRAILING_START
+            + "((?:(?!</tool_call>).)*?)</tool_call>(?=(?:\\s*<tool_call>(?:(?!</tool_call>).)*</tool_call>)*\\s*\\z)",
+            Pattern.DOTALL);
     // A <arg_key>KEY</arg_key><arg_value>VALUE</arg_value> pair. VALUE ends at </arg_value>, the next <arg_key>,
     // </tool_call> or the end of the text; the <arg_value> open tag may be missing (measured), and so the close.
     private static final Pattern GLM_ARG = Pattern.compile(

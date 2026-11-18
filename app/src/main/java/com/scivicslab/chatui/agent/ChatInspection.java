@@ -87,9 +87,11 @@ public final class ChatInspection {
     public static final String ENDED_ANSWERED = "answered";
     /** The turn stopped because its workflow's step limit was reached. */
     public static final String ENDED_STEP_LIMIT = "step-limit";
+    /** The turn ended with {@code ask_person}: its reply is a question waiting for a decision. */
+    public static final String ENDED_ASKED = "asked";
 
     /**
-     * @param ending    {@link #ENDED_ANSWERED} or {@link #ENDED_STEP_LIMIT}
+     * @param ending    {@link #ENDED_ANSWERED}, {@link #ENDED_STEP_LIMIT} or {@link #ENDED_ASKED}
      * @param modelCalls how many times the turn called the model
      * @param toolCalls  how many tools the turn ran
      * @return the one line {@code ask_chat} puts after the reply

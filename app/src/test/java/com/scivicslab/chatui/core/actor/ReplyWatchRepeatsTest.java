@@ -227,7 +227,8 @@ class ReplyWatchRepeatsTest {
                 "doc-retrieval-prompt-loop")) {
             try (java.io.InputStream in = getClass().getResourceAsStream("/workflows/" + loop + ".yaml")) {
                 String yaml = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-                assertEquals(2, yaml.split("method: rearmReplyWatches", -1).length - 1, loop + ": think-final and step-limit");
+                assertEquals(3, yaml.split("method: rearmReplyWatches", -1).length - 1,
+                        loop + ": think-final, step-limit and think-asks-person");
                 int finalAt = yaml.indexOf("label: think-final");
                 assertTrue(yaml.indexOf("method: rearmReplyWatches", finalAt) < yaml.indexOf("method: decideReminder", finalAt), loop);
             }
