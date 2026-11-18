@@ -239,7 +239,9 @@ public class ChatSession extends Interpreter {
             Map.entry("create_chat", List.of("provider", "model", "superior", "role")),
             Map.entry("get_chat_log", List.of("count")),
             Map.entry("complete_messages", List.of("model", "noThink")),
-            Map.entry("list_references", List.of("direction", "relation")),
+            Map.entry("list_references", List.of("direction", "relation", "node")),
+            Map.entry("search_docs", List.of("node")),
+            Map.entry("list_running_tools", List.of("tool")),
             Map.entry("set_chat_timekeeper", List.of("urgentWaitMinutes", "childReplyWarnMinutes")),
             Map.entry("accept_reply", List.of("requestId")),
             Map.entry("set_chat_name", List.of("name")),
@@ -290,7 +292,7 @@ public class ChatSession extends Interpreter {
             - calc(expression): evaluate a Java arithmetic expression, e.g. 23*47 or Math.sqrt(16).
             """);
         m.put("search_docs", """
-            - search_docs(query): search this team's internal documentation. It returns a ranked
+            - search_docs(query, node): search this team's internal documentation. It returns a ranked
               list of CANDIDATE documents — title, id, source path and a short summary each — not
               the answer to your question. A summary says what a document is about, not what it
               says, so to actually answer you must then call read on the "path" of the candidates
@@ -300,10 +302,17 @@ public class ChatSession extends Interpreter {
               over term frequencies, over meaning — always run, and their results are merged; each
               candidate says which of them found it, and one found by more than one is the strongest
               signal in the list. Search in the language the documents are written in: these are
-              mostly Japanese.
+              mostly Japanese. "node" is optional: leave it out to search the default documentation
+              portal, or give the name of another html-saurus node to search that one instead.
+            """);
+        m.put("list_running_tools", """
+            - list_running_tools(tool): list the tool instances the AI-workspace that runs this
+              chat-ui is running — each one's name, port, state (READY, STARTING, ...), address and
+              title. "tool" is optional: give a tool's name to list only its instances. It only
+              reads the list; it cannot start or stop anything.
             """);
         m.put("list_references", """
-            - list_references(id, direction, relation): follow the reference links an author
+            - list_references(id, direction, relation, node): follow the reference links an author
               declared between documents. Pass the "id" a search_docs candidate printed. Direction
               "forward" (the default) returns the documents that one refers to; "backward" returns
               the documents that refer to it. Each edge has a kind, written by the author — the
@@ -315,6 +324,7 @@ public class ChatSession extends Interpreter {
               the same kind of candidate list search_docs does, so call read on a path to see what
               a document actually says. "backward" stops at 30 documents and says so when it did;
               a standard that many documents declare as their prerequisite has that many edges.
+              "node" is optional and means what it means for search_docs.
             """);
         m.put("write", """
             - write(path, content): save text to a file under the working directory. Requires TWO
@@ -3142,9 +3152,20 @@ public class ChatSession extends Interpreter {
                 yield refusal != null ? refusal : calculator().evaluate(expression);
             }
             case "remove" -> FileRemoveTool.remove(fileScope, extractInput(args, "path"));
-            case "search_docs" -> DocSearchTool.search(extractInput(args, "query"), 0);
-            case "list_references" -> ReferenceLinkTool.list(extractInput(args, "id"),
-                    extractInput(args, "direction"), extractInput(args, "relation"));
+            case "search_docs", "list_references" -> {
+                // An html-saurus node when this instance knows one, else the HTTP API
+                // (ActorNodesForWorkspaceAndPortal_261118_oo01, decision 7).
+                var docs = com.scivicslab.chatui.agent.DocsSource.choose(
+                        com.scivicslab.chatui.core.remote.RemoteNodes.of(system), extractInput(args, "node"),
+                        DocSearchTool.baseUrl());
+                if (docs.error() != null) yield docs.error();
+                yield "search_docs".equals(tc.name())
+                        ? DocSearchTool.search(extractInput(args, "query"), 0, "all", docs.source())
+                        : ReferenceLinkTool.list(extractInput(args, "id"), extractInput(args, "direction"),
+                                extractInput(args, "relation"), docs.source());
+            }
+            case "list_running_tools" -> com.scivicslab.chatui.agent.RunningToolsTool.list(
+                    com.scivicslab.chatui.core.remote.RemoteNodes.of(system), extractInput(args, "tool"));
             case "ask_chat", "ask_chat_urgent" -> {
                 String requestId = nextRequestId();
                 String node = extractInput(args, "node").strip();

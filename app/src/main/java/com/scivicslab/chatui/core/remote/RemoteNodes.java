@@ -128,6 +128,10 @@ public final class RemoteNodes implements AutoCloseable {
                 .callTimeout(STATE_TIMEOUT)
                 .build();
         RemoteNodes remote = new RemoteNodes(local, node, ids, workspace);
+        // The discovery gives the system its chat-ui peers; the tool nodes of the same read are registered here.
+        if (workspace != null) {
+            for (ToolNode t : workspace.toolNodes()) node.registerRemoteNode(t.name(), t.host(), t.actorPort());
+        }
         node.addIIActor(new RemoteGatewayIIAR(GATEWAY, new RemoteGateway(local, remote), node));
         node.startHttpServer("127.0.0.1", actorPort);
         if (workspace != null) remote.startRefreshing();
@@ -154,12 +158,18 @@ public final class RemoteNodes implements AutoCloseable {
     public synchronized void refreshPeers() {
         if (workspace == null || !workspace.refresh()) return;
         List<NodeInfo> peers = workspace.peers();
-        Set<String> listed = peers.stream().map(NodeInfo::getNodeId).collect(java.util.stream.Collectors.toSet());
-        for (String gone : others()) {
-            if (!listed.contains(gone)) node.unregisterRemoteNode(gone);
+        List<ToolNode> tools = workspace.toolNodes();
+        Set<String> listed = new java.util.HashSet<>();
+        peers.forEach(p -> listed.add(p.getNodeId()));
+        tools.forEach(t -> listed.add(t.name()));
+        for (NodeInfo n : node.getNodes()) {
+            if (!n.getNodeId().equals(myName()) && !listed.contains(n.getNodeId())) node.unregisterRemoteNode(n.getNodeId());
         }
         for (NodeInfo peer : peers) {
             node.registerRemoteNode(peer.getNodeId(), peer.getHost(), peer.getPort());
+        }
+        for (ToolNode t : tools) {
+            node.registerRemoteNode(t.name(), t.host(), t.actorPort());
         }
     }
 
@@ -173,6 +183,41 @@ public final class RemoteNodes implements AutoCloseable {
     /** @return the remote path of {@code local}, or {@code null} when it has none */
     public static RemoteNodes of(IIActorSystem local) {
         return local == null ? null : BY_SYSTEM.get(local);
+    }
+
+    /**
+     * A node of the distributed actor system that is not a chat-ui instance: the AI-workspace, or an html-saurus
+     * portal, as the AI-workspace's {@code GET /api/nodes} lists it ({@code ActorNodesForWorkspaceAndPortal_261118_oo01}).
+     */
+    public record ToolNode(String name, String host, int actorPort, String kind) {}
+
+    /** @return the tool nodes of {@code kind}, lowest actor port first; empty when the peers were set by hand */
+    public List<ToolNode> toolNodes(String kind) {
+        if (workspace == null) return List.of();
+        return workspace.toolNodes().stream().filter(n -> n.kind().equals(kind))
+                .sorted(java.util.Comparator.comparingInt(ToolNode::actorPort)).toList();
+    }
+
+    /**
+     * Calls the gateway {@code gateway} of the tool node {@code nodeName} and waits for the result, at most
+     * {@code timeout}. A node not in the last list makes this instance read the list again first.
+     *
+     * @return the result, or a failure saying {@link #NODE_NOT_KNOWN} when the workspace does not list that node
+     */
+    public ActionResult callTool(String nodeName, String gateway, String action, String json, Duration timeout) {
+        if (!isToolNode(nodeName)) {
+            refreshPeers();
+            if (!isToolNode(nodeName)) return new ActionResult(false, NODE_NOT_KNOWN + ": " + nodeName);
+        }
+        try {
+            return node.getRemoteActor(nodeName, gateway).callByActionName(action, json, timeout);
+        } catch (RuntimeException e) {
+            return new ActionResult(false, action + " on " + nodeName + " failed: " + e.getMessage());
+        }
+    }
+
+    private boolean isToolNode(String name) {
+        return workspace != null && workspace.toolNodes().stream().anyMatch(n -> n.name().equals(name));
     }
 
     /** @return this instance's node name */
@@ -192,7 +237,7 @@ public final class RemoteNodes implements AutoCloseable {
     }
 
     private boolean listed(String name) {
-        return node.getNodes().stream().anyMatch(n -> n.getNodeId().equals(name) && !n.getNodeId().equals(myName()));
+        return others().contains(name);
     }
 
     /** @return the answer to a send to {@code nodeName}, which is not registered */
@@ -200,9 +245,10 @@ public final class RemoteNodes implements AutoCloseable {
         return NODE_NOT_KNOWN + ": " + nodeName + "; the nodes this instance knows are " + others();
     }
 
-    /** @return the names of the other nodes */
+    /** @return the names of the other chat-ui instances: the registered nodes less this one and the tool nodes */
     public List<String> others() {
-        return node.getNodes().stream().map(NodeInfo::getNodeId).filter(n -> !n.equals(myName())).toList();
+        return node.getNodes().stream().map(NodeInfo::getNodeId)
+                .filter(n -> !n.equals(myName()) && !isToolNode(n)).toList();
     }
 
     /**
@@ -235,7 +281,7 @@ public final class RemoteNodes implements AutoCloseable {
      * @return the other instance's {@link #GATEWAY}, or {@code null} when {@code nodeName} is not registered
      */
     private RemoteActorRef gatewayOf(String nodeName) {
-        if (nodeName == null || nodeName.equals(myName())) return null;
+        if (nodeName == null || nodeName.equals(myName()) || isToolNode(nodeName)) return null;
         try {
             return node.getRemoteActor(nodeName, GATEWAY);
         } catch (IllegalArgumentException notRegistered) {
