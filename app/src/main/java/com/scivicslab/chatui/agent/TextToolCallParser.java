@@ -228,7 +228,7 @@ public final class TextToolCallParser {
             readSpans.add(new int[]{inv.start(), inv.end()});
             String name = inv.group(1).trim();
             String opener = visible.substring(inv.start(), inv.end(1) + 1);
-            Map<String, String> args = invokeArgs(inv.group(2));
+            Map<String, String> args = invokeArgs(inv.group(2), original(content, inv, 2));
             // <reason> is looked for outside the parameter values: a value may mention the tag as text.
             Matcher rm = REASON.matcher(outsideValues(inv.group(2)));
             if (rm.find() && !args.containsKey("reason")) args.put("reason", clean(rm.group(1)));
@@ -249,9 +249,10 @@ public final class TextToolCallParser {
             readSpans.add(new int[]{fn.start(), fn.end()});
             String name = fn.group(1).trim();
             Map<String, String> args = new LinkedHashMap<>();
+            String fnBody = original(content, fn, 2);
             Matcher pm = FUNCTION_PARAM.matcher(fn.group(2));
             while (pm.find()) {
-                args.put(pm.group(1).trim(), clean(pm.group(2)));
+                args.put(pm.group(1).trim(), clean(fnBody.substring(pm.start(2), pm.end(2))));
             }
             calls.add(new ToolCall("text-call-" + idx++, name, toJson(args)));
             List<String> wrong = argumentProblems(name, args, null, requiredParams);
@@ -267,9 +268,10 @@ public final class TextToolCallParser {
                 readSpans.add(new int[]{glm.start(), glm.end()});
                 String name = glm.group(1).trim();
                 Map<String, String> args = new LinkedHashMap<>();
+                String glmBody = original(content, glm, 2);
                 Matcher am = GLM_ARG.matcher(glm.group(2));
                 while (am.find()) {
-                    args.put(am.group(1).trim(), clean(am.group(2)));
+                    args.put(am.group(1).trim(), clean(glmBody.substring(am.start(2), am.end(2))));
                 }
                 calls.add(new ToolCall("text-call-" + idx++, name, toJson(args)));
                 List<String> wrong = argumentProblems(name, args, null, requiredParams);
@@ -301,7 +303,8 @@ public final class TextToolCallParser {
                 }
                 problems.add("your call to " + name + " is not closed with </invoke>");
                 String body = visible.substring(open.end(), until);
-                problems.addAll(argumentProblems(name, invokeArgs(body), body, requiredParams));
+                problems.addAll(argumentProblems(name, invokeArgs(body, content.substring(open.end(), until)), body,
+                        requiredParams));
                 if (exampleTool[0] == null) exampleTool[0] = name;
             } else {
                 problems.add(unreadableAttempt(line, visible.substring(at, until)));
@@ -375,7 +378,9 @@ public final class TextToolCallParser {
      * the call, so a value may contain these tags as text. When that close tag is missing, the value
      * ends at the next parameter or {@code <reason>} that starts a line, or at the end of the call.
      */
-    private static Map<String, String> invokeArgs(String body) {
+    private static Map<String, String> invokeArgs(String body, String original) {
+        // Where each value begins and ends is read from the blanked body, so a tag quoted in a fenced block of the
+        // value does not end it; the value itself is taken from the reply, fenced blocks included.
         Map<String, String> args = new LinkedHashMap<>();
         Matcher open = PARAM_OPEN.matcher(body);
         int from = 0;
@@ -383,7 +388,7 @@ public final class TextToolCallParser {
             String key = open.group(1).trim();
             int valueStart = open.end();
             int[] end = valueEnd(body, valueStart);
-            args.put(key, clean(body.substring(valueStart, end[0])));
+            args.put(key, clean(original.substring(valueStart, end[0])));
             from = end[1];
         }
         return args;
@@ -424,7 +429,25 @@ public final class TextToolCallParser {
 
     /** @return {@code content} with its fenced code blocks removed */
     private static String withoutCodeFences(String content) {
-        return CODE_FENCE.matcher(content).replaceAll("");
+        // Blanked, not removed: every character of a fenced block becomes a space and its line breaks stay, so a
+        // call quoted in a fence is not seen, and a position in the result is the same position in the reply.
+        // Values are cut from the reply itself at those positions, so a fenced block inside a value reaches the
+        // tool whole. Removing the blocks made the positions differ, and the values were cut from the text
+        // without them: a write whose content held a ``` block wrote the file without it (project9/chat-01,
+        // session 140, turn 46, step 28).
+        Matcher m = CODE_FENCE.matcher(content);
+        StringBuilder out = new StringBuilder(content);
+        while (m.find()) {
+            for (int i = m.start(); i < m.end(); i++) {
+                if (out.charAt(i) != '\n' && out.charAt(i) != '\r') out.setCharAt(i, ' ');
+            }
+        }
+        return out.toString();
+    }
+
+    /** @return group {@code g} of a match on the blanked text, as the reply itself has it at the same place */
+    private static String original(String content, Matcher m, int g) {
+        return content.substring(m.start(g), m.end(g));
     }
 
     /** Strips leaked special tokens and surrounding whitespace from an extracted value. */

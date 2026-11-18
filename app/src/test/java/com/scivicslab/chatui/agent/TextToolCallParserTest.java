@@ -227,6 +227,53 @@ class TextToolCallParserTest {
         assertEquals("どうしますか？ A/B/C、または章立て自体の修正からでもどうぞ。", TextToolCallParser.stripToolCallBlocks(text));
     }
 
+    private static String contentOf(ToolCall call) {
+        return new org.json.JSONObject(call.argumentsJson()).getString("content");
+    }
+
+    /**
+     * project9/chat-01, session 140, turn 46, step 28: GLM wrote a file whose content held a ```cpp block, to see
+     * whether the block survives. The call reached write as "before\n\n\n\nafter": the whole block was gone.
+     */
+    @Test
+    void aFencedBlockInsideAGlmArgValueReachesTheToolWhole() {
+        String text = "<tool_call>write<arg_key>content</arg_key><arg_value>before\n\n```cpp\nint main() { return 0; }\n```"
+                + "\n\nafter\n</arg_value><arg_key>path</arg_key><arg_value>tmp-fence-test.md</arg_value></tool_call>";
+        List<ToolCall> calls = TextToolCallParser.parse(text);
+        assertEquals(1, calls.size());
+        assertEquals("before\n\n```cpp\nint main() { return 0; }\n```\n\nafter", contentOf(calls.get(0)));
+    }
+
+    @Test
+    void aFencedBlockInsideAnInvokeParameterReachesTheToolWhole_evenWhenItQuotesTheClosingTag() {
+        String content = "# Chapter\n\n```cpp\nenum class EventWatcherPhase { PreInputMethod, InputMethod };\n```\n\n"
+                + "A tag in a quoted block:\n\n```xml\n<parameter name=\"path\">x</parameter>\n</invoke>\n```\n\nEnd.";
+        String text = "Writing the chapter.\n\n<invoke name=\"write\">\n<parameter name=\"path\">ch1.md</parameter>\n"
+                + "<parameter name=\"content\">" + content + "</parameter>\n</invoke>";
+        List<ToolCall> calls = TextToolCallParser.parse(text);
+        assertEquals(1, calls.size(), calls.toString());
+        assertEquals(content, contentOf(calls.get(0)));
+        assertEquals("ch1.md", new org.json.JSONObject(calls.get(0).argumentsJson()).getString("path"));
+    }
+
+    @Test
+    void aFencedBlockInsideAFunctionParameterReachesTheToolWhole() {
+        String text = "<tool_call>\n<function=write>\n<parameter=path>\na.md\n</parameter>\n<parameter=content>\n"
+                + "x\n```java\nint y = 1;\n```\nz\n</parameter>\n</function>\n</tool_call>";
+        List<ToolCall> calls = TextToolCallParser.parse(text);
+        assertEquals(1, calls.size());
+        assertEquals("x\n```java\nint y = 1;\n```\nz", contentOf(calls.get(0)));
+    }
+
+    /** A call quoted in a fenced block of prose is still not a call. */
+    @Test
+    void aCallInsideAFencedBlockOfProseIsStillNotRead() {
+        String text = "Write it like this:\n\n```\n<invoke name=\"write\">\n<parameter name=\"path\">a.md</parameter>\n"
+                + "<parameter name=\"content\">x</parameter>\n</invoke>\n```\n\nThat is all.";
+        assertTrue(TextToolCallParser.parse(text).isEmpty());
+        assertFalse(TextToolCallParser.looksLikeTextToolCall(text));
+    }
+
     /** What the glued form must not take for a call: a quotation in prose, which is not a finished sentence's tail. */
     @Test
     void glmSpellingQuotedMidSentenceOrNotLastIsNotACall() {

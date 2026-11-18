@@ -1,0 +1,85 @@
+必要な引用材料はそろった。第1章から書き直す。まず010の全文を`write`で置く。
+
+<invoke name="write">
+<parameter name="path">doc_Base010/docs/fcitx5-internals/010_InstanceBirth_261115_oo01/010_InstanceBirth_261115_oo01.md</parameter>
+<parameter name="content">---
+id: InstanceBirth
+title: インスタンスの誕生 — mainからexecまで
+description: fcitx5の起動構造。Pimplとphase設計がなぜなのかを、instance.hの冒頭から読む
+---
+
+# InstanceBirth
+
+## Problem Definition
+
+fcitx5の`main()`は何をしているか。なぜ公開ヘッダには実装がなく、phaseという列挙が最初に現れるのか。
+
+## 起動の本体
+
+`src/lib/fcitx/instance.h:36-49` を開くと、最初の実体は`EventWatcherPhase`という列挙だ。
+
+```cpp
+/**
+ * The event handling phase of event pipeline.
+ */
+enum class EventWatcherPhase {
+    /**
+     * Handler executed before input method.
+     *
+     * Useful for addons that want to implement an independent mode.
+     *
+     * A common workflow of such addon is:
+     * 1. Check a hotkey in PostInputMethod phase to trigger the mode
+     * 2. Handle all the key event in PreInputMethod phase just like regular
+     *    input method.
+     */
+    PreInputMethod,
+    /**
+     * Handlers to be executed right after input method.
+     *
+     * The input method keyEvent is registered with an internal handler. So all
+     * the new handler in this phase will still executed after input method.
+     */
+    InputMethod,
+    /**
+     * Handlers to be executed after input method.
+     *
+     * common use case is when you want to implement a key that triggers a
+     * standalone action.
+     */
+    PostInputMethod,
+    /// Internal phase to be executed first
+    ReservedFirst,
+    /// Internal phase to be executed last
+    ReservedLast,
+    Default = PostInputMethod
+};
+```
+
+キーイベントはこの段階を決まった順に通過する。`PreInputMethod`は IMより先に処理する場で、独立モードを持つアドオンが使う。`InputMethod`は IM本体、`PostInputMethod`はその後の単発動作用。ヘッダのコメントには独立モードアドオンの典型的な作り方(ホットキーをPostで見て、キー処理をPreで行う)まで書いてあり、設計意図が読者に直接語りかけてくる。
+
+## Under the Hood
+
+`Instance`クラスの公開部は実質これだけである(`src/lib/fcitx/instance.h:95-100`)。
+
+```cpp
+class FCITXCORE_EXPORT Instance : public ConnectableObject {
+public:
+    Instance(int argc, char *argv[]);
+    ~Instance();
+
+    bool initialized() const { return !!d_ptr; }
+```
+
+実装はすべて`InstancePrivate`に隠れる(Pimpl)。理由はABI安定化で、fcitx5はライブラリとしてUI側からリンクされるため、公開ヘッダのメンバ変更がバイナリ非互換を生む。実装を別クラスに退避すればヘッダを不変のまま実装だけ進化できる。`instance.cpp`が2706行あるのに対しヘッダは640行という非対称もここから来る。
+
+ライブラリをパッケージとして配る者にとって、この構造は守るべき規約の根拠になる。公開ヘッダを変えることはAPIの変更であり、実装だけの変更はパッチで足りる。
+
+## 参考資料
+
+- `src/lib/fcitx/instance.h:36-49` — phase列挙
+- `src/lib/fcitx/instance.h:95-100` — Instance宣言とPimpl
+- `src/lib/fcitx/instance.cpp` — InstancePrivateの実体
+</parameter>
+<parameter name="reason">第1章にinstance.hの実引用を復活させるため</parameter>
+</invoke>
