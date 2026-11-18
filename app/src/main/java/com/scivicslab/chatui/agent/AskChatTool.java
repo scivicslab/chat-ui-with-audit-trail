@@ -309,15 +309,28 @@ public final class AskChatTool {
      */
     public static void followUp(IIActorSystem system, String myName, String askerName, String requestId,
                                 TurnReply turn, int reminder) {
-        Received from = RECEIVED.get(requestId);
-        if (from != null && from.sender().equals(askerName)) {
+        followUp(system, myName, askerName, requestId, turn, reminder, null);
+    }
+
+    /**
+     * @param link the way back to an asker on another chat-ui instance, recorded with the promise, or {@code null} for
+     *             an asker on this instance
+     */
+    public static void followUp(IIActorSystem system, String myName, String askerName, String requestId,
+                                TurnReply turn, int reminder, OpenRequests.RemoteLink link) {
+        if (link != null) {
             String body = turn.reply() != null ? turn.reply()
                     : "its turn left no answer" + (turn.ending() == null ? "" : ": " + turn.ending());
             // The sender knows the request by its own id, not by this instance's local one.
-            String text = "[follow-up to request " + from.requestId() + ", from "
+            String text = "[follow-up to request " + link.requestId() + ", from "
                     + (turn.turnId() == null ? myName : turn.turnId()) + ", reminder " + reminder + "]\n" + body;
-            sendOrLog(from.nodes(), from.senderNode(), "enqueueFollowUp", new JSONObject().put("requestId", from.requestId())
-                    .put("asker", askerName).put("from", myName).put("text", text), "follow-up to request " + from.requestId());
+            RemoteNodes nodes = RemoteNodes.of(system);
+            if (nodes == null) {
+                LOG.warning("follow-up to request " + link.requestId() + " not sent: this instance has no remote path");
+                return;
+            }
+            sendOrLog(nodes, link.node(), "enqueueFollowUp", new JSONObject().put("requestId", link.requestId())
+                    .put("asker", askerName).put("from", myName).put("text", text), "follow-up to request " + link.requestId());
             return;
         }
         IIActorRef<?> askerActor = system.getIIActor(askerName + ".chat");
@@ -476,35 +489,21 @@ public final class AskChatTool {
     }
 
     // ---- Requests between conversations of two chat-ui instances (ConversationSquadsAcrossInstances_261115_oo01).
-    // The sender's side keeps the request in SENT with the node it went to; the target's side keeps it in RECEIVED,
-    // so that the reply, a follow-up and a cancel find their way back. Everything goes as one message to the other
+    // The sender's side keeps the request in SENT with the node it went to. The target's side keeps the way back to the
+    // sender (OpenRequests.RemoteLink) with the request itself: on its queue item, in its conversation's open requests,
+    // and with a promise its timekeeper holds, all recorded, so the reply, a follow-up and a cancel find their way back
+    // after a restart too (EachActorRecordsItsOwnState_261118_oo01). Everything goes as one message to the other
     // instance's gateway actor, sent again under the same message id until it is received; the other side drops a
     // second copy.
 
     /**
-     * A request another instance's conversation sent to one of this instance's conversations.
-     *
-     * @param requestId the id the sender gave it, unique only on the sender's node
-     */
-    private record Received(RemoteNodes nodes, String senderNode, String requestId, String sender, String target,
-                            CompletableFuture<TurnReply> done) {}
-
-    /**
      * The id under which this instance keeps a request from another node: in the target's queue, in the target's
-     * open requests, in its timekeeper's promises, and in {@link #RECEIVED}. A request id is unique only on the node
+     * open requests and in its timekeeper's promises. A request id is unique only on the node
      * that made it, so two nodes can send the same one; with the sender's node in front, they stay apart.
      */
     static String localIdOf(String senderNode, String requestId) {
         return senderNode + "|" + requestId;
     }
-
-    /** The requests that came from other instances, by {@link #localIdOf}, oldest first. */
-    private static final java.util.Map<String, Received> RECEIVED = java.util.Collections.synchronizedMap(
-            new java.util.LinkedHashMap<>() {
-                @Override protected boolean removeEldestEntry(java.util.Map.Entry<String, Received> eldest) {
-                    return size() > MAX_SENT;
-                }
-            });
 
     /**
      * {@code ask_chat} and {@code ask_chat_urgent} with a {@code node}: sends the request to a conversation of
@@ -577,7 +576,7 @@ public final class AskChatTool {
         RemoteNodes nodes = RemoteNodes.of(system);
         if (nodes == null) return "error: the remote path is not running, so request " + id + " cannot be taken back";
         Receipt receipt = nodes.send(sent.node(), "withdrawRequest", new JSONObject().put("requestId", id)
-                .put("sender", myName).put("senderNode", nodes.myName()).toString());
+                .put("sender", myName).put("senderNode", nodes.myName()).put("target", sent.targetName()).toString());
         if (!receipt.accepted()) {
             return "error: node " + sent.node() + " did not receive the cancel: " + receipt.detail();
         }
@@ -606,7 +605,6 @@ public final class AskChatTool {
         }
         CompletableFuture<TurnReply> done = new CompletableFuture<>();
         String localId = localIdOf(senderNode, requestId);
-        RECEIVED.put(localId, new Received(nodes, senderNode, requestId, sender, target, done));
         OpenRequests.RemoteLink link = new OpenRequests.RemoteLink(senderNode, requestId);
         done.whenCompleteAsync((reply, failure) -> {
             if (reply == TurnReply.WITHDRAWN) return;
@@ -620,7 +618,6 @@ public final class AskChatTool {
                     ChatSession.ASK_CHAT_SOURCE_PREFIX + sender, localId, done, false, true, java.util.List.of(),
                     localId, urgent, link)).get(5, TimeUnit.SECONDS);
         } catch (Exception e) {
-            RECEIVED.remove(localId);
             LOG.log(Level.WARNING, "remote request " + requestId + " could not be queued for " + target, e);
             return new ActionResult(false, "could not queue the request: " + e.getClass().getSimpleName());
         }
@@ -676,25 +673,27 @@ public final class AskChatTool {
         String requestId = m.getString("requestId");
         String sender = m.getString("sender");
         String localId = localIdOf(m.getString("senderNode"), requestId);
-        Received r = RECEIVED.get(localId);
+        // Found from the conversation the request went to, which the sender names, and from what that conversation
+        // records itself (its queue, its open requests), so a cancel works after this instance restarted.
+        String target = m.optString("target", "");
+        IIActorRef<?> targetActor = target.isBlank() ? null : local.getIIActor(target + ".chat");
+        ActorRef<PromptQueue> queue = target.isBlank() ? null : local.getActor(target + ".queue");
         String result;
-        String target;
-        if (r == null || !r.sender().equals(sender)) {
+        if (!(targetActor instanceof ChatSessionIIAR targetChat) || queue == null) {
             result = "not found";
-            target = "?";
+            if (target.isBlank()) target = "?";
         } else {
-            target = r.target();
             boolean removed = false;
-            ActorRef<PromptQueue> queue = local.getActor(target + ".queue");
             try {
-                if (queue != null) {
-                    removed = queue.ask(q -> q.withdraw(localId, ChatSession.ASK_CHAT_SOURCE_PREFIX + sender))
-                            .get(5, TimeUnit.SECONDS);
-                }
+                removed = queue.ask(q -> q.withdraw(localId, ChatSession.ASK_CHAT_SOURCE_PREFIX + sender))
+                        .get(5, TimeUnit.SECONDS);
             } catch (Exception e) {
-                LOG.log(Level.WARNING, "remote cancel of " + requestId + " could not reach the queue of " + target, e);
+                String t = target;
+                LOG.log(Level.WARNING, "remote cancel of " + requestId + " could not reach the queue of " + t, e);
             }
-            result = removed ? "removed" : r.done().isDone() ? "already answered" : "already running";
+            // Neither waiting nor being worked on: it reached this instance (the sender has it as sent here), so its
+            // turn has ended.
+            result = removed ? "removed" : targetChat.isWorkingOnDirect(localId, sender) ? "already running" : "already answered";
         }
         sendOrLog(nodes, m.getString("senderNode"), "enqueueCancelResult", new JSONObject().put("requestId", requestId)
                 .put("asker", sender).put("from", target).put("result", result), "cancel result of " + requestId);
@@ -737,10 +736,13 @@ public final class AskChatTool {
         // way back to the node that asked (followUp).
         String requestId = m.has("senderNode") ? localIdOf(m.getString("senderNode"), m.getString("requestId"))
                 : m.getString("requestId");
+        // The way back to the asker goes with the promise into the timekeeper's record (step 7 across instances).
+        OpenRequests.RemoteLink link = m.has("senderNode")
+                ? new OpenRequests.RemoteLink(m.getString("senderNode"), m.getString("requestId")) : null;
         String asker = m.getString("asker");
         long minutes = m.getLong("minutes");
         try {
-            int n = keeper.ask(k -> k.expectReport(requestId, asker, minutes)).get(5, TimeUnit.SECONDS);
+            int n = keeper.ask(k -> k.expectReport(requestId, asker, minutes, link)).get(5, TimeUnit.SECONDS);
             return new ActionResult(true, "reminder " + n);
         } catch (Exception e) {
             return new ActionResult(false, "could not register: " + e.getClass().getSimpleName());

@@ -284,6 +284,19 @@ public final class OpenRequests {
         return true;
     }
 
+    /** @return the way back to the asker of the received request when it is on another instance, else {@code null} */
+    public RemoteLink linkOf(String original) {
+        Original o = originals.get(original);
+        return o == null ? null : o.link;
+    }
+
+    /** @return the received requests not yet answered, each with the qualified name of who asked */
+    public Map<String, String> unanswered() {
+        Map<String, String> out = new HashMap<>();
+        originals.forEach((id, o) -> { if (!o.answered && o.asker != null) out.put(id, o.asker); });
+        return Map.copyOf(out);
+    }
+
     /** @return the child requests still out, oldest first */
     public List<Outstanding> outstandingChildren() {
         List<Outstanding> all = new ArrayList<>(outstandingChildren.values());

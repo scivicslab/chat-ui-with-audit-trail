@@ -655,7 +655,9 @@ public class ChatSession extends Interpreter {
     public static final String REMINDER_TO_SCREEN = "screen";
 
     /** Who waits for the answer of a turn a reminder starts, and which reminder it was. */
-    private record FollowUpTo(String asker, int number) {}
+    private record FollowUpTo(String asker, int number, OpenRequests.RemoteLink link) {
+        FollowUpTo(String asker, int number) { this(asker, number, null); }
+    }
 
     /** The request id of the reminder this turn answers, and who waits for its answer; {@code null} if none. */
     private String turnReminder;
@@ -1237,7 +1239,8 @@ public class ChatSession extends Interpreter {
         if (turnReminder != null && turnFollowUp != null && !paused
                 && !REMINDER_TO_SCREEN.equals(turnFollowUp.asker())) {
             AskChatTool.followUp(system, myChatName(), turnFollowUp.asker(), turnReminder,
-                    turnAnswer != null ? turnAnswer : new TurnReply(null, null, turnId()), turnFollowUp.number());
+                    turnAnswer != null ? turnAnswer : new TurnReply(null, null, turnId()), turnFollowUp.number(),
+                    turnFollowUp.link());
         }
         // Kept with the paused turn first, then cleared.
         if (paused) queueResume(emitter, self);
@@ -1388,6 +1391,8 @@ public class ChatSession extends Interpreter {
         this.answerBeforeDecision = null;
         // A reminder's answer goes to whoever waits for the report.
         FollowUpTo reminder = reminderOf(source);
+        // The way back to an asker on another instance came with the reminder from the promise's record.
+        if (reminder != null && link != null) reminder = new FollowUpTo(reminder.asker(), reminder.number(), link);
         boolean isReminder = reminder != null && requestId != null;
         this.turnReminder = isReminder ? requestId : resumed != null ? resumed.reminderRequest() : null;
         this.turnFollowUp = isReminder ? reminder : resumed != null ? resumed.followUp() : null;
@@ -2736,7 +2741,10 @@ public class ChatSession extends Interpreter {
         }
         String req = request;
         String ask = asker;
-        int number = keeper.ask(k -> k.expectReport(req, ask, minutes)).get(5, TimeUnit.SECONDS);
+        // An asker on another instance is reached through the link its request carried, recorded with the promise.
+        OpenRequests.RemoteLink link = request == null ? null
+                : reminded != null ? reminded.link() : openRequests.linkOf(request);
+        int number = keeper.ask(k -> k.expectReport(req, ask, minutes, link)).get(5, TimeUnit.SECONDS);
         noteReminderDecision("REGISTERED " + minutes + " min (reminder " + number + ") for "
                 + (request == null ? "the person" : "request " + request + " from " + asker) + " | \""
                 + decision.quote() + "\""
@@ -3629,7 +3637,19 @@ public class ChatSession extends Interpreter {
      * Writes the requests this conversation received and has not answered, and those it sent and is waiting on, as
      * one {@code open-requests} entry ({@code EachActorRecordsItsOwnState_261118_oo01}). All of them every time.
      */
+    /** The received requests not yet answered and who asked each, readable from any thread (a cancel from another instance). */
+    private volatile java.util.Map<String, String> unansweredSnapshot = java.util.Map.of();
+
+    /**
+     * @return whether a request this conversation received from {@code asker} is still being worked on: started and not
+     *         yet answered. Readable from any thread, without waiting for a running turn.
+     */
+    public boolean isWorkingOn(String requestId, String asker) {
+        return asker != null && asker.equals(unansweredSnapshot.get(requestId));
+    }
+
     private void recordOpenRequests() {
+        unansweredSnapshot = openRequests.unanswered();
         com.scivicslab.chatui.core.iolog.SessionEntries e = entries;
         if (e != null) e.write(OPEN_REQUESTS_LABEL, openRequests.toJson().toString());
     }
@@ -3662,6 +3682,7 @@ public class ChatSession extends Interpreter {
             return;
         }
         outstandingSnapshot = List.copyOf(openRequests.outstandingChildren());
+        unansweredSnapshot = openRequests.unanswered();
     }
 
     /** @return the agent loop this conversation last recorded, or {@code null} when it recorded none */

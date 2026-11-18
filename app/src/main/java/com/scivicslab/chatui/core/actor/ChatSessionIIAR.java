@@ -194,6 +194,9 @@ public class ChatSessionIIAR extends InterpreterIIAR {
      */
     public String getModelDirect() { return chatSession().getModel(); }
 
+    /** @return whether the conversation is working on that received request now; does not wait for a running turn */
+    public boolean isWorkingOnDirect(String requestId, String asker) { return chatSession().isWorkingOn(requestId, asker); }
+
     /**
      * Has the conversation write its settings now, without waiting for a running turn: a change made on the provider
      * (model, effort, temperature) is recorded at once, as it was before the conversation recorded itself.

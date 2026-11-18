@@ -221,6 +221,119 @@ class RemoteAskChatTest {
         }
     }
 
+    /** b's squad recording to its own log, wired as the instance wires every conversation. */
+    private static Squad recordingSquad(IIActorSystem system, LlmProvider provider,
+                                        com.scivicslab.chatui.core.iolog.SessionEntries entries) {
+        Squad s = squad(system, provider);
+        s.chat().tellNow(x -> ((ChatSession) x).recordsTo(entries)).join();
+        s.queue().tellNow(q -> {
+            q.recordsTo(entries, "project1/chat-01");
+            q.setLogging(system, "project1/chat-01.log");
+        }).join();
+        s.keeper().tellNow(k -> k.recordsTo(entries)).join();
+        return s;
+    }
+
+    private static com.scivicslab.chatui.core.iolog.SessionEntries entriesOf(com.scivicslab.chatui.core.iolog.IoLogStore log) {
+        return com.scivicslab.chatui.core.iolog.SessionEntries.ofConversation(log,
+                com.scivicslab.chatui.core.iolog.IoLogView.over(log), "project1/chat-01");
+    }
+
+    /**
+     * A report promised to a sender on another instance survives a restart of the instance that promised it
+     * ({@code EachActorRecordsItsOwnState_261118_oo01}, step 7 across instances): a registers the promise on b, b
+     * restarts, the reminder comes at b's first check, and b's answer reaches a as a follow-up, from the link the
+     * promise recorded.
+     */
+    @Test
+    void aPromiseFromAnotherInstanceIsRemindedAfterARestartAndTheFollowUpReachesTheSender() throws Exception {
+        com.scivicslab.chatui.core.iolog.IoLogStore log = new com.scivicslab.chatui.core.iolog.IoLogStore();
+        log.useDatabaseAt(dir.resolve("b-promise-log").toString());
+        try {
+            IIActorSystem a = new IIActorSystem("instance-a-promise");
+            IIActorSystem b = new IIActorSystem("instance-b-promise-before");
+            Scripted asker = new Scripted(false, "ok");
+            squad(a, asker);
+            Squad bOne = recordingSquad(b, new Scripted(false, "unused"), entriesOf(log));
+            startNodes(a, b);
+            String registered = AskChatTool.expectReportRemote(a, "project1/chat-01", "b", "project1/chat-01",
+                    "project1/chat-01:s9:t1:r1", 0);
+            assertTrue(registered.startsWith("ok"), registered);
+            waitUntil(() -> {
+                try {
+                    return bOne.keeper().ask(Timekeeper::pendingPromises).get(5, TimeUnit.SECONDS).size() == 1;
+                } catch (Exception e) {
+                    return false;
+                }
+            }, "b's timekeeper holds the promise");
+
+            remoteB.close();
+            b.terminate();
+            IIActorSystem bAgain = new IIActorSystem("instance-b-promise-after");
+            Squad bOneAgain = recordingSquad(bAgain, new Scripted(false, "Report: everything is done."), entriesOf(log));
+            bOneAgain.keeper().tell(Timekeeper::restore).get(5, TimeUnit.SECONDS);
+            remoteB = RemoteNodes.start(bAgain, "a=127.0.0.1:" + portA, "b", portB, dir.resolve("b-ids.txt"));
+            bOneAgain.keeper().tell(k -> k.tick(System.currentTimeMillis())).get(5, TimeUnit.SECONDS);
+
+            waitUntil(() -> asker.prompts.stream().anyMatch(p -> p.contains("[follow-up to request project1/chat-01:s9:t1:r1")
+                    && p.contains("Report: everything is done.")), "the follow-up reached a: " + asker.prompts);
+        } finally {
+            if (log.store() != null) log.store().close();
+        }
+    }
+
+    /**
+     * Taking back a request sent to another instance works after that instance restarted, without anything kept in
+     * memory there: a waiting request is removed, a running one is said to be running.
+     */
+    @Test
+    void aRequestToAnotherInstanceCanBeTakenBackAfterThatInstanceRestarts() throws Exception {
+        com.scivicslab.chatui.core.iolog.IoLogStore log = new com.scivicslab.chatui.core.iolog.IoLogStore();
+        log.useDatabaseAt(dir.resolve("b-cancel-log").toString());
+        Scripted runner = new Scripted(true, "done");
+        try {
+            IIActorSystem a = new IIActorSystem("instance-a-cancel");
+            IIActorSystem b = new IIActorSystem("instance-b-cancel-before");
+            Scripted asker = new Scripted(false, "ok");
+            squad(a, asker);
+            Scripted busy = new Scripted(true, "long job done");
+            Squad bOne = recordingSquad(b, busy, entriesOf(log));
+            startNodes(a, b);
+            personTypes(bOne, "a long job");
+            assertTrue(busy.started.await(10, TimeUnit.SECONDS));
+            assertTrue(AskChatTool.sendRemote(a, "project1", "01", "b", "01", "job one", "project1/chat-01:s9:t2:r1", false)
+                    .startsWith("sent"));
+            assertTrue(AskChatTool.sendRemote(a, "project1", "01", "b", "01", "job two", "project1/chat-01:s9:t2:r2", false)
+                    .startsWith("sent"));
+            waitUntil(() -> {
+                try {
+                    return bOne.queue().ask(PromptQueue::snapshot).get(5, TimeUnit.SECONDS).size() == 2;
+                } catch (Exception e) {
+                    return false;
+                }
+            }, "both requests wait in b's queue");
+
+            remoteB.close();
+            b.terminate();
+            busy.release.countDown();
+            IIActorSystem bAgain = new IIActorSystem("instance-b-cancel-after");
+            Squad bOneAgain = recordingSquad(bAgain, runner, entriesOf(log));
+            remoteB = RemoteNodes.start(bAgain, "a=127.0.0.1:" + portA, "b", portB, dir.resolve("b-ids.txt"));
+            bOneAgain.queue().tell(q -> q.restore(bOneAgain.chat().asChatSessionRef(), e -> { })).get(5, TimeUnit.SECONDS);
+            assertTrue(runner.started.await(10, TimeUnit.SECONDS), "job one runs on b after the restart");
+
+            assertTrue(AskChatTool.cancel(a, "project1/chat-01", "project1/chat-01:s9:t2:r2").startsWith("cancel sent"));
+            waitUntil(() -> asker.prompts.stream().anyMatch(p -> p.contains("project1/chat-01:s9:t2:r2") && p.contains("removed")),
+                    "job two was removed: " + asker.prompts);
+            assertTrue(AskChatTool.cancel(a, "project1/chat-01", "project1/chat-01:s9:t2:r1").startsWith("cancel sent"));
+            waitUntil(() -> asker.prompts.stream().anyMatch(p -> p.contains("project1/chat-01:s9:t2:r1") && p.contains("already running")),
+                    "job one is running: " + asker.prompts);
+        } finally {
+            runner.release.countDown();
+            if (log.store() != null) log.store().close();
+        }
+    }
+
     @Test
     void theSameMessageSentTwiceRunsOnce() throws Exception {
         IIActorSystem a = new IIActorSystem("instance-a-dup");
@@ -324,7 +437,8 @@ class RemoteAskChatTest {
         // b's conversation promised a report; its timekeeper asks it now, and the answer goes back to a as a follow-up.
         // b keeps the request under its local id: the sending node in front of the sender's id. b's own end-of-turn
         // step registers a promise under that id too.
-        two.keeper().ask(k -> k.expectReport("a|" + requestId, "project1/chat-01", 0)).get(5, TimeUnit.SECONDS);
+        two.keeper().ask(k -> k.expectReport("a|" + requestId, "project1/chat-01", 0,
+                new com.scivicslab.chatui.core.actor.OpenRequests.RemoteLink("a", requestId))).get(5, TimeUnit.SECONDS);
         two.keeper().ask(k -> { k.tick(System.currentTimeMillis() + 60_000); return null; }).get(5, TimeUnit.SECONDS);
         waitUntil(() -> asker.prompts.stream().anyMatch(p -> p.contains("[follow-up to request " + requestId)),
                 "the follow-up in a's queue");
@@ -399,7 +513,7 @@ class RemoteAskChatTest {
 
             // c takes its request back; a's, with the same id, stays.
             assertTrue(gateway.send("withdrawRequest", new JSONObject().put("requestId", same)
-                    .put("sender", "project1/chat-01").put("senderNode", "c").toString()).accepted());
+                    .put("sender", "project1/chat-01").put("senderNode", "c").put("target", "project1/chat-01").toString()).accepted());
             waitUntil(() -> askerC.prompts.stream().anyMatch(p -> p.contains("[cancel result for request " + same)),
                     "the cancel result on c");
             assertTrue(askerC.prompts.stream().anyMatch(p -> p.contains("[cancel result for request " + same) && p.contains(": removed]")),

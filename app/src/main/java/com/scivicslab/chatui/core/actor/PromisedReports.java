@@ -27,7 +27,8 @@ public final class PromisedReports {
      * @param asker     the qualified name of the conversation waiting for the report, or {@code null} for the person
      * @param number    how many times this report has been asked for, this one included, counting from 1
      */
-    public record Reminder(String requestId, String asker, int number) {
+    public record Reminder(String requestId, String asker, int number, OpenRequests.RemoteLink link) {
+        public Reminder(String requestId, String asker, int number) { this(requestId, asker, number, null); }
 
         /** @return whether the report was promised to the person, so the answer stays on the screen */
         public boolean toScreen() {
@@ -35,7 +36,7 @@ public final class PromisedReports {
         }
     }
 
-    private record Promise(String requestId, String asker, long dueAt, int number) {}
+    private record Promise(String requestId, String asker, long dueAt, int number, OpenRequests.RemoteLink link) {}
 
     private static final String SCREEN = "(screen)";
 
@@ -51,9 +52,18 @@ public final class PromisedReports {
      * @return which reminder this registration will give for the request, counting from 1
      */
     public int expect(String requestId, String asker, long dueAt) {
+        return expect(requestId, asker, dueAt, null);
+    }
+
+    /**
+     * @param link the way back to an asker on another chat-ui instance, or {@code null}; recorded with the promise, so
+     *             its follow-up reaches that asker after a restart
+     */
+    public int expect(String requestId, String asker, long dueAt, OpenRequests.RemoteLink link) {
         String key = requestId == null ? SCREEN : requestId;
         int number = counts.merge(key, 1, Integer::sum);
-        promises.put(key, new Promise(requestId, asker == null || requestId == null ? null : asker, dueAt, number));
+        promises.put(key, new Promise(requestId, asker == null || requestId == null ? null : asker, dueAt, number,
+                requestId == null ? null : link));
         return number;
     }
 
@@ -68,7 +78,7 @@ public final class PromisedReports {
         for (Iterator<Promise> it = promises.values().iterator(); it.hasNext(); ) {
             Promise p = it.next();
             if (p.dueAt() <= now) {
-                due.add(new Reminder(p.requestId(), p.asker(), p.number()));
+                due.add(new Reminder(p.requestId(), p.asker(), p.number(), p.link()));
                 it.remove();
             }
         }
@@ -103,7 +113,9 @@ public final class PromisedReports {
             list.put(new org.json.JSONObject()
                     .put("requestId", p.requestId() == null ? org.json.JSONObject.NULL : p.requestId())
                     .put("asker", p.asker() == null ? org.json.JSONObject.NULL : p.asker())
-                    .put("dueAt", p.dueAt()).put("number", p.number()));
+                    .put("dueAt", p.dueAt()).put("number", p.number())
+                    .put("link", p.link() == null ? org.json.JSONObject.NULL
+                            : new org.json.JSONObject().put("node", p.link().node()).put("requestId", p.link().requestId())));
         }
         return new org.json.JSONObject().put("promises", list).put("counts", new org.json.JSONObject(counts));
     }
@@ -120,8 +132,10 @@ public final class PromisedReports {
             if (o == null || !o.has("dueAt")) continue;
             String requestId = o.isNull("requestId") ? null : o.optString("requestId", null);
             String asker = o.isNull("asker") ? null : o.optString("asker", null);
+            org.json.JSONObject l = o.optJSONObject("link");
             promises.put(requestId == null ? SCREEN : requestId,
-                    new Promise(requestId, asker, o.optLong("dueAt"), Math.max(1, o.optInt("number", 1))));
+                    new Promise(requestId, asker, o.optLong("dueAt"), Math.max(1, o.optInt("number", 1)),
+                            l == null ? null : new OpenRequests.RemoteLink(l.getString("node"), l.getString("requestId"))));
         }
     }
 

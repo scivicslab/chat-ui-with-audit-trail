@@ -192,7 +192,12 @@ public class Timekeeper {
      * @return which reminder this will be for the request, counting from 1
      */
     public int expectReport(String requestId, String asker, long minutes) {
-        int number = promised.expect(requestId, asker, System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(minutes));
+        return expectReport(requestId, asker, minutes, null);
+    }
+
+    /** @param link the way back to an asker on another chat-ui instance, or {@code null} for an asker on this one */
+    public int expectReport(String requestId, String asker, long minutes, OpenRequests.RemoteLink link) {
+        int number = promised.expect(requestId, asker, System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(minutes), link);
         record();
         return number;
     }
@@ -347,7 +352,7 @@ public class Timekeeper {
                         + (r.toScreen() ? ChatSession.REMINDER_TO_SCREEN : r.asker());
                 LOG.info(conversation + ": reminder " + r.number() + " for request " + r.requestId());
                 queue.tell(q -> q.enqueue(text, null, "queue", watchers, chat.asChatSessionRef(), source, null,
-                        new CompletableFuture<>(), false, true, List.of(), r.requestId(), false));
+                        new CompletableFuture<>(), false, true, List.of(), r.requestId(), false, r.link()));
             }
         } catch (Exception e) {
             LOG.log(Level.WARNING, conversation + ": timekeeper check failed", e);
