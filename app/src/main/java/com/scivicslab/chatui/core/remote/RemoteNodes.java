@@ -4,6 +4,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
@@ -72,6 +73,7 @@ public final class RemoteNodes implements AutoCloseable {
     /** The workspace's peer list, or {@code null} when the peers were set by hand in {@code chat-ui.peers}. */
     private final WorkspaceNodeDiscovery workspace;
     private com.scivicslab.pojoactor.core.scheduler.Scheduler refresher;
+    private com.scivicslab.pojoactor.core.scheduler.Scheduler announcer;
 
     private RemoteNodes(IIActorSystem local, DistributedIIActorSystem node, FileMessageIdStore messageIds,
                         WorkspaceNodeDiscovery workspace) {
@@ -220,6 +222,31 @@ public final class RemoteNodes implements AutoCloseable {
         return workspace != null && workspace.toolNodes().stream().anyMatch(n -> n.name().equals(name));
     }
 
+    /**
+     * Starts announcing this instance to the AI-workspace named in {@code aiWorkspaceNode} (the value of
+     * {@code AI_WORKSPACE_NODE}), now and then on schedule ({@link WorkspaceAnnouncer}). Nothing when there is no such
+     * value, or when the peers were set by hand and no AI-workspace's lists are read.
+     *
+     * @param httpPort this instance's HTTP port
+     * @return whether announcing started
+     */
+    public synchronized boolean announceTo(String aiWorkspaceNode, int httpPort) {
+        Optional<String> ws = WorkspaceAnnouncer.parse(aiWorkspaceNode);
+        if (ws.isEmpty() || workspace == null || announcer != null) return false;
+        WorkspaceAnnouncer a = new WorkspaceAnnouncer(this, ws.get(), httpPort, System::currentTimeMillis);
+        com.scivicslab.pojoactor.core.ActorRef<WorkspaceAnnouncer> self = node.actorOf(WorkspaceAnnouncer.ACTOR, a);
+        announcer = new com.scivicslab.pojoactor.core.scheduler.Scheduler(1);
+        // Ticks every RETRY_MILLIS; tick itself decides whether it is time to send.
+        announcer.scheduleWithFixedDelay(WorkspaceAnnouncer.ACTOR, self, WorkspaceAnnouncer::tick, 0,
+                WorkspaceAnnouncer.RETRY_MILLIS, java.util.concurrent.TimeUnit.MILLISECONDS);
+        return true;
+    }
+
+    /** @return the port this instance's node listens on */
+    public int actorPort() {
+        return node.getMyNode().getPort();
+    }
+
     /** @return this instance's node name */
     public String myName() {
         return node.getMyNode().getNodeId();
@@ -321,6 +348,7 @@ public final class RemoteNodes implements AutoCloseable {
     @Override
     public void close() {
         if (refresher != null) refresher.close();
+        if (announcer != null) announcer.close();
         BY_SYSTEM.remove(local, this);
         node.close();
         messageIds.close();
