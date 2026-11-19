@@ -330,7 +330,11 @@ public class Timekeeper {
             // A request that came back and was reopened is warned about again, counting from its reopening.
             warned.removeIf(id -> out.stream().noneMatch(o -> o.requestId().equals(id)));
             rearmedAt.keySet().removeIf(id -> out.stream().noneMatch(o -> o.requestId().equals(id)));
+            // A request with a promised report pending is the promiser's reminder's to follow up, not this watch's
+            // (AutomaticReplyDecision_261119_oo01).
+            java.util.Set<String> quiet = chat.promisedRequestsDirect();
             for (OpenRequests.Outstanding o : out) {
+                if (quiet.contains(o.requestId())) continue;
                 if (now - watchedFrom(o, rearmedAt) > childReplyWarnMillis && warned.add(o.requestId())) {
                     TargetState state;
                     try {

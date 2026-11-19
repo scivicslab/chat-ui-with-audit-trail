@@ -153,6 +153,9 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     /** When the running turn started, or {@code null} when none runs, read without waiting like {@link #isBusyDirect()}. */
     public Long runningSinceDirect() { return chatSession().runningSince(); }
 
+    /** The sent requests with a promised report pending, read without waiting for a running turn. */
+    public java.util.Set<String> promisedRequestsDirect() { return chatSession().promisedRequests(); }
+
     /** The child requests still out, read without waiting for a running turn, as {@link #isBusyDirect()} is. */
     public java.util.List<OpenRequests.Outstanding> outstandingChildrenDirect() {
         return chatSession().outstandingChildren();

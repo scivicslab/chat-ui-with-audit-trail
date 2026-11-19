@@ -691,6 +691,11 @@ public class ChatSession extends Interpreter {
      * while a turn holds this actor's thread (as {@link #isBusy()} is read).
      */
     private volatile List<OpenRequests.Outstanding> outstandingSnapshot = List.of();
+    /** The sent requests with a promised report pending, for the timekeeper to read without waiting for a turn. */
+    private volatile java.util.Set<String> promisedSnapshot = java.util.Set.of();
+
+    /** @return the sent requests whose promised report is pending, read without waiting for a running turn */
+    public java.util.Set<String> promisedRequests() { return promisedSnapshot; }
 
     /** Source of the message that resumes a paused turn. */
     public static final String RESUME_SOURCE = "agent:resume";
@@ -1456,7 +1461,11 @@ public class ChatSession extends Interpreter {
                     prompt != null && prompt.startsWith("[urgent request "), link);
             this.turnOriginal = requestId;
         } else if (requestId != null && source != null && source.startsWith(ASK_CHAT_REPLY_SOURCE_PREFIX)) {
-            this.turnOriginal = openRequests.replyArrived(requestId);
+            // A follow-up is the answer of the promiser's reminder; it ends the promise, and is the reply only when the
+            // request had had its reply before (AutomaticReplyDecision_261119_oo01).
+            this.turnOriginal = prompt != null && prompt.startsWith("[follow-up to request ")
+                    ? openRequests.followUpArrived(requestId, System.currentTimeMillis())
+                    : openRequests.replyArrived(requestId);
         } else if (isResume(source)) {
             // Goes on with the work of a paused turn, for the same original request.
             this.turnOriginal = openRequests.isOpen(requestId) ? requestId : null;
@@ -3139,7 +3148,7 @@ public class ChatSession extends Interpreter {
                 undecidedRequest = null;
                 undecidedReplier = null;
             }
-            return result + reopenAfterPromise(requestId, target + REMOTE_TARGET_MARK + node.strip());
+            return result + reopenAfterPromise(requestId, target + REMOTE_TARGET_MARK + node.strip(), minutes);
         }
         String target = chatId.isBlank() ? myChatName() : ChatUiActorSystem.resolveChatName(projectId, chatId);
         boolean self = target.equals(myChatName());
@@ -3167,7 +3176,7 @@ public class ChatSession extends Interpreter {
         }
         return "ok: " + target + "'s timekeeper will remind it in " + minutes + " minutes (reminder " + number
                 + ") to report on request " + requestId + "; its answer will come to you as a follow-up"
-                + reopenAfterPromise(requestId, target);
+                + reopenAfterPromise(requestId, target, minutes);
     }
 
     /**
@@ -3178,9 +3187,16 @@ public class ChatSession extends Interpreter {
      * @return the sentence to add to the tool's result, or {@code ""} when the request is not one this
      *         conversation sent
      */
-    private String reopenAfterPromise(String requestId, String target) {
+    private String reopenAfterPromise(String requestId, String target, long minutes) {
         if (!requestId.startsWith(myChatName() + ":")) return "";
-        OpenRequests.Reopening result = openRequests.reopen(requestId, target, System.currentTimeMillis());
+        long now = System.currentTimeMillis();
+        OpenRequests.Reopening result = openRequests.reopen(requestId, target, now);
+        // The request waits for the promised report: the "no reply yet" watch leaves it alone until the reminder's
+        // follow-up is read (AutomaticReplyDecision_261119_oo01).
+        if (result == OpenRequests.Reopening.REOPENED || result == OpenRequests.Reopening.STILL_OUT) {
+            openRequests.promised(requestId, target, now + minutes * 60_000L, result == OpenRequests.Reopening.STILL_OUT);
+            publishOutstanding();
+        }
         switch (result) {
             case REOPENED:
                 publishOutstanding();
@@ -3754,6 +3770,7 @@ public class ChatSession extends Interpreter {
     /** Publishes the child requests still out for the timekeeper to read. */
     private void publishOutstanding() {
         outstandingSnapshot = List.copyOf(openRequests.outstandingChildren());
+        promisedSnapshot = openRequests.promisedRequests();
         recordOpenRequests();
     }
 
@@ -4026,6 +4043,7 @@ public class ChatSession extends Interpreter {
             return;
         }
         outstandingSnapshot = List.copyOf(openRequests.outstandingChildren());
+        promisedSnapshot = openRequests.promisedRequests();
         unansweredSnapshot = openRequests.unanswered();
     }
 
