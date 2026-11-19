@@ -52,6 +52,9 @@ steps:
         method: rearmReplyWatches
         execution: direct
       - actor: this
+        method: decideReplyAtTurnEnd
+        execution: direct
+      - actor: this
         method: finish
         execution: direct
 
@@ -80,6 +83,9 @@ steps:
         execution: direct
       - actor: this
         method: rearmReplyWatches
+        execution: direct
+      - actor: this
+        method: decideReplyAtTurnEnd
         execution: direct
       - actor: this
         method: finish
@@ -137,6 +143,8 @@ steps:
       First, rearmReplyWatches arms again the timekeeper's reply-wait watch of each request this conversation sent
       that is still open, so that a request that stays open is reminded once per interval until its reply arrives,
       it is cancelled or it is closed (ReplyWatchRearmedAtTheEndOfEveryTurn_261116_oo01). It always succeeds.
+      Before finish, decideReplyAtTurnEnd records accept_reply on the reply this turn began with when the turn recorded
+      no decision on it, from facts only, or leaves it open with a warning (AutomaticReplyDecision_261119_oo01).
       No tool was called and no more prompts are queued: the final answer is fixed. Before it is
       emitted and the turn ends, decideReminder settles whether the timekeeper must remind this
       conversation (ReminderDecidedAtTheEndOfTheTurn_261114_oo01): when requests sent for a request
@@ -152,6 +160,9 @@ steps:
         execution: direct
       - actor: this
         method: decideReminder
+        execution: direct
+      - actor: this
+        method: decideReplyAtTurnEnd
         execution: direct
       - actor: this
         method: finish

@@ -664,7 +664,7 @@ public class ChatSession extends Interpreter {
      * ({@code ReplyDecisionAndPromisedReport_261108_oo01}). Anything a turn carries for its purpose belongs
      * here, so a pause loses none of it.
      */
-    private record PausedTurn(String task, String undecidedRequest, String undecidedReplier,
+    private record PausedTurn(String task, String undecidedRequest, String undecidedReplier, String undecidedEnding,
                               String reminderRequest, FollowUpTo followUp) {}
 
     /** The paused turns, by the paused turn's id, which its resume message's source names. */
@@ -724,6 +724,14 @@ public class ChatSession extends Interpreter {
 
     /** Whether this turn has already been asked once for a decision on its reply. */
     private boolean decisionAsked;
+    /**
+     * How the message this turn decides on ended, read from its ended line: {@code answered}, {@code asked},
+     * {@code step-limit}, {@link #ENDED_WITHOUT_A_REPLY}, or {@code null} for a follow-up, which has no ended line
+     * ({@code AutomaticReplyDecision_261119_oo01}).
+     */
+    private String undecidedEnding;
+    /** Whether this turn's end has already settled the reply it began with, so it is settled once. */
+    private boolean replyDecisionSettled;
 
     /** The text the model wrote before it was asked for a decision, kept for the turn's answer. */
     private String answerBeforeDecision;
@@ -1479,6 +1487,8 @@ public class ChatSession extends Interpreter {
         this.undecidedRequest = resumed != null ? resumed.undecidedRequest() : isReply ? requestId : null;
         this.undecidedReplier = resumed != null ? resumed.undecidedReplier()
                 : isReply ? source.substring(ASK_CHAT_REPLY_SOURCE_PREFIX.length()) : null;
+        this.undecidedEnding = resumed != null ? resumed.undecidedEnding() : isReply ? replyEndingOf(prompt) : null;
+        this.replyDecisionSettled = false;
         this.decisionAsked = false;
         this.answerBeforeDecision = null;
         // A reminder's answer goes to whoever waits for the report.
@@ -2581,6 +2591,8 @@ public class ChatSession extends Interpreter {
      * @return {@link ActionResult} with {@code success=true}
      */
     public ActionResult finish() {
+        // For an agent loop without the step: the reply this turn began with is settled before the turn ends.
+        decideReplyAtTurnEnd();
         if (!cancelled && finalAnswer == null && turnError != null) {
             // A failed turn (TurnErrorInConversation_260913_oo01): the error was relayed live as it
             // happened; here it becomes part of the record. Not an assistant answer — the provider
@@ -3316,6 +3328,79 @@ public class ChatSession extends Interpreter {
         return new ActionResult(true, "asked for a decision");
     }
 
+    /** What {@link #undecidedEnding} holds for a message saying the request ended without a reply. */
+    static final String ENDED_WITHOUT_A_REPLY = "without a reply";
+
+    private static final java.util.regex.Pattern ENDED_LINE = java.util.regex.Pattern.compile("(?m)^\\[ended: ([a-z-]+);");
+
+    /**
+     * Reads how a reply message ended from the line the sending side put on it, never from what the reply says.
+     *
+     * @param message the reply, follow-up or no-reply message a turn began with
+     * @return the ended line's word, {@link #ENDED_WITHOUT_A_REPLY}, or {@code null} for a follow-up or a message
+     *         with no ended line
+     */
+    static String replyEndingOf(String message) {
+        if (message == null || message.startsWith("[follow-up to request ")) return null;
+        String first = message.lines().findFirst().orElse("");
+        if (first.startsWith("[request ") && first.contains(" ended without a reply")) return ENDED_WITHOUT_A_REPLY;
+        java.util.regex.Matcher m = ENDED_LINE.matcher(message);
+        String last = null;
+        while (m.find()) last = m.group(1);
+        return last;
+    }
+
+    /**
+     * Agent-loop action at the end of a turn: when the turn began with a reply or a follow-up and recorded no decision
+     * on it (accept_reply, expect_report, or ask_chat to the one that replied), records one, from facts only: the
+     * request id, the reply's ended line and how this turn ended. It accepts the reply, unless the reply ended
+     * {@code asked} or {@code step-limit}, or this turn itself did not end normally; then it records no decision and
+     * warns. Each is written to the I/O log as {@code turn{N}/reply-decision} and to the conversation's log. Settles
+     * once per turn and always succeeds, so it never keeps the turn from ending
+     * ({@code AutomaticReplyDecision_261119_oo01}).
+     */
+    public ActionResult decideReplyAtTurnEnd() {
+        if (replyDecisionSettled) return new ActionResult(true, "already settled");
+        replyDecisionSettled = true;
+        if (undecidedRequest == null) return new ActionResult(true, "no reply waiting for a decision");
+        // A paused turn is not ending: the turn that resumes it decides.
+        if (pauseRequested) return new ActionResult(true, "paused: the resumed turn decides");
+        String request = undecidedRequest;
+        String replier = undecidedReplier;
+        String leftOpen = personQuestion != null ? "this turn ended by asking the person"
+                : stepLimitHit ? "this turn reached its step limit"
+                : cancelled ? "this turn was cancelled"
+                : finalAnswer == null && turnError != null ? "this turn failed: " + turnError
+                : com.scivicslab.chatui.agent.ChatInspection.ENDED_ASKED.equals(undecidedEnding)
+                        || com.scivicslab.chatui.agent.ChatInspection.ENDED_STEP_LIMIT.equals(undecidedEnding)
+                        ? "the reply ended " + undecidedEnding
+                : null;
+        if (leftOpen != null) {
+            String line = "LEFT OPEN | " + request + " | " + leftOpen + "; no decision is recorded on " + replier + "'s reply";
+            recordReplyDecision(line);
+            logToConversationSquad("WARNING", "turn" + ioTurnNo + ": " + line);
+            return new ActionResult(true, "left open");
+        }
+        String why = ENDED_WITHOUT_A_REPLY.equals(undecidedEnding) ? "the request ended without a reply"
+                : undecidedEnding == null ? "the follow-up's turn registered no new expect_report"
+                : "the reply ended " + undecidedEnding + " and the turn recorded no decision";
+        undecidedRequest = null;
+        undecidedReplier = null;
+        String line = "AUTO ACCEPT | " + request + " | " + why;
+        recordReplyDecision(line);
+        logToConversationSquad("INFO", "turn" + ioTurnNo + ": accept_reply recorded automatically: " + line);
+        return new ActionResult(true, "accepted");
+    }
+
+    private void recordReplyDecision(String line) {
+        if (ioLog == null || ioSession < 0) return;
+        try {
+            ioLog.record(ioSession, "agent", "turn" + ioTurnNo + "/reply-decision", line);
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "I/O log reply-decision record failed", e);
+        }
+    }
+
     /**
      * @param source a queued message's source
      * @return whether it resumes a paused turn: {@link #RESUME_SOURCE}, alone or followed by the paused turn's id
@@ -3657,7 +3742,7 @@ public class ChatSession extends Interpreter {
         // model told only to "continue" may continue the wrong one. Everything else the turn knew about its
         // purpose is kept under its own id, which the resume message's source names.
         String pausedId = turnId();
-        pausedTurns.put(pausedId, new PausedTurn(turnTask, undecidedRequest, undecidedReplier, turnReminder, turnFollowUp));
+        pausedTurns.put(pausedId, new PausedTurn(turnTask, undecidedRequest, undecidedReplier, undecidedEnding, turnReminder, turnFollowUp));
         String text = "[resume paused turn " + turnId() + (original == null ? "" : ", for request " + original)
                 + "]\nYour previous turn was paused so that an urgent request could be answered. Continue the work "
                 + "it was doing for the message below, and answer that message only; what it had done so far is in "

@@ -431,6 +431,18 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     }
 
     /**
+     * At the end of a turn that began with a reply or a follow-up and recorded no decision on it: records one from
+     * facts only ({@code AutomaticReplyDecision_261119_oo01}). See {@link ChatSession#decideReplyAtTurnEnd()}.
+     *
+     * @param arg unused
+     * @return always successful, so that the turn goes on to end
+     */
+    @Action("decideReplyAtTurnEnd")
+    public ActionResult decideReplyAtTurnEndAction(String arg) {
+        return chatSession().decideReplyAtTurnEnd();
+    }
+
+    /**
      * The first step of {@code think-asks-person}: succeeds only when the step that just ran asked the person
      * with {@code ask_person}, so the turn ends there ({@code AskThePersonEndsTheTurn_261119_oo01}).
      *
