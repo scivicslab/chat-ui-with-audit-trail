@@ -1059,6 +1059,11 @@ public class ChatSession extends Interpreter {
     /** @return the provider's kind id, e.g. {@code openai-compat} or {@code claude} */
     public String getProviderId() { return provider.id(); }
 
+    /** @see LlmProvider#persistedLog(int, long) */
+    public com.scivicslab.chatui.core.provider.PersistedLog persistedLog(int limit, long before) {
+        return provider.persistedLog(limit, before);
+    }
+
     /**
      * Returns the current provider session identifier, or {@code null} if no session is active.
      *

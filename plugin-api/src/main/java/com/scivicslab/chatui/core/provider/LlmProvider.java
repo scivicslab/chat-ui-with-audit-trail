@@ -155,6 +155,22 @@ public interface LlmProvider {
      */
     default void collapseTurn(String question, String answer) { }
 
+    /**
+     * Reads what this conversation did from the record the provider itself keeps on disk, newest
+     * first up to {@code limit}, for {@code get_chat_log} after a restart
+     * ({@code GetChatLogReadsPersistedHistory_261119_oo01}).
+     *
+     * <p>Called from the reader's own thread, not through this provider's actor: the reader is
+     * usually waiting on a conversation that is in the middle of a turn. An implementation reads
+     * only fields fixed at construction and files, and reads at most a bounded amount.</p>
+     *
+     * @param limit  how many entries at most
+     * @param before epoch milliseconds; only entries recorded earlier are returned
+     * @return the entries, oldest first, or {@code null} when this provider keeps no record of its
+     *         own and the conversation's I/O log is to be read instead (the default)
+     */
+    default PersistedLog persistedLog(int limit, long before) { return null; }
+
     /** True if this provider supports interactive user prompts (tool permission dialogs, etc.). */
     default boolean supportsInteractivePrompts() { return false; }
 

@@ -18,7 +18,8 @@ import java.util.List;
  * <p>The settings every harness provider shares are read from the body's configuration through
  * the creation context, under the keys {@code CliHarnessProvider_260912_oo01} defined:
  * {@code chat-ui.harness.permission-mode}, {@code chat-ui.harness.session-dir},
- * {@code chat-ui.harness.claude-model}, {@code chat-ui.harness.codex-model}.</p>
+ * {@code chat-ui.harness.claude-model}, {@code chat-ui.harness.codex-model}, and
+ * {@code chat-ui.harness.claude-projects-dir} ({@code GetChatLogReadsPersistedHistory_261119_oo01}).</p>
  */
 public class HarnessPlugin implements ChatUiPlugin {
 
@@ -37,7 +38,9 @@ public class HarnessPlugin implements ChatUiPlugin {
                 sessionDir,
                 ctx.httpPort(),
                 ctx.configOr("chat-ui.harness.claude-model", "sonnet"),
-                ctx.configOr("chat-ui.harness.codex-model", "gpt-5.5"));
+                ctx.configOr("chat-ui.harness.codex-model", "gpt-5.5"),
+                Path.of(ctx.configOr("chat-ui.harness.claude-projects-dir",
+                        Path.of(System.getProperty("user.home"), ".claude", "projects").toString())));
     }
 
     /** {@code claude}: with its own tools (harness set), or with them switched off (full set). */

@@ -476,7 +476,7 @@ public class IoLogView {
     }
 
     /** @return the turn, or {@code null} when either marker is missing */
-    private static Turn parseConversationEntry(String message) {
+    static Turn parseConversationEntry(String message) {
         if (message == null) return null;
         String qMarker = "QUESTION:";
         String aMarker = "\n\nANSWER:\n";

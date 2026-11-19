@@ -29,7 +29,7 @@ class ClaudeCodeRetractionTest {
     void aRetractionLineBetweenTwoResponsesReachesTheConversationAsARetraction() throws Exception {
         Path dir = Files.createTempDirectory("provider-retraction-test");
         ClaudeCodeProvider provider = new ClaudeCodeProvider(
-                new HarnessSettings("default", dir, 1, "sonnet", null), "p", "c", dir,
+                new HarnessSettings("default", dir, 1, "sonnet", null, dir), "p", "c", dir,
                 com.scivicslab.chatui.agent.ToolSet.FULL);
         StreamEventParser parser = new StreamEventParser();
         List<ChatEvent> sent = new ArrayList<>();

@@ -208,6 +208,16 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     /** Has the conversation write the agent loop just put on it, without waiting for a running turn. */
     public void recordAgentLoopDirect(String entry) { chatSession().recordAgentLoop(entry); }
 
+    /**
+     * Reads the conversation's history from its provider's own record, without waiting for a running turn
+     * ({@code GetChatLogReadsPersistedHistory_261119_oo01}).
+     *
+     * @return the entries, or {@code null} when the provider keeps no record and the I/O log is to be read
+     */
+    public com.scivicslab.chatui.core.provider.PersistedLog persistedLogDirect(int limit, long before) {
+        return chatSession().persistedLog(limit, before);
+    }
+
     /** The conversation's provider kind ({@code openai-compat}, {@code claude}, {@code codex}), read directly. */
     public String getProviderIdDirect() { return chatSession().getProviderId(); }
 

@@ -48,6 +48,7 @@ public class ClaudeCodeProvider implements LlmProvider {
     private final CliProcess cliProcess;
     private final SlashCommandHandler commandHandler;
     private final Path sessionFile;
+    private final ClaudeTranscriptLog transcriptLog;
     private final ToolSet toolSet;
     private final Set<String> pendingPermissionIds = Collections.newSetFromMap(new ConcurrentHashMap<>());
     private final Set<String> pendingPlanApprovalIds = Collections.newSetFromMap(new ConcurrentHashMap<>());
@@ -63,6 +64,8 @@ public class ClaudeCodeProvider implements LlmProvider {
                               Path workingDir, ToolSet toolSet) {
         this.toolSet = toolSet;
         this.sessionFile = settings.sessionFile(projectId, chatId, ID);
+        this.transcriptLog = new ClaudeTranscriptLog(sessionFile, settings.claudeProjectsDir(),
+                ClaudeTranscriptLog.DEFAULT_TAIL_BYTES);
         CliConfig config = CliConfig.defaults(settings.claudeModel());
         if (settings.permissionMode() != null && !settings.permissionMode().isBlank()) {
             config = config.withPermissionMode(settings.permissionMode().trim());
@@ -405,6 +408,16 @@ public class ClaudeCodeProvider implements LlmProvider {
             Thread.currentThread().interrupt();
         }
         return surfaced;
+    }
+
+    /**
+     * Reads the conversation's history from the transcript Claude Code keeps for the session named in
+     * the session file ({@code GetChatLogReadsPersistedHistory_261119_oo01}). Uses only final
+     * fields, so it may be called from any thread while a turn runs.
+     */
+    @Override
+    public com.scivicslab.chatui.core.provider.PersistedLog persistedLog(int limit, long before) {
+        return transcriptLog.read(limit, before);
     }
 
     // ---- Session persistence ----

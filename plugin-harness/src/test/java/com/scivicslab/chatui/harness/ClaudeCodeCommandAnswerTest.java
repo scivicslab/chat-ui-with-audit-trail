@@ -57,7 +57,7 @@ class ClaudeCodeCommandAnswerTest {
     void isExchangeWithBackend_isTrueOnlyForTheClisOwnCommands() throws Exception {
         java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("provider-test");
         ClaudeCodeProvider provider = new ClaudeCodeProvider(
-                new HarnessSettings("default", dir, 1, "sonnet", null), "p", "c", dir,
+                new HarnessSettings("default", dir, 1, "sonnet", null, dir), "p", "c", dir,
                 com.scivicslab.chatui.agent.ToolSet.FULL);
 
         assertTrue(provider.isExchangeWithBackend("/compact"));

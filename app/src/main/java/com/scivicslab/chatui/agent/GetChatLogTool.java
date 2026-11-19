@@ -2,14 +2,13 @@ package com.scivicslab.chatui.agent;
 
 import com.scivicslab.chatui.core.actor.ChatUiActorSystem;
 import com.scivicslab.chatui.core.actor.ConversationControls;
-import com.scivicslab.chatui.logging.RecentEntriesAccumulator;
-
-import java.util.List;
+import com.scivicslab.chatui.logging.ChatLog;
 
 /**
  * The {@code get_chat_log} tool: reads the newest entries of another conversation's log without
  * sending it anything, so a caller can see what a conversation is doing while an {@code ask_chat}
- * to it is still waiting, or why a call failed.
+ * to it is still waiting, or why a call failed. After a restart, the entries its in-memory log is short
+ * of come from the conversation's persisted history ({@code GetChatLogReadsPersistedHistory_261119_oo01}).
  */
 public final class GetChatLogTool {
 
@@ -28,8 +27,8 @@ public final class GetChatLogTool {
         String targetName = ChatUiActorSystem.resolveChatName(myProjectId, target);
         String projectId = targetName.substring(0, targetName.indexOf('/'));
         String chatId = targetName.substring(targetName.indexOf("/chat-") + "/chat-".length());
-        List<RecentEntriesAccumulator.Entry> entries = controls.getChatLogEntries(projectId, chatId);
-        if (entries == null) return "error: chat not found: " + target + OtherInstances.notFoundHint(targetName);
-        return ChatInspection.formatLog(entries, count);
+        ChatLog log = controls.getChatLog(projectId, chatId, ChatInspection.logCount(count));
+        if (log == null) return "error: chat not found: " + target + OtherInstances.notFoundHint(targetName);
+        return ChatInspection.formatChatLog(log, count);
     }
 }

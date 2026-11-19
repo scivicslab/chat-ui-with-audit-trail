@@ -3,6 +3,7 @@ package com.scivicslab.chatui.core.actor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.scivicslab.chatui.agent.FileAccessScope;
 import com.scivicslab.chatui.agent.ToolSet;
+import com.scivicslab.chatui.core.iolog.IoLogHistory;
 import com.scivicslab.chatui.core.iolog.IoLogStore;
 import com.scivicslab.chatui.core.plugin.OpenAiCompatProviderFactory;
 import com.scivicslab.chatui.core.plugin.PluginRegistry;
@@ -1055,10 +1056,28 @@ public class ChatUiActorSystem implements ConversationControls {
      * @param chatId    conversation id within that project
      * @return that conversation's recent log entries (oldest first), or {@code null} if it does not exist
      */
-    @Override
     public List<RecentEntriesAccumulator.Entry> getChatLogEntries(String projectId, String chatId) {
         RecentEntriesAccumulator buf = chatLogBuffers.get(chatActorName(projectId, chatId));
         return buf == null ? null : buf.recent();
+    }
+
+    /**
+     * The in-memory log, filled in front from the persisted history when it is short of
+     * {@code wanted}: the provider's own record when it keeps one (Claude Code's transcript),
+     * otherwise this conversation's I/O log ({@code GetChatLogReadsPersistedHistory_261119_oo01}).
+     * Nothing read here is written to {@link #chatLogBuffers}.
+     */
+    @Override
+    public com.scivicslab.chatui.logging.ChatLog getChatLog(String projectId, String chatId, int wanted) {
+        String name = chatActorName(projectId, chatId);
+        RecentEntriesAccumulator buf = chatLogBuffers.get(name);
+        if (buf == null) return null;
+        ChatSessionIIAR session = chatSessions.get(name);
+        return com.scivicslab.chatui.logging.ChatLog.fill(buf.recent(), wanted, (limit, before) -> {
+            com.scivicslab.chatui.core.provider.PersistedLog own =
+                    session == null ? null : session.persistedLogDirect(limit, before);
+            return own != null ? own : new IoLogHistory(ioLogStore).read(name, limit, before);
+        });
     }
 
     /** @return the system-wide log's recent entries (oldest first) */

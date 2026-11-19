@@ -124,9 +124,10 @@ class ConversationToolsTest {
             setCalls.add(projectId + "/" + chatId + "=" + model);
             return true;
         }
-        @Override public List<RecentEntriesAccumulator.Entry> getChatLogEntries(String projectId, String chatId) {
+        @Override public com.scivicslab.chatui.logging.ChatLog getChatLog(String projectId, String chatId, int wanted) {
             return chatId.equals("02")
-                    ? List.of(new RecentEntriesAccumulator.Entry(1_700_000_000_000L, "agent", "step", "hello from 02"))
+                    ? new com.scivicslab.chatui.logging.ChatLog(
+                            List.of(new RecentEntriesAccumulator.Entry(1_700_000_000_000L, "agent", "step", "hello from 02")), null)
                     : null;
         }
     }

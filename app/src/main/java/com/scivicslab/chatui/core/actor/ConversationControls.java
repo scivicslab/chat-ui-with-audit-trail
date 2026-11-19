@@ -26,8 +26,14 @@ public interface ConversationControls {
      */
     boolean setModel(String projectId, String chatId, String model);
 
-    /** @return the conversation's recent log entries, oldest first, or {@code null} if it does not exist */
-    List<RecentEntriesAccumulator.Entry> getChatLogEntries(String projectId, String chatId);
+    /**
+     * The conversation's newest log entries, with those its in-memory log is short of filled in from
+     * its persisted history ({@code GetChatLogReadsPersistedHistory_261119_oo01}).
+     *
+     * @param wanted how many entries at most
+     * @return the entries, oldest first, or {@code null} if the conversation does not exist
+     */
+    com.scivicslab.chatui.logging.ChatLog getChatLog(String projectId, String chatId, int wanted);
 
     /**
      * Adds a conversation to a project, the actor system allocating its id.

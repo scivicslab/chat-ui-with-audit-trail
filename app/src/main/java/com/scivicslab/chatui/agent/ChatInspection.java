@@ -75,12 +75,32 @@ public final class ChatInspection {
      */
     public static String formatLog(List<RecentEntriesAccumulator.Entry> entries, Integer count) {
         if (entries == null || entries.isEmpty()) return "the log is empty";
-        int n = (count == null || count <= 0) ? DEFAULT_LOG_ENTRIES : Math.min(count, MAX_LOG_ENTRIES);
+        int n = logCount(count);
         List<RecentEntriesAccumulator.Entry> tail = entries.subList(Math.max(0, entries.size() - n), entries.size());
         return tail.stream()
                 .map(e -> TIME.format(Instant.ofEpochMilli(e.time())) + " " + e.source() + " " + e.type()
                         + " " + oneLine(e.data()))
                 .collect(Collectors.joining("\n"));
+    }
+
+    /**
+     * @param count the number a caller asked for, or {@code null}
+     * @return {@link #DEFAULT_LOG_ENTRIES} when {@code count} is {@code null} or not positive, otherwise
+     *         {@code count} cut to {@link #MAX_LOG_ENTRIES}
+     */
+    public static int logCount(Integer count) {
+        return (count == null || count <= 0) ? DEFAULT_LOG_ENTRIES : Math.min(count, MAX_LOG_ENTRIES);
+    }
+
+    /**
+     * {@link #formatLog} for a log filled in from the persisted history, with the line saying why
+     * that history gave nothing, when it says so ({@code GetChatLogReadsPersistedHistory_261119_oo01}).
+     *
+     * @return the entries' lines, then {@code history: <note>} when {@code log} has a note
+     */
+    public static String formatChatLog(com.scivicslab.chatui.logging.ChatLog log, Integer count) {
+        String lines = formatLog(log.entries(), count);
+        return log.historyNote() == null ? lines : lines + "\nhistory: " + log.historyNote();
     }
 
     /** How a turn ended and how much it used, for the line {@code ask_chat} adds to a reply. */

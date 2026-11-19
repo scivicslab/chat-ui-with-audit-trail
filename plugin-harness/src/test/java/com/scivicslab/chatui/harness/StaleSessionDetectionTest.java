@@ -22,7 +22,7 @@ class StaleSessionDetectionTest {
     @Test
     void dispatch_resumeOfDeletedSession_marksTheSessionStaleAndShowsNoError(@TempDir Path dir) {
         ClaudeCodeProvider provider = new ClaudeCodeProvider(
-                new HarnessSettings("bypassPermissions", dir, 0, "sonnet", null),
+                new HarnessSettings("bypassPermissions", dir, 0, "sonnet", null, dir),
                 "project1", "01", null, ToolSet.HARNESS);
         String line = "{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"is_error\":true,"
                 + "\"session_id\":\"s1\",\"errors\":[\"No conversation found with session ID: s1\"]}";

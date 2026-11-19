@@ -14,13 +14,17 @@ import java.nio.file.Path;
  * @param httpPort        this instance's HTTP port, part of every session file's name
  * @param claudeModel     default model alias for a new Claude Code conversation
  * @param codexModel      default model for a new Codex conversation, or {@code null} for Codex's own
+ * @param claudeProjectsDir the directory Claude Code keeps its session transcripts under, one
+ *                        subdirectory per working directory; only read, by {@code get_chat_log}
+ *                        ({@code GetChatLogReadsPersistedHistory_261119_oo01})
  */
 public record HarnessSettings(
     String permissionMode,
     Path sessionDir,
     int httpPort,
     String claudeModel,
-    String codexModel
+    String codexModel,
+    Path claudeProjectsDir
 ) {
 
     /** @return the session file for one conversation and harness */
