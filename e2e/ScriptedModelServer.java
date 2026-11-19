@@ -36,7 +36,14 @@ import java.util.regex.Pattern;
  * <li>{@code SCENARIO-T}: call {@code list_running_tools} and {@code search_docs}, which reach the AI-workspace and
  * html-saurus as nodes; the turn ends with {@code TOOLS-DONE} followed by their results (ToolNodesCheck).</li>
  * <li>The end-of-turn reminder check registers a reminder only for an answer that says "I will report back".</li>
+ * <li>{@code SCENARIO-M}: {@code write} a file, {@code read} it back, and end with {@code NATIVE-DONE} followed by
+ * what was read (McpServerCheck, OpenAiCompatStandardToolCalling_261120_oo01).</li>
  * <li>Anything else: "OK. I will report back in 12 minutes."</li>
+ * </ul>
+ * When the request carries {@code tools}, as the openai-compat provider sends them, a scripted call is sent as
+ * {@code tool_calls} rather than as {@code <invoke>} text, and tool results that end the request are read as
+ * {@code Tool result (<name>):} text, so every scenario runs either way.
+ * <ul>
  * </ul>
  */
 public class ScriptedModelServer {
@@ -182,6 +189,24 @@ public class ScriptedModelServer {
             </invoke>
             </function_calls>""";
 
+    static final String WRITE_M = """
+            <function_calls>
+            <invoke name="write">
+            <parameter name="path">native-e2e.txt</parameter>
+            <parameter name="content">NATIVE-CONTENT-42</parameter>
+            </invoke>
+            </function_calls>""";
+
+    static final String READ_M = """
+            <function_calls>
+            <invoke name="read">
+            <parameter name="path">native-e2e.txt</parameter>
+            </invoke>
+            </function_calls>""";
+
+    static final Pattern INVOKE = Pattern.compile("<invoke name=\"([^\"]+)\">(.*?)</invoke>", Pattern.DOTALL);
+    static final Pattern PARAMETER = Pattern.compile("<parameter name=\"([^\"]+)\">(.*?)</parameter>", Pattern.DOTALL);
+
     static final Pattern REPLY_ID = Pattern.compile("\\[reply to request (\\S+?),");
 
     static String text(JsonNode message) {
@@ -212,6 +237,9 @@ public class ScriptedModelServer {
         if (last.contains("SCENARIO-G")) return GRAPH_G;
         if (last.contains("SCENARIO-R")) return ASK_03;
         if (last.contains("SCENARIO-T")) return TOOLS_T;
+        if (last.contains("SCENARIO-M")) return WRITE_M;
+        if (last.contains("Tool result (write)") && whole.contains("SCENARIO-M")) return READ_M;
+        if (last.contains("Tool result (read)") && whole.contains("SCENARIO-M")) return "NATIVE-DONE\n" + last;
         // Echoes the tool results, so the check reads them in the final answer the conversation keeps.
         if (last.contains("Tool result (") && whole.contains("SCENARIO-T")) return "TOOLS-DONE\n" + last;
         if (last.contains("REPLY-ME")) return "R42 is the result.";
@@ -245,10 +273,39 @@ public class ScriptedModelServer {
         JsonNode req = JSON.readTree(ex.getRequestBody());
         JsonNode messages = req.path("messages");
         String last = messages.size() > 0 ? text(messages.get(messages.size() - 1)) : "";
+        // The tool results that end the request, written as the text the <invoke> path sends them in.
+        StringBuilder results = new StringBuilder();
+        for (int i = messages.size() - 1; i >= 0 && "tool".equals(messages.get(i).path("role").asText()); i--) {
+            JsonNode m = messages.get(i);
+            results.insert(0, "Tool result (" + m.path("name").asText() + "):\n" + text(m) + "\n\n");
+        }
+        if (results.length() > 0) last = results.toString();
+        boolean byDefinition = req.has("tools");
         StringBuilder whole = new StringBuilder();
         for (JsonNode m : messages) whole.append(text(m)).append(' ');
         String reply = answer(last, whole.toString());
-        if (req.path("stream").asBoolean(false)) {
+        if (byDefinition && reply.contains("<invoke") && req.path("stream").asBoolean(false)) {
+            StringBuilder sse = new StringBuilder();
+            Matcher m = INVOKE.matcher(reply);
+            int index = 0;
+            while (m.find()) {
+                ObjectNode args = JSON.createObjectNode();
+                Matcher p = PARAMETER.matcher(m.group(2));
+                while (p.find()) args.put(p.group(1), p.group(2));
+                ObjectNode d = JSON.createObjectNode();
+                ObjectNode c = d.putArray("choices").addObject();
+                c.put("index", 0);
+                ObjectNode call = c.putObject("delta").putArray("tool_calls").addObject();
+                call.put("index", index).put("id", "call_" + System.nanoTime() + "_" + index).put("type", "function");
+                call.putObject("function").put("name", m.group(1)).put("arguments", JSON.writeValueAsString(args));
+                c.putNull("finish_reason");
+                sse.append("data: ").append(JSON.writeValueAsString(d)).append("\n\n");
+                index++;
+            }
+            sse.append("data: ").append(chunk(null, "tool_calls")).append("\n\n");
+            sse.append("data: [DONE]\n\n");
+            send(ex, 200, "text/event-stream", sse.toString().getBytes(StandardCharsets.UTF_8));
+        } else if (req.path("stream").asBoolean(false)) {
             StringBuilder sse = new StringBuilder();
             sse.append("data: ").append(chunk(reply, null)).append("\n\n");
             sse.append("data: ").append(chunk(null, "stop")).append("\n\n");
