@@ -285,6 +285,11 @@ public class ChatSession extends Interpreter {
         return (TOOL_DESCRIPTIONS.containsKey(name) || pluginTools.containsKey(name)) && toolSet.contains(name);
     }
 
+    /** @return the description of the built-in tool {@code tool} the model is shown, or {@code null} when there is none */
+    static String descriptionOf(String tool) {
+        return TOOL_DESCRIPTIONS.get(tool);
+    }
+
     /** @return the argument names in {@code - tool(a, b)} of the tool's description, in order */
     static List<String> signatureOf(String tool) {
         String description = TOOL_DESCRIPTIONS.get(tool);
@@ -335,8 +340,10 @@ public class ChatSession extends Interpreter {
         m.put("list_running_tools", """
             - list_running_tools(tool): list the tool instances the AI-workspace that runs this
               chat-ui is running — each one's name, port, state (READY, STARTING, ...), address and
-              title. "tool" is optional: give a tool's name to list only its instances. It only
-              reads the list; it cannot start or stop anything.
+              title — and, for a chat-ui instance, "node <name>": the node name ask_chat's "node"
+              takes. Known nodes no row matched come on a last line; without an AI-workspace it
+              lists the known node names alone. "tool" is optional: give a tool's name to list only
+              its instances. It only reads the list; it cannot start or stop anything.
             """);
         m.put("list_references", """
             - list_references(id, direction, relation, node): follow the reference links an author
@@ -372,8 +379,8 @@ public class ChatSession extends Interpreter {
             - ask_chat(chatId, prompt, node): send an instruction to another conversation (e.g. "02" for
               one in your own project, or "project2/02" to reach one in another project). Requires
               "chatId" and "prompt" <parameter> tags. Give "node" only to reach a conversation of
-              another chat-ui instance: the node's name as this instance is configured with it; then
-              chatId names the conversation there. Leave "node" out for this instance. It does NOT wait: the result only says the
+              another chat-ui instance: to find the node name of another instance, call
+              list_running_tools first; then chatId names the conversation there. Leave "node" out for this instance. It does NOT wait: the result only says the
               instruction was sent, and under which request id, e.g. "project1/chat-01:s40:t5:r2"
               (your conversation, session, turn, and the number of this ask_chat in your turn). The
               reply reaches you only AFTER YOU END YOUR TURN: it comes as a new message starting
@@ -390,7 +397,8 @@ public class ChatSession extends Interpreter {
               checking once whether the other conversation is stuck.
             """);
         m.put("ask_chat_urgent", """
-            - ask_chat_urgent(chatId, prompt, node): as ask_chat (including "node"), but the request goes into the other
+            - ask_chat_urgent(chatId, prompt, node): as ask_chat (including "node": to find the node name of
+              another instance, call list_running_tools first), but the request goes into the other
               conversation's queue ahead of every waiting message that is not urgent, and its reply
               comes back to you the same way. It does not interrupt a turn the other conversation
               is running; it is answered next. Requires "chatId" and "prompt" <parameter> tags.
@@ -402,7 +410,8 @@ public class ChatSession extends Interpreter {
         m.put("cancel_request", """
             - cancel_request(requestId, node): take back a request you sent with ask_chat or ask_chat_urgent
               while it still waits in the other conversation's queue. "node" is optional: a request
-              sent to another instance is found by its id; its result then arrives as a new message. Requires a "requestId"
+              sent to another instance is found by its id; its result then arrives as a new message
+              (to find the node name of another instance, call list_running_tools first). Requires a "requestId"
               <parameter> tag: the id the ask_chat result gave, e.g. "project1/chat-01:s40:t5:r2".
               Only you, the sender, can cancel it. The result says what happened: "removed" (it is
               out of the queue and no reply will come, so do not wait for one), "already running"
@@ -433,7 +442,8 @@ public class ChatSession extends Interpreter {
               and the answer it writes then comes to you as [follow-up to request …, reminder N].
               If that says "not yet" again, register again. Requires "chatId", "requestId" and
               "minutes" (whole minutes) <parameter> tags. Give "node" when the conversation that
-              promised the report is on another chat-ui instance, as you gave it to ask_chat. You do
+              promised the report is on another chat-ui instance, as you gave it to ask_chat (to find
+              the node name of another instance, call list_running_tools first). You do
               not register a reminder for a report you promise yourself: the end of your turn decides that.
             """);
         m.put("set_chat_name", """
@@ -459,8 +469,8 @@ public class ChatSession extends Interpreter {
             - set_collaborator(chatId, role, collaboratorChatId, node): record that, for ConversationSquad "chatId",
               the ConversationSquad playing role "role" (e.g. "worker") is "collaboratorChatId". Requires THREE
               <parameter> tags: "chatId", "role", "collaboratorChatId". Give "node" only when the one playing the
-              role is a conversation of another chat-ui instance: the node's name as this instance is configured
-              with it, as ask_chat takes it; then collaboratorChatId names the conversation there, and the agent
+              role is a conversation of another chat-ui instance, as ask_chat takes it: to find the node name of
+              another instance, call list_running_tools first; then collaboratorChatId names the conversation there, and the agent
               loop sends its work there. An agent loop installed via set_agent_loop can then resolve that role
               instead of a hardcoded chat id, and you can reassign it again later by calling this a second time.
             """);

@@ -109,6 +109,8 @@ class ToolNodesTest {
     private Workspace workspace;
     private RemoteNodes remote;
     private String httpBase;
+    /** What the stub AI-workspace's HTTP lists answer; a test may change them after the remote path started. */
+    private final Map<String, String> listAnswers = new java.util.concurrent.ConcurrentHashMap<>();
     private int firstPort, secondPort, workspacePort;
 
     private static int freePort() throws IOException {
@@ -160,12 +162,13 @@ class ToolNodesTest {
         w.addIIActor(new WorkspaceIIAR(workspace, w));
         w.startHttpServer("127.0.0.1", workspacePort);
 
-        HttpServer list = http(Map.of(
+        listAnswers.putAll(Map.of(
                 "/api/chat-ui/peers", "[{\"name\":\"chat-ui-me\",\"host\":\"127.0.0.1\",\"actorPort\":1}]",
                 "/api/nodes", "[{\"name\":\"ai-workspace-test\",\"host\":\"127.0.0.1\",\"actorPort\":" + workspacePort + ",\"kind\":\"ai-workspace\"},"
                         + "{\"name\":\"html-saurus-b\",\"host\":\"127.0.0.1\",\"actorPort\":" + secondPort + ",\"kind\":\"html-saurus\"},"
                         + "{\"name\":\"html-saurus-a\",\"host\":\"127.0.0.1\",\"actorPort\":" + firstPort + ",\"kind\":\"html-saurus\"},"
                         + "{\"name\":\"chat-ui-other\",\"host\":\"127.0.0.1\",\"actorPort\":2,\"kind\":\"chat-ui\"}]"));
+        HttpServer list = http(listAnswers);
         HttpServer portalHttp = http(Map.of(
                 "/api/search", HITS_FULLTEXT, "/api/search-semantic", HITS_SEMANTIC, "/api/find-related", HITS_RELATED,
                 "/api/prerequisites", EDGES, "/api/prerequisite-of", "[]"));
@@ -250,6 +253,32 @@ class ToolNodesTest {
     void listRunningToolsWithoutAnAiWorkspaceNodeSaysSo() {
         String none = RunningToolsTool.list(null, "");
         assertTrue(none.startsWith("error:") && none.contains("AI-workspace"), none);
+    }
+
+    /** ListRunningToolsShowsNodeNames_261119_oo01: the list is read again before the names are matched. */
+    @Test
+    void listRunningToolsShowsTheNodeOfAnInstanceStartedAMomentAgo() throws Exception {
+        listAnswers.put("/api/chat-ui/peers", "[{\"name\":\"chat-ui-me\",\"host\":\"127.0.0.1\",\"actorPort\":1},"
+                + "{\"name\":\"chat-ui-28010\",\"host\":\"127.0.0.1\",\"actorPort\":" + freePort() + "}]");
+        String all = RunningToolsTool.list(remote, "");
+        String row = all.lines().filter(l -> l.startsWith("- chat-ui-with-audit-trail-cloud-llm")).findFirst().orElse("");
+        assertTrue(row.contains("node chat-ui-28010"), all);
+        assertFalse(all.lines().filter(l -> l.startsWith("- html-saurus")).findFirst().orElse("").contains("node "), all);
+        assertTrue(all.endsWith("other nodes this instance knows: [chat-ui-me (this instance)]"), all);
+    }
+
+    /** ListRunningToolsShowsNodeNames_261119_oo01: peers written by hand give the known names, not an error. */
+    @Test
+    void listRunningToolsWithPeersWrittenByHandGivesTheNamesAlone() throws Exception {
+        RemoteNodes byHand = RemoteNodes.start(new IIActorSystem("by-hand-test"), "chat-ui-28014=127.0.0.1:" + freePort(),
+                null, "chat-ui-me", freePort(), dir.resolve("by-hand-ids.txt"));
+        closing.add(byHand);
+        String out = RunningToolsTool.list(byHand, "");
+        assertEquals(List.of(
+                "There is no AI-workspace list of running tools here: this chat-ui instance knows no AI-workspace node."
+                        + " The chat-ui nodes this instance knows, by name only:",
+                "- chat-ui-me (this instance)",
+                "- chat-ui-28014"), out.lines().toList());
     }
 
     @Test
