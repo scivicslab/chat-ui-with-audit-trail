@@ -141,6 +141,11 @@ public class PromptQueue {
                     requestId, urgent, o.optLong("queuedAt", System.currentTimeMillis()), o.getString("id"), link);
             place(item);
         }
+        // A request the conversation received whose turn the restart cut is answered with a notice, before anything
+        // queued runs; one a queued message carries is left for that message (TurnWithoutAnAnswerTellsTheAsker_261119_oo01).
+        java.util.Set<String> queuedRequestIds = new java.util.HashSet<>();
+        for (QueueItem item : queue) if (item.requestId() != null) queuedRequestIds.add(item.requestId());
+        chatSessionRef.tell(c -> c.closeRequestsCutByRestart(queuedRequestIds));
         if (!waiting.isEmpty()) {
             LOG.info("queue: put back " + waiting.size() + " prompt(s) of " + conversation);
             emitter.accept(ChatEvent.queueChanged());

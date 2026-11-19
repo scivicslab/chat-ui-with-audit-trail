@@ -1198,6 +1198,8 @@ public class ChatSession extends Interpreter {
         this.askCount = 0;
         this.turnOriginal = null;
         this.turnAnswer = null;
+        this.cancelled = false;
+        this.turnError = null;
         this.turnTranscript.setLength(0);
         this.pauseRequested = false;
         recordHistory("user", prompt);
@@ -1276,6 +1278,11 @@ public class ChatSession extends Interpreter {
         TurnReply reply = activeResultKey == null
                 ? TurnReply.NONE
                 : new TurnReply(completedResults.get(activeResultKey), completedEndings.get(activeResultKey), turnId());
+        // Every turn that ends with no answer says why, here where every turn closes, whichever provider ran it
+        // (TurnWithoutAnAnswerTellsTheAsker_261119_oo01).
+        TurnReply closing = turnAnswer != null && turnAnswer.reply() != null ? turnAnswer
+                : new TurnReply(null, noAnswerReason(), turnId());
+        if (activeResultKey != null && reply.reply() == null) reply = closing;
         // A turn that works for a request this conversation received answers it only when none of the
         // requests sent for it is still out; until then the asker's done stays open, and the answers
         // of every turn that worked for the request go in it, each under its turn's id
@@ -1286,7 +1293,7 @@ public class ChatSession extends Interpreter {
             originalDone = openRequests.doneOf(turnOriginal);
             // A paused turn has not finished the work: the request waits for the turn that resumes it.
             if (!paused) {
-                openRequests.turnEnded(turnOriginal, turnAnswer != null ? turnAnswer : new TurnReply(null, null, turnId()));
+                openRequests.turnEnded(turnOriginal, closing);
                 recordOpenRequests();
             }
         }
@@ -1294,8 +1301,7 @@ public class ChatSession extends Interpreter {
         // to the same request (ReplyDecisionAndPromisedReport_261108_oo01).
         if (turnReminder != null && turnFollowUp != null && !paused
                 && !REMINDER_TO_SCREEN.equals(turnFollowUp.asker())) {
-            AskChatTool.followUp(system, myChatName(), turnFollowUp.asker(), turnReminder,
-                    turnAnswer != null ? turnAnswer : new TurnReply(null, null, turnId()), turnFollowUp.number(),
+            AskChatTool.followUp(system, myChatName(), turnFollowUp.asker(), turnReminder, closing, turnFollowUp.number(),
                     turnFollowUp.link());
         }
         // Kept with the paused turn first, then cleared.
@@ -1314,6 +1320,35 @@ public class ChatSession extends Interpreter {
 
         emitter.accept(ChatEvent.status(provider.getCurrentModel(), provider.getSessionId(), false));
         if (done != originalDone) done.complete(reply);
+    }
+
+    /** Why a turn that left no answer has none: what its asker is told ({@code TurnWithoutAnAnswerTellsTheAsker_261119_oo01}). */
+    private String noAnswerReason() {
+        if (turnAnswer != null && turnAnswer.ending() != null) return turnAnswer.ending();
+        if (cancelled) return "its turn was cancelled";
+        if (turnError != null) return "its turn failed: " + turnError;
+        return "its turn ended without an answer";
+    }
+
+    /** What the asker of a request whose turn a restart cut is told. */
+    public static final String RESTARTED_DURING_ITS_TURN = "the instance restarted during its turn";
+
+    /**
+     * After a restart, once the open requests and the queue are back: a request this conversation received and has
+     * not answered, that waits for no request it sent and that no queued message will work on, was being worked on
+     * by a turn the restart cut. Its asker is told so; the work is not run again
+     * ({@code TurnWithoutAnAnswerTellsTheAsker_261119_oo01}).
+     *
+     * @param queuedRequestIds the request ids the queue's waiting messages carry, a resume of a paused turn included
+     */
+    public void closeRequestsCutByRestart(java.util.Set<String> queuedRequestIds) {
+        List<String> closed = openRequests.cutByRestart(queuedRequestIds, RESTARTED_DURING_ITS_TURN);
+        if (closed.isEmpty()) return;
+        for (String id : closed) {
+            logToConversationSquad("WARNING", "request " + id + " was in a turn the restart cut; its asker is told: "
+                    + RESTARTED_DURING_ITS_TURN);
+        }
+        publishOutstanding();
     }
 
     // ---- Agent loop (ChatSessionAgentLoop_260823_oo01) ----
@@ -1777,6 +1812,7 @@ public class ChatSession extends Interpreter {
             outcome = callLlmStep(promptToSend, stepImages);
         } catch (Exception e) {
             logger.log(Level.WARNING, "Agent-loop LLM call failed", e);
+            turnError = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
             turnEmitter.accept(ChatEvent.error("Error: " + e.getMessage()));
             finalAnswer = null;
             return new ActionResult(false, "error: " + e.getMessage());
@@ -1789,6 +1825,13 @@ public class ChatSession extends Interpreter {
         if (cancelled) {
             finalAnswer = null;
             return new ActionResult(false, "cancelled");
+        }
+
+        // A call the provider could not finish is the turn's failure, whatever it streamed first. It is not an
+        // empty stop: a CLI that ended is not sent the same prompt again (TurnWithoutAnAnswerTellsTheAsker_261119_oo01).
+        if (outcome.failed()) {
+            finalAnswer = null;
+            return new ActionResult(false, "error: " + turnError);
         }
 
         // No tool call, no text and no error is not a final answer — a genuine one always has
@@ -1805,6 +1848,7 @@ public class ChatSession extends Interpreter {
                 outcome = callLlmStep(promptToSend, stepImages);
             } catch (Exception e) {
                 logger.log(Level.WARNING, "Agent-loop LLM retry failed", e);
+                turnError = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
                 turnEmitter.accept(ChatEvent.error("Error: " + e.getMessage()));
                 finalAnswer = null;
                 return new ActionResult(false, "error: " + e.getMessage());
@@ -1816,6 +1860,10 @@ public class ChatSession extends Interpreter {
         if (cancelled) {
             finalAnswer = null;
             return new ActionResult(false, "cancelled");
+        }
+        if (outcome.failed()) {
+            finalAnswer = null;
+            return new ActionResult(false, "error: " + turnError);
         }
 
         if (outcome.cutOff()) {
@@ -1888,7 +1936,7 @@ public class ChatSession extends Interpreter {
      * is a broken call attempt), and what the parser found in it.
      */
     private record LlmStepOutcome(String text, List<ToolCall> calls, boolean cutOff,
-                                  TextToolCallParser.Analysis analysis) {}
+                                  TextToolCallParser.Analysis analysis, boolean failed) {}
 
     /**
      * Records one broken tool call to the I/O log ({@code turn{N}/step{M}/repair}) and the conversation's
@@ -2017,7 +2065,7 @@ public class ChatSession extends Interpreter {
         AtomicLong progressLoggedAt = new AtomicLong(System.currentTimeMillis());
         StepAnswerStream answerStream = new StepAnswerStream(e -> turnEmitter.accept(e));
 
-        providerRef.ask(p -> {
+        java.util.concurrent.CompletableFuture<Object> call = providerRef.ask(p -> {
             // The provider's own "delta"/"result" are not forwarded as they are: this step might
             // still be a tool call, not the final answer. Its streamed text goes to the browser as
             // a provisional answer ("answer_delta"), which StepAnswerStream takes back
@@ -2086,22 +2134,34 @@ public class ChatSession extends Interpreter {
             };
             p.sendPrompt(promptToSend, turnModel, wrapped, ctx);
             return null;
-        }, system.getManagedThreadPool()).get();
+        }, system.getManagedThreadPool());
+        boolean failed = false;
+        try {
+            call.get();
+        } catch (java.util.concurrent.ExecutionException e) {
+            // The provider could not finish the call, e.g. its CLI ended without a result. The step fails; what it
+            // streamed before stays in the step's record (TurnWithoutAnAnswerTellsTheAsker_261119_oo01).
+            Throwable cause = e.getCause() == null ? e : e.getCause();
+            turnError = cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage();
+            turnEmitter.accept(ChatEvent.error("Error: " + turnError));
+            logToConversationSquad("WARNING", stepLabel + " failed: " + turnError);
+            failed = true;
+        }
 
         String text = assistantBuf.toString();
         // A cut-off reply runs no tool: its last call, if it holds one, never closed, and the text
         // before it is no answer either. The step's text is kept, and shown as the live trace rather
         // than as the answer.
-        TextToolCallParser.Analysis analysis = cutOff[0]
+        TextToolCallParser.Analysis analysis = cutOff[0] || failed
                 ? new TextToolCallParser.Analysis(List.of(), List.of(), "read")
                 : TextToolCallParser.analyze(text, ChatSession::requiredParameters, this::toolOfThisConversation);
         // A broken call attempt runs none of its calls: one call written wrong among several means the
         // model's plan is not what it meant to send.
         List<ToolCall> calls = analysis.broken() ? List.of() : analysis.calls();
-        answerStream.finish(cutOff[0] || !calls.isEmpty() || analysis.broken());
+        answerStream.finish(cutOff[0] || failed || !calls.isEmpty() || analysis.broken());
         recordStepIo(promptToSend, sentBody.get(), text, thinkingBuf.toString(), calls);
         turnTranscript.append("You wrote:\n").append(text).append("\n\n");
-        return new LlmStepOutcome(text, calls, cutOff[0], analysis);
+        return new LlmStepOutcome(text, calls, cutOff[0], analysis, failed);
     }
 
     /**
@@ -2291,7 +2351,7 @@ public class ChatSession extends Interpreter {
                     m.append("  ").append(tc.name()).append(" ").append(tc.argumentsJson()).append("\n");
                 }
             }
-            if (turnError != null && (responseText == null || responseText.isBlank())) {
+            if (turnError != null) {
                 m.append("\n\nERROR:\n").append(turnError);
             }
             m.append("\n\nUSAGE: promptTokens=0 completionTokens=0");
@@ -2539,6 +2599,15 @@ public class ChatSession extends Interpreter {
             finalAnswer = answerBeforeDecision + "\n\n" + finalAnswer;
         }
         answerBeforeDecision = null;
+        if (!cancelled && finalAnswer != null && finalAnswer.isBlank()) {
+            // Nothing written, even after the retry: there is no answer to give. The asker is told so when the turn
+            // closes, rather than sent an empty reply that reads as answered (TurnWithoutAnAnswerTellsTheAsker_261119_oo01).
+            finalAnswer = null;
+            logToConversationSquad("WARNING", "turn" + ioTurnNo + " ended without an answer");
+            turnEmitter.accept(ChatEvent.result(auditSessionId(), 0.0,
+                    System.currentTimeMillis() - turnStartedAt, provider.getCurrentModel(), false)
+                    .withTurn(turnId(), turnRequestId));
+        }
         if (!cancelled && finalAnswer != null) {
             String answer = finalAnswer;
             long answeredIn = System.currentTimeMillis() - turnStartedAt;

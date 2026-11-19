@@ -284,6 +284,28 @@ public final class OpenRequests {
         return true;
     }
 
+    /**
+     * After a restart: answers, with no reply and {@code why} as the reason, every received request not yet answered
+     * that waits for none of its sent requests and that no queued message will work on. Its turn was cut by the
+     * restart, so no turn would ever answer it ({@code TurnWithoutAnAnswerTellsTheAsker_261119_oo01}). A request
+     * still waiting for a sent request is left open, as delegation means; so is one a queued message carries (the
+     * resume of a paused turn carries the request it works for).
+     *
+     * @param queuedRequestIds the request ids the queue's waiting messages carry
+     * @param why              what the asker is told
+     * @return the requests answered this way, in no particular order
+     */
+    public List<String> cutByRestart(java.util.Set<String> queuedRequestIds, String why) {
+        List<String> cut = new ArrayList<>();
+        for (Map.Entry<String, Original> e : new ArrayList<>(originals.entrySet())) {
+            Original o = e.getValue();
+            if (o.answered || !o.outstanding.isEmpty() || queuedRequestIds.contains(e.getKey())) continue;
+            turnEnded(e.getKey(), new TurnReply(null, why, null));
+            cut.add(e.getKey());
+        }
+        return cut;
+    }
+
     /** @return the way back to the asker of the received request when it is on another instance, else {@code null} */
     public RemoteLink linkOf(String original) {
         Original o = originals.get(original);
