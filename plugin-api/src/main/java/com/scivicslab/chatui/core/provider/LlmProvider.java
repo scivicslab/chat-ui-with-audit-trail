@@ -155,6 +155,54 @@ public interface LlmProvider {
      */
     default void collapseTurn(String question, String answer) { }
 
+    // ---- Tools given as definitions (OpenAiCompatStandardToolCalling_261120_oo01) ----
+
+    /**
+     * Whether this provider gives the model the conversation's tools as definitions and reports the model's
+     * calls as {@link ChatEvent#toolCall} events, instead of the conversation teaching a call format in the
+     * prompt and reading calls from the reply's text. When it does, the conversation also hands it the
+     * system message ({@link #setSystemMessage}), the results of the calls ({@link #addToolResults}), and the
+     * calls of tools that do not drive the conversation ({@link #callTool}); and a {@link #sendPrompt} with a
+     * blank prompt adds no user message, so the model answers the tool results just added.
+     *
+     * @return {@code true} for such a provider
+     */
+    default boolean callsToolsByDefinition() { return false; }
+
+    /**
+     * Makes {@code text} the conversation's system message, the first message of every request: the
+     * harness's notes, the skill catalog and the project's instructions.
+     *
+     * @param text the system message
+     */
+    default void setSystemMessage(String text) { }
+
+    /**
+     * Adds the results of the last reply's tool calls to the history, one per call, under each call's id.
+     *
+     * @param results the results, in the order of the calls
+     */
+    default void addToolResults(List<ToolCallResult> results) { }
+
+    /**
+     * Runs one tool that does not drive the conversation, through the MCP server that offers it.
+     *
+     * @param name          the tool's name
+     * @param argumentsJson the arguments as a JSON object text
+     * @return the observation, a text starting with {@code error: } when it failed, or {@code null} when this
+     *         provider runs no tools
+     */
+    default String callTool(String name, String argumentsJson) { return null; }
+
+    /**
+     * The result of one tool call, for {@link #addToolResults}.
+     *
+     * @param callId   the id of the call it answers
+     * @param toolName the tool's name
+     * @param content  the observation the model is shown
+     */
+    record ToolCallResult(String callId, String toolName, String content) {}
+
     /**
      * Reads what this conversation did from the record the provider itself keeps on disk, newest
      * first up to {@code limit}, for {@code get_chat_log} after a restart

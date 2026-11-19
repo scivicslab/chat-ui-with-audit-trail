@@ -1,6 +1,7 @@
 package com.scivicslab.chatui.openaicompat;
 
 import com.scivicslab.chatui.agent.ContextBudget;
+import com.scivicslab.chatui.agent.ToolCatalog;
 import com.scivicslab.chatui.openaicompat.client.ChatMessage;
 import com.scivicslab.chatui.openaicompat.client.ContextLengthExceededException;
 import com.scivicslab.chatui.openaicompat.client.OpenAiCompatClient;
@@ -21,6 +22,11 @@ import java.util.logging.Logger;
  *
  * <p>Maintains per-request conversation history for context, with automatic trimming
  * on context-length overflow.</p>
+ *
+ * <p>The model is given the conversation's tools as OpenAI tool definitions, and its calls come back from the
+ * server's {@code tool_calls} ({@code OpenAiCompatStandardToolCalling_261120_oo01}). The tools that do not drive
+ * the conversation are listed and run through an MCP client to chat-ui's MCP server; the ones that do come from
+ * {@link ToolCatalog} and are run by the conversation itself.</p>
  */
 public class OpenAiCompatProvider implements LlmProvider {
 
@@ -34,7 +40,10 @@ public class OpenAiCompatProvider implements LlmProvider {
     private volatile String currentModel;
     private volatile boolean cancelled;
     private volatile Thread sendingThread;
-    private final AgentLoopExtension agentLoopExtension;
+    /** The client of chat-ui's MCP server for this conversation, or {@code null} when it has none (a test). */
+    private final McpToolClient mcp;
+    /** The tools the model is given, read again whenever the system message is set at a turn's start. */
+    private List<ToolDefinition> tools = List.of();
 
     // Conversation history for context (not managed by actor — provider owns it)
     private final LinkedList<ChatMessage> history = new LinkedList<>();
@@ -64,7 +73,8 @@ public class OpenAiCompatProvider implements LlmProvider {
     private int collapsedCount = 0;
 
     /**
-     * Creates a provider that connects to one or more OpenAI-compatible servers.
+     * Creates a provider that connects to one or more OpenAI-compatible servers, with no MCP server: the model is
+     * given only the tools that drive the conversation.
      *
      * @param serverUrls   base URLs of the LLM servers (e.g. {@code http://localhost:8000})
      * @param defaultModel the model name to use when none is explicitly requested
@@ -74,22 +84,19 @@ public class OpenAiCompatProvider implements LlmProvider {
     }
 
     /**
-     * Creates a provider with an optional agent-loop plugin.
+     * Creates a provider whose tools come from an MCP server.
      *
-     * @param serverUrls        base URLs of the LLM servers
-     * @param defaultModel      the model name to use when none is explicitly requested
-     * @param agentLoopExtension optional plugin; {@code null} disables tool calling
+     * @param serverUrls   base URLs of the LLM servers
+     * @param defaultModel the model name to use when none is explicitly requested
+     * @param mcp          the client of chat-ui's MCP server for this conversation, or {@code null} for none
      */
-    public OpenAiCompatProvider(List<String> serverUrls, String defaultModel,
-                                AgentLoopExtension agentLoopExtension) {
+    public OpenAiCompatProvider(List<String> serverUrls, String defaultModel, McpToolClient mcp) {
         this.clients = serverUrls.stream()
                 .map(OpenAiCompatClient::new)
                 .toList();
         this.currentModel = defaultModel;
-        this.agentLoopExtension = agentLoopExtension;
-        if (agentLoopExtension != null) {
-            agentLoopExtension.initialize(this.clients);
-        }
+        this.mcp = mcp;
+        this.tools = drivingTools();
     }
 
     /** {@inheritDoc} */
@@ -103,6 +110,68 @@ public class OpenAiCompatProvider implements LlmProvider {
 
     /** {@inheritDoc} */
     @Override public String getCurrentModel() { return currentModel; }
+
+    /** {@inheritDoc} */
+    @Override public boolean callsToolsByDefinition() { return true; }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Called at the start of each turn, so the tool list is read again here: a conversation's tool set,
+     * and the plugin tools, may have changed since the last turn.</p>
+     */
+    @Override
+    public void setSystemMessage(String text) {
+        if (!history.isEmpty() && history.getFirst() instanceof ChatMessage.System) {
+            history.set(0, new ChatMessage.System(text));
+        } else {
+            history.addFirst(new ChatMessage.System(text));
+            collapsedCount++;
+        }
+        tools = readTools();
+    }
+
+    /** @return the tools the model is given now */
+    List<ToolDefinition> tools() {
+        return tools;
+    }
+
+    /** @return the MCP server's tools, then the tools that drive the conversation */
+    private List<ToolDefinition> readTools() {
+        List<ToolDefinition> all = new ArrayList<>();
+        if (mcp != null) {
+            try {
+                all.addAll(mcp.listTools());
+            } catch (McpToolClient.McpException e) {
+                logger.warning("tools/list to " + mcp.endpoint() + " failed; the model is given only the tools"
+                        + " that drive the conversation: " + e.getMessage());
+            }
+        }
+        all.addAll(drivingTools());
+        return List.copyOf(all);
+    }
+
+    /** @return the definitions of the tools the conversation runs itself, from {@link ToolCatalog} */
+    static List<ToolDefinition> drivingTools() {
+        return ToolCatalog.builtInTools().values().stream().filter(ToolCatalog.Spec::drivesConversation)
+                .map(spec -> new ToolDefinition(spec.name(), spec.description(), spec.inputSchema().toString()))
+                .toList();
+    }
+
+    @Override
+    public void addToolResults(List<ToolCallResult> results) {
+        for (ToolCallResult r : results) {
+            history.addLast(new ChatMessage.ToolResult(r.callId(), r.toolName(), r.content()));
+        }
+    }
+
+    /** {@inheritDoc} Runs it through chat-ui's MCP server, which records it to the I/O log. */
+    @Override
+    public String callTool(String name, String argumentsJson) {
+        if (mcp == null) return "error: tool '" + name + "' cannot be run: this conversation has no MCP server";
+        McpToolClient.Result r = mcp.callTool(name, argumentsJson);
+        return r.isError() && !r.text().startsWith("error: ") ? "error: " + r.text() : r.text();
+    }
 
     /**
      * Sets the model to use for subsequent requests.
@@ -201,19 +270,16 @@ public class OpenAiCompatProvider implements LlmProvider {
         }
 
         List<String> imageDataUrls = ctx.imageDataUrls() != null ? ctx.imageDataUrls() : List.of();
-        history.addLast(new ChatMessage.User(prompt, imageDataUrls));
+        // A blank prompt follows the tool results just added: the model answers them, and no user
+        // message is added (OpenAiCompatStandardToolCalling_261120_oo01).
+        boolean addsUserMessage = prompt != null && !prompt.isBlank() || !imageDataUrls.isEmpty();
+        if (addsUserMessage) history.addLast(new ChatMessage.User(prompt == null ? "" : prompt, imageDataUrls));
         fitHistoryToBudget();
-
-        // Delegate to agent loop if the plugin is present and enabled
-        if (agentLoopExtension != null && agentLoopExtension.isEnabled()) {
-            agentLoopExtension.runAgentLoop(currentModel, history, emitter, ctx);
-            return;
-        }
 
         OpenAiCompatClient client = selectClient(currentModel);
         if (client == null) {
             emitter.accept(ChatEvent.error("No server available for model: " + currentModel));
-            history.pollLast();
+            if (addsUserMessage) history.pollLast();
             return;
         }
 
@@ -224,8 +290,9 @@ public class OpenAiCompatProvider implements LlmProvider {
             final int currentRetry = retries;
             try {
                 StringBuilder assistantBuf = new StringBuilder();
+                List<ChatMessage.ToolCallRequest.ToolCall> calls = new ArrayList<>();
                 client.sendPrompt(currentModel, snapshot, ctx.noThink(), maxTokensFor(client, currentModel, snapshot),
-                    new OpenAiCompatClient.StreamCallback() {
+                    tools, new OpenAiCompatClient.StreamCallback() {
                         @Override public void onDelta(String content) {
                             assistantBuf.append(content);
                             emitter.accept(ChatEvent.delta(content));
@@ -235,6 +302,9 @@ public class OpenAiCompatProvider implements LlmProvider {
                             // it stays out of assistantBuf and therefore out of the history entry
                             // added in onComplete and out of the text parsed for tool calls.
                             emitter.accept(ChatEvent.thinking(reasoning));
+                        }
+                        @Override public void onToolCalls(List<ChatMessage.ToolCallRequest.ToolCall> toolCalls) {
+                            calls.addAll(toolCalls);
                         }
                         @Override public void onComplete(long durationMs, String finishReason) {
                             String response = assistantBuf.toString();
@@ -261,7 +331,16 @@ public class OpenAiCompatProvider implements LlmProvider {
                                         "The reply was cut off at the token limit (finish_reason=length)."));
                                 return;
                             }
-                            history.addLast(new ChatMessage.Assistant(response));
+                            if (calls.isEmpty()) {
+                                history.addLast(new ChatMessage.Assistant(response));
+                            } else {
+                                // The calls and the text written with them are one message; each call's
+                                // result follows it under the call's id (addToolResults).
+                                history.addLast(new ChatMessage.ToolCallRequest(response, List.copyOf(calls)));
+                                for (ChatMessage.ToolCallRequest.ToolCall c : calls) {
+                                    emitter.accept(ChatEvent.toolCall(c.id(), c.name(), c.arguments()));
+                                }
+                            }
                             fitHistoryToBudget();
                             if (currentRetry > 0) {
                                 logger.info("Context overflow recovered after " + currentRetry
@@ -333,16 +412,35 @@ public class OpenAiCompatProvider implements LlmProvider {
     }
 
     /**
-     * Signals that the current streaming request should be cancelled.
+     * Ends a turn in the history ({@code OpenAiCompatStandardToolCalling_261120_oo01}). Of what the turn added,
+     * the question, the replies that called tools with the results of those calls, and the answer are kept;
+     * the notes the conversation sent between steps, and the replies that were neither, are dropped. A call
+     * with no result, such as the {@code ask_person} that ended the turn, is dropped too: a request whose call
+     * has no answer is refused by the server.
+     *
+     * @param question the turn's question, as the person or the requesting conversation wrote it
+     * @param answer   the turn's answer, or {@code null} when it has none
      */
     @Override
     public void collapseTurn(String question, String answer) {
         if (question == null || question.isBlank()) return;
-        // Everything before collapsedCount is already (question, answer) pairs of earlier turns;
-        // everything after it is the turn that just ended, one prompt/response per agent-loop step.
-        // Only the latter is replaced — earlier turns are what a chat UI is expected to remember.
+        List<ChatMessage> turn = new ArrayList<>(history.subList(Math.min(collapsedCount, history.size()), history.size()));
         while (history.size() > collapsedCount) history.removeLast();
         history.addLast(new ChatMessage.User(question, List.of()));
+        java.util.Set<String> answered = new java.util.HashSet<>();
+        for (ChatMessage m : turn) if (m instanceof ChatMessage.ToolResult r) answered.add(r.toolCallId());
+        java.util.Set<String> kept = new java.util.HashSet<>();
+        for (ChatMessage m : turn) {
+            if (m instanceof ChatMessage.ToolCallRequest t) {
+                List<ChatMessage.ToolCallRequest.ToolCall> withResults =
+                        t.toolCalls().stream().filter(c -> answered.contains(c.id())).toList();
+                if (withResults.isEmpty()) continue;
+                history.addLast(new ChatMessage.ToolCallRequest(t.content(), withResults));
+                withResults.forEach(c -> kept.add(c.id()));
+            } else if (m instanceof ChatMessage.ToolResult r && kept.contains(r.toolCallId())) {
+                history.addLast(r);
+            }
+        }
         if (answer != null && !answer.isBlank()) {
             history.addLast(new ChatMessage.Assistant(answer));
         }
@@ -350,10 +448,25 @@ public class OpenAiCompatProvider implements LlmProvider {
         fitHistoryToBudget();
     }
 
-    /** Drops the oldest message, keeping {@link #collapsedCount} pointing at the same boundary. */
-    private void evictOldest() {
-        history.removeFirst();
-        if (collapsedCount > 0) collapsedCount--;
+    /**
+     * Drops the oldest message after the system message, keeping {@link #collapsedCount} pointing at the same
+     * boundary. A reply that called tools goes together with the results of its calls, and a result whose call
+     * is gone goes too: the server refuses a call without its result and a result without its call.
+     *
+     * @return the estimated tokens dropped
+     */
+    private int evictOldest() {
+        int at = !history.isEmpty() && history.getFirst() instanceof ChatMessage.System ? 1 : 0;
+        if (history.size() <= at) return 0;
+        ChatMessage removed = history.remove(at);
+        int tokens = ContextBudget.estimateMessageTokens(contentOf(removed));
+        if (collapsedCount > at) collapsedCount--;
+        while (history.size() > at && history.get(at) instanceof ChatMessage.ToolResult r) {
+            history.remove(at);
+            tokens += ContextBudget.estimateMessageTokens(contentOf(r));
+            if (collapsedCount > at) collapsedCount--;
+        }
+        return tokens;
     }
 
     /**
@@ -376,9 +489,11 @@ public class OpenAiCompatProvider implements LlmProvider {
     private void fitHistoryToBudget() {
         int budget = historyBudgetTokens();
         int used = estimateHistoryTokens();
-        while (used > budget && history.size() > 1) {
-            used -= ContextBudget.estimateMessageTokens(contentOf(history.getFirst()));
-            evictOldest();
+        int keep = !history.isEmpty() && history.getFirst() instanceof ChatMessage.System ? 2 : 1;
+        while (used > budget && history.size() > keep) {
+            int dropped = evictOldest();
+            if (dropped == 0 && history.size() > keep) dropped = 1;
+            used -= dropped;
         }
     }
 
@@ -454,7 +569,7 @@ public class OpenAiCompatProvider implements LlmProvider {
             case ChatMessage.System s -> s.content();
             case ChatMessage.ToolResult r -> r.content();
             case ChatMessage.ToolCallRequest t -> {
-                StringBuilder b = new StringBuilder();
+                StringBuilder b = new StringBuilder(t.content() == null ? "" : t.content());
                 for (ChatMessage.ToolCallRequest.ToolCall c : t.toolCalls()) {
                     b.append(c.name()).append(c.arguments());
                 }
@@ -468,13 +583,13 @@ public class OpenAiCompatProvider implements LlmProvider {
         cancelled = true;
         Thread t = sendingThread;
         if (t != null) t.interrupt();
-        if (agentLoopExtension != null) agentLoopExtension.cancel();
     }
 
     private void trimHistory() {
-        // Remove oldest non-system messages (keep at least the last user message)
-        if (history.size() > 2) evictOldest();
-        if (history.size() > 2) evictOldest();
+        // Remove the oldest messages after the system message (keep at least the last one)
+        int keep = !history.isEmpty() && history.getFirst() instanceof ChatMessage.System ? 3 : 2;
+        if (history.size() > keep) evictOldest();
+        if (history.size() > keep) evictOldest();
     }
 
     /**

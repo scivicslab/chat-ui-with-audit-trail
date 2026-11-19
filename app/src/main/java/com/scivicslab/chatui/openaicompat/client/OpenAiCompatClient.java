@@ -58,6 +58,15 @@ public class OpenAiCompatClient {
          * @param reasoning one streamed chunk of the model's reasoning
          */
         default void onReasoning(String reasoning) {}
+
+        /**
+         * Receives the tool calls of the reply, joined from its {@code delta.tool_calls} chunks, once the
+         * stream has ended and before {@link #onComplete}. Not called when the reply has none
+         * ({@code OpenAiCompatStandardToolCalling_261120_oo01}).
+         *
+         * @param toolCalls the calls in the order the server indexed them
+         */
+        default void onToolCalls(List<ChatMessage.ToolCallRequest.ToolCall> toolCalls) {}
     }
 
     /**
@@ -218,10 +227,23 @@ public class OpenAiCompatClient {
     public String sendPrompt(String model, List<ChatMessage> history, boolean noThink,
                              int maxTokens, StreamCallback callback,
                              java.util.function.Consumer<String> requestBodyListener) {
+        return sendPrompt(model, history, noThink, maxTokens, List.of(), callback, requestBodyListener);
+    }
+
+    /**
+     * As {@link #sendPrompt(String, List, boolean, int, StreamCallback, java.util.function.Consumer)}, with the
+     * tools the model may call in the request's {@code tools}. The calls it makes reach
+     * {@link StreamCallback#onToolCalls} ({@code OpenAiCompatStandardToolCalling_261120_oo01}).
+     *
+     * @param tools the tools; empty sends no {@code tools}
+     */
+    public String sendPrompt(String model, List<ChatMessage> history, boolean noThink,
+                             int maxTokens, List<ToolDefinition> tools, StreamCallback callback,
+                             java.util.function.Consumer<String> requestBodyListener) {
         long startTime = System.currentTimeMillis();
         try {
             String requestBody = buildRequestBody(model, history, noThink, maxTokens, true,
-                    List.of(), temperature);
+                    tools, temperature);
             if (requestBodyListener != null) requestBodyListener.accept(requestBody);
             HttpResponse<Stream<String>> response = sendWithRetry(requestBody);
 
@@ -241,6 +263,7 @@ public class OpenAiCompatClient {
             }
 
             StringBuilder fullResponse = new StringBuilder();
+            ToolCallAssembler toolCalls = new ToolCallAssembler();
             boolean interrupted = false;
             String finishReason = null;
             var iterator = response.body().iterator();
@@ -261,9 +284,11 @@ public class OpenAiCompatClient {
                     fullResponse.append(delta.content());
                     callback.onDelta(delta.content());
                 }
+                toolCalls.add(delta.toolCalls());
                 if (delta.finishReason() != null) finishReason = delta.finishReason();
             }
             if (interrupted) { callback.onError("Request cancelled"); return null; }
+            if (!toolCalls.isEmpty()) callback.onToolCalls(toolCalls.calls());
             callback.onComplete(System.currentTimeMillis() - startTime, finishReason);
             return fullResponse.length() > 0 ? fullResponse.toString() : null;
 
@@ -399,7 +424,10 @@ public class OpenAiCompatClient {
                 case ChatMessage.Assistant a ->
                     sb.append("\"content\":\"").append(escapeJson(a.content())).append("\"");
                 case ChatMessage.ToolCallRequest t -> {
-                    sb.append("\"content\":null,\"tool_calls\":[");
+                    sb.append("\"content\":");
+                    if (t.content() == null || t.content().isEmpty()) sb.append("null");
+                    else sb.append("\"").append(escapeJson(t.content())).append("\"");
+                    sb.append(",\"tool_calls\":[");
                     for (int j = 0; j < t.toolCalls().size(); j++) {
                         if (j > 0) sb.append(",");
                         var tc = t.toolCalls().get(j);
@@ -511,7 +539,49 @@ public class OpenAiCompatClient {
      *                  and the GPU broker report a failure after the stream has started — or
      *                  {@code null} for an ordinary chunk
      */
-    record SseDelta(String content, String reasoning, String finishReason, String error) {}
+    record SseDelta(String content, String reasoning, String finishReason, String error,
+                    List<ToolCallDelta> toolCalls) {
+        SseDelta(String content, String reasoning, String finishReason, String error) {
+            this(content, reasoning, finishReason, error, List.of());
+        }
+    }
+
+    /**
+     * One chunk's piece of one tool call ({@code delta.tool_calls[]}). The first piece of a call carries its
+     * {@code id} and {@code function.name}; later pieces carry more of {@code function.arguments}.
+     *
+     * @param index     which call of the reply this piece belongs to
+     * @param id        the call's id, or {@code null} when this piece does not carry it
+     * @param name      the tool's name, or {@code null} when this piece does not carry it
+     * @param arguments the next part of the arguments' JSON text, or {@code ""}
+     */
+    record ToolCallDelta(int index, String id, String name, String arguments) {}
+
+    /** Joins the {@link ToolCallDelta} pieces of one reply into whole calls, by index. */
+    static final class ToolCallAssembler {
+        private final java.util.TreeMap<Integer, String[]> byIndex = new java.util.TreeMap<>();
+
+        void add(List<ToolCallDelta> pieces) {
+            for (ToolCallDelta d : pieces) {
+                String[] call = byIndex.computeIfAbsent(d.index(), i -> new String[] {null, null, ""});
+                if (d.id() != null && call[0] == null) call[0] = d.id();
+                if (d.name() != null && call[1] == null) call[1] = d.name();
+                call[2] = call[2] + d.arguments();
+            }
+        }
+
+        boolean isEmpty() {
+            return byIndex.isEmpty();
+        }
+
+        /** @return the calls, in index order; one without an id is given {@code call_<index>} */
+        List<ChatMessage.ToolCallRequest.ToolCall> calls() {
+            List<ChatMessage.ToolCallRequest.ToolCall> out = new ArrayList<>();
+            byIndex.forEach((index, c) -> out.add(new ChatMessage.ToolCallRequest.ToolCall(
+                    c[0] != null ? c[0] : "call_" + index, c[1] != null ? c[1] : "", c[2])));
+            return out;
+        }
+    }
 
     static SseDelta parseSseDelta(String line) {
         if (line == null || !line.startsWith("data: ")) return null;
@@ -520,7 +590,38 @@ public class OpenAiCompatClient {
         String error = extractStreamError(data);
         if (error != null) return new SseDelta(null, null, null, error);
         return new SseDelta(extractDeltaContent(data), extractDeltaReasoning(data),
-                extractFinishReason(data), null);
+                extractFinishReason(data), null, extractDeltaToolCalls(data));
+    }
+
+    /**
+     * Reads {@code choices[0].delta.tool_calls} of one streamed chunk.
+     *
+     * @param json one SSE data payload
+     * @return the pieces of tool calls the chunk carries; empty when it carries none
+     */
+    static List<ToolCallDelta> extractDeltaToolCalls(String json) {
+        if (!json.contains("\"tool_calls\"")) return List.of();
+        try {
+            org.json.JSONArray choices = new org.json.JSONObject(json).optJSONArray("choices");
+            org.json.JSONObject choice = choices == null ? null : choices.optJSONObject(0);
+            org.json.JSONObject delta = choice == null ? null : choice.optJSONObject("delta");
+            org.json.JSONArray calls = delta == null ? null : delta.optJSONArray("tool_calls");
+            if (calls == null) return List.of();
+            List<ToolCallDelta> out = new ArrayList<>();
+            for (int i = 0; i < calls.length(); i++) {
+                org.json.JSONObject c = calls.optJSONObject(i);
+                if (c == null) continue;
+                org.json.JSONObject f = c.optJSONObject("function");
+                String id = c.isNull("id") ? null : c.optString("id", null);
+                String name = f == null || f.isNull("name") ? null : f.optString("name", null);
+                String arguments = f == null || f.isNull("arguments") ? "" : f.optString("arguments", "");
+                out.add(new ToolCallDelta(c.optInt("index", i), id, name, arguments));
+            }
+            return out;
+        } catch (org.json.JSONException e) {
+            logger.fine(() -> "Unreadable tool_calls chunk: " + json);
+            return List.of();
+        }
     }
 
     /**

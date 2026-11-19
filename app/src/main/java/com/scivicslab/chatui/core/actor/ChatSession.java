@@ -183,6 +183,22 @@ public class ChatSession extends Interpreter {
     /** The tool a conversation calls to ask the person and end its turn ({@code AskThePersonEndsTheTurn_261119_oo01}). */
     public static final String ASK_PERSON = "ask_person";
 
+    /** How asking the person ends the turn; said to every model, however it calls tools. */
+    private static final String ASK_PERSON_NOTE = """
+            Asking the person ends your turn. When you need the person's answer or decision before you go \
+            on — choosing between options you offer, approving a plan, confirming something you are unsure \
+            of — call ask_person with the question, and put no other tool call in that reply. A reply that \
+            asks a question or waits for a decision must not also start the work it asks about: anything \
+            else it calls is not run, and the turn ends. The answer arrives as your next message.""";
+
+    /** How to show an image; said to every model, however it calls tools. */
+    private static final String IMAGE_NOTE = """
+            To show an image (a diagram, an icon, a drawing you were asked for), write a fenced code \
+            block whose language is "svg", containing valid, self-contained SVG markup — it renders as \
+            an actual picture in the chat pane. This is the only way to produce an image here: there is \
+            no image-generation tool or model, so do not call one or invent one. Do not wrap the SVG in \
+            a data: URI or a markdown image link; write the <svg>...</svg> markup itself.""";
+
     private static final String SYSTEM_PROMPT_HEAD = """
             You are a helpful assistant with access to tools. To call a tool, write EXACTLY this format \
             in your reply (nothing else on those lines). Every parameter, without exception, uses a \
@@ -205,14 +221,23 @@ public class ChatSession extends Interpreter {
             When an answer shows a call block as an example, write its angle brackets as square \
             brackets, e.g. [invoke name="calc"] ... [/invoke], so that it is not run.
 
-            Asking the person ends your turn. When you need the person's answer or decision before you go \
-            on — choosing between options you offer, approving a plan, confirming something you are unsure \
-            of — call ask_person with the question, and put no other tool call in that reply. A reply that \
-            asks a question or waits for a decision must not also start the work it asks about: anything \
-            else it calls is not run, and the turn ends. The answer arrives as your next message.
+            """ + ASK_PERSON_NOTE + """
 
             Available tools:
             """;
+
+    /**
+     * The harness's notes for a model given its tools as definitions ({@code OpenAiCompatStandardToolCalling_261120_oo01}):
+     * what {@link #SYSTEM_PROMPT_HEAD} and {@link #SYSTEM_PROMPT_TAIL} say, less how to write a call and the list of
+     * tools, which the request's tool definitions carry.
+     */
+    private static final String HARNESS_NOTES = """
+            You are a helpful assistant with tools. Call a tool whenever you need what it gives; after its \
+            result comes back, call another tool or give your final answer. When you have enough \
+            information, answer in plain text without calling a tool: that text is taken as your final \
+            answer to the user.
+
+            """ + ASK_PERSON_NOTE + "\n\n" + IMAGE_NOTE;
 
     /**
      * What the first step's prompt says about each tool, keyed by tool name, in the order they are
@@ -282,11 +307,7 @@ public class ChatSession extends Interpreter {
             or give your final answer. When you have enough information, answer in plain text with NO \
             <invoke> block — that plain text is taken as your final answer to the user.
 
-            To show an image (a diagram, an icon, a drawing you were asked for), write a fenced code \
-            block whose language is "svg", containing valid, self-contained SVG markup — it renders as \
-            an actual picture in the chat pane. This is the only way to produce an image here: there is \
-            no image-generation tool or model, so do not call one or invent one. Do not wrap the SVG in \
-            a data: URI or a markdown image link; write the <svg>...</svg> markup itself.""";
+            """ + IMAGE_NOTE;
 
     // Per-turn working memory, reset in start(). Not thread-confined by field type (see
     // ChatSessionAgentLoop_260823_oo01's own note in chat-session-agent-loop.yaml) — safe only
@@ -1188,6 +1209,7 @@ public class ChatSession extends Interpreter {
         // Either side may ask for it: the conversation's own setting, or this one prompt.
         this.turnNoThink = noThink || noThinkAlways;
         this.turnStartedAt = System.currentTimeMillis();
+        if (byDefinition()) handSystemMessage();
         this.pendingCalls = null;
         this.finalAnswer = null;
         this.turnError = null;
@@ -1349,7 +1371,8 @@ public class ChatSession extends Interpreter {
      * @return {@link ActionResult} carrying the turn's text, always successful
      */
     public ActionResult currentPromptText() {
-        String text = (stepCount == 1) ? (firstStepPrompt() + "\n\n" + pendingPrompt) : pendingPrompt;
+        String opening = stepCount == 1 ? firstStepPrompt() : "";
+        String text = opening.isEmpty() ? pendingPrompt : opening + "\n\n" + pendingPrompt;
         return new ActionResult(true, text == null ? "" : text);
     }
 
@@ -1365,13 +1388,13 @@ public class ChatSession extends Interpreter {
     }
 
     /** @return {@link ActionResult} carrying part 1 of the opening text, see {@link #toolInstructionsText()} */
-    public ActionResult toolInstructions() { return new ActionResult(true, toolInstructionsText()); }
+    public ActionResult toolInstructions() { return new ActionResult(true, byDefinition() ? "" : toolInstructionsText()); }
 
     /** @return {@link ActionResult} carrying part 2 of the opening text, see {@link #skillCatalogPart()} */
-    public ActionResult skillCatalog() { return new ActionResult(true, skillCatalogPart()); }
+    public ActionResult skillCatalog() { return new ActionResult(true, byDefinition() ? "" : skillCatalogPart()); }
 
     /** @return {@link ActionResult} carrying part 3 of the opening text, see {@link #projectInstructionsPart()} */
-    public ActionResult projectInstructions() { return new ActionResult(true, projectInstructionsPart()); }
+    public ActionResult projectInstructions() { return new ActionResult(true, byDefinition() ? "" : projectInstructionsPart()); }
 
     /**
      * The turn's opening text: the tool instructions, then the two things that vary between
@@ -1384,7 +1407,44 @@ public class ChatSession extends Interpreter {
      * @return the text prefixed to this turn's first prompt
      */
     private String firstStepPrompt() {
+        // The same three parts are the system message instead (OpenAiCompatStandardToolCalling_261120_oo01).
+        if (byDefinition()) return "";
         return toolInstructionsText() + skillCatalogPart() + projectInstructionsPart();
+    }
+
+    /** Gives the provider this turn's system message; the provider also reads its tool list again. */
+    private void handSystemMessage() {
+        String text = systemMessageText();
+        try {
+            providerRef().ask(p -> { p.setSystemMessage(text); return null; }, system.getManagedThreadPool()).get();
+        } catch (Exception e) {
+            logger.log(Level.WARNING, "Could not give the provider the system message", e);
+        }
+    }
+
+    /** @return whether this conversation's provider gives the model its tools as definitions */
+    private boolean byDefinition() {
+        return provider != null && provider.callsToolsByDefinition();
+    }
+
+    /**
+     * The system message of a conversation whose provider gives the model its tools as definitions: what the
+     * provider says about itself, the harness's notes, where the file tools may reach, the skill catalog and
+     * the project's instructions ({@code OpenAiCompatStandardToolCalling_261120_oo01}).
+     *
+     * @return the text
+     */
+    String systemMessageText() {
+        return provider.promptPreface() + HARNESS_NOTES + fileScopeNote() + skillCatalogPart() + projectInstructionsPart();
+    }
+
+    /** @return where read and write may reach, with its leading blank line; {@code ""} without read */
+    private String fileScopeNote() {
+        if (!toolSet.contains("read")) return "";
+        return "\n\nread may read files under: " + fileScope.describeReadRoots()
+                + "\nwrite may only write under: " + fileScope.writeRoot()
+                + "\nA relative path is taken from the write directory. When a skill's text points"
+                + " at a file in its own directory, read it — that directory is readable.";
     }
 
     /**
@@ -1404,13 +1464,7 @@ public class ChatSession extends Interpreter {
         for (ConversationTool tool : pluginTools.values()) {
             if (toolSet.contains(tool.name())) buf.append(tool.description());
         }
-        buf.append("\n").append(SYSTEM_PROMPT_TAIL);
-        if (toolSet.contains("read")) {
-            buf.append("\n\nread may read files under: ").append(fileScope.describeReadRoots())
-               .append("\nwrite may only write under: ").append(fileScope.writeRoot())
-               .append("\nA relative path is taken from the write directory. When a skill's text points"
-                     + " at a file in its own directory, read it — that directory is readable.");
-        }
+        buf.append("\n").append(SYSTEM_PROMPT_TAIL).append(fileScopeNote());
         return buf.toString();
     }
 
@@ -1722,6 +1776,8 @@ public class ChatSession extends Interpreter {
         // Tool calls the provider's own harness makes inside this one sendPrompt, keyed by
         // tool_use id until their result arrives (CliHarnessProvider_260912_oo01).
         Map<String, ChatEvent> harnessToolUses = new LinkedHashMap<>();
+        // Calls the server read from the reply, for this conversation to run (OpenAiCompatStandardToolCalling_261120_oo01).
+        List<ToolCall> definedCalls = new java.util.ArrayList<>();
         // Where the response the harness is streaming now begins in assistantBuf: the start of the call, or
         // right after the last harness tool result. A harness that withdraws a response and asks the model
         // to answer again (a "retraction") withdraws the text from here on, and only the answer to the
@@ -1759,6 +1815,9 @@ public class ChatSession extends Interpreter {
                 } else if ("result".equals(event.type())) {
                     // The provider's own per-call completion signal; the agent loop's real
                     // completion signal is finish()'s result event, emitted once for the turn.
+                } else if ("tool_call".equals(event.type())) {
+                    definedCalls.add(new ToolCall(event.toolUseId(), event.toolName(),
+                            event.content() == null ? "" : event.content()));
                 } else if ("tool_use".equals(event.type())) {
                     // The harness called one of its own tools. Recorded when its result
                     // arrives, so the log holds the call and its observation as one entry,
@@ -1815,8 +1874,11 @@ public class ChatSession extends Interpreter {
         // A cut-off reply runs no tool: its last call, if it holds one, never closed, and the text
         // before it is no answer either. The step's text is kept, and shown as the live trace rather
         // than as the answer.
+        // A provider that gives the model its tools as definitions has had the server read the calls; the
+        // text is not read for them. What a call lacks is said in its result instead (runTool).
         TextToolCallParser.Analysis analysis = cutOff[0]
                 ? new TextToolCallParser.Analysis(List.of(), List.of(), "read")
+                : byDefinition() ? new TextToolCallParser.Analysis(List.copyOf(definedCalls), List.of(), "read")
                 : TextToolCallParser.analyze(text, ChatSession::requiredParameters, this::toolOfThisConversation);
         // A broken call attempt runs none of its calls: one call written wrong among several means the
         // model's plan is not what it meant to send.
@@ -2169,10 +2231,25 @@ public class ChatSession extends Interpreter {
             return new ActionResult(true, "observed");
         }
         StringBuilder observations = new StringBuilder();
+        List<LlmProvider.ToolCallResult> results = new java.util.ArrayList<>();
         for (ToolCall tc : pendingCalls) {
             String fullObservation;
+            // Recorded here unless chat-ui's MCP server ran it, which records it itself: once either way.
+            boolean recordHere = true;
             try {
-                fullObservation = executeTool(tc, summarizePages);
+                String refusal = byDefinition() ? whyNotRunnable(tc) : null;
+                if (refusal != null) {
+                    fullObservation = refusal;
+                } else if (byDefinition() && !drivesConversation(tc.name())
+                        && !(summarizePages && returnsPages(tc.name()))) {
+                    turnToolCalls++;
+                    fullObservation = providerRef().ask(p -> p.callTool(tc.name(), tc.argumentsJson()),
+                            system.getManagedThreadPool()).get();
+                    if (fullObservation == null) fullObservation = "error: the provider runs no tools";
+                    recordHere = false;
+                } else {
+                    fullObservation = executeTool(tc, summarizePages);
+                }
             } catch (Exception e) {
                 fullObservation = "error: " + e.getMessage();
             }
@@ -2182,7 +2259,8 @@ public class ChatSession extends Interpreter {
             String forModel = ContextBudget.truncateObservation(fitted,
                     Math.min(parsePositiveOr(observationChars, ContextBudget.OBS_THRESHOLD),
                              maxObservationChars));
-            recordToolIo(tc, fullObservation);
+            if (recordHere) recordToolIo(tc, fullObservation);
+            results.add(new LlmProvider.ToolCallResult(tc.id(), tc.name(), forModel));
             turnEmitter.accept(ChatEvent.thinking("Observation (" + tc.name() + "): "
                     + forModel.substring(0, Math.min(200, forModel.length())) + "\n"));
             observations.append("Tool result (").append(tc.name()).append("):\n")
@@ -2190,6 +2268,16 @@ public class ChatSession extends Interpreter {
         }
         pendingCalls = null;
         pendingPrompt = observations.toString().stripTrailing();
+        if (byDefinition()) {
+            // The results go back as tool messages under each call's id; the next step adds no user
+            // message (OpenAiCompatStandardToolCalling_261120_oo01).
+            try {
+                providerRef().ask(p -> { p.addToolResults(results); return null; }, system.getManagedThreadPool()).get();
+            } catch (Exception e) {
+                logger.log(Level.WARNING, "Could not give the provider the tool results", e);
+            }
+            pendingPrompt = "";
+        }
         // Kept as soon as the tools have run, not when the next step sends them: a turn paused right
         // after a tool finishes has no next step, and what the tool did would be lost
         // (TimekeeperPausesATurnForAnUrgentRequest_261107_oo01).
@@ -3013,6 +3101,36 @@ public class ChatSession extends Interpreter {
         } catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    /** @return whether {@code tool} is a built-in tool that drives the conversation, which this session runs itself */
+    private static boolean drivesConversation(String tool) {
+        ToolCatalog.Spec spec = ToolCatalog.builtIn(tool);
+        return spec != null && spec.drivesConversation();
+    }
+
+    /**
+     * Why a call the server read from a reply cannot be run, in the words its result gives the model
+     * ({@code OpenAiCompatStandardToolCalling_261120_oo01}); {@code null} when it can be run.
+     */
+    private String whyNotRunnable(ToolCall tc) {
+        String prefix = "error: the call could not be run: ";
+        if (!toolOfThisConversation(tc.name())) {
+            return prefix + "there is no tool named \"" + tc.name() + "\". Call one of the tools you were given.";
+        }
+        JSONObject args;
+        try {
+            args = new JSONObject(tc.argumentsJson() == null || tc.argumentsJson().isBlank() ? "{}" : tc.argumentsJson());
+        } catch (Exception e) {
+            return prefix + "the arguments are not a JSON object. Call " + tc.name()
+                    + " again with its arguments as one JSON object.";
+        }
+        List<String> missing = requiredParameters(tc.name()).stream()
+                .filter(a -> !args.has(a) || args.isNull(a) || args.optString(a, "").isBlank()).toList();
+        if (missing.isEmpty()) return null;
+        String what = missing.size() == 1 ? "the parameter \"" + missing.get(0) + "\" is missing"
+                : "the parameters " + String.join(", ", missing.stream().map(a -> "\"" + a + "\"").toList()) + " are missing";
+        return prefix + what + ". Call " + tc.name() + " again with every required parameter.";
     }
 
     /** Dispatches one tool call to its implementation and returns the raw (untruncated) observation. */

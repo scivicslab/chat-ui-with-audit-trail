@@ -397,6 +397,20 @@ public record ChatEvent(
      * @param isError   whether the tool reported a failure
      * @return a new tool_result event
      */
+    /**
+     * A tool call the model made for the conversation to run, as the server's {@code tool_calls} gave it
+     * ({@code OpenAiCompatStandardToolCalling_261120_oo01}). Unlike {@link #toolUse}, which reports a tool a
+     * provider's own harness ran, nothing has run yet: the conversation's agent loop runs it.
+     *
+     * @param callId        the id the server gave the call; the result goes back under it
+     * @param toolName      the tool's name
+     * @param argumentsJson the arguments as the model wrote them, a JSON object text that may be malformed
+     */
+    public static ChatEvent toolCall(String callId, String toolName, String argumentsJson) {
+        return new ChatEvent("tool_call", argumentsJson, null, null, null, null, null,
+                             null, null, null, null, null, null, null, toolName, callId, null, null);
+    }
+
     public static ChatEvent toolResult(String toolUseId, String content, boolean isError) {
         return new ChatEvent("tool_result", content, null, null, null, null, null,
                              null, null, null, null, null, null, null, null, toolUseId, isError, null);

@@ -15,8 +15,13 @@ import java.util.List;
  * <p>An element is {@code {"role": ..., "content": ...}}. {@code role} is {@code system},
  * {@code user} or {@code assistant}. {@code content} is a string, or an array of
  * {@code {"type":"text","text":...}} and {@code {"type":"image_url","image_url":{"url":...}}}
- * parts; only a user message may carry images. The {@code tool} role is not accepted, because the
- * agent loop of this product reads tool calls from the reply's text.</p>
+ * parts; only a user message may carry images.</p>
+ *
+ * <p>A model's tool calls are kept as OpenAI's tool calling writes them
+ * ({@code OpenAiCompatStandardToolCalling_261120_oo01}): an {@code assistant} element with
+ * {@code tool_calls} (each {@code {"id","type":"function","function":{"name","arguments"}}}) and a
+ * {@code content} that is the text written with the calls or {@code null}, and a {@code tool} element per
+ * result with {@code tool_call_id}, {@code name} and {@code content}.</p>
  */
 public final class RequestMessagesJson {
 
@@ -27,7 +32,17 @@ public final class RequestMessagesJson {
         JSONArray array = new JSONArray();
         for (ChatMessage m : messages) {
             JSONObject o = new JSONObject().put("role", m.role());
-            if (m instanceof ChatMessage.User u && u.hasImages()) {
+            if (m instanceof ChatMessage.ToolCallRequest t) {
+                o.put("content", t.content() == null || t.content().isEmpty() ? JSONObject.NULL : t.content());
+                JSONArray calls = new JSONArray();
+                for (ChatMessage.ToolCallRequest.ToolCall c : t.toolCalls()) {
+                    calls.put(new JSONObject().put("id", c.id()).put("type", "function")
+                            .put("function", new JSONObject().put("name", c.name()).put("arguments", c.arguments())));
+                }
+                o.put("tool_calls", calls);
+            } else if (m instanceof ChatMessage.ToolResult r) {
+                o.put("tool_call_id", r.toolCallId()).put("name", r.toolName()).put("content", r.content());
+            } else if (m instanceof ChatMessage.User u && u.hasImages()) {
                 JSONArray parts = new JSONArray()
                         .put(new JSONObject().put("type", "text").put("text", u.content()));
                 for (String url : u.imageDataUrls()) {
@@ -63,19 +78,47 @@ public final class RequestMessagesJson {
             Object content = o.opt("content");
             switch (role) {
                 case "system" -> out.add(new ChatMessage.System(textOf(content, i, false).text()));
-                case "assistant" -> out.add(new ChatMessage.Assistant(textOf(content, i, false).text()));
+                case "assistant" -> {
+                    JSONArray calls = o.optJSONArray("tool_calls");
+                    if (calls == null) {
+                        out.add(new ChatMessage.Assistant(textOf(content, i, false).text()));
+                    } else {
+                        String text = content == null || content == JSONObject.NULL ? "" : textOf(content, i, false).text();
+                        out.add(new ChatMessage.ToolCallRequest(text, toolCallsOf(calls, i)));
+                    }
+                }
+                case "tool" -> {
+                    String id = o.optString("tool_call_id", "");
+                    if (id.isEmpty()) throw new IllegalArgumentException("element " + i + ": a tool message needs tool_call_id");
+                    out.add(new ChatMessage.ToolResult(id, o.optString("name", ""), textOf(content, i, false).text()));
+                }
                 case "user" -> {
                     Parsed p = textOf(content, i, true);
                     out.add(new ChatMessage.User(p.text(), p.images()));
                 }
                 default -> throw new IllegalArgumentException("element " + i + ": role must be"
-                        + " system, user or assistant, not \"" + role + "\"");
+                        + " system, user, assistant or tool, not \"" + role + "\"");
             }
         }
         return out;
     }
 
     private record Parsed(String text, List<String> images) {}
+
+    private static List<ChatMessage.ToolCallRequest.ToolCall> toolCallsOf(JSONArray calls, int index) {
+        List<ChatMessage.ToolCallRequest.ToolCall> out = new ArrayList<>();
+        for (int j = 0; j < calls.length(); j++) {
+            JSONObject c = calls.optJSONObject(j);
+            JSONObject f = c == null ? null : c.optJSONObject("function");
+            if (f == null || c.optString("id", "").isEmpty() || f.optString("name", "").isEmpty()) {
+                throw new IllegalArgumentException("element " + index + ": tool call " + j
+                        + " needs an id and a function with a name");
+            }
+            out.add(new ChatMessage.ToolCallRequest.ToolCall(c.getString("id"), f.getString("name"),
+                    f.optString("arguments", "{}")));
+        }
+        return out;
+    }
 
     private static Parsed textOf(Object content, int index, boolean imagesAllowed) {
         if (content instanceof String s) return new Parsed(s, List.of());

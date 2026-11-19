@@ -36,8 +36,15 @@ public sealed interface ChatMessage {
         @Override public String role() { return "assistant"; }
     }
 
-    /** Assistant message that requests one or more tool calls instead of producing text. */
-    record ToolCallRequest(List<ToolCall> toolCalls) implements ChatMessage {
+    /**
+     * Assistant message that requests one or more tool calls, with the text the model wrote before them
+     * ({@code OpenAiCompatStandardToolCalling_261120_oo01}): a model often says why it calls a tool, and the
+     * next step reads that to remember what the call was for.
+     *
+     * @param content   the text written with the calls; empty when there was none
+     * @param toolCalls the calls, each with the id the server gave it
+     */
+    record ToolCallRequest(String content, List<ToolCall> toolCalls) implements ChatMessage {
         @Override public String role() { return "assistant"; }
 
         public record ToolCall(String id, String name, String arguments) {}

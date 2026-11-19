@@ -2,6 +2,8 @@ package com.scivicslab.chatui.core.plugin;
 
 import com.scivicslab.chatui.agent.ToolSet;
 import com.scivicslab.chatui.core.provider.LlmProvider;
+import com.scivicslab.chatui.core.actor.ChatUiActorSystem;
+import com.scivicslab.chatui.openaicompat.McpToolClient;
 import com.scivicslab.chatui.openaicompat.OpenAiCompatProvider;
 import com.scivicslab.chatui.plugin.LlmProviderFactory;
 import com.scivicslab.chatui.plugin.ProviderChoice;
@@ -38,6 +40,10 @@ public class OpenAiCompatProviderFactory implements LlmProviderFactory {
         if (ctx.toolSet() != ToolSet.FULL) {
             throw new IllegalArgumentException(KIND + " runs no tools of its own, so its tool set is always full");
         }
-        return new OpenAiCompatProvider(servers, defaultModel);
+        // The tools that do not drive the conversation come from this instance's own MCP server, as tools
+        // of this conversation (OpenAiCompatStandardToolCalling_261120_oo01).
+        McpToolClient mcp = new McpToolClient("http://127.0.0.1:" + ctx.httpPort() + "/mcp",
+                ChatUiActorSystem.chatActorName(ctx.projectId(), ctx.chatId()));
+        return new OpenAiCompatProvider(servers, defaultModel, mcp);
     }
 }
