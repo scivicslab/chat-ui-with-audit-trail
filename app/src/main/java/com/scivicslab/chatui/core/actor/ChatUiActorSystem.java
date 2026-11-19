@@ -2383,6 +2383,17 @@ public class ChatUiActorSystem implements ConversationControls {
             String effort = s.effort();
             if (providerRef != null) providerRef.tell(p -> p.setEffort(effort));
         }
+        if (s.mcpServers() != null && !s.mcpServers().isEmpty()) {
+            ChatSessionIIAR session = chatSessions.get(conversationSquadName);
+            Map<String, String> servers = s.mcpServers();
+            if (session != null) session.tell(a -> {
+                try {
+                    ((ChatSession) a).setMcpServers(servers);
+                } catch (IllegalArgumentException e) {
+                    LOG.warning(conversationSquadName + ": recorded MCP servers not restored: " + e.getMessage());
+                }
+            });
+        }
         LOG.info("Restored settings of " + conversationSquadName + ": provider=" + kind + ", tools=" + toolSet.id()
                 + ", model=" + s.model() + ", temperature=" + s.temperature());
     }
@@ -2426,6 +2437,42 @@ public class ChatUiActorSystem implements ConversationControls {
 
     /** @return the provider kinds and plugin tools this instance was started with */
     public PluginRegistry getPluginRegistry() { return pluginRegistry; }
+
+    @Override
+    public String setMcpServers(String myProjectId, String target, String serversJson) {
+        Map<String, String> servers;
+        try {
+            servers = McpServerList.parse(serversJson);
+        } catch (IllegalArgumentException e) {
+            return "error: " + e.getMessage();
+        }
+        String name = resolveChatName(myProjectId, target);
+        ChatSessionIIAR session = chatSessions.get(name);
+        if (session == null) return "error: no such conversation: " + name;
+        session.tell(a -> {
+            ChatSession c = (ChatSession) a;
+            c.setMcpServers(servers);
+            c.recordSettings(null);
+        }).join();
+        return servers.isEmpty() ? "ok: " + name + " has no external MCP server"
+                : "ok: " + name + " uses the MCP servers " + String.join(", ", servers.keySet())
+                        + "; their tools are given to the model from its next turn as <server>__<tool>";
+    }
+
+    /**
+     * @param conversation a qualified conversation name, e.g. {@code "project1/chat-01"}
+     * @return its external MCP servers by name, or {@code null} when there is no such conversation
+     */
+    public Map<String, String> mcpServersOf(String conversation) {
+        ChatSessionIIAR session = chatSessions.get(conversation);
+        if (session == null) return null;
+        try {
+            return session.<Map<String, String>>ask(a -> ((ChatSession) a).getMcpServers()).get(10, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Could not read the MCP servers of " + conversation, e);
+            return null;
+        }
+    }
 
     @Override
     public void publishToolRunner(ConversationToolRunner runner) {

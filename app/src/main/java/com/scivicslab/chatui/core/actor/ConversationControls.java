@@ -166,4 +166,17 @@ public interface ConversationControls {
      */
     default void publishToolRunner(ConversationToolRunner runner) {
     }
+
+    /**
+     * Replaces a conversation's external MCP servers and records them with its settings
+     * ({@code ExternalMcpServersOfAConversation_261120_oo01}).
+     *
+     * @param myProjectId the caller's project, which a bare {@code target} is taken in
+     * @param target      the conversation, e.g. {@code "02"} or {@code "project2/02"}
+     * @param serversJson a JSON object from server name to URL; {@code {}} removes them all
+     * @return {@code "ok: ..."}, or {@code "error: ..."} with nothing changed
+     */
+    default String setMcpServers(String myProjectId, String target, String serversJson) {
+        return "error: these controls cannot register MCP servers";
+    }
 }

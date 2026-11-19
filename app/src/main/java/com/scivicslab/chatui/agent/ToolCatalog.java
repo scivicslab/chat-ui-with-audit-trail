@@ -488,6 +488,19 @@ public final class ToolCatalog {
                     new ToolParameter("model", "string", false, ""),
                     new ToolParameter("noThink", "boolean", false, "")),
                 false);
+        // ExternalMcpServersOfAConversation_261120_oo01
+        add(m, "set_mcp_servers", """
+                register the external MCP servers a conversation of this project uses, replacing the ones it
+                had. "servers" is a JSON object from a server name (a lowercase letter, then lowercase letters,
+                digits or '-', at most 20) to the URL of its MCP endpoint, for example
+                {"htmlsaurus": "http://localhost:28001/mcp"}; {} removes them all. From that conversation's
+                next turn, a local LLM there is given each server's tools named <server>__<tool>, for example
+                htmlsaurus__search.
+                """,
+                List.of(
+                    new ToolParameter("chatId", "string", true, ""),
+                    new ToolParameter("servers", "string", true, "")),
+                false);
         return Collections.unmodifiableMap(m);
     }
 

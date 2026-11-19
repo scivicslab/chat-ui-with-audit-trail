@@ -187,7 +187,17 @@ public class IoLogView {
 
     /** A conversation's provider kind, tool set and model, as one settings record holds them. */
     public record Settings(String provider, String tools, String model, Double temperature,
-                           Long urgentWaitMinutes, Long childReplyWarnMinutes, Boolean noThink, String effort) {
+                           Long urgentWaitMinutes, Long childReplyWarnMinutes, Boolean noThink, String effort,
+                           java.util.Map<String, String> mcpServers) {
+        /**
+         * A record written before the external MCP servers were kept: none is set
+         * ({@code ExternalMcpServersOfAConversation_261120_oo01}).
+         */
+        public Settings(String provider, String tools, String model, Double temperature,
+                        Long urgentWaitMinutes, Long childReplyWarnMinutes, Boolean noThink, String effort) {
+            this(provider, tools, model, temperature, urgentWaitMinutes, childReplyWarnMinutes, noThink, effort, null);
+        }
+
         /** A record written before the timekeeper's limits were kept: neither is set. */
         public Settings(String provider, String tools, String model, Double temperature) {
             this(provider, tools, model, temperature, null, null);
@@ -349,6 +359,14 @@ public class IoLogView {
                 .orElse(null);
     }
 
+    /** @return the servers a settings record names, by name, or {@code null} when it names none */
+    private static java.util.Map<String, String> mcpServersOf(org.json.JSONObject o) {
+        if (o == null) return null;
+        java.util.Map<String, String> servers = new java.util.TreeMap<>();
+        for (String name : o.keySet()) servers.put(name, o.optString(name, ""));
+        return servers;
+    }
+
     public static Settings parseSettings(String message) {
         if (message == null || message.isBlank()) return null;
         try {
@@ -360,7 +378,8 @@ public class IoLogView {
                     o.has("childReplyWarnMinutes") && !o.isNull("childReplyWarnMinutes")
                             ? o.optLong("childReplyWarnMinutes") : null,
                     o.has("noThink") && !o.isNull("noThink") ? o.optBoolean("noThink") : null,
-                    o.has("effort") && !o.isNull("effort") ? o.optString("effort") : null);
+                    o.has("effort") && !o.isNull("effort") ? o.optString("effort") : null,
+                    mcpServersOf(o.optJSONObject("mcpServers")));
         } catch (Exception e) {
             return null;
         }

@@ -178,6 +178,15 @@ public interface LlmProvider {
     default void setSystemMessage(String text) { }
 
     /**
+     * The external MCP servers this conversation is registered with ({@code ExternalMcpServersOfAConversation_261120_oo01}).
+     * A provider that gives the model its tools as definitions lists their tools as {@code <server>__<tool>} from the
+     * next {@link #setSystemMessage} on, and runs such a call through {@link #callTool} on that server. Others ignore it.
+     *
+     * @param servers each server's name and the URL of its MCP endpoint
+     */
+    default void setMcpServers(java.util.Map<String, String> servers) { }
+
+    /**
      * Adds the results of the last reply's tool calls to the history, one per call, under each call's id.
      *
      * @param results the results, in the order of the calls

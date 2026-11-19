@@ -57,7 +57,9 @@ class ToolCatalogTest {
             Map.entry("get_chat_log", List.of(List.of("chatId", "count"), List.of("chatId"))),
             Map.entry("get_request_messages", List.of(List.of("chatId"), List.of("chatId"))),
             Map.entry("set_request_messages", List.of(List.of("chatId", "messages"), List.of("chatId", "messages"))),
-            Map.entry("complete_messages", List.of(List.of("chatId", "messages", "model", "noThink"), List.of("chatId", "messages"))));
+            Map.entry("complete_messages", List.of(List.of("chatId", "messages", "model", "noThink"), List.of("chatId", "messages"))),
+            // Added after the table was read (ExternalMcpServersOfAConversation_261120_oo01).
+            Map.entry("set_mcp_servers", List.of(List.of("chatId", "servers"), List.of("chatId", "servers"))));
 
     static final Set<String> DRIVING = Set.of(
             "ask_person", "ask_chat", "ask_chat_urgent", "accept_reply", "cancel_request", "expect_report");

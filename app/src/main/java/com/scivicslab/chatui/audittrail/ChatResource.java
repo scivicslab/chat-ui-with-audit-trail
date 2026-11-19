@@ -1239,6 +1239,48 @@ public class ChatResource {
     }
 
     /**
+     * A conversation's external MCP servers ({@code ExternalMcpServersOfAConversation_261120_oo01}).
+     *
+     * @return {@code {"servers": {name: url, ...}}}, or 404 for no such conversation
+     */
+    @GET
+    @Path("/{projectId}/chats/{chatId}/mcp-servers")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response mcpServers(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId) {
+        Map<String, String> servers = actorSystem.mcpServersOf(
+                com.scivicslab.chatui.core.actor.ChatUiActorSystem.chatActorName(projectId, chatId));
+        if (servers == null) {
+            return Response.status(404).entity(Map.of("type", "error", "message", "no such conversation")).build();
+        }
+        return Response.ok(Map.of("servers", servers)).build();
+    }
+
+    /**
+     * Replaces a conversation's external MCP servers with {@code servers} of the body, a JSON object from server name
+     * to URL; {@code {}} removes them all ({@code ExternalMcpServersOfAConversation_261120_oo01}).
+     *
+     * @return {@code {"type": "ok", "message": ...}}, or 400 with nothing changed
+     */
+    @POST
+    @Path("/{projectId}/chats/{chatId}/mcp-servers")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response setMcpServers(@PathParam("projectId") String projectId, @PathParam("chatId") String chatId,
+                                  Map<String, Object> body) {
+        Object servers = body == null ? null : body.get("servers");
+        if (!(servers instanceof Map<?, ?> m)) {
+            return Response.status(400).entity(Map.of("type", "error",
+                    "message", "servers is required: a JSON object from server name to URL, {} for none")).build();
+        }
+        String json = new org.json.JSONObject(m).toString();
+        String result = actorSystem.setMcpServers(projectId, chatId, json);
+        if (result.startsWith("error: ")) {
+            return Response.status(400).entity(Map.of("type", "error", "message", result.substring(7))).build();
+        }
+        return Response.ok(Map.of("type", "ok", "message", result.substring(4))).build();
+    }
+
+    /**
      * Creates the conversation with the id the caller names, or leaves it as it is when it exists.
      * For a caller that needs a particular id; {@code POST .../chats} allocates one.
      *

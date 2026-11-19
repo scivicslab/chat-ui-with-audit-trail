@@ -1412,11 +1412,38 @@ public class ChatSession extends Interpreter {
         return toolInstructionsText() + skillCatalogPart() + projectInstructionsPart();
     }
 
-    /** Gives the provider this turn's system message; the provider also reads its tool list again. */
+    /**
+     * This conversation's external MCP servers, by name ({@code ExternalMcpServersOfAConversation_261120_oo01}). Kept
+     * here rather than by the provider, which another provider replaces. Volatile: the REST view reads it.
+     */
+    private volatile Map<String, String> mcpServers = Map.of();
+
+    /** @param servers the external MCP servers, checked by {@link McpServerList#check}; recorded by the caller */
+    public void setMcpServers(Map<String, String> servers) {
+        this.mcpServers = McpServerList.check(servers);
+    }
+
+    /** @return the external MCP servers, by name */
+    public Map<String, String> getMcpServers() {
+        return mcpServers;
+    }
+
+    /** @return whether {@code tool} is a tool of one of this conversation's external MCP servers, {@code <server>__<tool>} */
+    private boolean isExternalTool(String tool) {
+        int at = tool == null ? -1 : tool.indexOf(com.scivicslab.chatui.openaicompat.OpenAiCompatProvider.EXTERNAL_SEPARATOR);
+        return at > 0 && mcpServers.containsKey(tool.substring(0, at));
+    }
+
+    /**
+     * Gives the provider this turn's external MCP servers and system message; the provider also reads its tool list
+     * again.
+     */
     private void handSystemMessage() {
         String text = systemMessageText();
+        Map<String, String> servers = mcpServers;
         try {
-            providerRef().ask(p -> { p.setSystemMessage(text); return null; }, system.getManagedThreadPool()).get();
+            providerRef().ask(p -> { p.setMcpServers(servers); p.setSystemMessage(text); return null; },
+                    system.getManagedThreadPool()).get();
         } catch (Exception e) {
             logger.log(Level.WARNING, "Could not give the provider the system message", e);
         }
@@ -2246,7 +2273,8 @@ public class ChatSession extends Interpreter {
                     fullObservation = providerRef().ask(p -> p.callTool(tc.name(), tc.argumentsJson()),
                             system.getManagedThreadPool()).get();
                     if (fullObservation == null) fullObservation = "error: the provider runs no tools";
-                    recordHere = false;
+                    // An external MCP server does not write this I/O log (ExternalMcpServersOfAConversation_261120_oo01).
+                    recordHere = isExternalTool(tc.name());
                 } else {
                     fullObservation = executeTool(tc, summarizePages);
                 }
@@ -3115,7 +3143,7 @@ public class ChatSession extends Interpreter {
      */
     private String whyNotRunnable(ToolCall tc) {
         String prefix = "error: the call could not be run: ";
-        if (!toolOfThisConversation(tc.name())) {
+        if (!toolOfThisConversation(tc.name()) && !isExternalTool(tc.name())) {
             return prefix + "there is no tool named \"" + tc.name() + "\". Call one of the tools you were given.";
         }
         JSONObject args;
@@ -3563,6 +3591,7 @@ public class ChatSession extends Interpreter {
         o.put("temperature", temperature == null ? org.json.JSONObject.NULL : temperature);
         o.put("noThink", noThinkAlways);
         o.put("effort", effort == null ? org.json.JSONObject.NULL : effort);
+        o.put("mcpServers", new org.json.JSONObject(mcpServers));
         e.write(com.scivicslab.chatui.core.iolog.IoLogView.SETTINGS_LABEL, o.toString());
     }
 

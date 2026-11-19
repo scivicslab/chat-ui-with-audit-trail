@@ -226,6 +226,9 @@ public final class ConversationToolRunner {
                     input(args, "chatId"), input(args, "provider"));
             case "set_chat_timekeeper" -> TimekeeperTool.set(controls, projectId,
                     input(args, "chatId"), input(args, "urgentWaitMinutes"), input(args, "childReplyWarnMinutes"));
+            case "set_mcp_servers" -> controls != null
+                    ? controls.setMcpServers(projectId, input(args, "chatId"), input(args, "servers"))
+                    : "error: this conversation has no controls to register MCP servers with";
             case "set_chat_name" -> ChatNameTool.set(controls, projectId, input(args, "chatId"), input(args, "name"));
             case "delete_chat" -> DeleteChatTool.delete(controls, projectId, conversationName(), input(args, "chatId"));
             case "get_chat_log" -> GetChatLogTool.get(controls, projectId,

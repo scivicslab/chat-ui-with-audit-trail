@@ -44,6 +44,12 @@ public class OpenAiCompatProvider implements LlmProvider {
     private final McpToolClient mcp;
     /** The tools the model is given, read again whenever the system message is set at a turn's start. */
     private List<ToolDefinition> tools = List.of();
+    /** The conversation's external MCP servers, by name ({@code ExternalMcpServersOfAConversation_261120_oo01}). */
+    private java.util.Map<String, McpToolClient> externalServers = java.util.Map.of();
+    /** Separates an external server's name from its tool's name in the name the model is given. */
+    public static final String EXTERNAL_SEPARATOR = "__";
+    /** What OpenAI accepts as a function name. */
+    private static final java.util.regex.Pattern FUNCTION_NAME = java.util.regex.Pattern.compile("[A-Za-z0-9_-]{1,64}");
 
     // Conversation history for context (not managed by actor — provider owns it)
     private final LinkedList<ChatMessage> history = new LinkedList<>();
@@ -131,6 +137,13 @@ public class OpenAiCompatProvider implements LlmProvider {
         tools = readTools();
     }
 
+    @Override
+    public void setMcpServers(java.util.Map<String, String> servers) {
+        java.util.Map<String, McpToolClient> clientsByName = new java.util.LinkedHashMap<>();
+        servers.forEach((name, url) -> clientsByName.put(name, new McpToolClient(url, null)));
+        externalServers = java.util.Collections.unmodifiableMap(clientsByName);
+    }
+
     /** @return the tools the model is given now */
     List<ToolDefinition> tools() {
         return tools;
@@ -147,6 +160,22 @@ public class OpenAiCompatProvider implements LlmProvider {
                         + " that drive the conversation: " + e.getMessage());
             }
         }
+        externalServers.forEach((server, client) -> {
+            try {
+                for (ToolDefinition t : client.listTools()) {
+                    String name = server + EXTERNAL_SEPARATOR + t.name();
+                    if (!FUNCTION_NAME.matcher(name).matches()) {
+                        logger.warning("Tool '" + t.name() + "' of MCP server " + server + " is not given to the model:"
+                                + " '" + name + "' is not a valid function name");
+                        continue;
+                    }
+                    all.add(new ToolDefinition(name, t.description(), t.parametersJson()));
+                }
+            } catch (McpToolClient.McpException e) {
+                logger.warning("tools/list to MCP server " + server + " (" + client.endpoint() + ") failed; its tools"
+                        + " are not given to the model this turn: " + e.getMessage());
+            }
+        });
         all.addAll(drivingTools());
         return List.copyOf(all);
     }
@@ -168,8 +197,15 @@ public class OpenAiCompatProvider implements LlmProvider {
     /** {@inheritDoc} Runs it through chat-ui's MCP server, which records it to the I/O log. */
     @Override
     public String callTool(String name, String argumentsJson) {
-        if (mcp == null) return "error: tool '" + name + "' cannot be run: this conversation has no MCP server";
-        McpToolClient.Result r = mcp.callTool(name, argumentsJson);
+        McpToolClient client = mcp;
+        String tool = name;
+        int at = name.indexOf(EXTERNAL_SEPARATOR);
+        if (at > 0 && externalServers.containsKey(name.substring(0, at))) {
+            client = externalServers.get(name.substring(0, at));
+            tool = name.substring(at + EXTERNAL_SEPARATOR.length());
+        }
+        if (client == null) return "error: tool '" + name + "' cannot be run: this conversation has no MCP server";
+        McpToolClient.Result r = client.callTool(tool, argumentsJson);
         return r.isError() && !r.text().startsWith("error: ") ? "error: " + r.text() : r.text();
     }
 
