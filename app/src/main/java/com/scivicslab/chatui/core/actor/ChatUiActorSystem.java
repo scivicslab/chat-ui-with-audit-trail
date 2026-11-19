@@ -176,6 +176,8 @@ public class ChatUiActorSystem implements ConversationControls {
     /** Keyed by qualified chat name ({@code project1/chat-01}), the same string used in the registry. */
     private final Map<String, ActorRef<ConversationSquad>> chats = new ConcurrentHashMap<>();
     private final Map<String, ChatSessionIIAR> chatSessions = new ConcurrentHashMap<>();
+    /** Each conversation's latest tool runner, for chat-ui's MCP server ({@code ToolCatalogAndChatUiMcpServer_261120_oo01}). */
+    private final Map<String, ConversationToolRunner> toolRunners = new ConcurrentHashMap<>();
     private RecentEntriesAccumulator systemLogBuffer;
     private final Map<String, RecentEntriesAccumulator> chatLogBuffers = new ConcurrentHashMap<>();
     private RecentEntriesAccumulator externalProxyLogBuffer;
@@ -775,6 +777,7 @@ public class ChatUiActorSystem implements ConversationControls {
         actorSystem.removeActorRecursively(name);
         chats.remove(name);
         chatSessions.remove(name);
+        toolRunners.remove(name);
         chatLogBuffers.remove(name);
         organizationOf(projectId).tell(o -> o.remove(chatId));
         // Its role edges, and every edge that names it in any project, go with it (CollaborationGraph_260828_oo01).
@@ -869,6 +872,7 @@ public class ChatUiActorSystem implements ConversationControls {
         for (String name : conversations) {
             chats.remove(name);
             chatSessions.remove(name);
+            toolRunners.remove(name);
             chatLogBuffers.remove(name);
         }
         projects.remove(projectId);
@@ -2422,6 +2426,19 @@ public class ChatUiActorSystem implements ConversationControls {
 
     /** @return the provider kinds and plugin tools this instance was started with */
     public PluginRegistry getPluginRegistry() { return pluginRegistry; }
+
+    @Override
+    public void publishToolRunner(ConversationToolRunner runner) {
+        if (chatSessions.containsKey(runner.conversationName())) toolRunners.put(runner.conversationName(), runner);
+    }
+
+    /**
+     * @param conversation a qualified conversation name, e.g. {@code "project1/chat-01"}
+     * @return the runner of its tools, or {@code null} when there is no such conversation
+     */
+    public ConversationToolRunner toolRunnerOf(String conversation) {
+        return conversation == null ? null : toolRunners.get(conversation);
+    }
 
     public ActorRef<PromptQueue> getPromptQueue(String projectId, String chatId) {
         return actorSystem.getActor(chatActorName(projectId, chatId) + ".queue");

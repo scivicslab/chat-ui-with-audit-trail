@@ -3,26 +3,8 @@ package com.scivicslab.chatui.core.actor;
 import com.scivicslab.chatui.agent.ToolCatalog;
 import com.scivicslab.chatui.agent.AskChatTool;
 import com.scivicslab.chatui.agent.ContextBudget;
-import com.scivicslab.chatui.agent.DocSearchTool;
 import com.scivicslab.chatui.agent.FileAccessScope;
-import com.scivicslab.chatui.agent.FileReadTool;
-import com.scivicslab.chatui.agent.FileWriteTool;
-import com.scivicslab.chatui.agent.LoadSkillTool;
-import com.scivicslab.chatui.agent.ReferenceLinkTool;
-import com.scivicslab.chatui.agent.SetCollaboratorTool;
 import com.scivicslab.chatui.agent.ChatInspection;
-import com.scivicslab.chatui.agent.GetChatLogTool;
-import com.scivicslab.chatui.agent.RequestMessagesTools;
-import com.scivicslab.chatui.agent.CreateChatTool;
-import com.scivicslab.chatui.agent.ProviderTools;
-import com.scivicslab.chatui.agent.TimekeeperTool;
-import com.scivicslab.chatui.agent.ChatNameTool;
-import com.scivicslab.chatui.agent.OrganizationTools;
-import com.scivicslab.chatui.agent.DeleteChatTool;
-import com.scivicslab.chatui.agent.GetChatStatusTool;
-import com.scivicslab.chatui.agent.ListChatModelsTool;
-import com.scivicslab.chatui.agent.SetChatModelTool;
-import com.scivicslab.chatui.agent.SetAgentLoopTool;
 import com.scivicslab.chatui.agent.TextToolCallParser;
 import com.scivicslab.chatui.agent.ToolCall;
 import com.scivicslab.chatui.agent.ToolSet;
@@ -34,9 +16,6 @@ import com.scivicslab.chatui.core.rest.ChatEvent;
 import com.scivicslab.chatui.core.service.AuthMode;
 import com.scivicslab.pojoactor.action.ActionResult;
 import com.scivicslab.pojoactor.core.ActorRef;
-import com.scivicslab.chatui.agent.CalcExpression;
-import com.scivicslab.chatui.agent.FileRemoveTool;
-import com.scivicslab.turingworkflow.examples.jshell.JShellCalculator;
 import com.scivicslab.turingworkflow.workflow.IIActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
 import com.scivicslab.turingworkflow.workflow.Interpreter;
@@ -348,8 +327,12 @@ public class ChatSession extends Interpreter {
      * ({@code ThinkingAndEffortAreConversationSettings_260917_oo01}).
      */
     private boolean noThinkAlways;
-    /** Open I/O-log session id for this turn, or -1 when logging is disabled. Set in start(). */
-    private long ioSession = -1;
+    /**
+     * Open I/O-log session id for this turn, or -1 when logging is disabled. Set in start(). Volatile, like
+     * {@link #ioTurnNo} and {@link #stepCount}: chat-ui's MCP server reads all three from its own thread to label
+     * the calls it records ({@link ConversationToolRunner.IoPosition}).
+     */
+    private volatile long ioSession = -1;
     /** Which tools this conversation is shown and may call; every conversation starts with all of them. */
     private ToolSet toolSet = ToolSet.FULL;
     /**
@@ -361,7 +344,7 @@ public class ChatSession extends Interpreter {
     /** Tools a plugin jar added (ProviderAndToolPlugins_260912_oo01), by name, in registration order. */
     private final Map<String, ConversationTool> pluginTools = new LinkedHashMap<>();
     /** This turn's number, for turn{N}/step{M}/... I/O-log labels. Set in start(). */
-    private int ioTurnNo;
+    private volatile int ioTurnNo;
 
     /**
      * The {@code ask_chat} request the current turn's prompt is, or answers, or {@code null}
@@ -459,7 +442,7 @@ public class ChatSession extends Interpreter {
     private String answerBeforeDecision;
     private List<ToolCall> pendingCalls;
     private String finalAnswer;
-    private int stepCount;
+    private volatile int stepCount;
     private volatile boolean cancelled;
 
     // ---- Babysitter loop (BabysitterLoopWorkflowShape_260828_oo01, made phase-agnostic by
@@ -515,8 +498,10 @@ public class ChatSession extends Interpreter {
 
     private String promptWorkflowFile = DEFAULT_PROMPT_WORKFLOW;
 
-    /** Lazily created on first {@code calc} tool call; kept for this session's lifetime. */
-    private JShellCalculator calculator;
+    /** The {@code calc} evaluator, made on first use; kept for this session's lifetime and shared by its runners. */
+    private final ConversationToolRunner.Calculator calculator = new ConversationToolRunner.Calculator();
+    /** The runner of the tools that do not drive this conversation, made again whenever what they read is set. */
+    private ConversationToolRunner toolRunner;
 
     /**
      * Convenience constructor without the I/O log (used by tests).
@@ -590,7 +575,10 @@ public class ChatSession extends Interpreter {
      *
      * @param system the actor system this session's ActorRef is registered in
      */
-    public void setActorSystem(IIActorSystem system) { this.system = system; }
+    public void setActorSystem(IIActorSystem system) {
+        this.system = system;
+        renewToolRunner();
+    }
 
     /**
      * @param providerName the name of the {@code provider} child actor, created by the generating side
@@ -618,6 +606,7 @@ public class ChatSession extends Interpreter {
     public void setChatIdentity(String projectId, String chatId) {
         this.projectId = projectId;
         this.chatId = chatId;
+        renewToolRunner();
     }
 
     /** @return this session's qualified conversation name, e.g. {@code "project1/chat-01"} */
@@ -629,21 +618,25 @@ public class ChatSession extends Interpreter {
     /** @param conversationControls the settings and log window the conversation tools use */
     public void setConversationControls(ConversationControls conversationControls) {
         this.conversationControls = conversationControls;
+        renewToolRunner();
     }
 
     /** @param roleTableRef the role table of this conversation's project */
     public void setRoleTableRef(ActorRef<RoleTable> roleTableRef) {
         this.roleTableRef = roleTableRef;
+        renewToolRunner();
     }
 
     /** @param fileScope the range of the file system {@code read}/{@code write} may touch */
     public void setFileScope(FileAccessScope fileScope) {
         this.fileScope = fileScope;
+        renewToolRunner();
     }
 
     /** @param skillRegistryRef the shared {@link SkillRegistry}, for {@code load_skill} */
     public void setSkillRegistryRef(ActorRef<SkillRegistry> skillRegistryRef) {
         this.skillRegistryRef = skillRegistryRef;
+        renewToolRunner();
     }
 
     /** @return the project instructions this conversation sends with each turn, or {@code null} when it has none */
@@ -2079,6 +2072,7 @@ public class ChatSession extends Interpreter {
      */
     public void setToolSet(ToolSet toolSet) {
         if (toolSet != null) this.toolSet = toolSet;
+        renewToolRunner();
     }
 
     /** @return which tools this conversation is shown and may call */
@@ -2094,6 +2088,26 @@ public class ChatSession extends Interpreter {
     public void setPluginTools(List<ConversationTool> tools) {
         pluginTools.clear();
         for (ConversationTool t : tools) pluginTools.put(t.name(), t);
+        renewToolRunner();
+    }
+
+    /**
+     * Copies what the tools that do not drive the conversation read into a new {@link ConversationToolRunner}, and
+     * hands it to the controls for chat-ui's MCP server ({@code ToolCatalogAndChatUiMcpServer_261120_oo01}).
+     */
+    private void renewToolRunner() {
+        toolRunner = new ConversationToolRunner(system, projectId, chatId, fileScope, conversationControls,
+                roleTableRef, skillRegistryRef, pluginTools, toolSet, calculator, ioLog,
+                () -> new ConversationToolRunner.IoPosition(ioSession, ioTurnNo, stepCount));
+        if (conversationControls != null && projectId != null && chatId != null) {
+            conversationControls.publishToolRunner(toolRunner);
+        }
+    }
+
+    /** @return the runner of the tools that do not drive this conversation */
+    private ConversationToolRunner toolRunner() {
+        if (toolRunner == null) renewToolRunner();
+        return toolRunner;
     }
 
     /** @return whether the named tool is a plugin tool whose observation is a set of pages */
@@ -3013,31 +3027,6 @@ public class ChatSession extends Interpreter {
         }
         turnToolCalls++;
         return switch (tc.name()) {
-            case "read" -> FileReadTool.read(fileScope, extractInput(args, "path"));
-            case "write" -> FileWriteTool.write(fileScope,
-                    extractInput(args, "path"), extractInput(args, "content"));
-            case "calc" -> {
-                // JShell evaluates Java, not arithmetic, and does it in this process
-                // (CalcExpression). Read the argument before it gets there.
-                String expression = extractInput(args, "expression");
-                String refusal = CalcExpression.reject(expression);
-                yield refusal != null ? refusal : calculator().evaluate(expression);
-            }
-            case "remove" -> FileRemoveTool.remove(fileScope, extractInput(args, "path"));
-            case "search_docs", "list_references" -> {
-                // An html-saurus node when this instance knows one, else the HTTP API
-                // (ActorNodesForWorkspaceAndPortal_261118_oo01, decision 7).
-                var docs = com.scivicslab.chatui.agent.DocsSource.choose(
-                        com.scivicslab.chatui.core.remote.RemoteNodes.of(system), extractInput(args, "node"),
-                        DocSearchTool.baseUrl());
-                if (docs.error() != null) yield docs.error();
-                yield "search_docs".equals(tc.name())
-                        ? DocSearchTool.search(extractInput(args, "query"), 0, "all", docs.source())
-                        : ReferenceLinkTool.list(extractInput(args, "id"), extractInput(args, "direction"),
-                                extractInput(args, "relation"), docs.source());
-            }
-            case "list_running_tools" -> com.scivicslab.chatui.agent.RunningToolsTool.list(
-                    com.scivicslab.chatui.core.remote.RemoteNodes.of(system), extractInput(args, "tool"));
             case "ask_chat", "ask_chat_urgent" -> {
                 String requestId = nextRequestId();
                 String node = extractInput(args, "node").strip();
@@ -3072,64 +3061,12 @@ public class ChatSession extends Interpreter {
                 }
                 yield sent;
             }
-            // Through the controls, which also record the loop; a ChatSession without them (a test) only installs it.
-            case "set_agent_loop" -> conversationControls != null
-                    ? conversationControls.setAgentLoop(projectId, extractInput(args, "chatId"), extractInput(args, "yaml"))
-                    : SetAgentLoopTool.setAgentLoop(system, projectId, extractInput(args, "chatId"), extractInput(args, "yaml"));
-            case "load_skill" -> LoadSkillTool.load(skillRegistryRef, extractInput(args, "name"));
-            // Through the controls, which also save the edge; a ChatSession without them (a test) writes the graph only.
-            case "set_collaborator" -> {
-                String node = extractInput(args, "node");
-                yield conversationControls != null
-                        ? conversationControls.setCollaborator(myChatName(), extractInput(args, "chatId"),
-                                extractInput(args, "role"), extractInput(args, "collaboratorChatId"), node)
-                        : SetCollaboratorTool.setCollaborator(roleTableRef,
-                                myChatName(), extractInput(args, "chatId"), extractInput(args, "role"),
-                                extractInput(args, "collaboratorChatId"), node,
-                                n -> com.scivicslab.chatui.core.remote.RemoteNodes.of(system) != null
-                                        && com.scivicslab.chatui.core.remote.RemoteNodes.of(system).knows(n));
-            }
-            case "get_chat_status" -> GetChatStatusTool.get(system, projectId, extractInput(args, "chatId"));
-            case "list_chat_models" -> ListChatModelsTool.list(system, projectId, extractInput(args, "chatId"));
-            case "set_chat_model" -> SetChatModelTool.set(system, conversationControls, projectId,
-                    extractInput(args, "chatId"), extractInput(args, "model"));
-            case "list_providers" -> ProviderTools.list(conversationControls);
-            case "create_chat" -> CreateChatTool.create(system, conversationControls, projectId, chatId,
-                    extractInput(args, "provider"), extractInput(args, "model"), extractInput(args, "superior"),
-                    extractInput(args, "role"));
-            case "list_chats" -> OrganizationTools.list(conversationControls, projectId, chatId);
-            case "set_superior" -> OrganizationTools.setSuperior(conversationControls, projectId, chatId,
-                    extractInput(args, "chatId"), extractInput(args, "superiorChatId"));
-            case "set_chat_provider" -> ProviderTools.setChatProvider(conversationControls, projectId,
-                    extractInput(args, "chatId"), extractInput(args, "provider"));
-            case "set_chat_timekeeper" -> TimekeeperTool.set(conversationControls, projectId,
-                    extractInput(args, "chatId"), extractInput(args, "urgentWaitMinutes"),
-                    extractInput(args, "childReplyWarnMinutes"));
             case "accept_reply" -> acceptReply(extractInput(args, "requestId"));
             case "cancel_request" -> cancelRequest(extractInput(args, "requestId"));
             case "expect_report" -> expectReport(extractInput(args, "chatId"), extractInput(args, "requestId"), extractInput(args, "node"),
                     extractInput(args, "minutes"));
-            case "set_chat_name" -> ChatNameTool.set(conversationControls, projectId,
-                    extractInput(args, "chatId"), extractInput(args, "name"));
-            case "delete_chat" -> DeleteChatTool.delete(conversationControls, projectId, myChatName(),
-                    extractInput(args, "chatId"));
-            case "get_chat_log" -> GetChatLogTool.get(conversationControls, projectId,
-                    extractInput(args, "chatId"), parseIntOrNull(extractInput(args, "count")));
-            case "get_request_messages" -> RequestMessagesTools.get(system, projectId, extractInput(args, "chatId"));
-            case "set_request_messages" -> RequestMessagesTools.set(system, projectId,
-                    extractInput(args, "chatId"), extractInput(args, "messages"));
-            case "complete_messages" -> RequestMessagesTools.complete(system, projectId,
-                    extractInput(args, "chatId"), extractInput(args, "messages"),
-                    extractInput(args, "model"), extractInput(args, "noThink"));
-            default -> {
-                // A plugin tool (ProviderAndToolPlugins_260912_oo01). With whole pages when the
-                // page-summarising transition asked for them: what reaches the model is decided
-                // afterwards by that transition, and the untouched observation reaches the I/O
-                // log either way.
-                ConversationTool tool = pluginTools.get(tc.name());
-                if (tool == null) yield "error: unknown tool '" + tc.name() + "'";
-                yield (summarizingPages && tool.returnsPages()) ? tool.executeUntrimmed(args) : tool.execute(args);
-            }
+            // Every tool that does not drive the conversation, the plugin tools among them.
+            default -> toolRunner().run(tc.name(), args, summarizingPages);
         };
     }
 
@@ -3140,21 +3077,6 @@ public class ChatSession extends Interpreter {
         } catch (Exception e) {
             return "";
         }
-    }
-
-    /** @return {@code text} parsed as an {@code Integer}, or {@code null} if blank/not a number. */
-    private static Integer parseIntOrNull(String text) {
-        if (text == null || text.isBlank()) return null;
-        try {
-            return Integer.valueOf(text.trim());
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private JShellCalculator calculator() {
-        if (calculator == null) calculator = new JShellCalculator();
-        return calculator;
     }
 
     /**

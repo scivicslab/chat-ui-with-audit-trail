@@ -156,4 +156,14 @@ public interface ConversationControls {
      * @return {@code "ok: ..."}, or {@code "error: ..."} with nothing changed
      */
     String setAgentLoop(String myProjectId, String target, String yaml);
+
+    /**
+     * Keeps a conversation's latest {@link ConversationToolRunner}, which chat-ui's MCP server runs its tools with
+     * ({@code ToolCatalogAndChatUiMcpServer_261120_oo01}). The conversation calls this whenever what its tools read
+     * changes. Controls without an MCP server (a test's) keep nothing.
+     *
+     * @param runner the runner, named by {@link ConversationToolRunner#conversationName()}
+     */
+    default void publishToolRunner(ConversationToolRunner runner) {
+    }
 }
