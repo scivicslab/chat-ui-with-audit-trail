@@ -248,7 +248,8 @@ class ReminderStepTest {
     @Test
     void theToolDescriptionsSayFiveMinutesAndDoNotTellTheModelToRegisterItsOwnPromise() {
         Squad one = squad(new IIActorSystem("reminder-step-tool-texts"), "01", new Scripted(false, 0, "x"));
-        String tools = one.chat().askNow(a -> ((ChatSession) a).toolInstructionsText()).join();
+        String tools = one.chat().askNow(a -> ((ChatSession) a).toolInstructionsText()).join()
+                .replaceAll("\\s+", " ");  // where a line wraps is not what this test is about
         assertTrue(tools.contains("without a reply before it is told (default 5)"), "set_chat_timekeeper says 5");
         assertTrue(!tools.contains("(default 30)"), "no 30 is left");
         assertTrue(tools.contains("- expect_report(chatId, requestId, minutes, node)"), "the tool itself stays");

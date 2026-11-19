@@ -22,6 +22,24 @@ public interface ConversationTool {
     String description();
 
     /**
+     * The tool's arguments, in the order {@link #description()} lists them, with their JSON Schema types
+     * ({@code ToolCatalogAndChatUiMcpServer_261120_oo01}). The default reads the names from the
+     * {@code - name(args): } head of {@link #description()} and makes each a required string; a tool
+     * with an optional or non-string argument overrides it.
+     *
+     * @return the arguments
+     */
+    default java.util.List<ToolParameter> parameters() {
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("-\\s*" + java.util.regex.Pattern.quote(name()) + "\\(([^)]*)\\)")
+                .matcher(description());
+        if (!m.find() || m.group(1).isBlank()) return java.util.List.of();
+        return java.util.Arrays.stream(m.group(1).split(","))
+                .map(String::trim).filter(a -> !a.isEmpty())
+                .map(ToolParameter::requiredString).toList();
+    }
+
+    /**
      * @param argumentsJson the call's arguments as a JSON object text
      * @return the observation, or a text starting with {@code error: }
      */

@@ -5,6 +5,7 @@ import com.scivicslab.chatui.agent.ScholarSearchTool;
 import com.scivicslab.chatui.agent.WebSearchTool;
 import com.scivicslab.chatui.plugin.ChatUiPlugin;
 import com.scivicslab.chatui.plugin.ConversationTool;
+import com.scivicslab.chatui.plugin.ToolParameter;
 
 import org.json.JSONObject;
 
@@ -97,6 +98,16 @@ public class WebToolsPlugin implements ChatUiPlugin {
                       (default 10). To read a paper, call fetch on its open-access URL. Query in
                       English: the abstracts indexed are mostly English.
                     """;
+        }
+
+        /** Only "query" is required; "year_from" and "limit" are numbers ({@link #input} reads them as text). */
+        @Override
+        public List<ToolParameter> parameters() {
+            return List.of(
+                    ToolParameter.requiredString("query"),
+                    new ToolParameter("sort", "string", false, "\"relevance\" (default) or \"cited\""),
+                    new ToolParameter("year_from", "integer", false, "keep works published in or after this year"),
+                    new ToolParameter("limit", "integer", false, "1-25, default 10"));
         }
 
         @Override
