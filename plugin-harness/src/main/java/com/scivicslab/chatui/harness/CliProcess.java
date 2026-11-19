@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -132,6 +133,7 @@ public class CliProcess {
         // Background thread: read stdout continuously and route parsed events into the turn or
         // autonomous queue. Keeps running while the process is alive, picking up both prompted and
         // autonomous (background-job / ScheduleWakeup) turns.
+        final Process started = currentProcess;
         readerThread = Thread.ofVirtual().start(() -> {
             try {
                 String line;
@@ -153,6 +155,10 @@ public class CliProcess {
                     }
                 }
             } catch (IOException ignored) {}
+            // The output closed: the process is ending. A prompt still waiting for its result is told at once
+            // rather than at its next 60-second poll (TurnWithoutAnAnswerTellsTheAsker_261119_oo01).
+            // Only for the process this reader reads: a process cancelled earlier must not end a later prompt.
+            if (turnActive && currentProcess == started) turnQueue.offer(StreamEvent.text(OUTPUT_CLOSED, null));
         });
 
         Process proc = currentProcess;
@@ -174,6 +180,8 @@ public class CliProcess {
      * <p>Writes the user message to stdin, then reads events from {@code turnQueue}
      * (filled by the background reader thread while the turn is active) until a
      * {@code result} event is received.</p>
+     *
+     * @throws EndedWithoutResult when the process ended before the prompt's {@code result}
      */
     public int sendPrompt(String prompt, StreamCallback callback) throws IOException {
         return sendPrompt(prompt, List.of(), callback);
@@ -208,13 +216,12 @@ public class CliProcess {
                         logger.info(binary + " CLI: no event in 60s but process is alive — continuing to wait...");
                         continue;
                     }
-                    // Process has died — give up and discard any stale queued events.
-                    turnActive = false;
-                    autonomousTurnOpen = false;
-                    turnQueue.clear();
-                    autonomousQueue.clear();
                     if (callback != null) callback.onComplete(-1);
-                    return -1;
+                    throw endedWithoutResult();
+                }
+                if (OUTPUT_CLOSED.equals(event.type())) {
+                    if (callback != null) callback.onComplete(-1);
+                    throw endedWithoutResult();
                 }
                 if (callback != null) callback.onEvent(event);
                 if ("result".equals(event.type())) return 0;
@@ -226,6 +233,46 @@ public class CliProcess {
         } finally {
             sendingThread = null;
         }
+    }
+
+    /** The type of the event the output reader leaves for a waiting prompt when the process's output closes. */
+    static final String OUTPUT_CLOSED = "output_closed";
+
+    /**
+     * The process ended in the middle of a prompt, before it wrote the prompt's {@code result}. Whatever it was
+     * doing for the prompt did not finish; the caller treats the prompt as failed
+     * ({@code TurnWithoutAnAnswerTellsTheAsker_261119_oo01}).
+     */
+    public static final class EndedWithoutResult extends IOException {
+        private final Integer exitCode;
+
+        EndedWithoutResult(String binary, Integer exitCode) {
+            super("the " + Path.of(binary).getFileName() + " CLI process ended without a result ("
+                    + (exitCode == null ? "exit code unknown" : "exit code " + exitCode) + ")");
+            this.exitCode = exitCode;
+        }
+
+        /** @return the process's exit code, or {@code null} when it had not exited within a few seconds */
+        public Integer exitCode() { return exitCode; }
+    }
+
+    /** Forgets the prompt's turn and says how the process ended. */
+    private EndedWithoutResult endedWithoutResult() {
+        turnActive = false;
+        autonomousTurnOpen = false;
+        turnQueue.clear();
+        autonomousQueue.clear();
+        Process p = currentProcess;
+        Integer code = null;
+        if (p != null) {
+            try {
+                if (p.waitFor(5, TimeUnit.SECONDS)) code = p.exitValue();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        logger.warning(binary + " CLI ended in the middle of a prompt, exit code " + code);
+        return new EndedWithoutResult(binary, code);
     }
 
     /**

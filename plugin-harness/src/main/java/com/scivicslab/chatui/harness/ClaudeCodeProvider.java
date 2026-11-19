@@ -275,6 +275,11 @@ public class ClaudeCodeProvider implements LlmProvider {
                 ctx.onActivity().run();
                 dispatch(event, emitter, staleSession, sawAssistant);
             });
+        } catch (CliProcess.EndedWithoutResult e) {
+            // A session the CLI cannot find ends the process too; that one is retried below with a new session.
+            // Any other end is the prompt's failure, reported with the exit code: the turn fails, and the asker is
+            // told why (TurnWithoutAnAnswerTellsTheAsker_261119_oo01).
+            if (!staleSession[0]) throw new IllegalStateException(e.getMessage(), e);
         } catch (IOException e) {
             logger.log(Level.WARNING, "claude CLI failed", e);
             emitter.accept(ChatEvent.error("claude CLI error: " + e.getMessage()));
@@ -293,6 +298,8 @@ public class ClaudeCodeProvider implements LlmProvider {
                     ctx.onActivity().run();
                     dispatch(event, emitter, new boolean[]{false}, retrySawAssistant);
                 });
+            } catch (CliProcess.EndedWithoutResult e) {
+                throw new IllegalStateException(e.getMessage(), e);
             } catch (IOException e) {
                 emitter.accept(ChatEvent.error("claude CLI error on retry: " + e.getMessage()));
             }

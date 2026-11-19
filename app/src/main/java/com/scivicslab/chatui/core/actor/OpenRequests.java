@@ -61,6 +61,18 @@ public final class OpenRequests {
      */
     private final Map<String, String> originalOfSent = new HashMap<>();
     private final Map<String, Outstanding> outstandingChildren = new HashMap<>();
+    /**
+     * Requests this conversation sent whose report another conversation promised, with an expect_report reminder
+     * pending: while one is here, the timekeeper's "no reply yet" watch says nothing about it
+     * ({@code AutomaticReplyDecision_261119_oo01}).
+     *
+     * @param target        the conversation that promised the report
+     * @param dueAt         when its reminder is due, in milliseconds since the epoch
+     * @param awaitingReply whether the request was still waiting for its reply when the report was promised: then the
+     *                      reminder's follow-up is progress, not the reply, and the request stays out after it
+     */
+    private record Promise(String target, long dueAt, boolean awaitingReply) {}
+    private final Map<String, Promise> promised = new java.util.LinkedHashMap<>();
     private String last;
 
     /**
@@ -128,7 +140,11 @@ public final class OpenRequests {
             sent.put(new org.json.JSONObject().put("requestId", s.requestId())
                     .put("target", s.target() == null ? org.json.JSONObject.NULL : s.target()).put("sentAt", s.sentAt()));
         }
-        return new org.json.JSONObject().put("received", received).put("sent", sent)
+        org.json.JSONArray promises = new org.json.JSONArray();
+        promised.forEach((id, p) -> promises.put(new org.json.JSONObject().put("requestId", id)
+                .put("target", p.target() == null ? org.json.JSONObject.NULL : p.target())
+                .put("dueAt", p.dueAt()).put("awaitingReply", p.awaitingReply())));
+        return new org.json.JSONObject().put("received", received).put("sent", sent).put("promised", promises)
                 .put("originalOfChild", new org.json.JSONObject(originalOfChild))
                 .put("originalOfSent", new org.json.JSONObject(originalOfSent))
                 .put("last", last == null ? org.json.JSONObject.NULL : last);
@@ -143,6 +159,7 @@ public final class OpenRequests {
         originalOfChild.clear();
         originalOfSent.clear();
         outstandingChildren.clear();
+        promised.clear();
         org.json.JSONArray received = saved.optJSONArray("received");
         for (int i = 0; received != null && i < received.length(); i++) {
             org.json.JSONObject r = received.optJSONObject(i);
@@ -174,6 +191,13 @@ public final class OpenRequests {
             outstandingChildren.put(s.getString("requestId"), new Outstanding(s.getString("requestId"),
                     s.isNull("target") ? null : s.optString("target", null), s.optLong("sentAt")));
         }
+        org.json.JSONArray promises = saved.optJSONArray("promised");
+        for (int i = 0; promises != null && i < promises.length(); i++) {
+            org.json.JSONObject p = promises.optJSONObject(i);
+            if (p == null || p.optString("requestId", "").isBlank()) continue;
+            promised.put(p.getString("requestId"), new Promise(p.isNull("target") ? null : p.optString("target", null),
+                    p.optLong("dueAt"), p.optBoolean("awaitingReply", true)));
+        }
         copy(saved.optJSONObject("originalOfChild"), originalOfChild);
         copy(saved.optJSONObject("originalOfSent"), originalOfSent);
         last = saved.isNull("last") ? null : saved.optString("last", null);
@@ -193,6 +217,7 @@ public final class OpenRequests {
      */
     public String replyArrived(String childRequestId) {
         outstandingChildren.remove(childRequestId);
+        promised.remove(childRequestId);
         String original = originalOfChild.remove(childRequestId);
         if (original == null) return null;
         Original o = originals.get(original);
@@ -240,6 +265,49 @@ public final class OpenRequests {
         outstandingChildren.put(childRequestId, new Outstanding(childRequestId, target, sentAt));
     }
 
+    /**
+     * Records that another conversation promised a report on a request this conversation sent and that is still out,
+     * and that its reminder is due at {@code dueAt}; the "no reply yet" watch leaves the request alone until the
+     * reminder's follow-up is read ({@code AutomaticReplyDecision_261119_oo01}). A later promise on the same request
+     * replaces the earlier one.
+     *
+     * @param awaitingReply whether the request had not had its reply yet
+     * @return whether the request is out, so that the promise was recorded
+     */
+    public boolean promised(String childRequestId, String target, long dueAt, boolean awaitingReply) {
+        if (!outstandingChildren.containsKey(childRequestId)) return false;
+        promised.put(childRequestId, new Promise(target, dueAt, awaitingReply));
+        return true;
+    }
+
+    /** As {@link #promised(String, String, long, boolean)}, for a request that has not had its reply yet. */
+    public boolean promised(String childRequestId, String target, long dueAt) {
+        return promised(childRequestId, target, dueAt, true);
+    }
+
+    /** @return the requests whose promised report is still pending */
+    public Set<String> promisedRequests() {
+        return Set.copyOf(promised.keySet());
+    }
+
+    /**
+     * A follow-up to a request this conversation sent has come: the answer of the turn the promiser's reminder started.
+     * When the request was still waiting for its reply when the report was promised, the follow-up is progress, not
+     * the reply: the request stays out, its watch counting from {@code now}. Otherwise the follow-up is the report the
+     * reopened request waited for, and it closes the request as a reply does. Either way the promise is over.
+     *
+     * @return the received request the turn the follow-up starts works for, as {@link #replyArrived} returns
+     */
+    public String followUpArrived(String childRequestId, long now) {
+        Promise p = promised.remove(childRequestId);
+        Outstanding out = outstandingChildren.get(childRequestId);
+        if (p != null && p.awaitingReply() && out != null) {
+            outstandingChildren.put(childRequestId, new Outstanding(childRequestId, out.target(), now));
+            return originalOfChild.get(childRequestId);
+        }
+        return replyArrived(childRequestId);
+    }
+
     /** What {@link #reopen} did, or why it did not. */
     public enum Reopening {
         /** The child request counts as out again; its original request waits for the report. */
@@ -282,6 +350,28 @@ public final class OpenRequests {
         if (!outstandingChildren.containsKey(childRequestId)) return false;
         replyArrived(childRequestId);
         return true;
+    }
+
+    /**
+     * After a restart: answers, with no reply and {@code why} as the reason, every received request not yet answered
+     * that waits for none of its sent requests and that no queued message will work on. Its turn was cut by the
+     * restart, so no turn would ever answer it ({@code TurnWithoutAnAnswerTellsTheAsker_261119_oo01}). A request
+     * still waiting for a sent request is left open, as delegation means; so is one a queued message carries (the
+     * resume of a paused turn carries the request it works for).
+     *
+     * @param queuedRequestIds the request ids the queue's waiting messages carry
+     * @param why              what the asker is told
+     * @return the requests answered this way, in no particular order
+     */
+    public List<String> cutByRestart(java.util.Set<String> queuedRequestIds, String why) {
+        List<String> cut = new ArrayList<>();
+        for (Map.Entry<String, Original> e : new ArrayList<>(originals.entrySet())) {
+            Original o = e.getValue();
+            if (o.answered || !o.outstanding.isEmpty() || queuedRequestIds.contains(e.getKey())) continue;
+            turnEnded(e.getKey(), new TurnReply(null, why, null));
+            cut.add(e.getKey());
+        }
+        return cut;
     }
 
     /** @return the way back to the asker of the received request when it is on another instance, else {@code null} */

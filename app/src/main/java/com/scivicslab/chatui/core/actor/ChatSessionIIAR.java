@@ -153,6 +153,9 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     /** When the running turn started, or {@code null} when none runs, read without waiting like {@link #isBusyDirect()}. */
     public Long runningSinceDirect() { return chatSession().runningSince(); }
 
+    /** The sent requests with a promised report pending, read without waiting for a running turn. */
+    public java.util.Set<String> promisedRequestsDirect() { return chatSession().promisedRequests(); }
+
     /** The child requests still out, read without waiting for a running turn, as {@link #isBusyDirect()} is. */
     public java.util.List<OpenRequests.Outstanding> outstandingChildrenDirect() {
         return chatSession().outstandingChildren();
@@ -428,6 +431,18 @@ public class ChatSessionIIAR extends InterpreterIIAR {
     @Action("rearmReplyWatches")
     public ActionResult rearmReplyWatchesAction(String arg) {
         return chatSession().rearmReplyWatches();
+    }
+
+    /**
+     * At the end of a turn that began with a reply or a follow-up and recorded no decision on it: records one from
+     * facts only ({@code AutomaticReplyDecision_261119_oo01}). See {@link ChatSession#decideReplyAtTurnEnd()}.
+     *
+     * @param arg unused
+     * @return always successful, so that the turn goes on to end
+     */
+    @Action("decideReplyAtTurnEnd")
+    public ActionResult decideReplyAtTurnEndAction(String arg) {
+        return chatSession().decideReplyAtTurnEnd();
     }
 
     /**
