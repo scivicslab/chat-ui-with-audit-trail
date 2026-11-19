@@ -3087,16 +3087,18 @@ public class ChatSession extends Interpreter {
                 undecidedRequest = null;
                 undecidedReplier = null;
             }
-            return "ok: request " + requestId + " no longer holds the request you received open";
+            return "ok: request " + requestId + " was still open; it is now closed";
         }
+        // Each answer says what happened to the request, not what it no longer does
+        // (TurnWithoutAnAnswerTellsTheAsker_261119_oo01).
         if (undecidedRequest != null && (requestId.isBlank() || requestId.equals(undecidedRequest))) {
             String accepted = undecidedRequest;
             undecidedRequest = null;
             undecidedReplier = null;
-            return "ok: the reply to request " + accepted + " is accepted";
+            return "ok: request " + accepted + " was already closed by its reply; your acceptance of that reply is recorded";
         }
-        return "ok: noted; no reply in this turn was waiting for a decision"
-                + (requestId.isBlank() ? "" : " on request " + requestId);
+        if (requestId.isBlank()) return "ok: no request was named and no reply in this turn waited for a decision; nothing changed";
+        return "ok: request " + requestId + " was not open; nothing changed";
     }
 
     /**
