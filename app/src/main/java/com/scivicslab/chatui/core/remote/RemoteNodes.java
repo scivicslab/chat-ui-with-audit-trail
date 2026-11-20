@@ -218,6 +218,29 @@ public final class RemoteNodes implements AutoCloseable {
         }
     }
 
+    /**
+     * The actions sent to a tool node, the answers to requests it sent: a tool node has no conversation for anything else
+     * to reach ({@code RepliesToToolNodes_261120_oo01}).
+     */
+    public static final Set<String> REPLY_ACTIONS = Set.of("enqueueReply", "enqueueCancelResult");
+
+    /**
+     * @return the {@link #GATEWAY} of the tool node {@code nodeName}, reading the AI-workspace's list again when the name
+     *         is not known yet; {@code null} when it is not a tool node
+     */
+    private RemoteActorRef toolGatewayOf(String nodeName) {
+        if (nodeName == null || nodeName.equals(myName())) return null;
+        if (!isToolNode(nodeName)) {
+            refreshPeers();
+            if (!isToolNode(nodeName)) return null;
+        }
+        try {
+            return node.getRemoteActor(nodeName, GATEWAY);
+        } catch (IllegalArgumentException notRegistered) {
+            return null;
+        }
+    }
+
     private boolean isToolNode(String name) {
         return workspace != null && workspace.toolNodes().stream().anyMatch(n -> n.name().equals(name));
     }
@@ -287,6 +310,7 @@ public final class RemoteNodes implements AutoCloseable {
      */
     public Receipt send(String nodeName, String action, String json) {
         RemoteActorRef gateway = gatewayOf(nodeName);
+        if (gateway == null && REPLY_ACTIONS.contains(action)) gateway = toolGatewayOf(nodeName);
         if (gateway == null) return Receipt.refused(null, notKnown(nodeName));
         return gateway.sendWithRetry(action, json, SEND_ATTEMPTS, SEND_DELAY);
     }
