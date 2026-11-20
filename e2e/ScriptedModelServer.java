@@ -38,6 +38,8 @@ import java.util.regex.Pattern;
  * <li>The end-of-turn reminder check registers a reminder only for an answer that says "I will report back".</li>
  * <li>{@code SCENARIO-M}: {@code write} a file, {@code read} it back, and end with {@code NATIVE-DONE} followed by
  * what was read (McpServerCheck, OpenAiCompatStandardToolCalling_261120_oo01).</li>
+ * <li>A revision request from html-saurus's Revise panel ({@code Review lines ...}): one proposal in the JSON form the
+ * panel reads, quoting the first twelve characters of the text (RevisionPanel_261120_oo01).</li>
  * <li>Anything else: "OK. I will report back in 12 minutes."</li>
  * </ul>
  * When the request carries {@code tools}, as the openai-compat provider sends them, a scripted call is sent as
@@ -221,7 +223,7 @@ public class ScriptedModelServer {
     }
 
     /** What the script answers to a call whose last message is {@code last}; {@code whole} is every message. */
-    static String answer(String last, String whole) throws InterruptedException {
+    static String answer(String last, String whole) throws Exception {
         if (last.contains("bookkeeping check")) {
             return last.contains("I will report back") ? "REGISTER 12 | \"I will report back\"" : "NONE | nothing promised";
         }
@@ -237,6 +239,12 @@ public class ScriptedModelServer {
         if (last.contains("SCENARIO-G")) return GRAPH_G;
         if (last.contains("SCENARIO-R")) return ASK_03;
         if (last.contains("SCENARIO-T")) return TOOLS_T;
+        if (last.contains("TEXT (those lines):\n")) {
+            String text = last.substring(last.indexOf("TEXT (those lines):\n") + "TEXT (those lines):\n".length());
+            String quote = text.substring(0, Math.min(12, text.indexOf('\n') > 0 ? text.indexOf('\n') : text.length()));
+            return "{\"proposals\":[{\"quote\":" + JSON.writeValueAsString(quote)
+                    + ",\"problem\":\"REVIEWED-BY-CONVERSATION\",\"fix\":\"shorten it\"}]}";
+        }
         if (last.contains("SCENARIO-M")) return WRITE_M;
         if (last.contains("Tool result (write)") && whole.contains("SCENARIO-M")) return READ_M;
         if (last.contains("Tool result (read)") && whole.contains("SCENARIO-M")) return "NATIVE-DONE\n" + last;
