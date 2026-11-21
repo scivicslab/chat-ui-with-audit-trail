@@ -13,7 +13,13 @@ import com.scivicslab.chatui.tool.ToolScope;
 import com.scivicslab.pojoactor.core.ActorSystem;
 import com.sun.net.httpserver.HttpServer;
 
+import java.io.ByteArrayOutputStream;
 import java.net.InetAddress;
+import java.net.StandardProtocolFamily;
+import java.net.UnixDomainSocketAddress;
+import java.nio.channels.Channels;
+import java.nio.channels.SocketChannel;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -39,7 +45,8 @@ import java.util.Map;
  * It builds a ToolRunner over a temporary directory, lists the core tools, calls write and then read, and then starts
  * the localhost HTTP MCP server and sends it one tools/call with the right key and one with a wrong key. Then it
  * sends one request through the LLM proxy to a throw-away upstream with a dummy key, and builds Claude Code's
- * confinement arguments. calc is
+ * confinement arguments. Last it starts the MCP server on a Unix domain socket and sends it one tools/list with the
+ * right key and one with a wrong key (stage 9 part 1). calc is
  * given an arithmetic-only evaluator, since JShell does not run in a native image. Prints one line per check and
  * exits 1 when any fails.
  */
@@ -110,11 +117,45 @@ public class KernelNativeProbe {
             check(confinement.get(0).equals("--settings") && confinement.get(1).contains("\"failIfUnavailable\":true")
                             && confinement.contains("--strict-mcp-config"),
                     "the confinement arguments are built", confinement.toString());
+
+            Path socket = Files.createTempDirectory("kernel-probe-sock").resolve("run").resolve("mcp.sock");
+            try (LocalMcpServer unix = new LocalMcpServer(system, socket)) {
+                String unixKey = unix.register(new ToolRunner(new ToolScope("probe-unix",
+                        new FileAccessScope(root, List.of()), ToolSet.FULL, Map.of()),
+                        expression -> "1081", DocsLookup.HTTP, ToolExtension.NONE, ToolCallRecorder.NONE));
+                String list = "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}";
+                String okAnswer = overSocket(socket, "Bearer " + unixKey, "probe-unix", list);
+                check(okAnswer.startsWith("HTTP/1.1 200") && okAnswer.contains("\"read\""),
+                        "the MCP server on a Unix socket lists the tools with the key", okAnswer);
+                String refusedAnswer = overSocket(socket, "Bearer wrong", "probe-unix", list);
+                check(refusedAnswer.startsWith("HTTP/1.1 401"), "the MCP server on a Unix socket refuses a wrong key",
+                        refusedAnswer);
+                String perms = PosixFilePermissions.toString(Files.getPosixFilePermissions(socket));
+                check(perms.equals("rw-------"), "the socket file is owner-only", perms);
+            }
         } finally {
             system.terminate();
         }
         System.out.println(failures == 0 ? "ALL PASSED" : failures + " FAILED");
         System.exit(failures == 0 ? 0 : 1);
+    }
+
+    /** Sends one HTTP/1.1 POST /mcp over a Unix domain socket and returns the whole answer. */
+    static String overSocket(Path socket, String authorization, String scope, String body) throws Exception {
+        byte[] content = body.getBytes(StandardCharsets.UTF_8);
+        String head = "POST /mcp HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nAuthorization: "
+                + authorization + "\r\n" + McpRequestHandler.SCOPE_HEADER + ": " + scope + "\r\nContent-Length: "
+                + content.length + "\r\n\r\n";
+        try (SocketChannel channel = SocketChannel.open(StandardProtocolFamily.UNIX)) {
+            channel.connect(UnixDomainSocketAddress.of(socket));
+            var out = Channels.newOutputStream(channel);
+            out.write(head.getBytes(StandardCharsets.ISO_8859_1));
+            out.write(content);
+            out.flush();
+            ByteArrayOutputStream all = new ByteArrayOutputStream();
+            Channels.newInputStream(channel).transferTo(all);
+            return all.toString(StandardCharsets.UTF_8);
+        }
     }
 
     static HttpRequest post(String url, String scope, String authorization, String body) {

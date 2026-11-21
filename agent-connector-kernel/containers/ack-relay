@@ -1,0 +1,16 @@
+#!/bin/sh
+# ack-relay: inside a --network=none container, expose agent-connector-kernel's two bind-mounted Unix sockets on
+# 127.0.0.1 (tasks/todo.md, Decisions 9 and 10), then run the harness given as arguments.
+#   /run/agent-connector-kernel/mcp.sock -> 127.0.0.1:18765 (the MCP server)
+#   /run/agent-connector-kernel/llm.sock -> 127.0.0.1:18766 (the LLM proxy)
+set -eu
+SOCKETS=/run/agent-connector-kernel
+for s in mcp.sock llm.sock; do
+  if [ ! -S "$SOCKETS/$s" ]; then
+    echo "ack-relay: $SOCKETS/$s is not a socket; start the container the way agent-connector-kernel's launcher does" >&2
+    exit 64
+  fi
+done
+socat TCP-LISTEN:18765,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:$SOCKETS/mcp.sock &
+socat TCP-LISTEN:18766,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:$SOCKETS/llm.sock &
+exec "$@"

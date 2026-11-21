@@ -1,0 +1,17 @@
+# OpenCode for agent-connector-kernel's Podman confinement (tasks/todo.md, stage 9).
+# Build from agent-connector-kernel/containers:  podman build -f opencode/Containerfile -t localhost/ack-opencode:1.19.6 .
+# Version: opencode-ai 1.19.6, the latest release (GitHub anomalyco/opencode v1.19.6, marked Latest; npm registry
+# opencode-ai latest = 1.19.6), checked 2026-11-22. The OpenCode 1 docs give `npm install -g opencode-ai`
+# (https://opencode.ai/v1/docs). The current docs at opencode.ai/docs describe OpenCode 2, which has no release yet.
+FROM docker.io/library/ubuntu:24.04
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends socat ca-certificates nodejs npm \
+ && npm install -g opencode-ai@1.19.6 \
+ && rm -rf /var/lib/apt/lists/* /root/.npm
+COPY ack-relay /usr/local/bin/ack-relay
+RUN chmod 0755 /usr/local/bin/ack-relay \
+ && useradd -m -d /home/agent -s /bin/bash agent \
+ && mkdir -p /home/agent/.config/opencode && chown -R agent:agent /home/agent
+USER agent
+ENV HOME=/home/agent
+WORKDIR /work

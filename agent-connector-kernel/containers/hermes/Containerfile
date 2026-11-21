@@ -1,0 +1,19 @@
+# Hermes Agent for agent-connector-kernel's Podman confinement (tasks/todo.md, stage 9).
+# Build from agent-connector-kernel/containers:  podman build -f hermes/Containerfile -t localhost/ack-hermes:0.23.3 .
+# Version: Hermes Agent v0.23.3, the latest release (GitHub NousResearch/hermes-agent v0.23.3, marked Latest,
+# "Release Date: November 19, 2026"), commit caafe5389ae585ef77387a962aee05b1bcf17029, checked 2026-11-22.
+# Installed with the official installer (https://hermes-agent.nousresearch.com/docs/getting-started/installation),
+# pinned with its --commit option. The installer brings its own pinned Python and Node.js.
+FROM docker.io/library/ubuntu:24.04
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends socat ca-certificates curl git \
+ && rm -rf /var/lib/apt/lists/*
+COPY ack-relay /usr/local/bin/ack-relay
+RUN chmod 0755 /usr/local/bin/ack-relay \
+ && useradd -m -d /home/agent -s /bin/bash agent
+USER agent
+ENV HOME=/home/agent
+RUN curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- \
+      --commit caafe5389ae585ef77387a962aee05b1bcf17029 --non-interactive --skip-browser --skip-computer-use
+ENV PATH=/home/agent/.local/bin:$PATH
+WORKDIR /work
