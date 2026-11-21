@@ -21,6 +21,8 @@
   </modules>
 
   <properties>
+    <!-- The shared streaming relay (~/works/llm-relay; tasks/todo.md, step 4a) -->
+    <llm-relay.version>0.1.0-SNAPSHOT</llm-relay.version>
     <compiler-plugin.version>3.14.0</compiler-plugin.version>
     <maven.compiler.release>25</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>

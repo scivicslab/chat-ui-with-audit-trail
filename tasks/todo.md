@@ -789,6 +789,42 @@ So the shared library has two layers, and the part they share is the streaming u
     - an OpenAI stream passes through unbroken: the first `data:` line arrives while the upstream still waits, then the rest in order;
     - the same for an Anthropic stream with `event:` and `data:` lines;
     - an upstream that is down is answered with 502.
+- **A library change made for step 2** (`6abdef8`): an interceptor answers through a `CompletionStage<Refusal>`.
+  - The kernel's rule asks the `ProxyKeys` actor, and blocking the event loop on `ask().join()` would stall it.
+  - `RelayProxy` waits without blocking, goes on in the request's own Vert.x context, and still runs the interceptors in order.
+  - Test first: the red run failed to compile on the old type. A new test has an interceptor answer 200 ms later from another thread, followed by a second one in order.
+  - 16 tests pass on Vert.x 4.5.21 and 4.5.35.
+
+### Step 4a.2: the kernel's LLM proxy on `llm-relay-proxy` (done 2026-11-22, W206 Job `chat77-relay-1`)
+
+- **Change:**
+  - `LlmProxy` is rewritten: it now builds a `RelayProxy` mounted under `/llm/` on a Vert.x `Router`, with the keys in the `ProxyKeys` actor.
+  - The new `ScopeKeyInterceptor`:
+    - calls `LlmProxyRequests.decide` off the event loop, since it asks the actor;
+    - on a refusal answers 400 or 401 with a JSON body;
+    - otherwise rewrites the request back in its Vert.x context: the path after `/llm/<scope>`, both `x-api-key` and `Authorization` removed, and the real credential set.
+  - The new bean `LlmProxyRoutes` mounts it on Quarkus's router (`@Observes Router`) when `agent-connector-kernel.llm.upstream` is set. The other settings are `credential-header`, default `authorization`, and `credential`. `app` sets no upstream, so it has no proxy.
+  - Deleted: `LlmProxy`'s `com.sun.net.httpserver` server and its hand-written forwarding.
+- **Not yet:** an https upstream is refused for now, because TLS to the upstream is not built. The real-model servers are http. Anthropic's API, for Claude Code, waits for a key anyway.
+- **Dependencies:** the kernel depends on `llm-relay-proxy` 0.1.0-SNAPSHOT (parent property `llm-relay.version`), `vertx-http-proxy` and `vertx-web-proxy`, at the versions Quarkus 3.33.4.2's BOM pins.
+  - `mvn dependency:tree` shows one `vertx-core`, 4.5.35, in `agent-connector-kernel` and in `app`.
+  - The uber-jar carries one `META-INF/maven/io.vertx/vertx-core/pom.properties`.
+- **Tests first.** The red run failed to compile (`incompatible types: io.vertx.core.Vertx cannot be converted to ActorSystem`; `cannot find symbol: method mount(Router)`). The new `LlmProxyTest` has 5 tests, against a stub upstream with dummy keys:
+  - no key, a wrong key and an unknown scope get the same 401 and body, a request that names no scope gets 400, and no refused request reaches the upstream;
+  - the right key is forwarded with the real credential in both shapes (`/v1/chat/completions` with `Authorization`, `/v1/messages` with `x-api-key` and `anthropic-version`), with the path after the scope and the query kept, and the throw-away key in no upstream header;
+  - a stream of four SSE chunks passes through in order, the first while the upstream still waits;
+  - an unreachable upstream is answered 502, and an upstream's own 503 reaches the client with its body;
+  - an https upstream is refused.
+- **Found on the way:** with an empty default, `agent-connector-kernel.llm.credential` counted as missing to MicroProfile Config, and `app` did not start ("Failed to load config value of type class java.lang.String"). Every E2E check of that run failed to connect. It is now an `Optional<String>`.
+- **Result** (`rm -rf target */target`, `mvn -B test` and `mvn -B package`, BUILD SUCCESS):
+  - counts: `plugin-api` 0, `agent-connector-kernel` 99, `app` 792, `plugin-web-tools` 17, `plugin-shell` 11, `plugin-harness` 61; total 980, with 0 failures;
+  - against 976 after step 3: the old `LlmProxyTest` (1) is replaced by the new one (5).
+- **E2E:** `McpServerCheck` and `ToolCallingCheck` ALL PASSED; `ExternalMcpCheck` and `--restored` exit 0.
+- **New E2E `e2e/LlmProxyCheck.java`**, run against a throw-away `app` with an upstream and the domain socket (`llmproxy.sh`). ALL PASSED:
+  - over TCP, a wrong key gets 401 with a JSON body;
+  - no scope gets 400;
+  - through the socket, the same request gets the same 401 and body;
+  - `/q/health` is not answered by the proxy.
 
 ### Questions on the plan change (all settled)
 

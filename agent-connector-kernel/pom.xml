@@ -64,6 +64,21 @@
       <artifactId>netty-transport-native-epoll</artifactId>
       <classifier>linux-x86_64</classifier>
     </dependency>
+    <!-- The LLM proxy: llm-relay-proxy on vertx-http-proxy (step 4a). llm-relay declares Vert.x "provided", so the
+         Vert.x artifacts it uses come here at the versions Quarkus's BOM pins. -->
+    <dependency>
+      <groupId>com.scivicslab</groupId>
+      <artifactId>llm-relay-proxy</artifactId>
+      <version>${llm-relay.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.vertx</groupId>
+      <artifactId>vertx-http-proxy</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.vertx</groupId>
+      <artifactId>vertx-web-proxy</artifactId>
+    </dependency>
     <!-- McpKeyMechanism: the per-scope key on the Quarkus security layer (Decisions 12 and 13) -->
     <dependency>
       <groupId>io.quarkus</groupId>
