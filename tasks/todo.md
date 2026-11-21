@@ -478,6 +478,91 @@ A test that moves to another module still counts once, so the total stays the sa
   - Proposed doc changes for chat-48 to decide: the module table of `ProviderAndToolPlugins_260912_oo01`, and a new 040_design doc for the split.
   - No push and no deploy without asking.
 
+## Plan change (2026-11-22): agent-connector-kernel uses Quarkus (t143:r1)
+
+The person's decision, relayed by chat-01 and chat-48 in t143:r1: "Quarkusを使いなさい". The enforcer ban on Quarkus, CDI, MicroProfile, SmallRye and Vert.x in `agent-connector-kernel` (stage 2) is withdrawn. The hand-written MCP server and its HTTP and Unix-socket listeners give way to Quarkiverse `quarkus-mcp-server`, the library `app` already uses. Stage 9 part 3 showed why: the hand-written server left out `serverInfo.version`, which the MCP specification requires, and Codex CLI's MCP client refused the handshake.
+
+12. **Decision 12: Quarkus in agent-connector-kernel** (t143:r1). It replaces Decisions 5 and 10 where they name `com.sun.net.httpserver` and the `java.nio` listener. The transport stays HTTP on localhost, and Podman still reaches it through a Unix domain socket.
+   - `agent-connector-kernel` becomes a library of CDI beans: no `quarkus-maven-plugin` build of its own, with a Jandex index so that `app` and `ssh-connector` discover its beans (https://quarkus.io/guides/cdi-reference, "Bean discovery").
+   - Its MCP server is `quarkus-mcp-server-http`, at the version `app` uses (2.0.4), and is built on the library's own extension points, with no fork and no patch:
+     - tools are registered with `ToolManager.newTool` (https://docs.quarkiverse.io/quarkus-mcp-server/2.0.x/guides-implementing-tools.html, "Programmatic API");
+     - one conversation sees only its own tools through a `ToolFilter` (…/2.0.x/guides-using-filters-and-checks.html), as `app`'s `ConversationToolFilter` already does;
+     - the per-conversation key is checked on the Quarkus security layer, with `quarkus.http.auth.permission.<name>.paths=/mcp/*` and `policy=authenticated` (…/2.0.x/reference-security.html, "Securing HTTP Endpoints"). The check is a custom `HttpAuthenticationMechanism` (https://quarkus.io/guides/security-customization). A missing, unknown or wrong key gets the same challenge, so a wrong key and an unknown name get the same 401 with the same body. Annotation-based security is not used, since it answers with an MCP error -32005 instead of an HTTP status (reference-security).
+   - There is one MCP server. `app`'s `ChatUiMcpServer` and `ConversationToolFilter` move into `agent-connector-kernel` as that server. `app` keeps only its `ToolExtension` for the ConversationSquad tools (Decisions 2).
+   - Concurrency stays with POJO-actor: the scopes and keys stay in actors (`ToolScopes`, `ProxyKeys`), called from the beans.
+
+### Doc answers (asked in t143:r1, points 4 and 5)
+
+- **Point 4: can the Quarkus HTTP server listen on a Unix domain socket? Yes.** The Vert.x reference guide, section "Use a Unix Domain Socket" (https://quarkus.io/guides/vertx-reference#use-a-unix-domain-socket), says:
+  - "Unix Domain Sockets are supported in both JVM and native modes. Unix domain sockets require a native transport dependency."
+  - The configuration is `quarkus.http.domain-socket=<path>` with `quarkus.http.domain-socket-enabled=true`, and `quarkus.http.host-enabled=false` turns the TCP socket off.
+  - The keys are in the configuration reference (https://quarkus.io/guides/all-config): `quarkus.http.domain-socket`, default `/var/run/io.quarkus.app.socket`, and `quarkus.http.domain-socket-enabled`, default `false`.
+  - The HTTP reference guide (https://quarkus.io/guides/http-reference) fires `io.quarkus.vertx.http.DomainSocketServerStart` when that server starts, and its `HttpServerOptionsCustomizer` also covers the Domain Socket server.
+
+  What follows for the plan:
+  - The HTTP server has one domain socket, not one per endpoint. The MCP server (`/mcp`) and the LLM proxy therefore share one socket. The proxy moves to `/llm/<scope>/v1`, so a scope can never be named `mcp`.
+  - The relay keeps its two ports inside the container (18765 and 18766), but both now go to the one socket, so the harness configurations change only the proxy's base path.
+  - The guide asks for "the right permissions to write to the socket". The 0600 socket in a 0700 directory (Decisions 10) is checked with a test after start-up, before anything else relies on it.
+- **Point 5: can the LLM proxy be written with Quarkus components? Partly. Quarkus has no reverse-proxy component of its own.**
+  - The `quarkus.http.proxy.*` keys in the configuration reference are for running behind a reverse proxy (forwarded headers, trusted proxies). They do not make Quarkus one.
+  - The component that fits is **Vert.x HTTP Proxy** (`io.vertx:vertx-http-proxy`), "a reverse proxy based on Vert.x" (https://vertx.io/docs/4.5.35/vertx-http-proxy/java/; the current page is https://vertx.io/docs/vertx-http-proxy/java/).
+    - Quarkus 3.33.4.2's platform BOM manages it at 4.5.35, the same version as the `vertx-core` Quarkus runs on.
+    - A `ProxyInterceptor` can rewrite the proxied request's headers, which is where the throw-away key is checked and the real credential put in.
+    - It is mounted on Quarkus's own router with `@Observes Router` (https://quarkus.io/guides/reactive-routes, "Using the Vert.x Web Router") and uses the managed `Vertx` instance (https://quarkus.io/guides/vertx-reference).
+    - The Vert.x page marks the module "Tech Preview status, this means the API can change between versions".
+  - The alternative uses supported Quarkus components only: a route on the same router, with the managed Vert.x `HttpClient` or WebClient streaming the answer back. The forwarding code (headers, streaming) stays hand-written there, as in `LlmProxy` today.
+  - The decisions (`LlmProxyRequests`: scope, key, 400 and 401) and the keys actor (`ProxyKeys`) stay plain objects under either choice.
+  - **The choice is for chat-48 before the proxy is rewritten.** chat-77 recommends Vert.x HTTP Proxy, because the platform BOM manages it and it removes the hand-written forwarding.
+
+### Stages and commits affected
+
+| Stage | Commit | What happens |
+|---|---|---|
+| 0–1 (plan, baseline) | `e39e158`, `b17e4a0`, `e8875db` | kept |
+| 2 (empty module, enforcer rule) | `f2568c5` | rule replaced: the ban on `io.quarkus*`, `io.quarkiverse*`, `jakarta.*`, `javax.inject`, `javax.enterprise`, `org.eclipse.microprofile*`, `io.smallrye*` and `io.vertx*` is removed |
+| 3 (plain tools, `PluginRegistry`) | `9560b27` | kept |
+| 4 (`ToolCatalog` cut) | `a9c1ae2` | kept |
+| 5 (`ConversationToolRunner` cut) | `5fbcbc8` | kept |
+| 6 (MCP endpoint and localhost server) | `9c4b530`, plus the 401 change in `83d52a8` | `McpToolEndpoint` and `ToolScopes` kept. `LocalMcpServer` and `McpRequestHandler` deleted, and their behaviour moves to the library server. `app`'s `ChatUiMcpServer` and `ConversationToolFilter` move into the kernel as that server. Their tests are rewritten for the library server, red first: key per conversation, the same 401 for an unknown name and a wrong key, 400 for a request that names no conversation, and only that conversation's tools visible. |
+| 7 (`HarnessLaunch`) | `97bfa74` | kept |
+| 8 (LLM proxy, Claude Code confinement) | `a38a780` | `ProxyKeys`, `LlmProxyRequests` and `ClaudeConfinement` kept. `LlmProxy`'s HTTP server is replaced, as chosen under point 5. |
+| 10 (native-image probe) | `83d52a8` | `e2e/KernelNativeProbe.java` deleted. The native image is built the Quarkus way for `ssh-connector` (`quarkus-maven-plugin`, `-Dnative`) in a W206 Job. |
+| 9 part 1 (Unix-socket listeners, launcher builders) | `0a0c28f` | `UnixSocketHttpServer` deleted, along with the Unix-socket constructors of `LocalMcpServer` and `LlmProxy`. `PodmanConfinement`, `CodexHarness`, `OpenCodeHarness`, `HermesHarness`, `ack-relay` and the Containerfiles kept, changed only for the one socket and the `/llm/<scope>/v1` base path. |
+| 9 part 2 (checks on 5.14) | `4e150e8` | kept: the `keep-id` fix, the Containerfiles, the proxy's 401. `e2e/ConfinementCheck.java` kept and pointed at the Quarkus server. The 16 checks are run again once the server is replaced. |
+| 9 part 3 (stub and real-model runs) | not committed; local branch `wip/s9p3` (`688ac1e`) | The harness network-off settings (Codex, OpenCode, Hermes, and the OpenCode image with `@opencode-ai/plugin` and `OPENCODE_DISABLE_MODELS_FETCH`) and their tests are kept and brought over. `e2e/HarnessStubRun.java` and `e2e/traced/Containerfile` are kept. The `serverInfo.version` fix and its test are dropped, because the library writes `serverInfo`. |
+
+Files on `wip/s9p3`:
+- `agent-connector-kernel/containers/opencode/Containerfile`
+- `confine/CodexHarness.java`, `confine/HermesHarness.java`, `confine/OpenCodeHarness.java`
+- `mcp/McpRequestHandler.java`
+- `HarnessConfigTest.java`, `McpRequestHandlerTest.java`
+- `e2e/HarnessStubRun.java`, `e2e/traced/Containerfile`
+
+### New order of work (each step tests first, red then green on W206; a report after each)
+
+1. **Enforcer rule.** Remove the ban. `agent-connector-kernel` gets `quarkus-arc`, `quarkus-vertx-http`, `quarkus-mcp-server-http` 2.0.4 and the native transport (Linux epoll) that Unix domain sockets need, plus a Jandex index. The build and the 934 + 41 tests stay green.
+2. **One MCP server, from the library.**
+   - Tests first: key per conversation; the same 401 and body for an unknown name and a wrong key; 400 for a request that names no conversation; only the conversation's tools in `tools/list`, and a `tools/call` outside them refused; `initialize` answers with a complete `serverInfo`.
+   - Then the kernel's beans: `ToolManager` registration, `ToolFilter`, `HttpAuthenticationMechanism` and the `/mcp/*` permission, with `app`'s `ChatUiMcpServer` and `ConversationToolFilter` moved in.
+   - `LocalMcpServer` and `McpRequestHandler` deleted, and the `McpServerCheck`, `ToolCallingCheck` and `ExternalMcpCheck` E2E checks pass against `app`.
+3. **Unix domain socket.**
+   - `quarkus.http.domain-socket` set by the launcher's process, and `UnixSocketHttpServer` deleted.
+   - A test checks the socket's 0600 and the directory's 0700.
+   - The relay maps both container ports to the one socket, and the harness configs take `/llm/<scope>/v1`. Brought over from `wip/s9p3`: the network-off settings and their tests.
+4. **LLM proxy.** On the Quarkus router, as chat-48 chooses under point 5. `LlmProxyTest` and `LlmProxyUnixSocketTest` are rewritten against it, red first. `LlmProxyRequestsTest` is unchanged.
+5. **Confinement checks again on 5.14** (part 2's 16 checks, then part 3's stub runs, traced and plain), with the network-off settings.
+6. **Real-model runs** (t135:r1), still on hold until step 5 passes: OpenCode with GLM-5.3, OpenCode with Qwen3.8 (its tool-call probe passed on 2026-11-22, `finish_reason: "tool_calls"`), Hermes Agent with GLM-5.3, and Codex CLI with GLM-5.3.
+   - Codex's config reference (https://learn.chatgpt.com/codex/config-file/config-reference) allows a custom provider, `model_providers.<id>.base_url`, but "responses is the only supported value" of `wire_api`. So the model server must serve the Responses API, and Codex CLI with GLM-5.3 runs only if 5.16 answers `/v1/responses`.
+   - Claude Code waits for an Anthropic key.
+7. **`ssh-connector` as a Quarkus application** (stage 11, after chat-48's spec): its own module with `quarkus-maven-plugin`, the native image built with `-Dnative` in a W206 Job (GraalVM CE).
+8. **Wrap-up** (stage 12).
+
+### Open questions for chat-48
+
+1. **Point 5:** Vert.x HTTP Proxy (recommended) or a hand-written route on Quarkus's router.
+2. **`app`'s `/mcp` gets keys when it becomes the kernel's server.** `0ac86a4` planned that switch for later. If it happens in step 2, `app`'s own Claude Code and Codex conversations must send their scope's key in their MCP config. The other way is that the security check applies only to scopes registered with a key.
+3. **One socket for both endpoints,** with the proxy at `/llm/<scope>/v1`, as point 4 leads to.
+
 ## Rules every stage follows
 
 - Work on `nigsc-connector-split` only, never on `main`. No push without asking chat-48.
