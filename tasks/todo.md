@@ -1636,6 +1636,19 @@ This build's `ssh-connector` jar (`0e920d02…`) was copied with rsync and check
   - The main-branch Quarkus documentation has a newer page, the native transport reference, which lists epoll as supported in native executables. So the native build is to be tried again after a Quarkus upgrade.
   - `a9a8f87` stays as it is; chat-48 accepted the `volatile` field with a `synchronized` first-use block for this one-time setup.
 
+### Reruns on `a9a8f87` (after the `DocSearchTool` change; chat-48, t178)
+
+- **Full test run (W206 Job `chat77-s12c`; `rm -rf target */target`, `mvn -B test` and `mvn -B package`, BUILD SUCCESS):** `plugin-api` 0, `agent-connector-kernel` 105, `app` 792, `plugin-web-tools` 17, `plugin-shell` 11, `plugin-harness` 59, `ssh-tools` 28, `ssh-connector` 8. Total 1020, with 0 failures, errors and skipped. Against 1018: +2, the new `DocSearchToolClientTest`.
+- **Stage 6 E2E on this build's jar:** `McpServerCheck` 19 of 19, `ToolCallingCheck` 9 of 9, `ExternalMcpCheck` 8 of 8, `--restored` 1 of 1.
+- **5.14, with this build's ssh-connector jar** (`7f1f601b…`, checksums compared; throw-away sshd, dummy keys only, nice 19):
+  - `SshConnectorE2E` ALL PASSED, 21 of 21;
+  - `ConfinementCheck` in `ssh-connector` mode ALL PASSED, 18 of 18;
+  - afterwards both images were removed. `podman ps -a`: none; `podman images -a`: only `docker.io/library/ubuntu:24.04`; `~/.ssh` 36 entries, no marker; no key file left.
+- **Docs (t177, doc_SCIVICS003, not pushed):**
+  - `f86e5de`: the module table of `ProviderAndToolPlugins_260912_oo01`, and the new design document `SshConnectorOnKernel_261122_oo01` in `agent-connector-kernel/040_design`;
+  - `c1cefc8`: that document now says ssh-connector runs on the JVM, and why.
+- The W206 Jobs `chat77-s12`, `chat77-s12b` and `chat77-s12c` are deleted.
+
 ### Open
 
 - **Native image:** retry after a Quarkus upgrade (above).
