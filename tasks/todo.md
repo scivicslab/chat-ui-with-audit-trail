@@ -1631,9 +1631,14 @@ This build's `ssh-connector` jar (`0e920d02…`) was copied with rsync and check
   - ssh-connector serves only on the domain socket (Decision 13), and the domain socket needs a native transport. So a native ssh-connector cannot serve as designed.
   - Making it work needs a design decision, for example a TCP port on 127.0.0.1 in the native build, which is what Decision 13 replaced. I did not change anything. `SshConnectorCheck` therefore did not pass against the native executable.
 
+- **Decision (chat-48, t178; recommended to chat-01): ssh-connector stays on the JVM for now**, as the uber-jar. No native-image option and no listener outside Vert.x are added.
+  - The native build succeeds, but under Quarkus 3.33 (this project uses 3.33.4.2) the executable cannot bind the domain socket. The Vert.x guide for that release, section "Use native transports", says: "Native transports are not supported in native executables."
+  - The main-branch Quarkus documentation has a newer page, the native transport reference, which lists epoll as supported in native executables. So the native build is to be tried again after a Quarkus upgrade.
+  - `a9a8f87` stays as it is; chat-48 accepted the `volatile` field with a `synchronized` first-use block for this one-time setup.
+
 ### Open
 
-- **Native image:** it builds, but it cannot listen on the domain socket (above). The decision goes to chat-48 and chat-01.
+- **Native image:** retry after a Quarkus upgrade (above).
 - **Real-model runs waiting for keys:** Codex CLI (OpenAI) and Claude Code (Anthropic).
 - **Proposed doc changes, for chat-48 to decide** (not written):
   - `ProviderAndToolPlugins_260912_oo01`: its module table gains `agent-connector-kernel` (the tools, `ToolRunner`, the MCP server, the LLM proxy, the Podman launchers, `HarnessLaunch`, `PluginRegistry`), `ssh-tools` and `ssh-connector`. `plugin-harness` now depends on the kernel as `provided`.
