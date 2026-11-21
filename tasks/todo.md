@@ -1,10 +1,22 @@
 # Split chat-ui-with-audit-trail into a headless core and the screen-and-record module (nigsc-connector)
 
-Design inputs: `NigscConnectorConcept_261121_oo01` (section 「chat-ui-with-audit-trail との関係」), `ConcurrencyWithPojoActor_261121_oo01`, `LlmKeyInjectionProxy_261121_oo01`, `ProviderAndToolPlugins_260912_oo01`, `ToolCatalogAndChatUiMcpServer_261120_oo01`. The survey behind this plan went to chat-48 as chat-77's reply.
+Design inputs: `AgentConnectorKernelConcept_261121_oo01` (`doc_SCIVICS003/docs/agent-connector-kernel/010_concepts`, section 「quarkus-chat-ui・ssh-connector・nigsc-connector との関係」), `ConcurrencyWithPojoActor_261121_oo01` and `LlmKeyInjectionProxy_261121_oo01` (both in `doc_SCIVICS003/docs/agent-connector-kernel/040_design`), `ProviderAndToolPlugins_260912_oo01`, `ToolCatalogAndChatUiMcpServer_261120_oo01`. The survey behind this plan went to chat-48 as chat-77's reply.
 
 Branch: `nigsc-connector-split`, from `main` at `7c4b507`. The name is the one chat-48 gave. Before branching, `git fetch origin` showed `main` equal to `origin/main` (both `7c4b507`). `git log main..harness-tools-mcp` and `git log main..origin/harness-tools-mcp` are both empty, so `harness-tools-mcp` holds no unmerged commits and changes nothing for the split.
 
-Goal of this rebuild: change the module structure, not the behaviour. The ssh tool, the stdio MCP server, the LLM proxy and the harness confinement come later and go on the core side. They are not part of these stages.
+Goal of this rebuild: change the module structure, not the behaviour. The ssh tool, the harness-side MCP transport, the LLM proxy and the harness confinement come later and go on the core side. They are not part of these stages.
+
+Background (for reference only; this work renames nothing):
+- After the split, chat-ui-with-audit-trail returns to the quarkus-chat-ui brand, as a new major version in the old `scivicslab/quarkus-chat-ui` repository.
+- nigsc-connector is a later tool that depends on the core and carries the settings specific to the NIG supercomputer.
+- The docs for chat-ui and for the core go in `doc_SCIVICS003`.
+
+## Decisions (approved by the person, relayed by chat-48, 2026-11-21)
+
+1. `CliProcess` stays in `plugin-harness`. It does not move to the `core` module.
+2. The tools that operate ConversationSquad actors (`create_chat`, `set_agent_loop` and the others) stay on `/mcp`, reached through the app's `ToolExtension`.
+3. Harnesses reach the core's tools over MCP on the nigsc-connector side. Inside chat-ui, the claude and codex conversations stay on `<invoke>` (the recommendation in the open question below, now decided).
+4. **The core module's name is not decided.** `chat-ui-with-audit-trail-core` and the directory `core` are placeholders. Stage 2 creates the module, so work stops after stage 1 until chat-48 confirms the name.
 
 ## Target modules
 
@@ -13,7 +25,7 @@ The core side is the new `core` module plus the plugin jars that depend only on 
 | Module | artifactId | Side | Contents |
 |---|---|---|---|
 | `plugin-api` | `chat-ui-with-audit-trail-plugin-api` (unchanged) | core | Unchanged: `LlmProvider`, `ProviderContext`, `ProviderCapabilities`, `ChatEvent`, `ToolSet`, `ChatUiPlugin`, `ConversationTool`, `LlmProviderFactory`, `ProviderCreationContext`, `ToolParameter`, `PersistedLog`, `OneShotReply` |
-| `core` (new) | `chat-ui-with-audit-trail-core` | core | The tool registry, the tool runner, the framework-free MCP tool endpoint, the plain tools and `PluginRegistry`. No Quarkus, CDI, MicroProfile or Vert.x dependency, and a Maven enforcer rule makes the build fail if one appears |
+| `core` (new; name is a placeholder, see Decisions 4) | `chat-ui-with-audit-trail-core` (placeholder) | core | The tool registry, the tool runner, the framework-free MCP tool endpoint, the plain tools and `PluginRegistry`. No Quarkus, CDI, MicroProfile or Vert.x dependency, and a Maven enforcer rule makes the build fail if one appears |
 | `plugin-harness` | unchanged | core | Launches and watches the claude and codex CLIs. Stays a plugin jar, so an instance started without it has no code that starts a CLI (`ProviderAndToolPlugins_260912_oo01`, 「なぜ「設定でオフ」ではなく「jar が無い」か」) |
 | `plugin-shell`, `plugin-web-tools` | unchanged | core | The `bash`, `web_search`, `fetch` and `scholar_search` tools |
 | `app` | `chat-ui-with-audit-trail` (unchanged, so the uber-jar name and the deploy convention stay the same) | screen and record | Web UI, REST (`audittrail`), the actor tree (`core.actor`), the I/O log, the agent loop, the openai-compat provider, the inter-instance gateway, the Quarkus adapter of the MCP server. Depends on `core` |
@@ -27,7 +39,7 @@ The module is named `core`, not `nigsc-connector`. The core is a library that bo
 | `com.scivicslab.chatui.agent` | `FileAccessScope`, `FileReadTool`, `FileWriteTool`, `FileRemoveTool`, `CalcExpression`, `DocSearchTool`, `ReferenceLinkTool`, `HttpDocs`, `DocsSource` (the interface only; its static `choose(RemoteNodes, …)` moves to the app class `DocsSources`), `ToolCatalog` (the `Spec` record and the core tools' specs only, see the cut below) |
 | `com.scivicslab.chatui.core.plugin` | `PluginRegistry` (`OpenAiCompatProviderFactory` stays in `app`, because it imports `ChatUiActorSystem`) |
 | `com.scivicslab.chatui.tool` (new) | `ToolRunner` (the plain-tool half of today's `ConversationToolRunner`), `ToolScope` (record: scope name, `FileAccessScope`, `ToolSet`, plugin tools), `ToolExtension` (interface: extra tool names and their handler), `ToolCallRecorder` (interface: one record per tool call), `DocsLookup` (interface: choose a `DocsSource` for a `node` argument), `ToolScopes` (scope name to `ToolRunner`; replaces the `toolRunners` map behind `ChatUiActorSystem.toolRunnerOf`) |
-| `com.scivicslab.chatui.mcp` | `McpToolEndpoint` (new POJO: `list(scopeName)` and `call(scopeName, tool, argumentsJson)`, used by the Quarkus adapter today and by a stdio server later) |
+| `com.scivicslab.chatui.mcp` | `McpToolEndpoint` (new POJO: `list(scopeName)` and `call(scopeName, tool, argumentsJson)`, used by the Quarkus adapter today and by the harness-side transport later) |
 
 ### What stays in `app`
 
@@ -89,11 +101,11 @@ Side 1 is `core`, side 2 is `app`. The basis is what each class imports (an impo
    - Both callers use it. This is the one place the later sandbox settings and the LLM-proxy variables (`ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `LlmKeyInjectionProxy_261121_oo01`) will be added.
    - No conversation state is touched by the launcher today: the plugin imports only `plugin-api`.
 
-## Open question for the person: how does a harness reach the core's tools?
+## How does a harness reach the core's tools? (decided: see Decisions 3)
 
-The two design documents disagree, and this plan does not decide between them.
+The two design documents disagree. The person took the recommendation below on 2026-11-21. The analysis stays here as the reason for the decision.
 
-- **Position A, the concept doc.** In `NigscConnectorConcept_261121_oo01` line 50, the harness talks to the nigsc-connector MCP server process over MCP on stdin and stdout (JSON-RPC). Lines 34 and 36 say the harness reaches the supercomputer only by calling that process's tools.
+- **Position A, the concept doc.** In `AgentConnectorKernelConcept_261121_oo01`, the harness calls the tools of the agent-connector-kernel process's MCP server (line 37 and the diagram at line 52), and line 40 says that calling those tools is all the harness can do towards the supercomputer and outside services. Line 101 leaves the transport between the harness and the MCP server undecided: stdin and stdout, or HTTP on `localhost` (needed when the harness runs in a container).
 - **Position B, the chat-ui design.** In `HarnessToolsThroughOneMcpServer_261120_oo01`, line 72 says no MCP server is registered with the claude and codex CLIs. Lines 115–128 explain why: the CLIs keep the `<invoke>` path that `ChatSession` parses, so there is only one agent loop. Four things depend on that one loop: `ask_person` ending the turn, the step limit, the pause for an urgent request, and the I/O log in step order. Code agrees: the word `mcp` does not occur in `CliProcess.java`, `ClaudeCodeProvider.java` or `CodexProvider.java`. Today `/mcp` is used only by the openai-compat provider (`ToolCatalogAndChatUiMcpServer_261120_oo01` line 105).
 
 What each choice does to the split:
@@ -107,7 +119,7 @@ What each choice does to the split:
   - The split is unaffected inside chat-ui.
   - nigsc-connector has no `ChatSession` to parse `<invoke>`, so a harness launched by nigsc-connector would have no way at all to reach the core's tools.
 - **A for nigsc-connector, B inside chat-ui:**
-  - The core offers its tools through `McpToolEndpoint`, which needs two transports: the Quarkus HTTP adapter for chat-ui (as today) and a later stdio transport for nigsc-connector.
+  - The core offers its tools through `McpToolEndpoint`, which needs two transports: the Quarkus HTTP adapter for chat-ui (as today) and a later harness-side transport for nigsc-connector (stdio or `localhost` HTTP, undecided in `AgentConnectorKernelConcept_261121_oo01` line 101).
   - `ChatSession` keeps calling `ToolRunner` directly on the `<invoke>` path.
   - The core's `ToolScope` and `ToolCallRecorder` must not require a turn or a step. chat-ui's recorder adds them; nigsc-connector's records a sequence number.
 
@@ -121,7 +133,7 @@ Recommendation: **A for nigsc-connector, B inside chat-ui.**
 - `ToolScope` and `ToolCallRecorder` are written without a turn or a step from stage 5 on.
 - No stage registers an MCP server with the CLIs, and no stage removes the `<invoke>` path.
 
-Whichever way the person decides, the result is a later stage on top of this one: a stdio transport (A for nigsc-connector) or an MCP config in `plugin-harness` (A in chat-ui).
+With the decision taken, the harness-side transport for nigsc-connector comes as a later stage on top of these. No MCP config is added to `plugin-harness`.
 
 ## Stages
 
@@ -133,12 +145,33 @@ Every stage ends in this order:
 
 A test that moves to another module still counts once, so the total stays the same.
 
-- [ ] 0. Create the branch `nigsc-connector-split` and commit this plan. This is the only commit of the survey job.
-- [ ] 1. **Baseline.**
+- [x] 0. Create the branch `nigsc-connector-split` and commit this plan (`e39e158`).
+- [x] 1. **Baseline.**
   - W206 Job on the branch head (same tree as `main`): `rm -rf target`, `mvn test`. Record the counts per module.
   - Run the E2E checks against a throw-away chat-ui started inside the same Job, on a port outside 28000–28020: `e2e/McpServerCheck.java`, `e2e/ExternalMcpCheck.java`, `e2e/ToolCallingCheck.java`. Record their output.
+  - **Result (2026-11-21, W206 Job `chat77-split-baseline`, pod on stonefly521, GraalVM CE 25):**
+    - Library chain from `git archive`: POJO-actor `adc5a49`, Turing-workflow `8300246`, Turing-workflow-plugins `cadc4fd` (`-pl plugin-rst-frame -am`). All installed with their tests.
+    - chat-ui at `e39e158` (same tree as `main` `7c4b507` apart from this file): `rm -rf target */target`, then `mvn -B test`, BUILD SUCCESS. Counts per module:
+
+      | Module | Tests | Failures | Errors | Skipped |
+      |---|---|---|---|---|
+      | `plugin-api` | 0 | 0 | 0 | 0 |
+      | `app` | 852 | 0 | 0 | 0 |
+      | `plugin-web-tools` | 17 | 0 | 0 | 0 |
+      | `plugin-shell` | 11 | 0 | 0 | 0 |
+      | `plugin-harness` | 54 | 0 | 0 | 0 |
+      | total | 934 | 0 | 0 | 0 |
+
+    - Then `rm -rf target */target` and `mvn -B package` (the same 934 tests ran again, all passed) for the uber-jar `chat-ui-with-audit-trail-3.0.0-SNAPSHOT.jar`.
+    - The throw-away instance ran inside the pod:
+      - `e2e/ScriptedModelServer.java` on `127.0.0.1:18978`, with jackson from the pod's Maven repository;
+      - chat-ui on port 18090 with `-Duser.home=/work/e2e/home`, `-Dchat-ui.read-roots=/work/e2e/root`, `-Dchat-ui.write-root=/work/e2e/root`, `-Dchat-ui.servers=http://127.0.0.1:18978`, `-Dchat-ui.default-model=fake`. Its working directory, and so its iolog database, was `/work/e2e`.
+    - `McpServerCheck 18090`: 19 PASS, 0 FAIL, "ALL PASSED".
+    - `ToolCallingCheck 18090`: 9 PASS, 0 FAIL, "ALL PASSED".
+    - `ExternalMcpCheck` was **not run**. It needs a real model that answers with `tool_calls` and an html-saurus `/mcp` to register. The only html-saurus instances are on 28001 and 28009, inside the forbidden range, and none runs in the pod. Running it means starting a throw-away html-saurus in the Job; chat-48 decides whether that is wanted.
+    - No production code or test was changed, and nothing failed or needed fixing to run.
 - [ ] 2. **Empty `core` module.**
-  - Add `core/pom.xml`. Dependencies: `plugin-api`, org.json, jackson-databind, and POJO-actor (needed when `ToolScopes` or the stdio session becomes an actor).
+  - Add `core/pom.xml`. Dependencies: `plugin-api`, org.json, jackson-databind, and POJO-actor (needed when `ToolScopes` or the harness-side MCP session becomes an actor).
   - Add `maven-enforcer-plugin` `bannedDependencies` for `io.quarkus*`, `io.quarkiverse*`, `jakarta.*`, `org.eclipse.microprofile*`, `io.vertx*`.
   - `app` depends on `core`. Parent `<modules>` order: `plugin-api`, `core`, `app`, plugins.
   - Check: counts equal to stage 1.
