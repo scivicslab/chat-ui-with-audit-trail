@@ -10,29 +10,33 @@ Background (for reference only; this work renames nothing):
 - After the split, chat-ui-with-audit-trail returns to the quarkus-chat-ui brand, as a new major version in the old `scivicslab/quarkus-chat-ui` repository.
 - nigsc-connector is a later tool that depends on the core and carries the settings specific to the NIG supercomputer.
 - The docs for chat-ui and for the core go in `doc_SCIVICS003`.
+- The supercomputer ssh tool will later be added to this repository as a plugin, `ssh-connector`, loaded into `agent-connector-kernel` the way `plugin-shell` is loaded today.
+- `nigsc-connector` will be a separate thing that depends on `agent-connector-kernel` and `ssh-connector` and carries the NIG supercomputer's settings.
+
+Naming rule: in docs, comments and commit messages, always write `agent-connector-kernel` in full, never "kernel" alone. The short form is confused with a Jupyter kernel and with Claude Science's Operon kernel process. Code identifiers avoid a bare `kernel` too.
 
 ## Decisions (approved by the person, relayed by chat-48, 2026-11-21)
 
-1. `CliProcess` stays in `plugin-harness`. It does not move to the `core` module.
+1. `CliProcess` stays in `plugin-harness`. It does not move to the `agent-connector-kernel` module.
 2. The tools that operate ConversationSquad actors (`create_chat`, `set_agent_loop` and the others) stay on `/mcp`, reached through the app's `ToolExtension`.
 3. Harnesses reach the core's tools over MCP on the nigsc-connector side. Inside chat-ui, the claude and codex conversations stay on `<invoke>` (the recommendation in the open question below, now decided).
-4. **The core module's name is not decided.** `chat-ui-with-audit-trail-core` and the directory `core` are placeholders. Stage 2 creates the module, so work stops after stage 1 until chat-48 confirms the name.
+4. The module is named `agent-connector-kernel`, both as the directory and as the artifactId (decided 2026-11-21).
 
 ## Target modules
 
-The core side is the new `core` module plus the plugin jars that depend only on `plugin-api`. Neither the core module nor those plugins may depend on `app`.
+The core side is the new `agent-connector-kernel` module plus the plugin jars that depend only on `plugin-api`. Neither `agent-connector-kernel` nor those plugins may depend on `app`.
 
 | Module | artifactId | Side | Contents |
 |---|---|---|---|
 | `plugin-api` | `chat-ui-with-audit-trail-plugin-api` (unchanged) | core | Unchanged: `LlmProvider`, `ProviderContext`, `ProviderCapabilities`, `ChatEvent`, `ToolSet`, `ChatUiPlugin`, `ConversationTool`, `LlmProviderFactory`, `ProviderCreationContext`, `ToolParameter`, `PersistedLog`, `OneShotReply` |
-| `core` (new; name is a placeholder, see Decisions 4) | `chat-ui-with-audit-trail-core` (placeholder) | core | The tool registry, the tool runner, the framework-free MCP tool endpoint, the plain tools and `PluginRegistry`. No Quarkus, CDI, MicroProfile or Vert.x dependency, and a Maven enforcer rule makes the build fail if one appears |
+| `agent-connector-kernel` (new) | `agent-connector-kernel` | core | The tool registry, the tool runner, the framework-free MCP tool endpoint, the plain tools and `PluginRegistry`. No Quarkus, CDI, MicroProfile or Vert.x dependency, and a Maven enforcer rule makes the build fail if one appears |
 | `plugin-harness` | unchanged | core | Launches and watches the claude and codex CLIs. Stays a plugin jar, so an instance started without it has no code that starts a CLI (`ProviderAndToolPlugins_260912_oo01`, 「なぜ「設定でオフ」ではなく「jar が無い」か」) |
 | `plugin-shell`, `plugin-web-tools` | unchanged | core | The `bash`, `web_search`, `fetch` and `scholar_search` tools |
-| `app` | `chat-ui-with-audit-trail` (unchanged, so the uber-jar name and the deploy convention stay the same) | screen and record | Web UI, REST (`audittrail`), the actor tree (`core.actor`), the I/O log, the agent loop, the openai-compat provider, the inter-instance gateway, the Quarkus adapter of the MCP server. Depends on `core` |
+| `app` | `chat-ui-with-audit-trail` (unchanged, so the uber-jar name and the deploy convention stay the same) | screen and record | Web UI, REST (`audittrail`), the actor tree (`core.actor`), the I/O log, the agent loop, the openai-compat provider, the inter-instance gateway, the Quarkus adapter of the MCP server. Depends on `agent-connector-kernel` |
 
-The module is named `core`, not `nigsc-connector`. The core is a library that both chat-ui and nigsc-connector use, and the nigsc-connector distribution (the launcher, `core`, and the plugin jars) is a separate later artifact. Package names do not change, as in `ProviderAndToolPlugins_260912_oo01`, so moving a class does not change its imports.
+The module is named `agent-connector-kernel`, not `nigsc-connector`. It is a library that both chat-ui and nigsc-connector use; nigsc-connector is a separate later artifact (see Background). Package names do not change, as in `ProviderAndToolPlugins_260912_oo01`, so moving a class does not change its imports.
 
-### What moves to `core`
+### What moves to `agent-connector-kernel`
 
 | Package | Classes |
 |---|---|
@@ -51,7 +55,7 @@ The module is named `core`, not `nigsc-connector`. The core is a library that bo
 
 ### Per-class split of package `agent`
 
-Side 1 is `core`, side 2 is `app`. The basis is what each class imports (an import scan of `app/src/main/java/com/scivicslab/chatui/agent/`) and what it refers to in its own package (a scan for class names with `//` comments removed). Two references found that way are in Javadoc only and do not bind: `ContextBudget` in `FileReadTool.java:176` and in `DocSearchTool.java:47`.
+Side 1 is `agent-connector-kernel`, side 2 is `app`. The basis is what each class imports (an import scan of `app/src/main/java/com/scivicslab/chatui/agent/`) and what it refers to in its own package (a scan for class names with `//` comments removed). Two references found that way are in Javadoc only and do not bind: `ContextBudget` in `FileReadTool.java:176` and in `DocSearchTool.java:47`.
 
 | Class | Side | Why |
 |---|---|---|
@@ -79,11 +83,11 @@ Side 1 is `core`, side 2 is `app`. The basis is what each class imports (an impo
 ## Cutting the shared classes
 
 1. **`ToolCatalog`** (`agent/ToolCatalog.java`): `BUILT_IN` (line 72) holds 32 specs, the conversation tools among them.
-   - `core` keeps `Spec` (line 35) and the specs of `read`, `calc`, `search_docs`, `list_references`, `write` and `remove`.
+   - `agent-connector-kernel` keeps `Spec` (line 35) and the specs of `read`, `calc`, `search_docs`, `list_references`, `write` and `remove`.
    - `app/ConversationToolCatalog` builds the full ordered map: `ask_person` first, then the core specs in today's places, then the rest. The `<invoke>` text keeps today's order and wording. `ToolCatalogTest` proves it.
    - `ChatSession` (lines 284, 291, 298, 3308) and `ChatUiMcpServer` (line 50) read `ConversationToolCatalog`.
 2. **`ConversationToolRunner`** (`core/actor/ConversationToolRunner.java`): `run` (line 174) mixes plain tools (lines 176–196 and 241–249) with tools that use the actor tree (lines 197–240).
-   - `core/ToolRunner` runs the plain tools and the plugin tools.
+   - `ToolRunner` in `agent-connector-kernel` runs the plain tools and the plugin tools.
    - It hands any other name to a `ToolExtension`, and it records each MCP call through a `ToolCallRecorder`. That replaces `record` (lines 254–269), which writes `IoLogStore` and the `.log` actor.
    - `search_docs` and `list_references` get their `DocsSource` from a `DocsLookup`. The default is the HTTP API; the app's implementation uses `RemoteNodes` (today lines 189–190).
    - The app's `ConversationToolRunner` keeps the actor-tree cases, the `IoPosition` supplier and the I/O-log writing.
@@ -92,9 +96,9 @@ Side 1 is `core`, side 2 is `app`. The basis is what each class imports (an impo
    - They call `McpToolEndpoint` instead, which resolves the scope through `ToolScopes`.
    - The `X-Chat-Ui-Conversation` header (lines 79–83) stays in the adapter, because it is HTTP.
    - `ConversationControls.publishToolRunner` (line 167) keeps its name and puts the runner into `ToolScopes`.
-4. **`DocsSource`** (`agent/DocsSource.java`): the interface (line 14) moves to `core`. The static `choose(RemoteNodes, …)` (line 51) moves to the app class `DocsSources`, because `RemoteNodes` is the inter-instance gateway.
+4. **`DocsSource`** (`agent/DocsSource.java`): the interface (line 14) moves to `agent-connector-kernel`. The static `choose(RemoteNodes, …)` (line 51) moves to the app class `DocsSources`, because `RemoteNodes` is the inter-instance gateway.
 5. **Calculator**: `ConversationToolRunner.Calculator` (lines 72–80) wraps the turing-workflow class `JShellCalculator`.
-   - In `core` it becomes an interface, `ExpressionEvaluator`. The app passes the JShell-backed implementation, so behaviour is unchanged.
+   - In `agent-connector-kernel` it becomes an interface, `ExpressionEvaluator`. The app passes the JShell-backed implementation, so behaviour is unchanged.
    - A later native build passes an arithmetic-only one (see stage 8).
 6. **Harness launch** (`plugin-harness`): the command and environment are built in two places, `CliProcess.startProcess`/`buildCommand` (lines 113–125 and 453–491) and `CodexProvider.sendPrompt`/`buildCommand` (lines 110–117 and 190–205).
    - Extract a POJO, `HarnessLaunch`: binary, argument list, environment to remove, environment to set, working directory, then `ProcessBuilder`.
@@ -170,14 +174,14 @@ A test that moves to another module still counts once, so the total stays the sa
     - `ToolCallingCheck 18090`: 9 PASS, 0 FAIL, "ALL PASSED".
     - `ExternalMcpCheck` was **not run**. It needs a real model that answers with `tool_calls` and an html-saurus `/mcp` to register. The only html-saurus instances are on 28001 and 28009, inside the forbidden range, and none runs in the pod. Running it means starting a throw-away html-saurus in the Job; chat-48 decides whether that is wanted.
     - No production code or test was changed, and nothing failed or needed fixing to run.
-- [ ] 2. **Empty `core` module.**
-  - Add `core/pom.xml`. Dependencies: `plugin-api`, org.json, jackson-databind, and POJO-actor (needed when `ToolScopes` or the harness-side MCP session becomes an actor).
+- [ ] 2. **Empty `agent-connector-kernel` module.**
+  - Add `agent-connector-kernel/pom.xml`. Dependencies: `plugin-api`, org.json, jackson-databind, and POJO-actor (needed when `ToolScopes` or the harness-side MCP session becomes an actor).
   - Add `maven-enforcer-plugin` `bannedDependencies` for `io.quarkus*`, `io.quarkiverse*`, `jakarta.*`, `org.eclipse.microprofile*`, `io.vertx*`.
-  - `app` depends on `core`. Parent `<modules>` order: `plugin-api`, `core`, `app`, plugins.
+  - `app` depends on `agent-connector-kernel`. Parent `<modules>` order: `plugin-api`, `agent-connector-kernel`, `app`, plugins.
   - Check: counts equal to stage 1.
-- [ ] 3. **Move the plain tools and `PluginRegistry` to `core`.**
+- [ ] 3. **Move the plain tools and `PluginRegistry` to `agent-connector-kernel`.**
   - Move `FileAccessScope`, `FileReadTool`, `FileWriteTool`, `FileRemoveTool`, `CalcExpression`, `DocSearchTool`, `ReferenceLinkTool`, `HttpDocs`, the `DocsSource` interface (its `choose` goes to app `DocsSources`) and `PluginRegistry`, with their tests: `FileAccessScopeTest`, `FileReadToolMultiPathTest`, `FileRemoveToolTest`, `FileToolsScopeTest`, `CalcExpressionTest`, `ReferenceLinkToolTest`, `PluginRegistryTest`, `WriteKeepsCodeFencesTest` if it uses only these.
-  - Check: counts equal, and `core` builds with the enforcer rule on.
+  - Check: counts equal, and `agent-connector-kernel` builds with the enforcer rule on.
 - [ ] 4. **Cut `ToolCatalog`.**
   - Core `ToolCatalog` with `Spec` and the core specs; app `ConversationToolCatalog` with the ordered full map.
   - Check: `ToolCatalogTest` (the signature table, unchanged), `ChatSessionToolSetTest`, `BrokenToolCallTest`, `ChatSessionToolCallRepairTest`, `ToolCallingProviderTest`.
@@ -186,13 +190,13 @@ A test that moves to another module still counts once, so the total stays the sa
   - `ToolScope` and `ToolCallRecorder` carry no turn and no step; the app's recorder reads its `IoPosition` itself. This keeps both choices of the open question possible.
   - Write the core unit test `ToolRunnerTest` (plain tools, a fake extension, a fake recorder) before the code: it is red because the classes are missing, then green.
   - Check: `ConversationToolRunnerTest`, `ConversationToolsTest`, `ExternalMcpToolsTest`, `NodeArgumentPointsToListRunningToolsTest`, `RunningToolsNodeNamesTest`, `ChatSessionHarnessToolIoTest`.
-- [ ] 6. **MCP endpoint in `core`, Quarkus adapter in `app`.**
+- [ ] 6. **MCP endpoint in `agent-connector-kernel`, Quarkus adapter in `app`.**
   - `McpToolEndpoint` and `ToolScopes`. `ChatUiMcpServer` and `ConversationToolFilter` delegate to them. `ChatUiActorSystem.toolRunnerOf` reads `ToolScopes`.
   - Check: unit tests, then in a W206 Job the E2E `McpServerCheck`, `ExternalMcpCheck` and `ToolCallingCheck` against a throw-away instance. Output must match stage 1.
 - [ ] 7. **`HarnessLaunch` in `plugin-harness`.**
   - First write a test that pins today's argv and environment for claude (`stdbuf -oL claude --output-format stream-json --input-format stream-json --verbose --model …`, `--permission-mode bypassPermissions`, `--tools ""` for the full tool set, `CLAUDECODE` and `CLAUDE_CODE_ENTRYPOINT` removed) and for codex (`codex exec [resume <thread>] --json --skip-git-repo-check -c sandbox_mode="workspace-write" [-m <model>] -`). It passes before and after the change.
   - Check: that test, `StreamEventParserTest`, `CliProcessAutonomousTurnTest`, `CliEndedWithoutResultTest`, `ClaudeCodeRetractionTest`, `ClaudeCodeCommandAnswerTest`, `CodexEventParserTest`, `HarnessPluginTest`, `SlashCommandHandlerTest`.
-- [ ] 8. **Native-image probe of `core`.**
+- [ ] 8. **Native-image probe of `agent-connector-kernel`.**
   - An E2E program with `main()`, outside the Maven build (testing standard `TestingStandard_260404_oo01`): it builds a `ToolRunner` over a temporary directory, lists the tools, and calls `write`, then `read`.
   - Build it with GraalVM CE `native-image` in a W206 Job (ubuntu:24.04 plus the GraalVM tarball) and run it.
   - Record what fails. Expected: `calc` through JShell, `PluginRegistry`'s runtime jar loading, jackson-databind, and POJO-actor, which is still unproven under native-image (`ConcurrencyWithPojoActor_261121_oo01` line 63).
