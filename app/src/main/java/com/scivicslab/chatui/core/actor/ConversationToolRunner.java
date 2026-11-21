@@ -21,6 +21,7 @@ import com.scivicslab.chatui.agent.SetAgentLoopTool;
 import com.scivicslab.chatui.agent.SetChatModelTool;
 import com.scivicslab.chatui.agent.SetCollaboratorTool;
 import com.scivicslab.chatui.agent.TimekeeperTool;
+import com.scivicslab.chatui.agent.ConversationToolCatalog;
 import com.scivicslab.chatui.agent.ToolCatalog;
 import com.scivicslab.chatui.agent.ToolSet;
 import com.scivicslab.chatui.core.iolog.IoLogStore;
@@ -49,7 +50,7 @@ import java.util.logging.Logger;
  * chat-ui's MCP server can run a tool without sending the session a message. A {@code tools/call} arrives
  * while the session waits in {@code runTool} for that very call; a message would wait behind it for ever.</p>
  *
- * <p>The tools that drive the conversation ({@link ToolCatalog#conversationDrivingTools()}) change the
+ * <p>The tools that drive the conversation ({@link ConversationToolCatalog#conversationDrivingTools()}) change the
  * running turn's state, and stay in {@link ChatSession}.</p>
  */
 public final class ConversationToolRunner {
@@ -136,7 +137,7 @@ public final class ConversationToolRunner {
      */
     public boolean offers(String tool) {
         if (!toolSet.contains(tool)) return false;
-        ToolCatalog.Spec spec = ToolCatalog.builtIn(tool);
+        ToolCatalog.Spec spec = ConversationToolCatalog.builtIn(tool);
         return spec != null ? !spec.drivesConversation() : pluginTools.containsKey(tool);
     }
 

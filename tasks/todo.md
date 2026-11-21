@@ -249,9 +249,11 @@ A test that moves to another module still counts once, so the total stays the sa
       - `ToolCallingCheck`: 9 PASS, 0 FAIL.
       - `ExternalMcpCheck`: 8 PASS, 0 FAIL. After a restart, `--restored`: 1 PASS, 0 FAIL.
     - The first stage-3 run failed to compile `PluginRegistryTest` in `agent-connector-kernel` (`cannot find symbol OpenAiCompatProviderFactory`, lines 52 and 81). That test went back to `app`; see "As built" above.
-- [ ] 4. **Cut `ToolCatalog`.**
+- [x] 4. **Cut `ToolCatalog`.**
   - Core `ToolCatalog` with `Spec` and the core specs; app `ConversationToolCatalog` with the ordered full map.
   - Check: `ToolCatalogTest` (the signature table, unchanged), `ChatSessionToolSetTest`, `BrokenToolCallTest`, `ChatSessionToolCallRepairTest`, `ToolCallingProviderTest`.
+  - As built: `ToolCatalog` in `agent-connector-kernel` keeps `Spec`, `define`, `ofPlugin`, `requiredSentence`, `wrap` and the six core specs (`coreTools()`, `core(name)`). The app class `ConversationToolCatalog` builds the 32-tool ordered map with the core specs in their old places (`builtInTools()`, `builtIn(name)`, `conversationDrivingTools()`). Callers changed: `ChatSession`, `ConversationToolRunner`, `ChatUiMcpServer`, `OpenAiCompatProvider`, and the tests `ToolCatalogTest` and `ConversationToolRunnerTest` (calls only; the signature table is unchanged). `agent-connector-kernel` now also depends on org.json, for `Spec.inputSchema()`.
+  - **Result (2026-11-21, W206 Job `chat77-split-s4to8`):** `rm -rf target */target`, `mvn -B test` and `mvn -B package`, BUILD SUCCESS. Counts: `plugin-api` 0, `agent-connector-kernel` 60, `app` 792, `plugin-web-tools` 17, `plugin-shell` 11, `plugin-harness` 54, total 934 (no test moved, none added), 0 failures, errors and skipped. The enforcer passed. E2E: `McpServerCheck` 19/19, `ToolCallingCheck` 9/9, `ExternalMcpCheck` 8/8, `--restored` 1/1.
 - [ ] 5. **Cut `ConversationToolRunner`.**
   - Core `ToolRunner`, `ToolScope`, `ToolExtension`, `ToolCallRecorder`, `DocsLookup`, `ExpressionEvaluator`. The app's `ConversationToolRunner` implements the extension, the recorder and the lookup.
   - `ToolScope` and `ToolCallRecorder` carry no turn and no step; the app's recorder reads its `IoPosition` itself. This keeps both choices of the open question possible.

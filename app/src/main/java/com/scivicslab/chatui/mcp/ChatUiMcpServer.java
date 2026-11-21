@@ -1,5 +1,6 @@
 package com.scivicslab.chatui.mcp;
 
+import com.scivicslab.chatui.agent.ConversationToolCatalog;
 import com.scivicslab.chatui.agent.ToolCatalog;
 import com.scivicslab.chatui.core.actor.ChatUiActorSystem;
 import com.scivicslab.chatui.core.actor.ConversationToolRunner;
@@ -23,7 +24,7 @@ import java.util.logging.Logger;
  * chat-ui's MCP server at {@code /mcp}: the harness tools that do not drive a conversation, run as the tools of the
  * conversation the request names ({@code ToolCatalogAndChatUiMcpServer_261120_oo01}).
  *
- * <p>The tools are registered once at start-up from {@link ToolCatalog} and the plugin registry. A request names its
+ * <p>The tools are registered once at start-up from {@link ConversationToolCatalog} and the plugin registry. A request names its
  * conversation in the {@value #CONVERSATION_HEADER} header as {@code <project>/<chat>}; {@link ConversationToolFilter}
  * lists only that conversation's tools, and a call runs with that conversation's {@link ConversationToolRunner} on
  * the thread that took the request, without a message to the conversation's {@code ChatSession}.</p>
@@ -47,7 +48,7 @@ public class ChatUiMcpServer {
 
     void register(@Observes StartupEvent event) {
         List<ToolCatalog.Spec> specs = new ArrayList<>();
-        ToolCatalog.builtInTools().values().stream().filter(s -> !s.drivesConversation()).forEach(specs::add);
+        ConversationToolCatalog.builtInTools().values().stream().filter(s -> !s.drivesConversation()).forEach(specs::add);
         chats.getPluginRegistry().tools().forEach(t -> specs.add(ToolCatalog.ofPlugin(t)));
         for (ToolCatalog.Spec spec : specs) {
             toolManager.newTool(spec.name())
