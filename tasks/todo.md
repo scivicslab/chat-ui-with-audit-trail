@@ -4,7 +4,7 @@ Design inputs: `AgentConnectorKernelConcept_261121_oo01` (`doc_SCIVICS003/docs/a
 
 Branch: `nigsc-connector-split`, from `main` at `7c4b507`. The name is the one chat-48 gave. Before branching, `git fetch origin` showed `main` equal to `origin/main` (both `7c4b507`). `git log main..harness-tools-mcp` and `git log main..origin/harness-tools-mcp` are both empty, so `harness-tools-mcp` holds no unmerged commits and changes nothing for the split.
 
-Goal of this rebuild: change the module structure, not the behaviour. The LLM proxy and the harness confinement come later and go on the core side. The harness-side MCP transport, HTTP on localhost (Decisions 5), is built in stage 6, and `ssh-connector` with the ssh tools (Decisions 6) in stage 9. They are not part of these stages.
+Goal of this rebuild: change the module structure, not the behaviour. The harness-side MCP transport, HTTP on localhost (Decisions 5), is built in stage 6. The LLM proxy and the harness confinement are built in stage 8 (Decisions 7), and `ssh-connector` with the ssh tools (Decisions 6) in stage 10. They are not part of these stages.
 
 Background (for reference only; this work renames nothing):
 - After the split, chat-ui-with-audit-trail returns to the quarkus-chat-ui brand, as a new major version in the old `scivicslab/quarkus-chat-ui` repository.
@@ -33,7 +33,8 @@ Naming rule: in docs, comments and commit messages, always write `agent-connecto
    Inside chat-ui-with-audit-trail nothing changes: Decisions 3 stands, no MCP config is passed to the harness, and the E2E checks after each stage prove today's behaviour is kept.
 6. **`ssh-connector` is a standalone tool, not a plugin of `agent-connector-kernel`** (the person's decision, 2026-11-21, relayed by chat-01 and chat-48).
    - The design documents were updated to match: `doc_SCIVICS003` commit `547f35a` (`AgentConnectorKernelConcept_261121_oo01`) and `doc_Infra001` commit `7f1dc54` (`NigscConnectorComposition_261121_oo01`).
-   - It is built in stage 9.
+   - It is built in stage 10.
+7. **The LLM proxy and the harness confinement get a stage of their own, stage 8, inside `agent-connector-kernel`** (approved by chat-01, 2026-11-21, relayed by chat-48 in t107:r1). They follow `LlmKeyInjectionProxy_261121_oo01` and `HarnessConfinement_261121_oo01` (`doc_SCIVICS003/docs/agent-connector-kernel/040_design`). The native-image probe becomes stage 9, `ssh-connector` stage 10 and wrap-up stage 11.
 
 ## Target modules
 
@@ -112,7 +113,7 @@ Side 1 is `agent-connector-kernel`, side 2 is `app`. The basis is what each clas
 4. **`DocsSource`** (`agent/DocsSource.java`): the interface (line 14) moves to `agent-connector-kernel`. The static `choose(RemoteNodes, …)` (line 51) moves to the app class `DocsSources`, because `RemoteNodes` is the inter-instance gateway.
 5. **Calculator**: `ConversationToolRunner.Calculator` (lines 72–80) wraps the turing-workflow class `JShellCalculator`.
    - In `agent-connector-kernel` it becomes an interface, `ExpressionEvaluator`. The app passes the JShell-backed implementation, so behaviour is unchanged.
-   - A later native build passes an arithmetic-only one (see stage 8).
+   - A later native build passes an arithmetic-only one (see stage 9).
 6. **Harness launch** (`plugin-harness`): the command and environment are built in two places, `CliProcess.startProcess`/`buildCommand` (lines 113–125 and 453–491) and `CodexProvider.sendPrompt`/`buildCommand` (lines 110–117 and 190–205).
    - Extract a POJO, `HarnessLaunch`: binary, argument list, environment to remove, environment to set, working directory, then `ProcessBuilder`.
    - Both callers use it. This is the one place the later sandbox settings and the LLM-proxy variables (`ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `LlmKeyInjectionProxy_261121_oo01`) will be added.
@@ -285,25 +286,51 @@ A test that moves to another module still counts once, so the total stays the sa
     - `agent-connector-kernel` now also depends on pojo-actor (`${pojo-actor.version}`). The enforcer still passes.
     - New tests, written first: `McpRequestHandlerTest` (5: no key, wrong key, right key with `tools/call`, right key with `tools/list`, unknown scope and missing scope) and `LocalMcpServerTest` (1: loopback only, a real HTTP request with the key answered, a wrong key refused). Red run on W206: without the classes, `mvn test -pl agent-connector-kernel -am` failed to compile (`cannot find symbol ToolScopes`, `McpRequestHandler`, `LocalMcpServer`). Then green.
   - **Result (2026-11-21, W206 Job `chat77-split-s4to8`):** BUILD SUCCESS for `mvn -B test` and `mvn -B package` after `rm -rf target */target`. Counts: `plugin-api` 0, `agent-connector-kernel` 72 (60 + 6 `ToolRunnerTest` + 5 `McpRequestHandlerTest` + 1 `LocalMcpServerTest`), `app` 792, `plugin-web-tools` 17, `plugin-shell` 11, `plugin-harness` 54, total 946 = 934 + 12 new, with 0 failures, errors and skipped. The enforcer passed. E2E: `McpServerCheck` 19/19, `ToolCallingCheck` 9/9, `ExternalMcpCheck` 8/8, `--restored` 1/1.
-- [ ] 7. **`HarnessLaunch` in `plugin-harness`.**
+- [x] 7. **`HarnessLaunch` in `plugin-harness`.**
   - The MCP entry `HarnessLaunch` can hand a harness is a URL plus a key (Decisions 5). No stdio-shaped entry. Inside chat-ui none is passed (Decisions 3).
   - First write a test that pins today's argv and environment for claude (`stdbuf -oL claude --output-format stream-json --input-format stream-json --verbose --model …`, `--permission-mode bypassPermissions`, `--tools ""` for the full tool set, `CLAUDECODE` and `CLAUDE_CODE_ENTRYPOINT` removed) and for codex (`codex exec [resume <thread>] --json --skip-git-repo-check -c sandbox_mode="workspace-write" [-m <model>] -`). It passes before and after the change.
   - Check: that test, `StreamEventParserTest`, `CliProcessAutonomousTurnTest`, `CliEndedWithoutResultTest`, `ClaudeCodeRetractionTest`, `ClaudeCodeCommandAnswerTest`, `CodexEventParserTest`, `HarnessPluginTest`, `SlashCommandHandlerTest`.
-- [ ] 8. **Native-image probe of `agent-connector-kernel`.**
+  - As built:
+    - `HarnessLaunch` (record: command, environment variables removed and added, working directory) builds the `ProcessBuilder` for both CLIs. `CliProcess.launch` removes `CLAUDECODE` and `CLAUDE_CODE_ENTRYPOINT` and adds the API key when one is set. `CodexProvider.launch` adds `OPENAI_API_KEY` when one is set.
+    - `HarnessLaunch.McpEntry(url, scope, key)` gives Claude Code's `--mcp-config` value: one HTTP server with `Authorization: Bearer <key>` and `X-Agent-Connector-Scope`. There is no stdio form.
+    - `CliProcess.setMcpEntry` adds `--mcp-config` only when an entry is set, and chat-ui never sets one (Decisions 3). Codex is given no MCP entry in this stage.
+    - The pin test `HarnessLaunchPinTest` (4: claude harness tool set, claude full tool set resumed with effort, codex, and claude's environment and working directory through a fake CLI) was written first and passed on the unchanged code (W206, `mvn test -pl plugin-harness -am`). Then it passed again after the change.
+    - Limitation: the removal of `CLAUDECODE` and `CLAUDE_CODE_ENTRYPOINT` can only be seen when the test process has them set, and the W206 pod does not. `HarnessLaunchTest` covers removal itself with `PATH`.
+    - New test `HarnessLaunchTest` (3: removed and added variables and working directory, the MCP entry's JSON, `--mcp-config` only when an entry is given).
+  - **Result (2026-11-21, W206 Job `chat77-split-s4to8`):** BUILD SUCCESS for `mvn -B test` and `mvn -B package` after `rm -rf target */target`. Counts: `plugin-api` 0, `agent-connector-kernel` 72, `app` 792, `plugin-web-tools` 17, `plugin-shell` 11, `plugin-harness` 61 (54 + 4 `HarnessLaunchPinTest` + 3 `HarnessLaunchTest`), total 953 = 934 + 19 new (12 from stages 5 and 6, 7 from this stage), with 0 failures, errors and skipped. The enforcer passed. E2E: `McpServerCheck` 19/19, `ToolCallingCheck` 9/9, `ExternalMcpCheck` 8/8, `--restored` 1/1.
+- [ ] 8. **LLM proxy and harness confinement in `agent-connector-kernel`** (Decisions 7).
+  - The LLM proxy of `LlmKeyInjectionProxy_261121_oo01`:
+    - It runs on the JDK HTTP server, bound to the loopback address only, as in stage 6.
+    - A harness is given `http://127.0.0.1:<port>/<scope>` as its LLM base URL and a throw-away key for that scope.
+    - The proxy refuses an unknown scope (404) and a missing or wrong key (401). Keys are compared in constant time.
+    - Otherwise it puts the real credential in the key's place and passes the request to the provider. The answer is streamed back as it arrives, Server-Sent Events included.
+    - The throw-away keys live in an actor (plain POJO first). Requests run on the `ActorSystem`'s managed pool.
+  - The Claude Code confinement of `HarnessConfinement_261121_oo01`:
+    - a plain argument builder: the `--settings` JSON of that document, and `--mcp-config <agent-connector-kernel's MCP server only> --strict-mcp-config`;
+    - the variables that point the harness at the LLM proxy (`ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY` = the throw-away key).
+    - Podman confinement for the other harnesses is not part of this stage.
+  - The enforcer rule stays unchanged, and only dummy keys are used in tests.
+  - `app` uses neither part yet (Decisions 3). Both are plain classes with no Quarkus in them, so quarkus-chat-ui, or any product's launcher, can call them later.
+  - Tests are written first and fail first:
+    - proxy: no key, wrong key, right key, unknown scope, and one real-HTTP forward through a throw-away upstream;
+    - confinement: the `--settings` JSON, and the arguments with `--mcp-config` and `--strict-mcp-config`.
+  - Check: full `rm -rf target */target` and `mvn -B test`, with the counts against the baseline and the new tests listed separately; the enforcer rule; and the three E2E checks.
+- [ ] 9. **Native-image probe of `agent-connector-kernel`.**
   - An E2E program with `main()`, outside the Maven build (testing standard `TestingStandard_260404_oo01`): it builds a `ToolRunner` over a temporary directory, lists the tools, and calls `write`, then `read`.
   - Build it with GraalVM CE `native-image` in a W206 Job (ubuntu:24.04 plus the GraalVM tarball) and run it.
   - It also starts the localhost HTTP server of stage 6 inside the native image and sends it one request with the right key. The check passes when the server compiles into the image and answers that request.
+  - It also compiles and runs the LLM proxy of stage 8 (one forward through a throw-away upstream with a dummy key) and the confinement argument builder.
   - Record what fails. Expected: `calc` through JShell, `PluginRegistry`'s runtime jar loading, jackson-databind, and POJO-actor, which is still unproven under native-image (`ConcurrencyWithPojoActor_261121_oo01` line 63).
   - This stage reports; it does not have to pass. What to exclude or replace is decided with chat-48.
-- [ ] 9. **`ssh-connector`** (Decisions 6).
+- [ ] 10. **`ssh-connector`** (Decisions 6).
   - It produces two things:
     - a module of its own for the ssh tools, which quarkus-chat-ui can reuse;
     - a runnable `ssh-connector` artifact with a `main` entry point. It starts `agent-connector-kernel`'s MCP server (the localhost HTTP server of stage 6) and the LLM proxy, and launches a harness through `HarnessLaunch` (stage 7), handing it the MCP entry as a URL plus a key.
   - The ssh tools themselves are **to be specified before the stage starts**; chat-48 will send that spec.
   - Check: an E2E program with `main()`, outside the Maven build (`TestingStandard_260404_oo01`), run on a throw-away instance in a W206 Job. Plus full `rm -rf target`, `mvn test` with the counts against stage 1, and the E2E checks of stage 6, which show chat-ui is unchanged.
-  - Open before this stage can start: the LLM proxy (`LlmKeyInjectionProxy_261121_oo01`) has no stage of its own in this plan. Stage 9 needs it, so where it is built is to be settled with chat-48.
-- [ ] 10. **Wrap-up.**
-  - Full `rm -rf target` and `mvn test` in a W206 Job, plus the E2E checks of stage 6 and the `ssh-connector` E2E of stage 9.
+  - It uses the LLM proxy and the confinement of stage 8.
+- [ ] 11. **Wrap-up.**
+  - Full `rm -rf target` and `mvn test` in a W206 Job, plus the E2E checks of stage 6 and the `ssh-connector` E2E of stage 10.
   - Diff against `main`.
   - A review section in this file.
   - Proposed doc changes for chat-48 to decide: the module table of `ProviderAndToolPlugins_260912_oo01`, and a new 040_design doc for the split.
