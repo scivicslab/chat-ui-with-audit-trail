@@ -635,7 +635,7 @@ ssh -F <ssh-connector's ssh_config> -o BatchMode=yes -o StrictHostKeyChecking=ac
     - More such objects may come up after it.
 - No executable was produced, so the native step 2 check did not run.
 
-- [ ] 12. **Wrap-up.**
+- [x] 12. **Wrap-up.** Done 2026-11-22; see "Review (stage 12)" at the end of this file.
   - Full `rm -rf target` and `mvn test` in a W206 Job, plus the E2E checks of stage 6 and the `ssh-connector` E2E of stage 11.
   - Diff against `main`.
   - A review section in this file.
@@ -1551,3 +1551,77 @@ centre pane; the right pane has nothing for it. Read-only.
 - Browser: 14 checks pass on the jar built on W206 (screenshots `/tmp/uitest/timekeeper-chat0*.png`).
 - Found only in the browser: `console.html` is a Qute template, so `{p}` in an HTML comment made `/` answer 500. Comments there must not contain braces.
 - Not verified: a real model; a promised report that is already due and waiting for the next 30 s check; the pause actually happening (the view only shows the countdown).
+
+## Review (stage 12, 2026-11-22)
+
+### 1. Full test run (W206 Job `chat77-s12`, on `038b67f`)
+
+`rm -rf target */target`, `mvn -B test` and `mvn -B package`: BUILD SUCCESS.
+
+| Module | Tests | Failures | Errors | Skipped |
+|---|---|---|---|---|
+| `plugin-api` | 0 | 0 | 0 | 0 |
+| `agent-connector-kernel` | 103 | 0 | 0 | 0 |
+| `app` | 792 | 0 | 0 | 0 |
+| `plugin-web-tools` | 17 | 0 | 0 | 0 |
+| `plugin-shell` | 11 | 0 | 0 | 0 |
+| `plugin-harness` | 59 | 0 | 0 | 0 |
+| `ssh-tools` | 28 | 0 | 0 | 0 |
+| `ssh-connector` | 8 | 0 | 0 | 0 |
+| **Total** | **1018** | 0 | 0 | 0 |
+
+The same as after stage 11 (1018 = 982 + 28 + 8). This run also covers the `SecureRandom` change of step 4 in every module.
+
+### 2. The E2E checks of stage 6, on this build's jar
+
+`McpServerCheck` 19 of 19, `ToolCallingCheck` 9 of 9, `ExternalMcpCheck` 8 of 8, `ExternalMcpCheck --restored` 1 of 1: ALL PASSED. No port was busy.
+
+### 3. The ssh-connector E2E on 5.14
+
+This build's `ssh-connector` jar (`0e920d02…`) was copied with rsync and checksums compared. The run used a throw-away sshd container, dummy keys only, and nice 19.
+- `SshConnectorE2E`: ALL PASSED, 21 of 21: every tool, the host-key change, and the confined OpenCode run calling `submit_job` then `job_status`.
+- `ConfinementCheck` in `ssh-connector` mode: ALL PASSED, 18 of 18 (the 16 checks and the two for the ssh key).
+- Afterwards:
+  - both images were removed (`podman rmi`, then `podman image prune -f`);
+  - `podman ps -a`: none; `podman images -a`: only `docker.io/library/ubuntu:24.04` (chat-01's);
+  - `~/.ssh`: 36 entries, as before, and no marker;
+  - no key file left.
+
+### 4. Diff against `main` (`git diff --stat main...nigsc-connector-split`)
+
+132 files, +8867 −507, in 32 commits.
+
+| Module | Files | + | − | What |
+|---|---|---|---|---|
+| `agent-connector-kernel` (new) | 62 | 2901 | 0 | The plain tools, docs sources and `PluginRegistry` moved from `app` byte for byte, except `DocsSource`, whose `choose` went to `app`'s `DocsSources` (stage 3). Also: `ToolRunner` and `ToolCatalog`'s core part; the MCP server on Quarkiverse (`KernelMcpServer`, `McpScopes`, `McpKeyMechanism`, `McpAccess`, `McpScopeToolFilter`); the domain-socket guard; the LLM proxy on `llm-relay-proxy`; the Podman launchers and harness configurations; `HarnessLaunch`; the containers. |
+| `app` | 13 | 233 | 316 | Depends on the kernel. `ToolCatalog` became `ConversationToolCatalog` (its core part is the kernel's). `ConversationToolRunner` builds on the kernel's `ToolRunner`. `ChatUiMcpScopes` replaces `ChatUiMcpServer` and `ConversationToolFilter`. `application.properties` sets `require-key=false` and the old scope header. Callers were renamed in `ChatSession` and `OpenAiCompatProvider`. The tests of the moved classes moved with them. |
+| `plugin-harness` | 5 | 148 | 15 | `HarnessLaunch` extracted (stage 7), then moved to the kernel (stage 11). `CliProcess` and `CodexProvider` launch through it. `HarnessLaunchPinTest` and `CliProcessMcpEntryTest`. |
+| `ssh-tools` (new) | 17 | 1425 | 0 | Stage 11. |
+| `ssh-connector` (new) | 12 | 872 | 0 | Stage 11. |
+| `e2e` | 20 | 2137 | 0 | The E2E programs of stages 8–11, the test-only `confinement-host` (step 5), the `traced` image (stage 9 part 3), and the throw-away `sshd` image (stage 11). |
+| `pom.xml` | 1 | 21 | 0 | The three new modules, the kernel's and `ssh-tools`' versions, `quarkus-mcp-server-http` 2.0.4 managed once, `llm-relay.version`. |
+| `tasks/todo.md` | 1 | 1110 | 0 | This plan. |
+
+**Checked against the plan:**
+- I found no change in `app` that the split did not need. Every edit there serves the move (imports, renamed callers, the kernel dependency, the MCP server on the kernel, the two settings). No behaviour of chat-ui changed: 792 `app` tests and the stage 6 E2E checks pass as on `main`.
+- Nothing in `plugin-web-tools` or `plugin-shell` changed.
+
+**To flag** (each one was reported when it was made; none is a hidden change):
+- `e2e/ConfinementCheck.java` now runs with the ssh-connector jar as its classpath, in both its modes, because it uses `ConnectorLaunch` (stage 11, step 3).
+- ssh-connector with no harness also writes `private/llm-key` (stage 11, step 3). The spec did not ask for it; the confinement check needs it, and so does a client the user starts.
+- `e2e/confinement-host` is a test-only Quarkus application, outside the reactor (step 5). It could now be replaced by ssh-connector in `ConfinementCheck`'s first mode.
+
+**Outside this diff:**
+- `~/works/llm-relay`: its own repository, no remote, commits `1f00ec1` and `6abdef8`.
+- `quarkus-gpu-broker`: local branch `llm-relay` (`2d9d336`), not deployed; it waits for the person's approval.
+- The local branch `wip/s9p3` (`688ac1e`) is kept.
+
+### Open
+
+- **Native image (stage 11, step 4):** fails on agent-connector-kernel's `static final HttpClient` in `DocSearchTool`. chat-01 decides whether to fix it (chat-48, t174).
+- **Real-model runs waiting for keys:** Codex CLI (OpenAI) and Claude Code (Anthropic).
+- **Proposed doc changes, for chat-48 to decide** (not written):
+  - `ProviderAndToolPlugins_260912_oo01`: its module table gains `agent-connector-kernel` (the tools, `ToolRunner`, the MCP server, the LLM proxy, the Podman launchers, `HarnessLaunch`, `PluginRegistry`), `ssh-tools` and `ssh-connector`. `plugin-harness` now depends on the kernel as `provided`.
+  - A new 040_design document for the split: why the headless part is a library of CDI beans; the one domain socket with the MCP server and the proxy at `/llm/<scope>/v1`; Decision 13's `require-key`; what each product sets (chat-ui `false` with `X-Chat-Ui-Conversation`, ssh-connector `true`); and the module dependency graph.
+- No push and no deploy was done.
+
