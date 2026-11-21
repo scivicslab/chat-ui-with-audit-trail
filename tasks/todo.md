@@ -531,6 +531,32 @@ ssh -F <ssh-connector's ssh_config> -o BatchMode=yes -o StrictHostKeyChecking=ac
   - One confined harness (OpenCode, with the stub model) calls `submit_job` and then `job_status` through MCP. The container still passes the 16 confinement checks, including that `~/.ssh` and the dummy ssh key cannot be read from inside it.
   - Afterwards the sshd container and its image are removed. `podman ps -a` and `podman images -a` are shown, and the dummy keys are deleted.
 - Rules as for every step: W206 for builds and `mvn test`, never `-DskipTests`; nice 19 on 5.14; don't touch docker, ml-marker, the GPU or `:3`; commit on this branch; don't push.
+### Stage 11, step 1: `ssh-tools` (2026-11-22, W206 Job `chat77-s11`)
+
+- **Module `ssh-tools`** (a plain jar on agent-connector-kernel and POJO-actor; package `com.scivicslab.sshtools`):
+  - `SshCommandLine`: `ssh -F <config>`, then the fixed options in the spec's order, then `--`, the host alias and the remote command as one element. An alias that is empty or starts with `-` is refused.
+  - `RemoteText`: POSIX single quoting (`'` becomes `'\''`). NUL, `\n` and `\r` are refused, and so is an empty value.
+  - `SshConfigFile`: writes `ssh_config` (0600) and an empty `known_hosts` (0600) in a 0700 directory. An existing directory that is not 0700 is refused and left as it is. Each `Host` block has `HostName`, `User`, optionally `Port`, `IdentityFile`, `IdentitiesOnly yes`, `BatchMode yes`, `StrictHostKeyChecking accept-new`, `UserKnownHostsFile <own>`, `GlobalKnownHostsFile /dev/null`, and optionally `ProxyJump <another block>`. Values holding white space, quotes, `#`, `=` or control characters are refused.
+  - `SshRunner` (a POJO, run as one actor per host): starts the argument array with `ProcessBuilder`, never through a shell. Standard input comes from bytes or a file, and standard output goes to memory or a file. At the time limit or an output limit it kills the process and its descendants, for example the ssh of a `ProxyJump`, and the result names the limit.
+  - `JobArguments`: `^[0-9]+(_[0-9]+)?$` for `job_id`; letters, digits, `-` and `_`, up to 64 characters, for `name`.
+  - `LocalFiles`: a path must lie under the working directory. Every existing directory on the way must be a real directory, not a symbolic link; the target may not be a symbolic link or a directory; an existing file is refused unless `overwrite`. Reading takes only a regular file whose real path is inside.
+  - `SshTools` (a `ToolExtension`): the seven tools.
+    - `submit_job` runs `mkdir -p -- '<dir>' && cat > '<dir>/job.sh' && sbatch [--job-name='<name>'] '<dir>/job.sh'`, with the script on standard input. `<dir>` is `<jobs dir>/<yyyyMMdd-HHmmss>-<8 hex>`.
+    - `job_status` asks `squeue -j N -h -o '%i|%j|%T|%M|%R'`, then `sacct -j N -n -P -o JobID,JobName,State,ExitCode,Elapsed`.
+    - `download_file` writes a dot-named temporary file next to the target and then moves it into place. Without `overwrite` the move fails if the target exists.
+- **Tests first: 28 in 7 classes.**
+  - Red against the skeleton (every method throws `UnsupportedOperationException`): 28 of 28 failed (`mvn -B test -pl ssh-tools -am`).
+  - Then green: 28 of 28 passed.
+  - `SshCommandLineTest.realSshDashGDoesNotReadAnOptionAfterTheAlias` runs OpenSSH 9.6p1's `ssh -G` on the generated array. With `--`, `proxycommand` has no `touch`. The control run without `--` does show `touch`, and the marker file is never created.
+  - `RemoteTextTest` reads each quoted value back through `sh -c 'printf %s …'`: `a'b`, `$(id)`, `` `id` ``, `; rm -rf ~` and two more all stay literal.
+  - `SshToolsTest` runs the seven tools against a fake `ssh` that records its arguments and standard input. A refused argument never starts it (0 calls).
+- **Result** (`rm -rf target */target`, `mvn -B test` and `mvn -B package`, BUILD SUCCESS):
+  - counts: `plugin-api` 0, `agent-connector-kernel` 101, `app` 792, `plugin-web-tools` 17, `plugin-shell` 11, `plugin-harness` 61, `ssh-tools` 28; total 1010, with 0 failures;
+  - against 982: +28, all in `ssh-tools`;
+  - E2E: `McpServerCheck` and `ToolCallingCheck` ALL PASSED; `ExternalMcpCheck` and `--restored` exit 0.
+- The build pod now also installs `openssh-client`, for `ssh -G`.
+- **Open:** the `ssh-connector` module waits for chat-48's answer on `HarnessLaunch`. It is in `plugin-harness`, not in agent-connector-kernel.
+
 - [ ] 12. **Wrap-up.**
   - Full `rm -rf target` and `mvn test` in a W206 Job, plus the E2E checks of stage 6 and the `ssh-connector` E2E of stage 11.
   - Diff against `main`.

@@ -18,6 +18,7 @@
     <module>plugin-web-tools</module>
     <module>plugin-shell</module>
     <module>plugin-harness</module>
+    <module>ssh-tools</module>
   </modules>
 
   <properties>
