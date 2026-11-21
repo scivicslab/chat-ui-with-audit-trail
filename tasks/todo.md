@@ -50,6 +50,11 @@ Naming rule: in docs, comments and commit messages, always write `agent-connecto
    Rule for each harness launcher: before writing it, check that harness's official docs that (1) it can connect to agent-connector-kernel's MCP server over localhost HTTP and (2) its LLM endpoint can be pointed at the LLM proxy, and record the URL and what the page says. If either fails, that launcher is not built and there is no workaround; it is reported to chat-48.
 
    Tests use dummy keys only. A run against a real model (Claude, OpenAI, GLM-5.3 on the B200 vLLM, Copilot) is not done without chat-48 arranging the credential or endpoint.
+9. **Stage-9 decisions** (2026-11-22; Copilot CLI, the network and OpenCode by the person, the image base by chat-01; relayed by chat-48 in t118:r1; `HarnessConfinement_261121_oo01` at `doc_SCIVICS003` commit `4a31a5d`):
+   - **GitHub Copilot CLI is dropped.** No launcher is built. The supported harnesses are Claude Code, Codex CLI, OpenCode and Hermes Agent.
+   - **Network:** each Podman container runs with `--network=none`. The MCP server and the LLM proxy are reached only through Unix sockets bind-mounted into the container. Inside it, a relay exposes those sockets on 127.0.0.1. No pasta and no slirp4netns. The relay is `socat` from the Ubuntu packages.
+   - **Image:** based on `ubuntu:24.04`. Each harness is installed the official way, and the latest released version is pinned at the start of stage 9, with the version and its source written into this plan.
+   - **OpenCode** is tested with both GLM-5.3 and Qwen3.8 on the B200 vLLM. Qwen3.8 needs tool calling enabled in vLLM; if it is not enabled, that is reported, not worked around. That check needs the real endpoint, so it belongs to the real-model runs, not to stage 9.
 
 ## Later (after the split)
 
@@ -348,10 +353,10 @@ A test that moves to another module still counts once, so the total stays the sa
       2. LLM endpoint: `ANTHROPIC_BASE_URL` with `ANTHROPIC_AUTH_TOKEN` (sent as `Authorization: Bearer`) or `ANTHROPIC_API_KEY` (sent as `x-api-key`) (https://code.claude.com/docs/en/llm-gateway-connect, https://code.claude.com/docs/en/llm-gateway).
       Caveat from the docs: `ANTHROPIC_API_KEY` "needs a one-time approval in interactive sessions", which `ANTHROPIC_AUTH_TOKEN` avoids.
   - **Result (2026-11-21, W206 Job `chat77-split-s4to8`):** BUILD SUCCESS for `mvn -B test` and `mvn -B package` after `rm -rf target */target`. Counts: `plugin-api` 0, `agent-connector-kernel` 80 (72 + 4 `LlmProxyRequestsTest` + 1 `LlmProxyTest` + 3 `ClaudeConfinementTest`), `app` 792, `plugin-web-tools` 17, `plugin-shell` 11, `plugin-harness` 61, total 961 = 934 + 27 new (19 from stages 5–7, 8 from this stage), with 0 failures, errors and skipped. The enforcer passed. E2E: `McpServerCheck` 19/19, `ToolCallingCheck` 9/9, `ExternalMcpCheck` 8/8, `--restored` 1/1 (run on this stage's jar; see the correction under stage 5).
-- [ ] 9. **Podman launchers for Codex CLI, OpenCode, Hermes Agent and Copilot CLI** (Decisions 8).
+- [ ] 9. **Podman launchers for Codex CLI, OpenCode and Hermes Agent** (Decisions 8 and 9; Copilot CLI dropped).
   - Each launcher builds the rootless Podman command of `HarnessConfinement_261121_oo01`:
     - only the working directory is mounted, never agent-connector-kernel's directory or the user's home;
-    - the container reaches only agent-connector-kernel's MCP server and the LLM proxy;
+    - `--network=none`: the container reaches agent-connector-kernel's MCP server and the LLM proxy only through Unix sockets bind-mounted into it, which `socat` inside the container exposes on 127.0.0.1 (Decisions 9);
     - the harness's environment holds only the proxy's throw-away key.
   - Each launcher also writes the harness's own MCP and LLM-endpoint configuration.
   - Tests are written first and fail first, and use dummy keys only. Runs against real models wait for chat-48 (Decisions 8).
@@ -364,6 +369,16 @@ A test that moves to another module still counts once, so the total stays the sa
     | Hermes Agent | Yes: `mcp_servers.<name>.url` and `headers` in `~/.hermes/config.yaml` (https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp) | Yes: `model.provider: custom`, `model.base_url`, `model.api_key` or `key_env` (https://hermes-agent.nousresearch.com/docs/integrations/providers) | build |
     | GitHub Copilot CLI | Yes: `"type": "http"`, `url`, `headers` in `~/.copilot/mcp-config.json`, or `copilot mcp add --transport http --header …` (https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers) | **Only with BYOK.** `providers.json` `baseUrl` and `apiKey` (written literally, not read from the environment), and "GitHub authentication is not required if you use your own LLM provider API keys (BYOK)" (https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/use-byok-models, https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/authenticate-copilot-cli). The model of the Copilot subscription goes through the GitHub account, and no page says that endpoint can be pointed elsewhere. | **not built; reported to chat-48** |
 
+  - Design consequence of Decisions 9: the MCP server (stage 6) and the LLM proxy (stage 8) listen on loopback TCP, and the JDK `com.sun.net.httpserver` cannot listen on a Unix socket. Something must therefore serve each of them on a Unix socket on the host side. Whether that is a host-side relay or a Unix-socket listener in agent-connector-kernel is to be settled with chat-48 before the launchers are built.
+  - Tests (t118:r1): dummy keys only.
+    - Unit tests first, red then green, for each launcher's argument and configuration builder.
+    - A confinement proof per Podman harness image, inside a container started the way the launcher starts it: (a) both sockets work through the relay (an MCP `tools/list`, and one proxied request with a dummy key against a stub upstream); (b) an outbound connection to an external host fails; (c) a connection to a host-side TCP port fails.
+  - **Blocked (2026-11-22): rootless Podman does not run in the W206 Job pod.** Probe Job `chat77-podman-probe` (ubuntu:24.04 pod on stonefly521, default pod security, Podman 4.9.3 from the Ubuntu packages, user `probe` with `/etc/subuid` `probe:165536:65536`):
+    - `unshare --user --map-root-user true` works;
+    - `podman info` and `podman run --network=none ubuntu:24.04` both fail with `newuidmap: write to uid_map failed: Operation not permitted` / `cannot set up namespace using "/usr/bin/newuidmap": exit status 1` (exit 125);
+    - Podman also warns `"/" is not a shared mount`, and `/dev/fuse` does not exist in the pod;
+    - kernel 6.8.0-101-generic, `max_user_namespaces` 514234, `unprivileged_userns_clone` 1, seccomp off, CapEff `00000000a80425fb`.
+    - Stage 9 stops here until chat-48 says how to proceed (t118:r1).
   - Check: full `rm -rf target */target` and `mvn -B test`, with the counts against the baseline and the new tests listed separately; the enforcer rule; and the three E2E checks.
 - [x] 10. **Native-image probe of `agent-connector-kernel`.**
   - An E2E program with `main()`, outside the Maven build (testing standard `TestingStandard_260404_oo01`): it builds a `ToolRunner` over a temporary directory, lists the tools, and calls `write`, then `read`.
