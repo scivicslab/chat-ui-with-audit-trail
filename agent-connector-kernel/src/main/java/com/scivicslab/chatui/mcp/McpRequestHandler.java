@@ -13,8 +13,9 @@ import java.util.function.Predicate;
  * A plain object with no HTTP in it: the server hands it the two headers and the body, and writes back what it returns.
  *
  * <p>A request names its scope in {@value #SCOPE_HEADER} and carries the scope's key as
- * {@code Authorization: Bearer <key>}. Without a scope the answer is 400; for a scope that does not exist, 404; without
- * the scope's key, 401. Only then is the body read as one JSON-RPC message: {@code initialize}, {@code tools/list},
+ * {@code Authorization: Bearer <key>}. Without a scope the answer is 400. For a scope that does not exist and for a
+ * request without the scope's key, the answer is the same 401, so a local process without a key cannot learn which
+ * scope names exist. Only then is the body read as one JSON-RPC message: {@code initialize}, {@code tools/list},
  * {@code tools/call}, or a notification, which gets 202 and no body.</p>
  */
 public final class McpRequestHandler {
@@ -52,9 +53,9 @@ public final class McpRequestHandler {
     public Reply handle(String scope, String authorization, String body) {
         if (scope == null || scope.isBlank()) return refusal(400, "the request names no scope; send " + SCOPE_HEADER);
         String name = scope.strip();
-        if (!scopeExists.test(name)) return refusal(404, "no such scope: " + name);
         String key = authorization != null && authorization.startsWith("Bearer ") ? authorization.substring(7).strip() : null;
-        ToolRunner runner = open.apply(name, key);
+        // An unknown scope and a wrong key get the same answer, so the answer tells nothing about which scopes exist.
+        ToolRunner runner = scopeExists.test(name) ? open.apply(name, key) : null;
         if (runner == null) return refusal(401, "the request does not carry this scope's key");
 
         JSONObject request;

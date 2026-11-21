@@ -72,9 +72,16 @@ class McpRequestHandlerTest {
         assertTrue(names.contains("\"read\"") && names.contains("\"calc\""), names);
     }
 
+    /**
+     * An unknown scope is refused exactly like a wrong key, so a local process without a key cannot learn which scope
+     * names exist. Only a missing scope header is told apart (400).
+     */
     @Test
-    void anUnknownScopeIsRefused() {
-        assertEquals(404, handler.handle("s2", "Bearer " + key, CALL).status());
+    void anUnknownScopeIsRefusedLikeAWrongKey() {
+        McpRequestHandler.Reply unknown = handler.handle("s2", "Bearer " + key, CALL);
+        McpRequestHandler.Reply wrongKey = handler.handle("s1", "Bearer " + key + "x", CALL);
+        assertEquals(401, unknown.status());
+        assertEquals(wrongKey, unknown);
         assertEquals(400, handler.handle(null, "Bearer " + key, CALL).status());
     }
 }
