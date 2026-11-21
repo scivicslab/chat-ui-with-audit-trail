@@ -826,6 +826,29 @@ So the shared library has two layers, and the part they share is the streaming u
   - through the socket, the same request gets the same 401 and body;
   - `/q/health` is not answered by the proxy.
 
+### Step 4a.3: the GPU broker on `llm-relay-core` (done 2026-11-22; local branch only, not deployed)
+
+- **Where:** `~/works/quarkus-gpu-broker`, new local branch `llm-relay` from `1a9033c`, commit `2d9d336`.
+  - Made in a separate worktree, so the broker's working copy stayed on `main` and untouched.
+  - Author `scivicslab <devteam@scivicslab.com>`.
+  - No push. Not deployed: the running broker at 192.168.5.21:30805, its config and its image were not touched.
+- **Change:**
+  - `HttpAiServiceClient` now sends through `RelayCall.sendAndWait`, with an adapter from `RelaySink` to `ResponseSink`. `AiServiceClient` and the test doubles are unchanged.
+  - `AiServiceEndpointBuilder` passes Quarkus's `Vertx`; a client built outside CDI (tests) uses one private Vert.x.
+  - The pom adds `llm-relay-core` 0.1.0-SNAPSHOT.
+  - The broker's sinks are called on the Vert.x event loop now. I read the four (`StreamingResponseSink`, `PolledResponseSink`, `RepetitionStoppingResponseSink`, `GenerationMeasuringResponseSink`), and none blocks.
+- **F1, fixed as chat-48 decided:**
+  - A failure after the start raises the new `AiServiceFailedAfterStartException`. `AiServiceEndpointWorker` fails the sink and records the job failed, instead of requeueing it.
+  - A failure before the first byte is requeued as before.
+  - The change is noted in the branch's commit message and in the broker's `tasks/todo.md`.
+- **F2:** no timeout is set (`RelayOptions.DEFAULTS`).
+- **Tests first.** The red run failed to compile (`cannot find symbol AiServiceFailedAfterStartException`).
+  - `HttpAiServiceClientTest` grows from 2 to 8 tests: B1/B2 (body, Content-Type, HTTP/1.1, no `Upgrade`), B3, B4, B6, B7/B8/B10, B9, F1 and B11.
+  - The new `FailureAfterStartTest`, 1 test, has two endpoints: after a failure that follows the start, the sink is failed, the job reached one endpoint only, and nothing was started twice.
+- **Result** (W206 Job `chat77-relay-1`, `mvn -B test` and `mvn -B package`, BUILD SUCCESS): 243 tests, with 0 failures, against 236 at `1a9033c` in the same Job.
+- **Vert.x:** the uber-jar `quarkus-gpu-broker-1.2.0-SNAPSHOT.jar` carries one `META-INF/maven/io.vertx/vertx-core/pom.properties`, version 4.5.21, and `com/scivicslab/llmrelay/RelayCall.class`. `mvn dependency:tree` shows `llm-relay-core`, then `vertx-core` 4.5.21.
+- **Next:** deploying waits for the person's approval, which chat-48 asks for.
+
 ### Questions on the plan change (all settled)
 
 1. **Point 5: settled by the person's decision (2026-11-22, t147:r1).** The LLM proxy uses Vert.x HTTP Proxy, with the part shared with the GPU broker in `llm-relay` (step 4a).
