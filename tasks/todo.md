@@ -620,13 +620,138 @@ Files on `wip/s9p3`:
        - counts: `plugin-api` 0, `agent-connector-kernel` 95, `app` 792, `plugin-web-tools` 17, `plugin-shell` 11, `plugin-harness` 61; total 976, with 0 failures, errors and skipped;
        - against 972 after step 2: minus 3 deleted (`UnixSocketHttpServerTest` 2, `LlmProxyUnixSocketTest` 1), plus 7 new.
      - E2E: `McpServerCheck` ALL PASSED; `ExternalMcpCheck` and `--restored` exit 0; `ToolCallingCheck` ALL PASSED in a fresh home (`e2eonly.sh`). It had failed in the run that reused the home (see step 2).
-4. **LLM proxy.** On the Quarkus router, as chat-48 chooses under point 5. `LlmProxyTest` and `LlmProxyUnixSocketTest` are rewritten against it, red first. `LlmProxyRequestsTest` is unchanged.
+4. **LLM proxy.** Replaced by step 4a below (the person's decision, t147:r1): Vert.x HTTP Proxy, with the part shared with the GPU broker in a library of its own, `llm-relay`. `LlmProxyTest` and `LlmProxyUnixSocketTest` are rewritten against it, red first. `LlmProxyRequestsTest` is unchanged.
 5. **Confinement checks again on 5.14** (part 2's 16 checks, then part 3's stub runs, traced and plain), with the network-off settings.
 6. **Real-model runs** (t135:r1), still on hold until step 5 passes: OpenCode with GLM-5.3, OpenCode with Qwen3.8 (its tool-call probe passed on 2026-11-22, `finish_reason: "tool_calls"`), Hermes Agent with GLM-5.3, and Codex CLI with GLM-5.3.
    - Codex's config reference (https://learn.chatgpt.com/codex/config-file/config-reference) allows a custom provider, `model_providers.<id>.base_url`, but "responses is the only supported value" of `wire_api`. So the model server must serve the Responses API, and Codex CLI with GLM-5.3 runs only if 5.16 answers `/v1/responses`.
    - Claude Code waits for an Anthropic key.
 7. **`ssh-connector` as a Quarkus application** (stage 11, after chat-48's spec): its own module with `quarkus-maven-plugin`, the native image built with `-Dnative` in a W206 Job (GraalVM CE).
 8. **Wrap-up** (stage 12).
+
+## Step 4a: design of `llm-relay`, the shared streaming relay (t147:r1)
+
+The person's decision (2026-11-22, via chat-01 and chat-48):
+- the LLM proxy uses Vert.x HTTP Proxy (`io.vertx:vertx-http-proxy`);
+- it is built on existing libraries and made robust;
+- the part it shares with the GPU broker becomes one shared library, so the same job is not written twice.
+
+This replaces step 4 of the order above. Nothing below is built before chat-48's go-ahead.
+
+### What the broker's relay does today (read before the design)
+
+Source: `~/works/quarkus-gpu-broker` at `1a9033c`, Quarkus 3.28.3. The relay is `llm/HttpAiServiceClient.java`, behind `llm/AiServiceClient.java`, and its one caller is `actor/AiServiceEndpointWorker.java`. The behaviours the library must keep:
+
+| # | Behaviour | Where |
+|---|---|---|
+| B1 | POSTs the job's request bytes verbatim to `http://<address><path>`, with the client's `Content-Type` when there is one. The broker never parses the body. | `HttpAiServiceClient.java:38-43`; `model/RequestBody.java:3-8` |
+| B2 | HTTP/1.1 is forced. The JDK client's h2c upgrade corrupts multipart/form-data bodies sent to uvicorn/FastAPI backends (YomiToku, Marker, embedding). | `HttpAiServiceClient.java:29-34`; test `HttpAiServiceClientTest.underlyingClient_isPinnedToHttp11` |
+| B3 | A 5xx raises `AiServiceCallException` before `start`, so the job can be handed to another endpoint. | `HttpAiServiceClient.java:48-51`; `model/ResponseSink.java:13-17` |
+| B4 | A connection failure (`IOException`) raises the same exception. | `HttpAiServiceClient.java:59-60` |
+| B5 | On that exception the worker requeues the job onto another endpoint through `JobQueue.submit`, up to `MAX_ATTEMPTS = 3`, then fails the sink with "gave up after 3 attempts". | `AiServiceEndpointWorker.java:30, 78-81, 121-133` |
+| B6 | Any status below 500 is relayed with its own status, so a 4xx reaches the client as that refusal, not as a 200 with an error body. | `HttpAiServiceClient.java:52-54`; `ResponseSink.java:60-67`; test `HttpAiServiceClientTest.aRefusalOfTheServer_isRelayedWithItsStatus` |
+| B7 | `start(contentType, status)` is called once, before any `emit`. The content type is the upstream's, defaulting to `application/octet-stream`. | `HttpAiServiceClient.java:52-54`; `ResponseSink.java:10-12` |
+| B8 | The body is relayed as it arrives, in chunks of at most 8 KB, each a fresh copy. | `HttpAiServiceClient.java:27, 67-71` |
+| B9 | `stopRequested()` is asked after every `emit`. When it is true, the relay closes the upstream body, which ends the generation, and the job still counts as complete. | `HttpAiServiceClient.java:72-77`; `ResponseSink.java:72-83`; `RepetitionStoppingResponseSink.java:97`; `RunawayGenerationLimits_260915_oo01` |
+| B10 | `complete()` is called after the body ends. | `HttpAiServiceClient.java:58` |
+| B11 | An interrupt raises the exception and keeps the thread's interrupt flag. | `HttpAiServiceClient.java:61-64` |
+| B12 | The call blocks the worker actor's own virtual thread until the response is done, which gives one job at a time per endpoint. | `AiServiceClient.java:10-13`; `AiServiceEndpointWorker.java:78` |
+| B13 | `servedBy(address)` comes before the call, from the worker, not the relay. It stays in the worker. | `AiServiceEndpointWorker.java:77` |
+| B14 | No request or idle timeout is set: the JDK client's default is none. | `HttpAiServiceClient.java:32-34, 38-40` |
+
+Two findings, for chat-48 to decide on:
+- **F1: a failure after `start` is also requeued.** An `IOException` while the body is being read is caught at `HttpAiServiceClient.java:59-60`, after `start` at line 52. The worker then requeues it (`AiServiceEndpointWorker.java:79-81`), so the next attempt calls `start` again on a sink that has already emitted. `ResponseSink`'s contract (lines 10-12) allows `fail` at any point, but not a second `start`.
+  - The library tells the two cases apart: before the first byte means another endpoint may try; after the first byte means the sink is failed.
+  - Keeping today's behaviour exactly would mean keeping this bug. My recommendation is to fix it, with a test, in the broker step.
+- **F2: no timeout (B14).** The library keeps "no timeout" as its default, so the broker's behaviour is unchanged. It makes a connect timeout and an idle timeout settable, and the broker step does not set them unless chat-48 asks.
+
+### The kernel's proxy (what it keeps)
+
+The kernel's proxy keeps `LlmProxyRequests` (scope, key and 400/401 decisions) and `ProxyKeys` (throw-away keys in a POJO-actor actor). It needs:
+- both request shapes: `/v1/chat/completions` (OpenAI-compatible, `Authorization: Bearer`) and `/v1/messages` (Anthropic, `x-api-key`, with `anthropic-version` passed through);
+- the real credential put in place of the throw-away key;
+- Server-Sent Events passed through as they arrive;
+- the proxy at `/llm/<scope>/v1` on the Quarkus HTTP server, so it is reached through the domain socket (Decision 13).
+
+### Why one design does not cover both directly
+
+The two consumers enter the relay at different points:
+- **The kernel** has a live incoming request: the harness's HTTP request on the Quarkus router. That is the case Vert.x HTTP Proxy is made for (`HttpProxy.reverseProxy(client)` as a request handler, with a `ProxyInterceptor` on the proxied request).
+- **The broker** has no live request at the moment it relays. Its REST resource reads the client's body into bytes (`RequestBody`), queues a `Job`, and a worker sends it later, perhaps twice or three times (B5).
+  - Vert.x HTTP Proxy proxies an `HttpServerRequest` and streams its body once. It cannot hold a request in a priority queue, and it cannot send the same body again to a second endpoint.
+
+So the shared library has two layers, and the part they share is the streaming upstream call.
+
+### The library: `llm-relay`
+
+- **`llm-relay-core`**, the upstream call, on the Vert.x `HttpClient` (no Quarkus; the caller passes its `Vertx`):
+  - `Upstream`: an address and a path, plus the client options: HTTP/1.1 always (B2), keep-alive, an optional connect timeout and an optional idle timeout, both off by default (B14, F2).
+  - `RelayCall.send(Upstream, RequestBody, RelaySink)` returns a `Future<Outcome>`. A blocking `sendAndWait`, for a caller on a virtual thread, keeps the broker's B12 and B11.
+  - `RelaySink` mirrors the broker's `ResponseSink`: `start(contentType, status)`, `emit(Buffer)`, `stopRequested()`, `complete()`. The broker adapts its `ResponseSink` to it in a few lines.
+  - The library takes over B1, B3, B4, B6, B7, B8 (each `emit` is one Vert.x buffer as it arrives; no reading until the end), B9 (the upstream connection is reset when `stopRequested`, and the outcome is `COMPLETED`) and B10.
+  - **Outcomes** (`Outcome`): `COMPLETED`; `RETRYABLE` (connection failure or 5xx, before `start`, B3 and B4); `FAILED_AFTER_START` (F1).
+    - The caller decides what to do: the broker's worker requeues on `RETRYABLE`, keeping B5 and its actor, and fails the sink on `FAILED_AFTER_START`.
+    - Endpoint choice and the attempt count stay in the broker's `JobQueue` and worker, which are POJO-actor actors. The library holds no queue and no actor.
+- **`llm-relay-proxy`**, a reverse proxy for a live request, on `vertx-http-proxy`, built on `llm-relay-core`'s client options:
+  - `RelayProxy`: mounts `HttpProxy.reverseProxy(client)` for a path prefix on a Vert.x `Router`. The client is made from `Upstream`'s options (HTTP/1.1, timeouts).
+  - **Interceptors** (`RelayInterceptor`, on `ProxyInterceptor`): each one can refuse a request with a status and body, rewrite its path and headers, or choose its origin. The proxy runs them in order before the request goes upstream.
+    - **The kernel's:** a `ScopeKeyInterceptor` that calls `LlmProxyRequests.decide`. A refusal is 400 or 401. On success the `/llm/<scope>` prefix is stripped, the throw-away key is replaced by the real credential (`Authorization` or `x-api-key`), and hop-by-hop headers are dropped.
+    - **An origin-choosing interceptor** with retry before the first byte, which Vert.x HTTP Proxy does not do by itself, is needed by no consumer at present. The broker keeps its queue (see above), so the proxy module does not have to have it.
+  - Streaming: Vert.x HTTP Proxy pipes the origin's response body to the client. `llm-relay-proxy`'s first tests show that SSE chunks arrive one by one, in order, and are not held until the end.
+- **Request shapes:** both layers pass bytes through and parse no body. The shape matters only for which header carries the credential, which is `LlmProxyRequests`' business, and for the tests. They use both an OpenAI stream (`data:` lines, then `data: [DONE]`) and an Anthropic stream (`event:` and `data:` lines).
+
+### Placement: its own Maven project, `~/works/llm-relay`
+
+- It is a multi-module project: parent `com.scivicslab:llm-relay-parent`, with modules `llm-relay-core` and `llm-relay-proxy`.
+- It has its own version, starting at `0.1.0-SNAPSHOT`, and is installed with `mvn install`.
+- A module inside quarkus-chat-ui is not cleaner:
+  - the broker would then depend on chat-ui's repository, version and release cycle for the one part it shares;
+  - chat-ui's modules all build against chat-ui's Quarkus BOM (3.33.4.2), while the broker runs 3.28.3.
+- It is not in the POJO-actor, Turing-workflow, Turing-workflow-plugins family, whose versions move together, so it keeps a version of its own.
+- Its dependencies are plain Vert.x (`vertx-core`, `vertx-web` for `Router`, `vertx-http-proxy`), with no Quarkus. Tests use JUnit 5 and a Vert.x stub upstream only, with dummy keys.
+
+### Staying compatible with both Quarkus versions
+
+- Quarkus 3.28.3 (the broker) pins `vertx-core` and `vertx-http-proxy` at 4.5.21. Quarkus 3.33.4.2 (the kernel) pins both at 4.5.35. Both are read from the platform BOM POMs in `~/.m2`.
+- `llm-relay` compiles against the lower one, 4.5.21, and declares the Vert.x artifacts `provided`. Each consumer's own Quarkus BOM then decides the runtime version, and no second Vert.x reaches either application.
+- It uses only API that is in both (Vert.x 4.5 keeps its API within the 4.5 line).
+- The library's tests run twice in the W206 Job, with `-Dvertx.version=4.5.21` and with `-Dvertx.version=4.5.35`.
+- A Quarkus upgrade to Vert.x 5 would be a new major version of `llm-relay`.
+
+### New order of work, after chat-48's go-ahead
+
+1. **`llm-relay` and its tests** (a new local git repository, `~/works/llm-relay`; commit, no push). Tests first, red then green, against both Vert.x versions:
+   - `llm-relay-core`:
+     - HTTP/1.1 always (B2);
+     - the body and `Content-Type` are sent verbatim (B1);
+     - a 5xx and a refused connection give `RETRYABLE` with no `start` (B3, B4);
+     - a 4xx is relayed with its status (B6);
+     - `start` comes once, before `emit` (B7);
+     - several chunks arrive in order, the first before the upstream has finished (B8);
+     - `stopRequested` resets the upstream and completes (B9);
+     - a failure after `start` gives `FAILED_AFTER_START` (F1);
+     - `sendAndWait` keeps the interrupt flag (B11).
+   - `llm-relay-proxy`:
+     - an interceptor's refusal reaches the client with its status and body;
+     - headers and the path are rewritten;
+     - SSE chunks pass through unbroken, in order and unbuffered, in both shapes;
+     - an upstream error before the first byte reaches the client as 502.
+2. **The kernel's LLM proxy on `llm-relay-proxy`** (on the Quarkus router through `@Observes Router`, at `/llm/<scope>/v1`). `LlmProxy`'s `com.sun.net.httpserver` and its hand-written forwarding are deleted. Tests first, with dummy keys and a stub upstream only:
+   - no key, wrong key and unknown scope get the same 401;
+   - no scope gets 400;
+   - the right key is forwarded with the real credential;
+   - streaming passes through unbroken (several SSE chunks, in order, not held to the end);
+   - an upstream error before the first byte is answered.
+   - An E2E check runs it through the domain socket.
+3. **The GPU broker on `llm-relay-core`**, on a new local branch of `~/works/quarkus-gpu-broker`:
+   - `HttpAiServiceClient`'s body is replaced by a `RelayCall` with the `ResponseSink` adapter, and `AiServiceClient` and the test doubles stay.
+   - Every behaviour B1–B13 keeps a test, the existing ones included. F1 is fixed if chat-48 agrees.
+   - Never deployed or restarted, and the running broker at 192.168.5.21:30805 and its config are not touched. Deploying waits for the person's approval.
+4. **Back to the plan:** step 5 (the 5.14 confinement checks and the stub runs), then step 6 (the real-model runs).
+
+### Open questions for chat-48
+
+1. **F1:** fix the requeue of a failure after `start`, or keep today's behaviour exactly?
+2. **The broker's path:** `llm-relay-core` alone, as above, rather than Vert.x HTTP Proxy, because the broker queues and retries a request that is no longer live.
 
 ### Open questions for chat-48
 
