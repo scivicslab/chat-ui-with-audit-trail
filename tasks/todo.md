@@ -622,9 +622,9 @@ Files on `wip/s9p3`:
      - E2E: `McpServerCheck` ALL PASSED; `ExternalMcpCheck` and `--restored` exit 0; `ToolCallingCheck` ALL PASSED in a fresh home (`e2eonly.sh`). It had failed in the run that reused the home (see step 2).
 4. **LLM proxy.** Replaced by step 4a below (the person's decision, t147:r1): Vert.x HTTP Proxy, with the part shared with the GPU broker in a library of its own, `llm-relay`. `LlmProxyTest` and `LlmProxyUnixSocketTest` are rewritten against it, red first. `LlmProxyRequestsTest` is unchanged.
 5. **Confinement checks again on 5.14** (part 2's 16 checks, then part 3's stub runs, traced and plain), with the network-off settings.
-6. **Real-model runs** (t135:r1), still on hold until step 5 passes: OpenCode with GLM-5.3, OpenCode with Qwen3.8 (its tool-call probe passed on 2026-11-22, `finish_reason: "tool_calls"`), Hermes Agent with GLM-5.3, and Codex CLI with GLM-5.3.
+6. **Real-model runs** (t135:r1). Done (see "Step 6" below): OpenCode with GLM-5.3, OpenCode with Qwen3.8 and Hermes Agent with GLM-5.3 passed. Codex CLI with GLM-5.3 failed at the model server, and Codex now waits for an OpenAI key (t163:r1).
    - Codex's config reference (https://learn.chatgpt.com/codex/config-file/config-reference) allows a custom provider, `model_providers.<id>.base_url`, but "responses is the only supported value" of `wire_api`. So the model server must serve the Responses API, and Codex CLI with GLM-5.3 runs only if 5.16 answers `/v1/responses`.
-   - Claude Code waits for an Anthropic key.
+   - Claude Code waits for an Anthropic key, and Codex CLI for an OpenAI key.
 7. **`ssh-connector` as a Quarkus application** (stage 11, after chat-48's spec): its own module with `quarkus-maven-plugin`, the native image built with `-Dnative` in a W206 Job (GraalVM CE).
 8. **Wrap-up** (stage 12).
 
@@ -891,7 +891,7 @@ So the shared library has two layers, and the part they share is the streaming u
   - against 980 after step 4a.2: +2 (`codexApprovesOurMcpServersToolsAndNothingGlobal`, `hermesListsOurMcpToolsDirectly`);
   - E2E: `McpServerCheck` and `ToolCallingCheck` ALL PASSED; `ExternalMcpCheck` and `--restored` exit 0.
 
-### Step 6: real models, through the confined container and the kernel's proxy (stopped at Codex, 2026-11-22)
+### Step 6: real models, through the confined container and the kernel's proxy (done, 2026-11-22)
 
 - **Before the runs:**
   - the broker's `/queues` showed the three chat queues UP and idle (GLM-5.3 0/4, gemma 0/32, Qwen3.8 0/1);
@@ -904,17 +904,25 @@ So the shared library has two layers, and the part they share is the streaming u
 | OpenCode 1.19.6 | `GLM-5.3-Flash-Uncensored` (5.16) | `42` | `agent-connector-kernel_calc {"expression":"6*7"}`; the host ran `calc(6*7)`; the result was in the next request | PASS |
 | OpenCode 1.19.6 | `qwen3.8-flash-next-iq3_xxs-radeon` (5.23) | `42` | the same | PASS |
 | Hermes Agent 0.23.3 | `GLM-5.3-Flash-Uncensored` (5.16) | `6 * 7 = 42` | `calc(6*7)` ran and its result was in the next request | PASS |
-| Codex CLI 0.171.0 | `GLM-5.3-Flash-Uncensored` (5.16) | none: exit 1 | none | **FAIL** |
+| Codex CLI 0.171.0 | `GLM-5.3-Flash-Uncensored` (5.16) | none: exit 1 | none | FAIL at the model server; waits for an OpenAI key |
 
 - **Codex's raw error.** The model server answered Codex's first request with 400:
   `{"error": {"message": "tools of type 'namespace' are not supported: this server runs function tools only", "type": "invalid_request_error", "param": null, "code": null}}`.
   - Codex sends its MCP tools as a Responses API `namespace` tool (see step 5), and GLM-5.3's server takes function tools only.
   - One request reached the model, and the run stopped there.
+  - The same server answers `POST /v1/responses` itself with 200 (the minimal request above, without tools). What it refuses is the `namespace` tool type.
+- **Codex: decided (t163:r1).**
+  - The person's decision named OpenAI as Codex's test model; GLM-5.3 was only an extra chance.
+  - The proxy does not translate `namespace` tools into function tools. That would be working around the model server.
+  - Codex's real-model run waits for an OpenAI key, as Claude Code's waits for an Anthropic key.
 - In every passing run: the real key was not given to the container, and every request reached the model through the proxy with the real (dummy) key.
 - Hermes' own probes before its chat request went through the proxy too, all read-only: `GET /api/v1/models`, `/api/tags`, `/v1/props`, `/props`, `/version`, `/v1/models`, and `POST /api/show`. They answered 404, or 200 for `/v1/models`.
 - The check took the relay's closing `socat … Connection reset by peer` line for Hermes' first reply line. The actual reply is `6 * 7 = 42`.
-- **Claude Code** still waits for an Anthropic key.
-- **On 5.14:** no containers are left; the six images are kept until step 6 ends.
+- **Waiting for keys:** Claude Code (Anthropic) and Codex CLI (OpenAI).
+- **Clean-up after step 6:**
+  - on 5.14 the six images (`localhost/ack-{codex:0.171.0,opencode:1.19.6,hermes:0.23.3}` and their `-traced`) were removed with `podman rmi`. `podman ps -a` lists no containers, and `podman images -a` lists only `docker.io/library/ubuntu:24.04`, which is chat-01's;
+  - no `~/.ssh` markers are left on 5.14;
+  - no W206 Job or pod of this work is left.
 
 ### Questions on the plan change (all settled)
 
