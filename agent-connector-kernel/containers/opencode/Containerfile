@@ -14,4 +14,13 @@ RUN chmod 0755 /usr/local/bin/ack-relay \
  && mkdir -p /home/agent/.config/opencode && chown -R agent:agent /home/agent
 USER agent
 ENV HOME=/home/agent
+# Nothing is fetched at run time (tasks/todo.md, stage 9 part 3). Two sources of fetches in OpenCode 1.19.6:
+# - Config loading installs @opencode-ai/plugin at OpenCode's own version into every config directory, in the
+#   background (packages/opencode/src/config/config.ts, Npm.install). Npm.install does nothing when node_modules exists
+#   and every declared package is in package-lock.json's root (packages/core/src/npm.ts), so it is installed here.
+#   The provider package @ai-sdk/openai-compatible needs nothing: it is bundled (provider/provider.ts, BUNDLED_PROVIDERS).
+# - The models.dev catalogue, fetched from models.opencode.ai unless OPENCODE_DISABLE_MODELS_FETCH is set
+#   (packages/core/src/models-dev.ts; https://opencode.ai/v1/docs/cli, environment variables).
+RUN cd /home/agent/.config/opencode && npm install --no-audit --no-fund @opencode-ai/plugin@1.19.6 && rm -rf /home/agent/.npm
+ENV OPENCODE_DISABLE_MODELS_FETCH=1
 WORKDIR /work

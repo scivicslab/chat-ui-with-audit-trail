@@ -588,11 +588,38 @@ Files on `wip/s9p3`:
        - against 976 after step 1: minus 9 deleted (`LocalMcpServerTest` 1, `LocalMcpServerUnixSocketTest` 3, `McpRequestHandlerTest` 5), plus 5 new.
      - E2E on this jar:
        - `McpServerCheck` ALL PASSED; `ExternalMcpCheck` and `--restored` exit 0.
-       - `ToolCallingCheck` failed once in that run: the conversation's history had an extra user and assistant pair (`[system, user, assistant, user, assistant, tool, assistant, tool, assistant]`); its other checks passed. It passed in the run before (the same server code in no-key mode) and in two reruns on the same jar (`e2eonly.sh`), both with `[system, user, assistant, tool, assistant, tool, assistant]`. The cause of the one failure is not known.
+       - `ToolCallingCheck` failed once in that run: the conversation's history had an extra user and assistant pair (`[system, user, assistant, user, assistant, tool, assistant, tool, assistant]`); its other checks passed. It passed in two reruns on the same jar (`e2eonly.sh`, each in a fresh home), both with `[system, user, assistant, tool, assistant, tool, assistant]`.
+       - Cause, found in step 3: my Job script `runstage.sh` reused `/work/<label>-e2e` as the instance's home. A second run under the same label restored the earlier run's conversations. chat-ui's log says `Restored 1 turn(s) into project1/chat-02 from I/O log session 3`, and that restored turn is the extra pair. The script now starts each run from an empty home. The code was not at fault.
 3. **Unix domain socket.**
    - `quarkus.http.domain-socket` set by the launcher's process, and `UnixSocketHttpServer` deleted.
    - A test checks the socket's 0600 and the directory's 0700.
    - The relay maps both container ports to the one socket, and the harness configs take `/llm/<scope>/v1`. Brought over from `wip/s9p3`: the network-off settings and their tests.
+   - **Done (2026-11-22, W206 Job `chat77-split-k1`).** One socket, owner-only.
+     - Change:
+       - `PodmanConfinement` mounts one socket, `agent-connector-kernel.sock`, at `/run/agent-connector-kernel/agent-connector-kernel.sock`, and the proxy's base URL is `http://127.0.0.1:18766/llm/<scope>/v1`.
+       - `ack-relay` maps both container ports, 18765 and 18766, to that socket.
+       - In the kernel, `SocketPermissions` (plain) and `DomainSocketGuard` (bean):
+         - at start-up the guard refuses a socket directory that others can read or enter, and refuses a domain socket without `quarkus.vertx.prefer-native-transport=true`;
+         - on `DomainSocketServerStart` it makes the socket 0600.
+       - The kernel depends on `netty-transport-native-epoll` (`linux-x86_64`).
+       - Deleted: `UnixSocketHttpServer`, its test, `UnixSocketClient`, `LlmProxyUnixSocketTest`, and `LlmProxy`'s Unix-socket constructor. `LlmProxy`'s TCP form stays until step 4.
+       - Brought over from `wip/s9p3`: the network-off settings of `CodexHarness`, `OpenCodeHarness` and `HermesHarness`, their tests, and the OpenCode Containerfile (`@opencode-ai/plugin` installed, `OPENCODE_DISABLE_MODELS_FETCH=1`).
+     - Found on the way: the domain socket needs `quarkus.vertx.prefer-native-transport=true` as well as the epoll dependency.
+       - Without it, start-up failed with "Unable to bind to Unix domain socket. Consider adding the 'io.netty:netty-transport-native-epoll' dependency", though the dependency was in the jar.
+       - The launcher sets it together with `quarkus.http.domain-socket-enabled`, and `app` as shipped does not, since it has no socket.
+     - Not yet consistent, until step 4: the launcher and the harness configs point at `/llm/<scope>/v1`, but the proxy at that path arrives with step 4. `e2e/ConfinementCheck.java` still names the deleted `LocalMcpServer` and the two sockets, and step 5 points it at the Quarkus server.
+     - Tests first. The red run failed to compile on the new symbols (`PodmanConfinement.SOCKET`, `SocketPermissions`). A second red tree without those two symbols then showed the assertions red:
+       - `PodmanConfinementTest`: the mount list, and `expected: <http://127.0.0.1:18766/llm/s1/v1> but was: <http://127.0.0.1:18766/s1/v1>`;
+       - `HarnessConfigTest`: 5 failures and 1 error (the base URLs and the network-off settings).
+     - New tests:
+       - `SocketPermissionsTest`, 3: a missing directory is created 0700; a 0755 directory is refused and left unchanged; a bound socket becomes 0600.
+       - `PodmanConfinementTest.theMcpServerAndTheProxyAreReachedThroughTheOneSocket`, 1.
+       - `HarnessConfigTest`, 3 from `wip/s9p3`.
+     - New E2E `e2e/DomainSocketCheck.java`, against a throw-away `app` with `-Dquarkus.http.domain-socket=… -Dquarkus.http.domain-socket-enabled=true -Dquarkus.vertx.prefer-native-transport=true`, in a 0700 directory (`sock.sh`): the directory is 0700; the socket is 0600; `initialize` through the socket answers 200; the answer carries a complete `serverInfo`. ALL PASSED.
+     - Result (`rm -rf target */target`, `mvn -B test` and `mvn -B package`, BUILD SUCCESS):
+       - counts: `plugin-api` 0, `agent-connector-kernel` 95, `app` 792, `plugin-web-tools` 17, `plugin-shell` 11, `plugin-harness` 61; total 976, with 0 failures, errors and skipped;
+       - against 972 after step 2: minus 3 deleted (`UnixSocketHttpServerTest` 2, `LlmProxyUnixSocketTest` 1), plus 7 new.
+     - E2E: `McpServerCheck` ALL PASSED; `ExternalMcpCheck` and `--restored` exit 0; `ToolCallingCheck` ALL PASSED in a fresh home (`e2eonly.sh`). It had failed in the run that reused the home (see step 2).
 4. **LLM proxy.** On the Quarkus router, as chat-48 chooses under point 5. `LlmProxyTest` and `LlmProxyUnixSocketTest` are rewritten against it, red first. `LlmProxyRequestsTest` is unchanged.
 5. **Confinement checks again on 5.14** (part 2's 16 checks, then part 3's stub runs, traced and plain), with the network-off settings.
 6. **Real-model runs** (t135:r1), still on hold until step 5 passes: OpenCode with GLM-5.3, OpenCode with Qwen3.8 (its tool-call probe passed on 2026-11-22, `finish_reason: "tool_calls"`), Hermes Agent with GLM-5.3, and Codex CLI with GLM-5.3.

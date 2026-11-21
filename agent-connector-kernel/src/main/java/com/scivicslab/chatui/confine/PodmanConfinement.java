@@ -13,9 +13,11 @@ import java.util.Map;
  *
  * <ul>
  * <li>{@code --network=none}: the container has no network.</li>
- * <li>agent-connector-kernel's MCP server and LLM proxy are reached only through their two Unix sockets, bind-mounted
- * into {@value #SOCKET_DIR}. The image's relay ({@value #RELAY}, {@code socat}) exposes them inside the container
- * on 127.0.0.1:{@value #MCP_PORT} and 127.0.0.1:{@value #LLM_PORT}, and then runs the harness.</li>
+ * <li>agent-connector-kernel's MCP server and LLM proxy are reached only through one Unix socket, the domain socket
+ * of the application's Quarkus HTTP server, bind-mounted into {@value #SOCKET_DIR}
+ * (https://quarkus.io/guides/vertx-reference#use-a-unix-domain-socket; Decisions 12 and 13). The image's relay
+ * ({@value #RELAY}, {@code socat}) exposes it inside the container on 127.0.0.1:{@value #MCP_PORT} for the MCP server
+ * and 127.0.0.1:{@value #LLM_PORT} for the proxy, at {@code /llm/<scope>/v1}, and then runs the harness.</li>
  * <li>The only other mounts are the working directory and the harness's configuration file (read-only). None of them
  * may lie inside agent-connector-kernel's own directory, which holds the secrets.</li>
  * <li>The keys are passed by variable name only ({@code -e NAME}), so their values are in the environment podman is
@@ -26,10 +28,8 @@ public final class PodmanConfinement {
 
     /** Where the sockets appear inside the container. */
     public static final String SOCKET_DIR = "/run/agent-connector-kernel";
-    /** The MCP server's socket file name, on both sides. */
-    public static final String MCP_SOCKET = "mcp.sock";
-    /** The LLM proxy's socket file name, on both sides. */
-    public static final String LLM_SOCKET = "llm.sock";
+    /** The socket file's name, on both sides: the domain socket of the application's Quarkus HTTP server. */
+    public static final String SOCKET = "agent-connector-kernel.sock";
     /** The relay in the image: exposes the sockets on 127.0.0.1, then runs its arguments. */
     public static final String RELAY = "/usr/local/bin/ack-relay";
     /** The port the relay exposes the MCP server on, inside the container. */
@@ -57,9 +57,12 @@ public final class PodmanConfinement {
         return "http://127.0.0.1:" + MCP_PORT + "/mcp";
     }
 
-    /** @return the LLM proxy's OpenAI-compatible base URL for {@code scope}, inside the container */
+    /**
+     * @return the LLM proxy's OpenAI-compatible base URL for {@code scope}, inside the container. The proxy shares the
+     *         HTTP server with the MCP server, so it lives under {@code /llm/} (Decision 13).
+     */
     public static String llmBaseUrl(String scope) {
-        return "http://127.0.0.1:" + LLM_PORT + "/" + scope + "/v1";
+        return "http://127.0.0.1:" + LLM_PORT + "/llm/" + scope + "/v1";
     }
 
     /**
@@ -67,7 +70,7 @@ public final class PodmanConfinement {
      *
      * @param image      the harness image, e.g. {@code localhost/ack-codex:0.171.0}
      * @param kernelDir  agent-connector-kernel's own directory; nothing inside it is mounted
-     * @param socketDir  the owner-only directory holding {@value #MCP_SOCKET} and {@value #LLM_SOCKET}
+     * @param socketDir  the owner-only directory holding {@value #SOCKET}
      * @param workDir    the working directory, mounted at {@value #WORK_DIR}
      * @param configFile the harness configuration file written for this launch
      * @param harness    which harness
@@ -98,9 +101,7 @@ public final class PodmanConfinement {
                 "--security-opt=no-new-privileges"));
         Path sockets = launch.socketDir().toAbsolutePath().normalize();
         args.add("-v");
-        args.add(sockets.resolve(MCP_SOCKET) + ":" + SOCKET_DIR + "/" + MCP_SOCKET);
-        args.add("-v");
-        args.add(sockets.resolve(LLM_SOCKET) + ":" + SOCKET_DIR + "/" + LLM_SOCKET);
+        args.add(sockets.resolve(SOCKET) + ":" + SOCKET_DIR + "/" + SOCKET);
         args.add("-v");
         args.add(launch.workDir().toAbsolutePath().normalize() + ":" + WORK_DIR);
         args.add("-w");

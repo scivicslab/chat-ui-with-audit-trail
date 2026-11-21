@@ -13,7 +13,11 @@ import java.util.List;
  * in-container relay (https://opencode.ai/v1/docs/providers), the key as {@code options.apiKey} with
  * {@code {env:NAME}} substitution;</li>
  * <li>one remote MCP server under {@code mcp} with {@code type: "remote"}, {@code url}, {@code oauth: false} and
- * {@code headers}, the key as {@code {env:NAME}} (https://opencode.ai/v1/docs/mcp-servers).</li>
+ * {@code headers}, the key as {@code {env:NAME}} (https://opencode.ai/v1/docs/mcp-servers);</li>
+ * <li>{@code autoupdate: false}, so OpenCode does not look for a newer release (https://opencode.ai/v1/docs/config).
+ * The image does the rest of stage 9 part 3's "no call to the outside": it holds the {@code @opencode-ai/plugin}
+ * package OpenCode installs into its config directory, and sets {@code OPENCODE_DISABLE_MODELS_FETCH}
+ * (containers/opencode/Containerfile).</li>
  * </ul>
  */
 public final class OpenCodeHarness implements PodmanHarness {
@@ -38,6 +42,7 @@ public final class OpenCodeHarness implements PodmanHarness {
         return new JSONObject()
                 .put("$schema", "https://opencode.ai/config.json")
                 .put("model", "ack/" + model)
+                .put("autoupdate", false)
                 .put("provider", new JSONObject().put("ack", provider))
                 .put("mcp", new JSONObject().put("agent-connector-kernel", mcp))
                 .toString(2) + "\n";

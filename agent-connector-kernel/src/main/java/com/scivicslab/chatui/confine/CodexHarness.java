@@ -11,7 +11,11 @@ import java.util.List;
  * throw-away key's variable; {@code wire_api} is left out, since {@code responses} is its only value and the default
  * (https://learn.chatgpt.com/codex/config-file/config-advanced, config-reference);</li>
  * <li>one MCP server over streamable HTTP with {@code url}, {@code bearer_token_env_var} for {@code Authorization},
- * and {@code http_headers} for the scope header (https://learn.chatgpt.com/codex/extend/mcp).</li>
+ * and {@code http_headers} for the scope header (https://learn.chatgpt.com/codex/extend/mcp);</li>
+ * <li>no call to the outside (tasks/todo.md, stage 9 part 3): run against a stub model, Codex 0.171.0 looked up
+ * api.github.com (its curated plugin sync), ab.chatgpt.com and chatgpt.com. {@code check_for_update_on_startup},
+ * {@code analytics.enabled} (the Statsig metrics exporter), and {@code features.plugins}, {@code remote_plugin} and
+ * {@code apps} turn those calls off (config-reference).</li>
  * </ul>
  */
 public final class CodexHarness implements PodmanHarness {
@@ -19,7 +23,8 @@ public final class CodexHarness implements PodmanHarness {
     @Override
     public String configText(String scope, String model) {
         Names.check(scope, model);
-        return "model = \"" + model + "\"\n"
+        return "check_for_update_on_startup = false\n"
+                + "model = \"" + model + "\"\n"
                 + "model_provider = \"ack\"\n"
                 + "\n"
                 + "[model_providers.ack]\n"
@@ -30,7 +35,15 @@ public final class CodexHarness implements PodmanHarness {
                 + "[mcp_servers.agent-connector-kernel]\n"
                 + "url = \"" + PodmanConfinement.mcpUrl() + "\"\n"
                 + "bearer_token_env_var = \"" + PodmanConfinement.MCP_KEY_VAR + "\"\n"
-                + "http_headers = { \"X-Agent-Connector-Scope\" = \"" + scope + "\" }\n";
+                + "http_headers = { \"X-Agent-Connector-Scope\" = \"" + scope + "\" }\n"
+                + "\n"
+                + "[analytics]\n"
+                + "enabled = false\n"
+                + "\n"
+                + "[features]\n"
+                + "plugins = false\n"
+                + "remote_plugin = false\n"
+                + "apps = false\n";
     }
 
     @Override

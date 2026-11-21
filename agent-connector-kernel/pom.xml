@@ -57,6 +57,13 @@
       <groupId>io.quarkiverse.mcp</groupId>
       <artifactId>quarkus-mcp-server-http</artifactId>
     </dependency>
+    <!-- The HTTP server's Unix domain socket needs a native transport
+         (https://quarkus.io/guides/vertx-reference#use-a-unix-domain-socket); Linux only, as the Podman launchers are -->
+    <dependency>
+      <groupId>io.netty</groupId>
+      <artifactId>netty-transport-native-epoll</artifactId>
+      <classifier>linux-x86_64</classifier>
+    </dependency>
     <!-- McpKeyMechanism: the per-scope key on the Quarkus security layer (Decisions 12 and 13) -->
     <dependency>
       <groupId>io.quarkus</groupId>

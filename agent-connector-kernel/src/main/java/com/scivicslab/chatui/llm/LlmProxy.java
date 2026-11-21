@@ -1,6 +1,5 @@
 package com.scivicslab.chatui.llm;
 
-import com.scivicslab.chatui.unixhttp.UnixSocketHttpServer;
 import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.pojoactor.core.ActorSystem;
 import com.sun.net.httpserver.HttpExchange;
@@ -16,7 +15,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,9 +25,10 @@ import java.util.Set;
  * tasks/todo.md stage 8). A harness gets a throw-away key; the proxy checks it, puts the real credential in its
  * place, and passes the answer back as it arrives, Server-Sent Events included.
  *
- * <p>It listens either on the loopback address over TCP, or on a Unix domain socket for a harness in a container
- * with {@code --network=none} (tasks/todo.md, Decisions 10). Both forms make the same decisions
- * ({@link LlmProxyRequests}) and forward the same way. The throw-away keys live in a {@link ProxyKeys} actor, and
+ * <p>It listens on the loopback address over TCP. Its Unix-socket form is gone with the hand-written Unix-socket server
+ * (tasks/todo.md, step 3): the proxy moves onto the Quarkus HTTP server, and so onto its domain socket at
+ * {@code /llm/<scope>/v1}, in step 4. The decisions are {@link LlmProxyRequests}'. The throw-away keys live in a
+ * {@link ProxyKeys} actor, and
  * requests run on the {@link ActorSystem}'s managed thread pool, so one long streaming answer does not hold up the
  * others. Built on the JDK alone ({@code com.sun.net.httpserver}, {@code java.net.http}, {@code java.nio}), so it
  * adds no dependency and runs from any product's process.</p>
@@ -50,7 +49,6 @@ public final class LlmProxy implements AutoCloseable {
     }
 
     private final HttpServer http;
-    private final UnixSocketHttpServer unix;
     private final ActorRef<ProxyKeys> keys;
     private final LlmProxyRequests requests;
     private final HttpClient client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
@@ -72,21 +70,6 @@ public final class LlmProxy implements AutoCloseable {
         http.createContext("/", this::answer);
         http.setExecutor(system.getManagedThreadPool());
         http.start();
-        this.unix = null;
-    }
-
-    /**
-     * Starts the proxy on a Unix domain socket only, with no TCP port (tasks/todo.md, Decisions 10).
-     *
-     * @param socket the socket file, created 0600 in an owner-only directory
-     */
-    public LlmProxy(ActorSystem system, Path socket, URI upstream, String credentialHeader, String credential)
-            throws IOException {
-        this.keys = system.actorOf("llm-proxy-keys-" + Integer.toHexString(socket.toAbsolutePath().hashCode()),
-                new ProxyKeys());
-        this.requests = requests(keys, upstream, credentialHeader, credential);
-        this.http = null;
-        this.unix = new UnixSocketHttpServer(system, socket, this::answer);
     }
 
     private static LlmProxyRequests requests(ActorRef<ProxyKeys> keys, URI upstream, String credentialHeader,
@@ -97,14 +80,9 @@ public final class LlmProxy implements AutoCloseable {
                 upstream, credentialHeader, credential);
     }
 
-    /** @return the loopback address the proxy is bound to, or {@code null} when it listens on a Unix socket */
+    /** @return the loopback address the proxy is bound to */
     public InetSocketAddress address() {
-        return http == null ? null : http.getAddress();
-    }
-
-    /** @return the socket file, or {@code null} when the proxy listens on loopback TCP */
-    public Path socket() {
-        return unix == null ? null : unix.socket();
+        return http.getAddress();
     }
 
     /**
@@ -121,12 +99,8 @@ public final class LlmProxy implements AutoCloseable {
         keys.tell(k -> k.unregister(scope)).join();
     }
 
-    /**
-     * @return the base URL the scope's harness is given on loopback TCP, e.g. {@code http://127.0.0.1:41235/s1};
-     *         {@code null} when the proxy listens on a Unix socket (the harness then reaches it through its relay)
-     */
+    /** @return the base URL the scope's harness is given on loopback TCP, e.g. {@code http://127.0.0.1:41235/s1} */
     public String baseUrl(String scope) {
-        if (http == null) return null;
         return "http://" + http.getAddress().getAddress().getHostAddress() + ":" + http.getAddress().getPort() + "/" + scope;
     }
 
@@ -160,23 +134,7 @@ public final class LlmProxy implements AutoCloseable {
         }
     }
 
-    private void answer(UnixSocketHttpServer.Exchange exchange) throws IOException {
-        forward(exchange.method(), exchange.target(), exchange.headers(), exchange.body(), new Reply() {
-            @Override public void refuse(int status, byte[] json) throws IOException {
-                exchange.respond(status, "application/json", json);
-            }
-
-            @Override public OutputStream stream(int status, Map<String, List<String>> headers) throws IOException {
-                return exchange.stream(status, headers);
-            }
-
-            @Override public void fail(int status) throws IOException {
-                exchange.respond(status, null, new byte[0]);
-            }
-        });
-    }
-
-    /** The one way both forms answer: refuse, or forward to the upstream and stream the answer back. */
+    /** Refuses, or forwards to the upstream and streams the answer back. */
     private void forward(String method, String target, Map<String, List<String>> headers, byte[] body, Reply reply)
             throws IOException {
         LlmProxyRequests.Decision decision = requests.decide(target, headers);
@@ -218,8 +176,7 @@ public final class LlmProxy implements AutoCloseable {
     /** Stops the proxy at once and closes the keys actor. */
     @Override
     public void close() {
-        if (http != null) http.stop(0);
-        if (unix != null) unix.close();
+        http.stop(0);
         keys.close();
     }
 }

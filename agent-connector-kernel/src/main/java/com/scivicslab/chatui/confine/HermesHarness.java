@@ -10,7 +10,12 @@ import java.util.List;
  * naming the throw-away key's variable (https://hermes-agent.nousresearch.com/docs/integrations/providers);</li>
  * <li>one MCP server under {@code mcp_servers} with {@code url} and {@code headers}, the key as {@code ${NAME}}, which
  * Hermes expands in any string of a server entry (https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp,
- * https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference).</li>
+ * https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference);</li>
+ * <li>no call to the outside (tasks/todo.md, stage 9 part 3): run against a stub model, Hermes 0.23.3 looked up
+ * raw.githubusercontent.com, openrouter.ai and hermes-agent.nousresearch.com, which all stopped once its model
+ * catalogue was off, and api.github.com for its passive update check. {@code model_catalog.enabled: false} (hermes_cli/model_catalog.py,
+ * get_catalog) and {@code updates.check: false} (hermes_cli/source_check.py, check_for_updates) turn them off. Neither
+ * key is in the configuration docs; both are read from the source of v0.23.3.</li>
  * </ul>
  */
 public final class HermesHarness implements PodmanHarness {
@@ -28,7 +33,11 @@ public final class HermesHarness implements PodmanHarness {
                 + "    url: \"" + PodmanConfinement.mcpUrl() + "\"\n"
                 + "    headers:\n"
                 + "      Authorization: \"Bearer ${" + PodmanConfinement.MCP_KEY_VAR + "}\"\n"
-                + "      X-Agent-Connector-Scope: \"" + scope + "\"\n";
+                + "      X-Agent-Connector-Scope: \"" + scope + "\"\n"
+                + "model_catalog:\n"
+                + "  enabled: false\n"
+                + "updates:\n"
+                + "  check: false\n";
     }
 
     @Override
