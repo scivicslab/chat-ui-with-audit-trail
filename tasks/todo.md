@@ -172,14 +172,40 @@ A test that moves to another module still counts once, so the total stays the sa
       - chat-ui on port 18090 with `-Duser.home=/work/e2e/home`, `-Dchat-ui.read-roots=/work/e2e/root`, `-Dchat-ui.write-root=/work/e2e/root`, `-Dchat-ui.servers=http://127.0.0.1:18978`, `-Dchat-ui.default-model=fake`. Its working directory, and so its iolog database, was `/work/e2e`.
     - `McpServerCheck 18090`: 19 PASS, 0 FAIL, "ALL PASSED".
     - `ToolCallingCheck 18090`: 9 PASS, 0 FAIL, "ALL PASSED".
-    - `ExternalMcpCheck` was **not run**. It needs a real model that answers with `tool_calls` and an html-saurus `/mcp` to register. The only html-saurus instances are on 28001 and 28009, inside the forbidden range, and none runs in the pod. Running it means starting a throw-away html-saurus in the Job; chat-48 decides whether that is wanted.
+    - `ExternalMcpCheck` was not run in the first pass (it needs a real model that answers with `tool_calls` and an html-saurus `/mcp`, and the only html-saurus instances are on 28001 and 28009, inside the forbidden range). At chat-48's request it was run afterwards, in the same Job and against the same `e39e158` jar:
+      - a throw-away html-saurus (a copy of the jar `html-saurus-portal-server-3.0.0-SNAPSHOT-shaded-261121141211.jar`, `serve --dir /work/ext/hs --port 18001`) serving a `git archive HEAD` copy of `doc_Base010`'s `docusaurus.config.ts`, `sidebars.ts`, `package.json` and `docs/ProjectStandard2`;
+      - a throw-away chat-ui on port 18091 with `-Duser.home=/work/ext/home`, read and write roots under `/work/ext/root`, `-Dchat-ui.servers=http://192.168.5.21:30805` (the GPU broker), model `google/gemma-4-26B-A4B-it`.
+      - `ExternalMcpCheck 18091 google/gemma-4-26B-A4B-it http://127.0.0.1:18001/mcp`: 8 PASS, 0 FAIL, "ALL PASSED".
+      - After stopping and starting that chat-ui again, `ExternalMcpCheck 18091 --restored http://127.0.0.1:18001/mcp`: 1 PASS, 0 FAIL, "ALL PASSED".
     - No production code or test was changed, and nothing failed or needed fixing to run.
-- [ ] 2. **Empty `agent-connector-kernel` module.**
+- [x] 2. **Empty `agent-connector-kernel` module.**
   - Add `agent-connector-kernel/pom.xml`. Dependencies: `plugin-api`, org.json, jackson-databind, and POJO-actor (needed when `ToolScopes` or the harness-side MCP session becomes an actor).
+    - As built: only `plugin-api` (plus `junit-jupiter` for tests). An empty module needs nothing else; org.json, jackson-databind and POJO-actor are added in the stage whose moved classes use them, so every dependency is in the build because a class needs it.
   - Add `maven-enforcer-plugin` `bannedDependencies` for `io.quarkus*`, `io.quarkiverse*`, `jakarta.*`, `org.eclipse.microprofile*`, `io.vertx*`.
+    - As built: `maven-enforcer-plugin` 3.5.0, execution `no-framework-in-agent-connector-kernel` (default phase `validate`), `searchTransitive` true. It bans those five patterns plus `javax.inject`, `javax.enterprise` (the old CDI coordinates) and `io.smallrye*` (Quarkus's MicroProfile implementations).
   - `app` depends on `agent-connector-kernel`. Parent `<modules>` order: `plugin-api`, `agent-connector-kernel`, `app`, plugins.
+    - As built: the module order and the parent's managed `agent-connector-kernel` dependency are in, but `app` does **not** depend on the module yet. With the dependency, the first stage-2 run failed in `app` at `quarkus:generate-code`: Quarkus's dependency resolver opens every reactor dependency's `target/classes`, and an empty module has none (`/src/stage2/agent-connector-kernel/target/classes does not exist`). `app` gets the dependency in stage 3, together with the first moved classes.
   - Check: counts equal to stage 1.
+  - **Result (2026-11-21, W206 Job `chat77-split-baseline`):**
+    - `rm -rf target */target`, then `mvn -B test`, BUILD SUCCESS. The reactor runs `agent-connector-kernel` third, after `plugin-api`. Its enforcer log reads `Rule 0: org.apache.maven.enforcer.rules.dependency.BannedDependencies passed`.
+    - Counts against stage 1:
+
+      | Module | Stage 1 | Stage 2 |
+      |---|---|---|
+      | `plugin-api` | 0 | 0 |
+      | `agent-connector-kernel` | (none) | 0 |
+      | `app` | 852 | 852 |
+      | `plugin-web-tools` | 17 | 17 |
+      | `plugin-shell` | 11 | 11 |
+      | `plugin-harness` | 54 | 54 |
+      | total | 934 | 934 |
+
+      Every run had 0 failures, 0 errors and 0 skipped.
+    - Proof that the rule rejects a forbidden dependency:
+      - The same tree was given `jakarta.inject:jakarta.inject-api` as a dependency of `agent-connector-kernel` (pod-local copy, not committed), then `mvn -B validate -pl agent-connector-kernel -am` was run.
+      - Result: BUILD FAILURE at `enforcer:3.5.0:enforce (no-framework-in-agent-connector-kernel)`, with `Rule 0: …BannedDependencies failed`, the rule's message, and `jakarta.inject:jakarta.inject-api:jar:2.0.1 <--- banned via the exclude/include list`.
 - [ ] 3. **Move the plain tools and `PluginRegistry` to `agent-connector-kernel`.**
+  - Add the `agent-connector-kernel` dependency to `app/pom.xml` (deferred from stage 2).
   - Move `FileAccessScope`, `FileReadTool`, `FileWriteTool`, `FileRemoveTool`, `CalcExpression`, `DocSearchTool`, `ReferenceLinkTool`, `HttpDocs`, the `DocsSource` interface (its `choose` goes to app `DocsSources`) and `PluginRegistry`, with their tests: `FileAccessScopeTest`, `FileReadToolMultiPathTest`, `FileRemoveToolTest`, `FileToolsScopeTest`, `CalcExpressionTest`, `ReferenceLinkToolTest`, `PluginRegistryTest`, `WriteKeepsCodeFencesTest` if it uses only these.
   - Check: counts equal, and `agent-connector-kernel` builds with the enforcer rule on.
 - [ ] 4. **Cut `ToolCatalog`.**

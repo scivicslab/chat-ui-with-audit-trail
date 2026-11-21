@@ -13,6 +13,7 @@
        each plugin-* is a plain jar the body loads at start-up from chat-ui.plugins. -->
   <modules>
     <module>plugin-api</module>
+    <module>agent-connector-kernel</module>
     <module>app</module>
     <module>plugin-web-tools</module>
     <module>plugin-shell</module>
@@ -48,6 +49,11 @@
       <dependency>
         <groupId>com.scivicslab</groupId>
         <artifactId>chat-ui-with-audit-trail-plugin-api</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.scivicslab</groupId>
+        <artifactId>agent-connector-kernel</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
