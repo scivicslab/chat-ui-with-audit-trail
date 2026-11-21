@@ -185,7 +185,7 @@ class ToolNodesTest {
     }
 
     private DocsSource docs(String node) {
-        DocsSource.Choice c = DocsSource.choose(remote, node, httpBase);
+        DocsSource.Choice c = DocsSources.choose(remote, node, httpBase);
         assertNull(c.error(), c.error());
         return c.source();
     }
@@ -212,7 +212,7 @@ class ToolNodesTest {
 
     @Test
     void anUnknownNodeIsAnErrorThatNamesTheKnownOnes() {
-        DocsSource.Choice c = DocsSource.choose(remote, "html-saurus-zzz", httpBase);
+        DocsSource.Choice c = DocsSources.choose(remote, "html-saurus-zzz", httpBase);
         assertNull(c.source());
         assertTrue(c.error().contains("html-saurus-zzz") && c.error().contains("html-saurus-a")
                 && c.error().contains("html-saurus-b"), c.error());
@@ -220,7 +220,7 @@ class ToolNodesTest {
 
     @Test
     void withoutAnHtmlSaurusNodeItFallsBackToHttp() {
-        DocsSource.Choice c = DocsSource.choose(null, "", httpBase);
+        DocsSource.Choice c = DocsSources.choose(null, "", httpBase);
         assertNull(c.error());
         assertEquals(httpBase, c.source().where());
         assertTrue(DocSearchTool.search("actor", 0, "fulltext", c.source()).contains("Actor tree"));

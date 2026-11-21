@@ -186,7 +186,7 @@ public final class ConversationToolRunner {
             case "search_docs", "list_references" -> {
                 // An html-saurus node when this instance knows one, else the HTTP API
                 // (ActorNodesForWorkspaceAndPortal_261118_oo01, decision 7).
-                var docs = com.scivicslab.chatui.agent.DocsSource.choose(
+                var docs = com.scivicslab.chatui.agent.DocsSources.choose(
                         RemoteNodes.of(system), input(args, "node"), DocSearchTool.baseUrl());
                 if (docs.error() != null) yield docs.error();
                 yield "search_docs".equals(tool)

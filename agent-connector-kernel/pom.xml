@@ -22,6 +22,16 @@
       <groupId>com.scivicslab</groupId>
       <artifactId>chat-ui-with-audit-trail-plugin-api</artifactId>
     </dependency>
+    <!-- search_docs and list_references read html-saurus's JSON answers as trees, and DocSearchTool reads its HTML
+         pages with jsoup -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.jsoup</groupId>
+      <artifactId>jsoup</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>

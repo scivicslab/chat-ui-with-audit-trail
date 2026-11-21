@@ -4,7 +4,7 @@ Design inputs: `AgentConnectorKernelConcept_261121_oo01` (`doc_SCIVICS003/docs/a
 
 Branch: `nigsc-connector-split`, from `main` at `7c4b507`. The name is the one chat-48 gave. Before branching, `git fetch origin` showed `main` equal to `origin/main` (both `7c4b507`). `git log main..harness-tools-mcp` and `git log main..origin/harness-tools-mcp` are both empty, so `harness-tools-mcp` holds no unmerged commits and changes nothing for the split.
 
-Goal of this rebuild: change the module structure, not the behaviour. The ssh tool, the harness-side MCP transport, the LLM proxy and the harness confinement come later and go on the core side. They are not part of these stages.
+Goal of this rebuild: change the module structure, not the behaviour. The ssh tool, the LLM proxy and the harness confinement come later and go on the core side. The harness-side MCP transport, HTTP on localhost (Decisions 5), is built in stage 6. They are not part of these stages.
 
 Background (for reference only; this work renames nothing):
 - After the split, chat-ui-with-audit-trail returns to the quarkus-chat-ui brand, as a new major version in the old `scivicslab/quarkus-chat-ui` repository.
@@ -21,6 +21,13 @@ Naming rule: in docs, comments and commit messages, always write `agent-connecto
 2. The tools that operate ConversationSquad actors (`create_chat`, `set_agent_loop` and the others) stay on `/mcp`, reached through the app's `ToolExtension`.
 3. Harnesses reach the core's tools over MCP on the nigsc-connector side. Inside chat-ui, the claude and codex conversations stay on `<invoke>` (the recommendation in the open question below, now decided).
 4. The module is named `agent-connector-kernel`, both as the directory and as the artifactId (decided 2026-11-21).
+5. **The harness reaches the MCP server over HTTP on localhost** (the person's decision, 2026-11-21, relayed by chat-01 and chat-48). There is no stdio option. This answers `AgentConnectorKernelConcept_261121_oo01` line 101. It is built in this rebuild, in stage 6, and not left to the nigsc-connector work:
+   - every request carries the scope (conversation) name and a key;
+   - a request without a valid key is refused, and keys are compared in constant time;
+   - the server is the JDK's own `com.sun.net.httpserver` (module `jdk.httpserver`), so it adds no dependency and the enforcer rule stays unchanged;
+   - it binds to the loopback address only;
+   - its concurrency is written with POJO-actor, as a plain POJO first, with no class name ending in `Actor`.
+   Inside chat-ui-with-audit-trail nothing changes: Decisions 3 stands, no MCP config is passed to the harness, and the E2E checks after each stage prove today's behaviour is kept.
 
 ## Target modules
 
@@ -43,7 +50,7 @@ The module is named `agent-connector-kernel`, not `nigsc-connector`. It is a lib
 | `com.scivicslab.chatui.agent` | `FileAccessScope`, `FileReadTool`, `FileWriteTool`, `FileRemoveTool`, `CalcExpression`, `DocSearchTool`, `ReferenceLinkTool`, `HttpDocs`, `DocsSource` (the interface only; its static `choose(RemoteNodes, …)` moves to the app class `DocsSources`), `ToolCatalog` (the `Spec` record and the core tools' specs only, see the cut below) |
 | `com.scivicslab.chatui.core.plugin` | `PluginRegistry` (`OpenAiCompatProviderFactory` stays in `app`, because it imports `ChatUiActorSystem`) |
 | `com.scivicslab.chatui.tool` (new) | `ToolRunner` (the plain-tool half of today's `ConversationToolRunner`), `ToolScope` (record: scope name, `FileAccessScope`, `ToolSet`, plugin tools), `ToolExtension` (interface: extra tool names and their handler), `ToolCallRecorder` (interface: one record per tool call), `DocsLookup` (interface: choose a `DocsSource` for a `node` argument), `ToolScopes` (scope name to `ToolRunner`; replaces the `toolRunners` map behind `ChatUiActorSystem.toolRunnerOf`) |
-| `com.scivicslab.chatui.mcp` | `McpToolEndpoint` (new POJO: `list(scopeName)` and `call(scopeName, tool, argumentsJson)`, used by the Quarkus adapter today and by the harness-side transport later) |
+| `com.scivicslab.chatui.mcp` | `McpToolEndpoint` (new POJO: `list(scopeName)` and `call(scopeName, tool, argumentsJson)`, used by the Quarkus adapter in `app` and by the localhost HTTP server of stage 6; neither passes HTTP details into it) |
 
 ### What stays in `app`
 
@@ -109,7 +116,7 @@ Side 1 is `agent-connector-kernel`, side 2 is `app`. The basis is what each clas
 
 The two design documents disagree. The person took the recommendation below on 2026-11-21. The analysis stays here as the reason for the decision.
 
-- **Position A, the concept doc.** In `AgentConnectorKernelConcept_261121_oo01`, the harness calls the tools of the agent-connector-kernel process's MCP server (line 37 and the diagram at line 52), and line 40 says that calling those tools is all the harness can do towards the supercomputer and outside services. Line 101 leaves the transport between the harness and the MCP server undecided: stdin and stdout, or HTTP on `localhost` (needed when the harness runs in a container).
+- **Position A, the concept doc.** In `AgentConnectorKernelConcept_261121_oo01`, the harness calls the tools of the agent-connector-kernel process's MCP server (line 37 and the diagram at line 52), and line 40 says that calling those tools is all the harness can do towards the supercomputer and outside services. Line 101 leaves the transport between the harness and the MCP server undecided: stdin and stdout, or HTTP on `localhost` (needed when the harness runs in a container). The person decided on HTTP on `localhost` on 2026-11-21 (Decisions 5).
 - **Position B, the chat-ui design.** In `HarnessToolsThroughOneMcpServer_261120_oo01`, line 72 says no MCP server is registered with the claude and codex CLIs. Lines 115–128 explain why: the CLIs keep the `<invoke>` path that `ChatSession` parses, so there is only one agent loop. Four things depend on that one loop: `ask_person` ending the turn, the step limit, the pause for an urgent request, and the I/O log in step order. Code agrees: the word `mcp` does not occur in `CliProcess.java`, `ClaudeCodeProvider.java` or `CodexProvider.java`. Today `/mcp` is used only by the openai-compat provider (`ToolCatalogAndChatUiMcpServer_261120_oo01` line 105).
 
 What each choice does to the split:
@@ -123,7 +130,7 @@ What each choice does to the split:
   - The split is unaffected inside chat-ui.
   - nigsc-connector has no `ChatSession` to parse `<invoke>`, so a harness launched by nigsc-connector would have no way at all to reach the core's tools.
 - **A for nigsc-connector, B inside chat-ui:**
-  - The core offers its tools through `McpToolEndpoint`, which needs two transports: the Quarkus HTTP adapter for chat-ui (as today) and a later harness-side transport for nigsc-connector (stdio or `localhost` HTTP, undecided in `AgentConnectorKernelConcept_261121_oo01` line 101).
+  - The core offers its tools through `McpToolEndpoint`, which needs two transports: the Quarkus HTTP adapter for chat-ui (as today) and an HTTP server on localhost inside agent-connector-kernel for nigsc-connector. `AgentConnectorKernelConcept_261121_oo01` line 101 left the choice between stdio and `localhost` HTTP open; the person chose `localhost` HTTP on 2026-11-21 (Decisions 5).
   - `ChatSession` keeps calling `ToolRunner` directly on the `<invoke>` path.
   - The core's `ToolScope` and `ToolCallRecorder` must not require a turn or a step. chat-ui's recorder adds them; nigsc-connector's records a sequence number.
 
@@ -137,7 +144,7 @@ Recommendation: **A for nigsc-connector, B inside chat-ui.**
 - `ToolScope` and `ToolCallRecorder` are written without a turn or a step from stage 5 on.
 - No stage registers an MCP server with the CLIs, and no stage removes the `<invoke>` path.
 
-With the decision taken, the harness-side transport for nigsc-connector comes as a later stage on top of these. No MCP config is added to `plugin-harness`.
+With the decision taken, the localhost HTTP server for nigsc-connector is built in stage 6 (Decisions 5). No MCP config is passed to the harness inside chat-ui.
 
 ## Stages
 
@@ -179,7 +186,7 @@ A test that moves to another module still counts once, so the total stays the sa
       - After stopping and starting that chat-ui again, `ExternalMcpCheck 18091 --restored http://127.0.0.1:18001/mcp`: 1 PASS, 0 FAIL, "ALL PASSED".
     - No production code or test was changed, and nothing failed or needed fixing to run.
 - [x] 2. **Empty `agent-connector-kernel` module.**
-  - Add `agent-connector-kernel/pom.xml`. Dependencies: `plugin-api`, org.json, jackson-databind, and POJO-actor (needed when `ToolScopes` or the harness-side MCP session becomes an actor).
+  - Add `agent-connector-kernel/pom.xml`. Dependencies: `plugin-api`, org.json, jackson-databind, and POJO-actor (needed when `ToolScopes` or the localhost HTTP server's request handling becomes an actor).
     - As built: only `plugin-api` (plus `junit-jupiter` for tests). An empty module needs nothing else; org.json, jackson-databind and POJO-actor are added in the stage whose moved classes use them, so every dependency is in the build because a class needs it.
   - Add `maven-enforcer-plugin` `bannedDependencies` for `io.quarkus*`, `io.quarkiverse*`, `jakarta.*`, `org.eclipse.microprofile*`, `io.vertx*`.
     - As built: `maven-enforcer-plugin` 3.5.0, execution `no-framework-in-agent-connector-kernel` (default phase `validate`), `searchTransitive` true. It bans those five patterns plus `javax.inject`, `javax.enterprise` (the old CDI coordinates) and `io.smallrye*` (Quarkus's MicroProfile implementations).
@@ -204,10 +211,38 @@ A test that moves to another module still counts once, so the total stays the sa
     - Proof that the rule rejects a forbidden dependency:
       - The same tree was given `jakarta.inject:jakarta.inject-api` as a dependency of `agent-connector-kernel` (pod-local copy, not committed), then `mvn -B validate -pl agent-connector-kernel -am` was run.
       - Result: BUILD FAILURE at `enforcer:3.5.0:enforce (no-framework-in-agent-connector-kernel)`, with `Rule 0: …BannedDependencies failed`, the rule's message, and `jakarta.inject:jakarta.inject-api:jar:2.0.1 <--- banned via the exclude/include list`.
-- [ ] 3. **Move the plain tools and `PluginRegistry` to `agent-connector-kernel`.**
+- [x] 3. **Move the plain tools and `PluginRegistry` to `agent-connector-kernel`.**
   - Add the `agent-connector-kernel` dependency to `app/pom.xml` (deferred from stage 2).
   - Move `FileAccessScope`, `FileReadTool`, `FileWriteTool`, `FileRemoveTool`, `CalcExpression`, `DocSearchTool`, `ReferenceLinkTool`, `HttpDocs`, the `DocsSource` interface (its `choose` goes to app `DocsSources`) and `PluginRegistry`, with their tests: `FileAccessScopeTest`, `FileReadToolMultiPathTest`, `FileRemoveToolTest`, `FileToolsScopeTest`, `CalcExpressionTest`, `ReferenceLinkToolTest`, `PluginRegistryTest`, `WriteKeepsCodeFencesTest` if it uses only these.
   - Check: counts equal, and `agent-connector-kernel` builds with the enforcer rule on.
+  - As built:
+    - Moved, package names unchanged: `FileAccessScope`, `FileReadTool`, `FileWriteTool`, `FileRemoveTool`, `CalcExpression`, `DocSearchTool`, `ReferenceLinkTool`, `HttpDocs`, `DocsSource` (package `com.scivicslab.chatui.agent`) and `PluginRegistry` (package `com.scivicslab.chatui.core.plugin`).
+    - Moved tests: `FileAccessScopeTest`, `FileReadToolMultiPathTest`, `FileRemoveToolTest`, `FileToolsScopeTest`, `CalcExpressionTest`, `ReferenceLinkToolTest`. Two tests stay in `app`. `WriteKeepsCodeFencesTest` drives a `ChatSession`. `PluginRegistryTest` registers the app's `OpenAiCompatProviderFactory` (lines 52 and 81) and checks its kind and its "Local LLM" label; it stays unchanged, because rewriting it around a fake factory would change what it proves. The first stage-3 run moved it, and it failed to compile in `agent-connector-kernel`: same package name, so no import showed the dependency.
+    - `DocsSource.choose(RemoteNodes, …)` is now the app class `DocsSources.choose`, because `RemoteNodes` is the inter-instance gateway. Its callers changed: `ConversationToolRunner` line 189 and `ToolNodesTest` lines 188, 215 and 223.
+    - `ExpressionEvaluator` is not needed yet. `CalcExpression` only checks the argument; the JShell evaluation stays in `app`'s `ConversationToolRunner.Calculator` until stage 5.
+    - `agent-connector-kernel` now also depends on jackson-databind (the tree model of html-saurus's JSON answers) and jsoup (`DocSearchTool` reads HTML pages). Neither is banned by the enforcer.
+    - Every member that `app` calls on the moved classes is `public`. The package names are shared across the two jars, and package-private access across two class loaders would fail at run time.
+  - **Result (2026-11-21, W206 Job `chat77-split-stage3`, pod on stonefly521):**
+    - `rm -rf target */target`, then `mvn -B test`, BUILD SUCCESS. Then `rm -rf target */target` and `mvn -B package`; the same counts ran again, all passing.
+    - The enforcer log for `agent-connector-kernel` reads `Rule 0: org.apache.maven.enforcer.rules.dependency.BannedDependencies passed`. None of the moved classes pulls in Quarkus, CDI, MicroProfile or Vert.x.
+
+      | Module | Stage 1 | Stage 3 |
+      |---|---|---|
+      | `plugin-api` | 0 | 0 |
+      | `agent-connector-kernel` | — | 60 |
+      | `app` | 852 | 792 |
+      | `plugin-web-tools` | 17 | 17 |
+      | `plugin-shell` | 11 | 11 |
+      | `plugin-harness` | 54 | 54 |
+      | total | 934 | 934 |
+
+      Every run had 0 failures, 0 errors and 0 skipped.
+    - Tests whose module changed (from `app` to `agent-connector-kernel`): `CalcExpressionTest` 30, `FileReadToolMultiPathTest` 7 (reported under its display name "FileReadTool — several paths in one call"), `FileRemoveToolTest` 8, `FileAccessScopeTest` 5, `FileToolsScopeTest` 5, `ReferenceLinkToolTest` 5. That makes 60, and app's 852 − 60 = 792.
+    - The E2E checks ran against throw-away instances in the pod, set up as in stage 1, using the stage-3 jar:
+      - `McpServerCheck`: 19 PASS, 0 FAIL.
+      - `ToolCallingCheck`: 9 PASS, 0 FAIL.
+      - `ExternalMcpCheck`: 8 PASS, 0 FAIL. After a restart, `--restored`: 1 PASS, 0 FAIL.
+    - The first stage-3 run failed to compile `PluginRegistryTest` in `agent-connector-kernel` (`cannot find symbol OpenAiCompatProviderFactory`, lines 52 and 81). That test went back to `app`; see "As built" above.
 - [ ] 4. **Cut `ToolCatalog`.**
   - Core `ToolCatalog` with `Spec` and the core specs; app `ConversationToolCatalog` with the ordered full map.
   - Check: `ToolCatalogTest` (the signature table, unchanged), `ChatSessionToolSetTest`, `BrokenToolCallTest`, `ChatSessionToolCallRepairTest`, `ToolCallingProviderTest`.
@@ -218,13 +253,21 @@ A test that moves to another module still counts once, so the total stays the sa
   - Check: `ConversationToolRunnerTest`, `ConversationToolsTest`, `ExternalMcpToolsTest`, `NodeArgumentPointsToListRunningToolsTest`, `RunningToolsNodeNamesTest`, `ChatSessionHarnessToolIoTest`.
 - [ ] 6. **MCP endpoint in `agent-connector-kernel`, Quarkus adapter in `app`.**
   - `McpToolEndpoint` and `ToolScopes`. `ChatUiMcpServer` and `ConversationToolFilter` delegate to them. `ChatUiActorSystem.toolRunnerOf` reads `ToolScopes`.
+  - The localhost HTTP server of Decisions 5, inside `agent-connector-kernel`:
+    - It is built on `com.sun.net.httpserver`, bound to the loopback address only, with POJO-actor concurrency (plain POJO first).
+    - Every request names its scope and carries a key. A missing or wrong key is refused, comparing in constant time.
+    - It calls the same `McpToolEndpoint.call(scopeName, …)` as the Quarkus adapter. No HTTP detail reaches `McpToolEndpoint`.
+    - Its unit tests are written first and fail first: no key, wrong key, right key, unknown scope.
+    - `app` does not start this server. chat-ui keeps its Quarkus `/mcp` exactly as today.
   - Check: unit tests, then in a W206 Job the E2E `McpServerCheck`, `ExternalMcpCheck` and `ToolCallingCheck` against a throw-away instance. Output must match stage 1.
 - [ ] 7. **`HarnessLaunch` in `plugin-harness`.**
+  - The MCP entry `HarnessLaunch` can hand a harness is a URL plus a key (Decisions 5). No stdio-shaped entry. Inside chat-ui none is passed (Decisions 3).
   - First write a test that pins today's argv and environment for claude (`stdbuf -oL claude --output-format stream-json --input-format stream-json --verbose --model …`, `--permission-mode bypassPermissions`, `--tools ""` for the full tool set, `CLAUDECODE` and `CLAUDE_CODE_ENTRYPOINT` removed) and for codex (`codex exec [resume <thread>] --json --skip-git-repo-check -c sandbox_mode="workspace-write" [-m <model>] -`). It passes before and after the change.
   - Check: that test, `StreamEventParserTest`, `CliProcessAutonomousTurnTest`, `CliEndedWithoutResultTest`, `ClaudeCodeRetractionTest`, `ClaudeCodeCommandAnswerTest`, `CodexEventParserTest`, `HarnessPluginTest`, `SlashCommandHandlerTest`.
 - [ ] 8. **Native-image probe of `agent-connector-kernel`.**
   - An E2E program with `main()`, outside the Maven build (testing standard `TestingStandard_260404_oo01`): it builds a `ToolRunner` over a temporary directory, lists the tools, and calls `write`, then `read`.
   - Build it with GraalVM CE `native-image` in a W206 Job (ubuntu:24.04 plus the GraalVM tarball) and run it.
+  - It also starts the localhost HTTP server of stage 6 inside the native image and sends it one request with the right key. The check passes when the server compiles into the image and answers that request.
   - Record what fails. Expected: `calc` through JShell, `PluginRegistry`'s runtime jar loading, jackson-databind, and POJO-actor, which is still unproven under native-image (`ConcurrencyWithPojoActor_261121_oo01` line 63).
   - This stage reports; it does not have to pass. What to exclude or replace is decided with chat-48.
 - [ ] 9. **Wrap-up.**
