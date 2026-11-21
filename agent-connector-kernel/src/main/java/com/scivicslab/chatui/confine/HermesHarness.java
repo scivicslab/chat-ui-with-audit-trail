@@ -16,7 +16,12 @@ import java.util.List;
  * catalogue was off, and api.github.com for its passive update check. {@code model_catalog.enabled: false} (hermes_cli/model_catalog.py,
  * get_catalog) and {@code updates.check: false} (hermes_cli/source_check.py, check_for_updates) turn them off. Neither
  * key is in the configuration docs; both are read from the source of v0.23.3.</li>
+ * <li>our MCP server's tools listed to the model by name: by default Hermes 0.23.3 replaces MCP tools with three bridge
+ * tools (tool_search, tool_describe, tool_call; tools/tool_search.py), and {@code tools.tool_search.enabled: "off"}
+ * keeps them direct (tasks/todo.md, step 5). Also source-only, pinned to v0.23.3.</li>
  * </ul>
+ * <p>The three source-only keys ({@code model_catalog.enabled}, {@code updates.check}, {@code tools.tool_search.enabled})
+ * must be checked again whenever the Hermes version changes.</p>
  */
 public final class HermesHarness implements PodmanHarness {
 
@@ -37,7 +42,10 @@ public final class HermesHarness implements PodmanHarness {
                 + "model_catalog:\n"
                 + "  enabled: false\n"
                 + "updates:\n"
-                + "  check: false\n";
+                + "  check: false\n"
+                + "tools:\n"
+                + "  tool_search:\n"
+                + "    enabled: \"off\"\n";
     }
 
     @Override

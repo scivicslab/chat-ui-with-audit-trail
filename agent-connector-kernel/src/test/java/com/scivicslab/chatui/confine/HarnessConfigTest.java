@@ -58,7 +58,7 @@ class HarnessConfigTest {
                 + "  key_env: ACK_LLM_KEY\nmcp_servers:\n  agent-connector-kernel:\n"
                 + "    url: \"http://127.0.0.1:18765/mcp\"\n    headers:\n"
                 + "      Authorization: \"Bearer ${ACK_MCP_KEY}\"\n      X-Agent-Connector-Scope: \"s1\"\n"
-                + "model_catalog:\n  enabled: false\nupdates:\n  check: false\n", yaml);
+                + "model_catalog:\n  enabled: false\nupdates:\n  check: false\ntools:\n  tool_search:\n    enabled: \"off\"\n", yaml);
         assertEquals("/home/agent/.hermes/config.yaml", h.containerConfigPath());
         assertEquals(List.of("hermes"), h.command());
     }
@@ -74,6 +74,24 @@ class HarnessConfigTest {
         assertTrue(toml.startsWith("check_for_update_on_startup = false\n"), "a top-level key, before any table: " + toml);
         assertTrue(toml.contains("\n[analytics]\nenabled = false\n"), toml);
         assertTrue(toml.contains("\n[features]\nplugins = false\nremote_plugin = false\napps = false\n"), toml);
+    }
+
+    /**
+     * Codex 0.171.0 refused every MCP tool call with "MCP tool call requires approval, but approval policy is never"
+     * (tasks/todo.md, step 5). Our server's tools are approved for this server alone, with
+     * {@code mcp_servers.<id>.default_tools_approval_mode = "approve"}
+     * (https://learn.chatgpt.com/codex/config-file/config-reference). No global approval or sandbox setting is
+     * touched: the container is the security boundary.
+     */
+    @Test
+    void codexApprovesOurMcpServersToolsAndNothingGlobal() {
+        String toml = new CodexHarness().configText("s1", "gpt-5.5");
+        int server = toml.indexOf("[mcp_servers.agent-connector-kernel]\n");
+        int next = toml.indexOf("\n[", server + 1);
+        String section = toml.substring(server, next < 0 ? toml.length() : next);
+        assertTrue(section.contains("\ndefault_tools_approval_mode = \"approve\"\n"), section);
+        assertEquals(1, toml.split("approval", -1).length - 1, "the one approval key, under our server: " + toml);
+        assertFalse(toml.contains("sandbox"), toml);
     }
 
     /** OpenCode 1.19.6's update check is off ({@code autoupdate}, https://opencode.ai/v1/docs/config). */
@@ -93,6 +111,18 @@ class HarnessConfigTest {
         String yaml = new HermesHarness().configText("s1", "glm-5.3");
         assertTrue(yaml.contains("\nmodel_catalog:\n  enabled: false\n"), yaml);
         assertTrue(yaml.contains("\nupdates:\n  check: false\n"), yaml);
+    }
+
+    /**
+     * Hermes 0.23.3 replaces MCP tools in the model-visible tool list by three bridge tools (tool_search, tool_describe,
+     * tool_call; tools/tool_search.py), so a model never sees our server's tools by name (tasks/todo.md, step 5).
+     * {@code tools.tool_search.enabled: off} keeps them direct. Like model_catalog.enabled and updates.check, the key is
+     * in Hermes' source, not its docs, and is pinned to v0.23.3.
+     */
+    @Test
+    void hermesListsOurMcpToolsDirectly() {
+        String yaml = new HermesHarness().configText("s1", "glm-5.3");
+        assertTrue(yaml.contains("\ntools:\n  tool_search:\n    enabled: \"off\"\n"), yaml);
     }
 
     @Test

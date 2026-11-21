@@ -1,18 +1,8 @@
-import com.scivicslab.chatui.agent.FileAccessScope;
-import com.scivicslab.chatui.agent.ToolSet;
 import com.scivicslab.chatui.confine.CodexHarness;
 import com.scivicslab.chatui.confine.HermesHarness;
 import com.scivicslab.chatui.confine.OpenCodeHarness;
 import com.scivicslab.chatui.confine.PodmanConfinement;
 import com.scivicslab.chatui.confine.PodmanHarness;
-import com.scivicslab.chatui.llm.LlmProxy;
-import com.scivicslab.chatui.mcp.LocalMcpServer;
-import com.scivicslab.chatui.tool.DocsLookup;
-import com.scivicslab.chatui.tool.ToolCallRecorder;
-import com.scivicslab.chatui.tool.ToolExtension;
-import com.scivicslab.chatui.tool.ToolRunner;
-import com.scivicslab.chatui.tool.ToolScope;
-import com.scivicslab.pojoactor.core.ActorSystem;
 import com.sun.net.httpserver.HttpServer;
 
 import java.io.ByteArrayOutputStream;
@@ -37,10 +27,11 @@ import java.util.concurrent.atomic.AtomicReference;
  * outside the Maven build (TestingStandard_260404_oo01), run on a host with rootless Podman.
  *
  * <pre>
- * java -cp &lt;agent-connector-kernel jar and its dependencies&gt; e2e/ConfinementCheck.java &lt;codex|opencode|hermes&gt; &lt;image&gt; &lt;run dir&gt;
+ * java -cp &lt;agent-connector-kernel jar and org.json&gt; e2e/ConfinementCheck.java &lt;codex|opencode|hermes&gt; &lt;image&gt; &lt;run dir&gt; &lt;host jar&gt;
  * </pre>
  *
- * On the host it starts agent-connector-kernel's MCP server and LLM proxy on Unix sockets only, a stub upstream for
+ * On the host it starts the test host (e2e/confinement-host: agent-connector-kernel's MCP server and LLM proxy in a
+ * Quarkus application, on one owner-only domain socket; step 5), a stub upstream for
  * the proxy and a stub "host loopback" server, both on host 127.0.0.1, and plants a marker file in a stand-in for
  * agent-connector-kernel's directory and in ~/.ssh. It then runs the container with exactly the arguments
  * {@link PodmanConfinement#arguments} builds for the harness, except that the trailing harness command is replaced by
@@ -60,14 +51,16 @@ public class ConfinementCheck {
     static final String SCRIPT = String.join("\n",
             "R=ACKREAL; R=${R}DUMMY; M=ACKSECRET; M=${M}MARKER",
             "out() { echo \"CHECK|$1|$2|$3\"; }",
-            "http() { printf '%s' \"$1\" | socat -T5 - TCP:127.0.0.1:$2 2>&1; }",
+            // shut-none: socat must not half-close the connection when the request is written; Vert.x then drops
+            // the request it has not answered yet. The answer ends the connection (Connection: close).
+            "http() { printf '%s' \"$1\" | socat -t 10 -T 10 - TCP:127.0.0.1:$2,shut-none 2>&1; }",
             "for i in 1 2 3 4 5 6 7 8 9 10; do socat -T1 /dev/null TCP:127.0.0.1:18765 2>/dev/null && break; sleep 0.5; done",
-            "B='{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}'",
-            "REQ=$(printf 'POST /mcp HTTP/1.1\\r\\nHost: x\\r\\nContent-Type: application/json\\r\\nAuthorization: Bearer %s\\r\\nX-Agent-Connector-Scope: check\\r\\nContent-Length: %d\\r\\nConnection: close\\r\\n\\r\\n%s' \"$ACK_MCP_KEY\" ${#B} \"$B\")",
+            "B='{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}'",
+            "REQ=$(printf 'POST /mcp HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Type: application/json\\r\\nAccept: application/json, text/event-stream\\r\\nMcp-Protocol-Version: 2026-07-28\\r\\nMcp-Method: tools/list\\r\\nAuthorization: Bearer %s\\r\\nX-Agent-Connector-Scope: check\\r\\nContent-Length: %d\\r\\nConnection: close\\r\\n\\r\\n%s' \"$ACK_MCP_KEY\" ${#B} \"$B\")",
             "A=$(http \"$REQ\" 18765); case \"$A\" in *'HTTP/1.1 200'*'\"read\"'*) out mcp-tools-list-through-relay PASS 'POST /mcp tools/list via socat TCP:127.0.0.1:18765';; *) out mcp-tools-list-through-relay FAIL \"$(echo $A | head -c 200)\";; esac",
             "B2='{\"model\":\"dummy-model\",\"messages\":[]}'",
-            "REQ2=$(printf 'POST /check/v1/chat/completions HTTP/1.1\\r\\nHost: x\\r\\nContent-Type: application/json\\r\\nAuthorization: Bearer %s\\r\\nContent-Length: %d\\r\\nConnection: close\\r\\n\\r\\n%s' \"$ACK_LLM_KEY\" ${#B2} \"$B2\")",
-            "A2=$(http \"$REQ2\" 18766); case \"$A2\" in *'HTTP/1.1 200'*stub-upstream*) out proxied-request-through-relay PASS 'POST /check/v1/chat/completions via socat TCP:127.0.0.1:18766';; *) out proxied-request-through-relay FAIL \"$(echo $A2 | head -c 200)\";; esac",
+            "REQ2=$(printf 'POST /llm/check/v1/chat/completions HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Type: application/json\\r\\nAuthorization: Bearer %s\\r\\nContent-Length: %d\\r\\nConnection: close\\r\\n\\r\\n%s' \"$ACK_LLM_KEY\" ${#B2} \"$B2\")",
+            "A2=$(http \"$REQ2\" 18766); case \"$A2\" in *'HTTP/1.1 200'*stub-upstream*) out proxied-request-through-relay PASS 'POST /llm/check/v1/chat/completions via socat TCP:127.0.0.1:18766';; *) out proxied-request-through-relay FAIL \"$(echo $A2 | head -c 200)\";; esac",
             "if socat -T3 /dev/null TCP:1.1.1.1:443 2>/dev/null; then out external-tcp FAIL 'connected to 1.1.1.1:443'; else out external-tcp PASS 'socat -T3 /dev/null TCP:1.1.1.1:443 fails'; fi",
             "if getent hosts example.com >/dev/null 2>&1; then out dns FAIL 'example.com resolved'; else out dns PASS 'getent hosts example.com fails'; fi",
             "if socat -T3 /dev/null TCP:127.0.0.1:$HOST_STUB_PORT 2>/dev/null; then out host-loopback-port FAIL \"connected to 127.0.0.1:$HOST_STUB_PORT\"; else out host-loopback-port PASS \"socat TCP:127.0.0.1:$HOST_STUB_PORT fails (host stub listens there)\"; fi",
@@ -87,6 +80,7 @@ public class ConfinementCheck {
         String which = args[0];
         String image = args[1];
         Path base = Path.of(args[2]).toAbsolutePath();
+        Path hostJar = Path.of(args[3]).toAbsolutePath();
         PodmanHarness harness = switch (which) {
             case "codex" -> new CodexHarness();
             case "opencode" -> new OpenCodeHarness();
@@ -103,8 +97,6 @@ public class ConfinementCheck {
         Files.writeString(kernelMarker, marker + "\n");
         Path sshMarker = Path.of(System.getProperty("user.home"), ".ssh", "ack-confinement-marker-" + token);
         Files.writeString(sshMarker, marker + "\n");
-        Path runtime = Path.of(System.getenv().getOrDefault("XDG_RUNTIME_DIR", base.toString()));
-        Path socketDir = runtime.resolve("ack-check-" + token);
         Path workDir = base.resolve("work-" + which);
         Files.createDirectories(workDir);
         Path configFile = base.resolve("config-" + which + "-" + token);
@@ -128,15 +120,15 @@ public class ConfinementCheck {
         });
         hostStub.start();
 
-        ActorSystem system = new ActorSystem("confinement-check");
         int failures = 0;
         List<String> rows = new ArrayList<>();
-        try (LocalMcpServer mcp = new LocalMcpServer(system, socketDir.resolve(PodmanConfinement.MCP_SOCKET));
-             LlmProxy proxy = new LlmProxy(system, socketDir.resolve(PodmanConfinement.LLM_SOCKET),
-                     URI.create("http://127.0.0.1:" + upstream.getAddress().getPort()), "authorization", "Bearer " + realKey)) {
-            String mcpKey = mcp.register(new ToolRunner(new ToolScope("check", new FileAccessScope(workDir, List.of()),
-                    ToolSet.FULL, Map.of()), expression -> "1081", DocsLookup.HTTP, ToolExtension.NONE, ToolCallRecorder.NONE));
-            String llmKey = proxy.register("check");
+        // agent-connector-kernel's MCP server and LLM proxy, in a Quarkus application on one domain socket (step 5).
+        try (ConfinementHost host = ConfinementHost.start(hostJar, base, "check", workDir,
+                URI.create("http://127.0.0.1:" + upstream.getAddress().getPort()), "Bearer " + realKey, "ACK-CHECK-" + token)) {
+            Path socketDir = host.socketDir;
+            String mcpKey = host.mcpKey;
+            String llmKey = host.llmKey;
+            System.out.println("host socket " + host.socket + " " + host.permissions());
             Files.writeString(configFile, harness.configText("check", "dummy-model"));
 
             PodmanConfinement.Launch launch = new PodmanConfinement.Launch(image, kernelDir, socketDir, workDir, configFile,
@@ -198,7 +190,6 @@ public class ConfinementCheck {
         } finally {
             upstream.stop(0);
             hostStub.stop(0);
-            system.terminate();
             Files.deleteIfExists(sshMarker);
             Files.deleteIfExists(configFile);
         }

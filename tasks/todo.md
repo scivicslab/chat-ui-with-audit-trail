@@ -849,6 +849,73 @@ So the shared library has two layers, and the part they share is the streaming u
 - **Vert.x:** the uber-jar `quarkus-gpu-broker-1.2.0-SNAPSHOT.jar` carries one `META-INF/maven/io.vertx/vertx-core/pom.properties`, version 4.5.21, and `com/scivicslab/llmrelay/RelayCall.class`. `mvn dependency:tree` shows `llm-relay-core`, then `vertx-core` 4.5.21.
 - **Next:** deploying waits for the person's approval, which chat-48 asks for.
 
+### Step 5: the 5.14 checks through the one Quarkus socket (done 2026-11-22)
+
+- **The test host, `e2e/confinement-host`.** `app` gives no keys and ssh-connector does not exist yet, so this test-only Quarkus application stands in. Its own pom is outside the reactor, and it is not shipped.
+  - It is agent-connector-kernel with one keyed scope (`HostScopes`, an `McpScopes` bean) and the LLM proxy, on the domain socket only (`quarkus.http.host-enabled=false`).
+  - It writes the two keys to a 0600 file in a 0700 directory (`KeysFile`), and records each `calc` call.
+  - It gets the real (dummy) credential through its environment (`AGENT_CONNECTOR_KERNEL_LLM_CREDENTIAL`), not its command line.
+  - `e2e/ConfinementHost.java` starts it at nice 19 and stops it by its own PID. `ConfinementCheck` and `HarnessStubRun` use it, compiled together by the source launcher.
+- **Builds:** in W206 Job `chat77-split-s5` (the agent-connector-kernel install runs its tests). Every jar and source passed `sha256sum -c` on 5.14 against the Job's checksums. The image files matched `git show HEAD:<path>`, and the six images were rebuilt from them at nice 19.
+- **Part 1: the 16 confinement checks, PASS 16/16 for each of Codex CLI 0.171.0, OpenCode 1.19.6 and Hermes Agent 0.23.3.**
+  - The socket is `rw-------` in an `rwx------` directory.
+  - MCP `tools/list` (stateless, protocol `2026-07-28`) and one proxied request (`/llm/check/v1/chat/completions`) work through the relay.
+  - External TCP, DNS, the host's loopback port, addresses and gateways fail.
+  - The markers in the agent-connector-kernel directory and in `~/.ssh` cannot be read.
+  - The real key is in no environment and no file; the throw-away key is where the harness expects it; the stub upstream received the real dummy key.
+- **Part 2: the real harness binaries against the stub model, PASS for all three, plain and traced:**
+  - exit 0, and the real key was not given to the container;
+  - every request reached the stub with the real dummy key;
+  - the stub's tool call reached the MCP server (`calc(6*7)` recorded by the host) and its result was in the next request;
+  - the canned reply was printed;
+  - traced: every connect and send went to 127.0.0.1:18765/18766, the relay to the one socket (`other targets []`). Not network: glibc's absent nscd socket (a passwd lookup), and, for Hermes, its own gateway socket and its own server on the container's loopback.
+- **Found and fixed on the way:**
+  1. *My check script:* `socat` half-closed the connection after writing the request, and Vert.x then dropped the unanswered request (empty answers). The old hand-written server had ignored that. The script now uses `shut-none`.
+  2. *My stub:* Codex puts MCP tools in a Responses API `namespace` entry (`mcp__agent_connector_kernel`), and a call carries `namespace` beside `name` (codex-rs `protocol/src/models.rs`, `FunctionCall.namespace`, at `rust-v0.171.0`). The stub now finds and calls a tool there.
+  3. *Codex refused every MCP call* with "MCP tool call requires approval, but approval policy is never". `CodexHarness` now sets `default_tools_approval_mode = "approve"` under `[mcp_servers.agent-connector-kernel]` only, with no global approval or sandbox setting (https://learn.chatgpt.com/codex/config-file/config-reference, `mcp_servers.<id>.default_tools_approval_mode`).
+     - Test first: `HarnessConfigTest.codexApprovesOurMcpServersToolsAndNothingGlobal` was red on W206 (`expected: <true> but was: <false>`), then green.
+  4. *Hermes hid MCP tools behind its tool search.* It offers `tool_search`, `tool_describe` and `tool_call` instead of the tools (`tools/tool_search.py`, v0.23.3: "MCP/plugin tools … are replaced in the model-visible array by three bridge tools"). `HermesHarness` now sets `tools.tool_search.enabled: "off"`.
+     - Hermes' first chat request then lists `mcp__agent_connector_kernel__calc` and our other five tools by name.
+     - Test first: `hermesListsOurMcpToolsDirectly` and the exact `hermes` config test were red, then green.
+  5. *The stub limits (chat-48, t161 and t162):*
+     - the stub gives its plain reply after 3 tool-call rounds, so a harness that refuses a tool ends the run;
+     - plain stub runs stop after 2 minutes, and traced runs after 8, because Hermes starts slowly under strace.
+     - Before the cap, Codex's refusals looped 9,531 times against the local stub, none to a model.
+- **Hermes' source-only keys, pinned to v0.23.3:** `model_catalog.enabled`, `updates.check` and `tools.tool_search.enabled` are read from its source, not its docs. They must be checked again whenever the Hermes version changes.
+- **`Mcp-Session-Id header not found`** (one WARN per Hermes run). It is explained by the host's access log:
+  - before initializing, Hermes probes `HEAD /mcp` and `GET /mcp` with no session; the server answers 405, and the `GET` triggers the warning;
+  - then `POST /mcp` initialize answers 200 with a session (protocol `2025-11-25`), and every later request carries it, its `GET` stream (200) included.
+  - So the library's session handling works for Hermes, and nothing needs patching.
+- **W206 full suite on this tree** (`rm -rf target */target`, `mvn -B test` and `mvn -B package`, BUILD SUCCESS):
+  - counts: `plugin-api` 0, `agent-connector-kernel` 101, `app` 792, `plugin-web-tools` 17, `plugin-shell` 11, `plugin-harness` 61; total 982, with 0 failures;
+  - against 980 after step 4a.2: +2 (`codexApprovesOurMcpServersToolsAndNothingGlobal`, `hermesListsOurMcpToolsDirectly`);
+  - E2E: `McpServerCheck` and `ToolCallingCheck` ALL PASSED; `ExternalMcpCheck` and `--restored` exit 0.
+
+### Step 6: real models, through the confined container and the kernel's proxy (stopped at Codex, 2026-11-22)
+
+- **Before the runs:**
+  - the broker's `/queues` showed the three chat queues UP and idle (GLM-5.3 0/4, gemma 0/32, Qwen3.8 0/1);
+  - 5.16 `GET /v1/responses` answered 404 `{"error": "not found"}`;
+  - one minimal `POST /v1/responses` answered 200 (`"model": "GLM-5.3-Flash-Uncensored"`, text `ok`), so Codex with GLM-5.3 was run.
+- **The runs:** each was preceded by a fresh read of `/queues`. There was one prompt per run ("Use the calc tool to compute 6*7, then answer."), one request at a time through the pass-through, no retry loop and no admin call.
+
+| Harness | Model served | First line of the reply | MCP tool call | Result |
+|---|---|---|---|---|
+| OpenCode 1.19.6 | `GLM-5.3-Flash-Uncensored` (5.16) | `42` | `agent-connector-kernel_calc {"expression":"6*7"}`; the host ran `calc(6*7)`; the result was in the next request | PASS |
+| OpenCode 1.19.6 | `qwen3.8-flash-next-iq3_xxs-radeon` (5.23) | `42` | the same | PASS |
+| Hermes Agent 0.23.3 | `GLM-5.3-Flash-Uncensored` (5.16) | `6 * 7 = 42` | `calc(6*7)` ran and its result was in the next request | PASS |
+| Codex CLI 0.171.0 | `GLM-5.3-Flash-Uncensored` (5.16) | none: exit 1 | none | **FAIL** |
+
+- **Codex's raw error.** The model server answered Codex's first request with 400:
+  `{"error": {"message": "tools of type 'namespace' are not supported: this server runs function tools only", "type": "invalid_request_error", "param": null, "code": null}}`.
+  - Codex sends its MCP tools as a Responses API `namespace` tool (see step 5), and GLM-5.3's server takes function tools only.
+  - One request reached the model, and the run stopped there.
+- In every passing run: the real key was not given to the container, and every request reached the model through the proxy with the real (dummy) key.
+- Hermes' own probes before its chat request went through the proxy too, all read-only: `GET /api/v1/models`, `/api/tags`, `/v1/props`, `/props`, `/version`, `/v1/models`, and `POST /api/show`. They answered 404, or 200 for `/v1/models`.
+- The check took the relay's closing `socat … Connection reset by peer` line for Hermes' first reply line. The actual reply is `6 * 7 = 42`.
+- **Claude Code** still waits for an Anthropic key.
+- **On 5.14:** no containers are left; the six images are kept until step 6 ends.
+
 ### Questions on the plan change (all settled)
 
 1. **Point 5: settled by the person's decision (2026-11-22, t147:r1).** The LLM proxy uses Vert.x HTTP Proxy, with the part shared with the GPU broker in `llm-relay` (step 4a).

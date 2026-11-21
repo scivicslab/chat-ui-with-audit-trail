@@ -1,0 +1,8 @@
+# Test-only image for e2e/HarnessStubRun.java (tasks/todo.md, stage 9 part 3): a harness image plus strace, so the
+# run can list every address the harness tries to reach. Never used by agent-connector-kernel's launcher.
+#   podman build --build-arg BASE=localhost/ack-codex:0.171.0 -t localhost/ack-codex-traced:0.171.0 e2e/traced
+ARG BASE
+FROM ${BASE}
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends strace && rm -rf /var/lib/apt/lists/*
+USER agent
