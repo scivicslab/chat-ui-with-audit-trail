@@ -623,6 +623,18 @@ ssh -F <ssh-connector's ssh_config> -o BatchMode=yes -o StrictHostKeyChecking=ac
   - `~/.ssh` has 36 entries, as before, and no marker;
   - no key file is left under `~/chat77-confinement/s11`.
 
+### Stage 11, step 4: the native build of `ssh-connector` (2026-11-22, W206 Job `chat77-s11`; it does not have to pass)
+
+- **Command:** `rm -rf target */target`, then `mvn -B package -Dnative -pl ssh-connector -am` (GraalVM CE 25+37.1 `native-image`, through `quarkus-maven-plugin`), with `build-essential` and `zlib1g-dev` installed. The tests ran first and passed: `agent-connector-kernel` 103, `ssh-tools` 28, `ssh-connector` 8.
+- **First attempt: failed** in `[2/8] Performing analysis`: `Detected an instance of Random/SplittableRandom class in the image heap`, reached through `SshTools.newJobDirName` (a `static final SecureRandom`). This was ssh-tools' own code, so I fixed it: the `SecureRandom` is now made in the method. No native-image option was added.
+- **Second attempt: failed** at the same step, in agent-connector-kernel's code: `An object of type 'jdk.internal.net.http.HttpClientFacade' was found in the image heap`. The object was reached through `DocSearchTool.get` (its `static final HttpClient HTTP`), via `ReferenceLinkTool.list`, `ToolRunner.run`, `McpToolEndpoint.call` and `KernelMcpServer.register`.
+  - ssh-connector does not offer `search_docs` or `list_references`, but `ToolRunner.run` still reaches their code.
+  - I did not change this: it is the kernel's code, which chat-ui shares, and the step did not ask for a pass. Ways to go on later:
+    - make the client in `DocSearchTool` lazily, in a holder class initialized at run time;
+    - or add `--initialize-at-run-time` for `DocSearchTool` in ssh-connector's `quarkus.native.additional-build-args`.
+    - More such objects may come up after it.
+- No executable was produced, so the native step 2 check did not run.
+
 - [ ] 12. **Wrap-up.**
   - Full `rm -rf target` and `mvn test` in a W206 Job, plus the E2E checks of stage 6 and the `ssh-connector` E2E of stage 11.
   - Diff against `main`.

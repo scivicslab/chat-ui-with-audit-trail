@@ -34,7 +34,6 @@ public final class SshTools implements ToolExtension {
 
     private static final Pattern SUBMITTED = Pattern.compile("Submitted batch job ([0-9]+)");
     private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
-    private static final SecureRandom RANDOM = new SecureRandom();
 
     private final ActorRef<SshRunner> runner;
     private final SshCommandLine ssh;
@@ -63,8 +62,9 @@ public final class SshTools implements ToolExtension {
 
     /** @return a new job directory's name: the local time and eight random hex digits, e.g. 20261122-051500-1a2b3c4d */
     public static String newJobDirName() {
+        // Made here, not in a static field: a native image would otherwise build it with a fixed seed.
         byte[] bytes = new byte[4];
-        RANDOM.nextBytes(bytes);
+        new SecureRandom().nextBytes(bytes);
         return LocalDateTime.now().format(STAMP) + "-" + HexFormat.of().formatHex(bytes);
     }
 
