@@ -1,0 +1,79 @@
+<?xml version="1.0"?>
+<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd"
+    xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.scivicslab</groupId>
+    <artifactId>chat-ui-with-audit-trail-parent</artifactId>
+    <version>3.0.0-SNAPSHOT</version>
+  </parent>
+  <artifactId>ssh-connector</artifactId>
+  <version>3.0.0-SNAPSHOT</version>
+
+  <!-- ssh-connector (tasks/todo.md, stage 11): agent-connector-kernel's MCP server, with the ssh tools, and its LLM
+       proxy on one owner-only domain socket, and one harness started confined in Podman. A Quarkus application with a
+       main entry point, packaged as one jar; the native image is tried with -Dnative. -->
+  <properties>
+    <quarkus.package.jar.type>uber-jar</quarkus.package.jar.type>
+    <quarkus.package.jar.add-runner-suffix>false</quarkus.package.jar.add-runner-suffix>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.scivicslab</groupId>
+      <artifactId>agent-connector-kernel</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.scivicslab</groupId>
+      <artifactId>ssh-tools</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>${quarkus.platform.group-id}</groupId>
+        <artifactId>quarkus-maven-plugin</artifactId>
+        <version>${quarkus.platform.version}</version>
+        <extensions>true</extensions>
+        <executions>
+          <execution>
+            <goals>
+              <goal>build</goal>
+              <goal>generate-code</goal>
+              <goal>generate-code-tests</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <artifactId>maven-compiler-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <artifactId>maven-surefire-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <!-- mvn package -Dnative: the native image, with GraalVM CE's native-image (https://quarkus.io/guides/building-native-image) -->
+    <profile>
+      <id>native</id>
+      <activation>
+        <property>
+          <name>native</name>
+        </property>
+      </activation>
+      <properties>
+        <quarkus.native.enabled>true</quarkus.native.enabled>
+        <quarkus.package.jar.enabled>false</quarkus.package.jar.enabled>
+      </properties>
+    </profile>
+  </profiles>
+</project>

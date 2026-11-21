@@ -560,7 +560,31 @@ ssh -F <ssh-connector's ssh_config> -o BatchMode=yes -o StrictHostKeyChecking=ac
   - against 982: +28, all in `ssh-tools`;
   - E2E: `McpServerCheck` and `ToolCallingCheck` ALL PASSED; `ExternalMcpCheck` and `--restored` exit 0.
 - The build pod now also installs `openssh-client`, for `ssh -G`.
-- **Open:** the `ssh-connector` module waits for chat-48's answer on `HarnessLaunch`. It is in `plugin-harness`, not in agent-connector-kernel.
+- `HarnessLaunch` moved to agent-connector-kernel first (chat-48, t168; see stage 7), in a commit of its own.
+
+### Stage 11, steps 1 and 2: the `ssh-connector` module and application (2026-11-22, W206 Job `chat77-s11`)
+
+- **Module `ssh-connector`**: a Quarkus application (`quarkus-maven-plugin`, an uber-jar, `ssh-connector-3.0.0-SNAPSHOT.jar`, and a `native` profile for `-Dnative`). It depends on agent-connector-kernel and `ssh-tools` only.
+  - `SshConnectorMain` (`@QuarkusMain`): the directory is `-Dssh-connector.dir`, else `$SSH_CONNECTOR_DIR`, else `~/.ssh-connector`. It must be 0700 and hold `ssh-connector.properties`. Main hands Quarkus that file as `quarkus.config.locations`, the socket `<dir>/sockets/agent-connector-kernel.sock` as `quarkus.http.domain-socket`, and the log `<dir>/ssh-connector.log`. A `-D` on the command line wins over the file.
+  - `ConnectorSettings`: the one settings file. Required: `ssh-connector.host.alias`, `.host.name`, `.host.user` and `ssh-connector.key`, an absolute path. Optional: `.host.port`; `ssh-connector.jump.{alias,name,user,port}`; `ssh-connector.ssh`; `ssh-connector.slurm.{sbatch,squeue,sacct,scancel,jobs-dir}`; `ssh-connector.limits.{time-seconds,output-bytes,file-bytes}`; and `ssh-connector.harness.{kind,image,model}` (`kind` is `none`, `opencode`, `codex` or `hermes`). Also required: `ssh-connector.work-dir`, an absolute path that may not overlap the directory and may not hold the key. The LLM upstream is agent-connector-kernel's `agent-connector-kernel.llm.upstream`.
+  - Layout of the directory: `private/` is agent-connector-kernel's own directory, never mounted; it holds `ssh/ssh_config`, `ssh/known_hosts` and, with no harness, `mcp-key`. `sockets/` holds the one domain socket, and `harness/` the harness's configuration file. All of them are 0700, and the files in them 0600.
+  - `ConnectorScope`: the one scope `ssh-connector`. Its key is 32 random bytes, compared in constant time. Its tools are the seven ssh tools, and its tool set is `HARNESS`.
+  - `ConnectorBeans`: at start-up, writes `ssh_config` and `known_hosts` and starts one `SshRunner` actor for the host (`ssh-<alias>`). `ConnectorMcpScopes` is agent-connector-kernel's `McpScopes`.
+  - `ConnectorLaunch`: `PodmanConfinement.arguments`, then the harness's own arguments (ssh-connector's command-line arguments), as a `HarnessLaunch`. The keys go only in podman's environment. `AGENT_CONNECTOR_KERNEL_LLM_CREDENTIAL` is removed from that environment, and `-t` is added after `-i` when on a terminal.
+  - `SshConnectorApp`: opens the scope to the LLM proxy, writes the harness's configuration, starts the harness with `inheritIO`, and ends with its exit status. With `kind=none` it writes `private/mcp-key` and serves until stopped.
+- **Tests first: 8 in 3 classes** (`ConnectorSettingsTest` 4, `ConnectorLaunchTest` 2, `ConnectorScopeTest` 2). Red against the skeleton: 8 of 8 failed (`mvn -B test -pl ssh-connector -am`). Then green.
+- **Result** (`rm -rf target */target`, `mvn -B test` and `mvn -B package`, BUILD SUCCESS):
+  - counts: `plugin-api` 0, `agent-connector-kernel` 103, `app` 792, `plugin-web-tools` 17, `plugin-shell` 11, `plugin-harness` 59, `ssh-tools` 28, `ssh-connector` 8; total 1018, with 0 failures;
+  - against 982: +28 `ssh-tools`, +8 `ssh-connector`;
+  - E2E: `McpServerCheck` and `ToolCallingCheck` ALL PASSED; `ExternalMcpCheck` and `--restored` exit 0.
+  - The first `ExternalMcpCheck` of this run failed: "port 18091 busy before start". My `plugincheck.sh` instance on that port had not ended on SIGTERM. I stopped it with SIGKILL and ran `ext.sh` again alone, and both checks then exited 0. `plugincheck.sh` now waits and then sends SIGKILL.
+- **Step 2 check** (`serve11.sh`, `e2e/SshConnectorCheck.java` with `e2e/SocketMcpClient.java`): `ssh-connector` with `kind=none`, host `unreachable.invalid`, a fresh dummy ed25519 key. ALL PASSED, 11 checks:
+  - `private/mcp-key` is 0600; the socket's directory is 0700 and the socket 0600;
+  - no scope gets 400; no key, a wrong key and another scope name with the right key get 401;
+  - with the key, `initialize` answers 200 and `tools/list` lists exactly the seven ssh tools;
+  - `job_status` with `1;id` is answered as an error before `ssh` starts;
+  - `run_command` reaches `ssh`, which fails for the unreachable host with exit 255.
+  - The log shows `MCP server offers 7 tools`, and the `ssh_config` written has every required key.
 
 - [ ] 12. **Wrap-up.**
   - Full `rm -rf target` and `mvn test` in a W206 Job, plus the E2E checks of stage 6 and the `ssh-connector` E2E of stage 11.

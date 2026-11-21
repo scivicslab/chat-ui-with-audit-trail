@@ -19,6 +19,7 @@
     <module>plugin-shell</module>
     <module>plugin-harness</module>
     <module>ssh-tools</module>
+    <module>ssh-connector</module>
   </modules>
 
   <properties>
@@ -57,6 +58,11 @@
       <dependency>
         <groupId>com.scivicslab</groupId>
         <artifactId>agent-connector-kernel</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.scivicslab</groupId>
+        <artifactId>ssh-tools</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
