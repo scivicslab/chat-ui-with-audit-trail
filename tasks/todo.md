@@ -468,9 +468,69 @@ A test that moves to another module still counts once, so the total stays the sa
   - It produces two things:
     - a module of its own for the ssh tools, which quarkus-chat-ui can reuse;
     - a runnable `ssh-connector` artifact with a `main` entry point. It starts `agent-connector-kernel`'s MCP server (the localhost HTTP server of stage 6) and the LLM proxy, and launches a harness through `HarnessLaunch` (stage 7), handing it the MCP entry as a URL plus a key.
-  - The ssh tools themselves are **to be specified before the stage starts**; chat-48 will send that spec.
-  - Check: an E2E program with `main()`, outside the Maven build (`TestingStandard_260404_oo01`), run on a throw-away instance in a W206 Job. Plus full `rm -rf target`, `mvn test` with the counts against stage 1, and the E2E checks of stage 6, which show chat-ui is unchanged.
-  - It uses the LLM proxy and the confinement of stage 8.
+  - The ssh tools are specified in "Stage 11 spec: the ssh tools" below (chat-48, 2026-11-22, on chat-01's t1775:r1).
+  - Check: an E2E program with `main()`, outside the Maven build (`TestingStandard_260404_oo01`). Plus full `rm -rf target`, `mvn test` with the counts against stage 1, and the E2E checks of stage 6, which show chat-ui is unchanged.
+  - It uses the LLM proxy and the confinement of stage 8, and the one Quarkus domain socket and one-time keys of steps 2–3.
+
+### Stage 11 spec: the ssh tools (chat-48, 2026-11-22)
+
+Design inputs: `SshOnlyNoWebApi_261121_oo01` (doc_SCIVICS003 `docs/ssh-connector/040_design`), the Under the Hood of `AgentConnectorKernelConcept_261121_oo01`, `NigscConnectorComposition_261121_oo01` (doc_Infra001), and chat-01's t1775:r1.
+
+**What must hold** (from those documents; each one gets a test):
+- P1. The harness never reads `~/.ssh` and never holds the ssh key. ssh-connector, outside the container, runs OpenSSH `ssh` itself. The container still gets only the one socket (stage 9 part 2's checks stay green).
+- P2. Nothing the model passes can run a command on the user's computer. `ssh` is started by `ProcessBuilder` with an argument array, never through a shell, with the fixed options below, and `--` before the host name. Model text appears only after the host name, as one argument, or on standard input.
+- P3. Files written on the user's computer stay under ssh-connector's working directory (`FileAccessScope`). No `..`, no absolute paths outside it, no symlink that leads out, no overwriting of an existing file unless the tool call says so.
+- P4. The model chooses no ssh option, host, user, key, port, `ProxyCommand`, `ProxyJump` or `LocalCommand`. They all come from ssh-connector's own `ssh_config`.
+
+**The `ssh` command line, fixed** (exactly as `SshOnlyNoWebApi_261121_oo01`):
+```
+ssh -F <ssh-connector's ssh_config> -o BatchMode=yes -o StrictHostKeyChecking=accept-new
+    -o IdentitiesOnly=yes -o ClearAllForwardings=yes -o ForwardAgent=no -o PermitLocalCommand=no
+    -- <host alias from ssh-connector's config> '<remote command>'
+```
+- ssh-connector writes its own `ssh_config` (0600, in a 0700 directory of its own). Each `Host` block sets `IdentityFile`, `IdentitiesOnly yes`, `BatchMode yes`, `StrictHostKeyChecking accept-new`, `UserKnownHostsFile <ssh-connector's own known_hosts>` and `GlobalKnownHostsFile /dev/null`. The user's `~/.ssh/config` and `~/.ssh/known_hosts` are never read.
+- The host alias is fixed per deployment, in ssh-connector's config, for example `nig-a003`. The model never names a host.
+- Each `ssh` run has a time limit (default 120 s, settable) and an output limit (default 1 MiB per stream, settable). When either is hit, the process is killed, and the tool answers with an error saying which limit.
+- Remote strings that ssh-connector builds, such as a path inside `cat > …`, are POSIX single-quoted: `'` becomes `'\''`. A value containing NUL or a newline is refused before `ssh` is started.
+
+**The tools** (MCP tools, registered on agent-connector-kernel through `ToolManager`, in their own module `ssh-tools`):
+
+| Tool | Arguments | What runs on the cluster | Checks before running |
+|---|---|---|---|
+| `run_command` | `command` (string) | `ssh … -- <host> '<command>'`. The command runs on the cluster under the user's own account. | NUL and newline refused; output and time limits. |
+| `submit_job` | `script` (string), `name` (optional: letters, digits, `-`, `_`, up to 64 characters) | The script goes over standard input to `cat > <jobs dir>/<id>/job.sh`, then `sbatch <jobs dir>/<id>/job.sh`. The answer is the Slurm job id parsed from `Submitted batch job N`. | `<id>` is chosen by ssh-connector; `name` is checked against its pattern; the jobs dir comes from config. |
+| `job_status` | `job_id` | `squeue -j <id> -h -o …`, and if it isn't found there, `sacct -j <id> -n -P -o …` | `job_id` must match `^[0-9]+(_[0-9]+)?$`. |
+| `cancel_job` | `job_id` | `scancel <id>` | the same pattern. |
+| `list_remote` | `path` | `ls -la -- '<path>'` | NUL and newline refused; quoted. |
+| `upload_file` | `local_path`, `remote_path` | The local file goes over standard input to `cat > '<remote_path>'`. | `local_path` must resolve inside the working directory (P3), with a size limit (default 64 MiB). |
+| `download_file` | `remote_path`, `local_path`, `overwrite` (default false) | `cat -- '<remote_path>'`, with standard output streamed to the file | `local_path` must resolve inside the working directory; parent directories are created inside it only; an existing file is refused unless `overwrite`; a size limit (default 64 MiB). The file is written to a temporary name and then moved. |
+
+- `run_command` is kept, as the concept document's Under the Hood decides: `submit_job` already runs anything on the cluster under the user's account, so dropping the general tool would protect nothing more. What the tools must never allow is a command on the user's computer (P2), which no tool can reach.
+- The Slurm command names (`sbatch`, `squeue`, `sacct`, `scancel`) and the jobs directory are deployment settings, so nigsc-connector can set its own values (partitions and the like come later).
+- Concurrency: one `SshRunner` POJO per host, run as a POJO-actor actor, so ssh calls to one host go one at a time by default. Nothing runs on the caller's thread for longer than one call. No class name ends in `Actor`.
+
+**The `ssh-connector` application** (module `ssh-connector`, a Quarkus app with `quarkus-maven-plugin`):
+- It depends on agent-connector-kernel and `ssh-tools`.
+- It serves the MCP server and the LLM proxy on the one owner-only domain socket, with `require-key=true` (Decision 13).
+- It launches one harness, confined, through `HarnessLaunch` and the Podman launchers.
+- Configuration lives in one file in ssh-connector's directory: the host alias and its `ssh_config` values, the key path, the jobs directory, the limits, the harness and model. The native build (`-Dnative`) is tried in a W206 Job and reported; it doesn't have to pass in this stage.
+
+**Tests, written first and red, then green:**
+- Unit tests (W206, `mvn test`):
+  - the argument array: fixed options in order; `--` immediately before the host alias; model text only after it, as one element;
+  - a `command` of `-oProxyCommand=touch /tmp/x` stays one argument after the host, and nothing runs on the user's computer. Check this by running real `ssh -G` on the generated argument array; `proxycommand` must be absent;
+  - quoting: `a'b`, `$(id)`, `` `id` `` and `; rm -rf ~` stay literal inside the single-quoted remote string; NUL and newline are refused;
+  - `job_id` and `name` patterns: accepted and refused cases;
+  - `local_path`: `../x`, `/etc/passwd`, a symlink pointing out of the working directory, and an existing file without `overwrite` are all refused; a nested new path inside the working directory is accepted;
+  - the time and output limits kill the process and say which limit;
+  - `ssh_config` is written 0600 in a 0700 directory, and every required key is present.
+- E2E on 5.14 (a `main()` outside the build), against a throw-away sshd container, never a real cluster:
+  - The image is built from `ubuntu:24.04` with `openssh-server`. It has fake `sbatch`, `squeue`, `sacct` and `scancel` scripts that record their arguments and answer like Slurm. It listens only on a host loopback port.
+  - A fresh dummy ed25519 key and a fresh host key are made for each run. ssh-connector's `known_hosts` starts empty, and `accept-new` records the host key. A second run with a changed host key must fail with `Host key verification failed`.
+  - Each tool runs once through `ssh-connector`, as a direct MCP call with the key. `submit_job` must return the fake job id, and the fake `sbatch` must have received the script exactly.
+  - One confined harness (OpenCode, with the stub model) calls `submit_job` and then `job_status` through MCP. The container still passes the 16 confinement checks, including that `~/.ssh` and the dummy ssh key cannot be read from inside it.
+  - Afterwards the sshd container and its image are removed. `podman ps -a` and `podman images -a` are shown, and the dummy keys are deleted.
+- Rules as for every step: W206 for builds and `mvn test`, never `-DskipTests`; nice 19 on 5.14; don't touch docker, ml-marker, the GPU or `:3`; commit on this branch; don't push.
 - [ ] 12. **Wrap-up.**
   - Full `rm -rf target` and `mvn test` in a W206 Job, plus the E2E checks of stage 6 and the `ssh-connector` E2E of stage 11.
   - Diff against `main`.
