@@ -1,0 +1,6 @@
+#!/bin/sh
+# Fake squeue: job 4242 is running until scancel; any other job is not in the queue.
+d=/var/fake-slurm
+printf '%s\n' "$@" > "$d/squeue.args"
+if [ "$2" = 4242 ] && [ ! -e "$d/cancelled" ]; then echo "4242|e2e-job|RUNNING|0:05|node01"; fi
+exit 0

@@ -27,8 +27,14 @@ import java.util.concurrent.atomic.AtomicReference;
  * outside the Maven build (TestingStandard_260404_oo01), run on a host with rootless Podman.
  *
  * <pre>
- * java -cp &lt;agent-connector-kernel jar and org.json&gt; e2e/ConfinementCheck.java &lt;codex|opencode|hermes&gt; &lt;image&gt; &lt;run dir&gt; &lt;host jar&gt;
+ * java -cp &lt;ssh-connector jar&gt; e2e/ConfinementCheck.java &lt;codex|opencode|hermes&gt; &lt;image&gt; &lt;run dir&gt; &lt;host jar&gt;
+ * java -cp &lt;ssh-connector jar&gt; e2e/ConfinementCheck.java &lt;codex|opencode|hermes&gt; &lt;image&gt; &lt;run dir&gt; &lt;ssh-connector jar&gt; ssh-connector
  * </pre>
+ *
+ * The classpath is the ssh-connector jar, which holds agent-connector-kernel and org.json too. In the second form the
+ * host is ssh-connector itself, with no harness: the podman arguments are the ones its {@code ConnectorLaunch} builds,
+ * the marker goes in its {@code private/} directory, and two more checks show that the dummy ssh key named in its
+ * settings cannot be read and that no private key is anywhere in the container (tasks/todo.md, stage 11, step 3).
  *
  * On the host it starts the test host (e2e/confinement-host: agent-connector-kernel's MCP server and LLM proxy in a
  * Quarkus application, on one owner-only domain socket; step 5), a stub upstream for
@@ -56,11 +62,11 @@ public class ConfinementCheck {
             "http() { printf '%s' \"$1\" | socat -t 10 -T 10 - TCP:127.0.0.1:$2,shut-none 2>&1; }",
             "for i in 1 2 3 4 5 6 7 8 9 10; do socat -T1 /dev/null TCP:127.0.0.1:18765 2>/dev/null && break; sleep 0.5; done",
             "B='{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}'",
-            "REQ=$(printf 'POST /mcp HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Type: application/json\\r\\nAccept: application/json, text/event-stream\\r\\nMcp-Protocol-Version: 2026-07-28\\r\\nMcp-Method: tools/list\\r\\nAuthorization: Bearer %s\\r\\nX-Agent-Connector-Scope: check\\r\\nContent-Length: %d\\r\\nConnection: close\\r\\n\\r\\n%s' \"$ACK_MCP_KEY\" ${#B} \"$B\")",
-            "A=$(http \"$REQ\" 18765); case \"$A\" in *'HTTP/1.1 200'*'\"read\"'*) out mcp-tools-list-through-relay PASS 'POST /mcp tools/list via socat TCP:127.0.0.1:18765';; *) out mcp-tools-list-through-relay FAIL \"$(echo $A | head -c 200)\";; esac",
+            "REQ=$(printf 'POST /mcp HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Type: application/json\\r\\nAccept: application/json, text/event-stream\\r\\nMcp-Protocol-Version: 2026-07-28\\r\\nMcp-Method: tools/list\\r\\nAuthorization: Bearer %s\\r\\nX-Agent-Connector-Scope: %s\\r\\nContent-Length: %d\\r\\nConnection: close\\r\\n\\r\\n%s' \"$ACK_MCP_KEY\" \"$SCOPE\" ${#B} \"$B\")",
+            "A=$(http \"$REQ\" 18765); case \"$A\" in *'HTTP/1.1 200'*\"\\\"$EXPECT_TOOL\\\"\"*) out mcp-tools-list-through-relay PASS 'POST /mcp tools/list via socat TCP:127.0.0.1:18765';; *) out mcp-tools-list-through-relay FAIL \"$(echo $A | head -c 200)\";; esac",
             "B2='{\"model\":\"dummy-model\",\"messages\":[]}'",
-            "REQ2=$(printf 'POST /llm/check/v1/chat/completions HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Type: application/json\\r\\nAuthorization: Bearer %s\\r\\nContent-Length: %d\\r\\nConnection: close\\r\\n\\r\\n%s' \"$ACK_LLM_KEY\" ${#B2} \"$B2\")",
-            "A2=$(http \"$REQ2\" 18766); case \"$A2\" in *'HTTP/1.1 200'*stub-upstream*) out proxied-request-through-relay PASS 'POST /llm/check/v1/chat/completions via socat TCP:127.0.0.1:18766';; *) out proxied-request-through-relay FAIL \"$(echo $A2 | head -c 200)\";; esac",
+            "REQ2=$(printf 'POST /llm/%s/v1/chat/completions HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Type: application/json\\r\\nAuthorization: Bearer %s\\r\\nContent-Length: %d\\r\\nConnection: close\\r\\n\\r\\n%s' \"$SCOPE\" \"$ACK_LLM_KEY\" ${#B2} \"$B2\")",
+            "A2=$(http \"$REQ2\" 18766); case \"$A2\" in *'HTTP/1.1 200'*stub-upstream*) out proxied-request-through-relay PASS \"POST /llm/$SCOPE/v1/chat/completions via socat TCP:127.0.0.1:18766\";; *) out proxied-request-through-relay FAIL \"$(echo $A2 | head -c 200)\";; esac",
             "if socat -T3 /dev/null TCP:1.1.1.1:443 2>/dev/null; then out external-tcp FAIL 'connected to 1.1.1.1:443'; else out external-tcp PASS 'socat -T3 /dev/null TCP:1.1.1.1:443 fails'; fi",
             "if getent hosts example.com >/dev/null 2>&1; then out dns FAIL 'example.com resolved'; else out dns PASS 'getent hosts example.com fails'; fi",
             "if socat -T3 /dev/null TCP:127.0.0.1:$HOST_STUB_PORT 2>/dev/null; then out host-loopback-port FAIL \"connected to 127.0.0.1:$HOST_STUB_PORT\"; else out host-loopback-port PASS \"socat TCP:127.0.0.1:$HOST_STUB_PORT fails (host stub listens there)\"; fi",
@@ -72,6 +78,9 @@ public class ConfinementCheck {
             "if env | grep -q \"$R\"; then out real-key-env FAIL 'in env'; else out real-key-env PASS 'env | grep <real-key prefix> finds nothing'; fi",
             "if tr '\\0' '\\n' < /proc/1/environ | grep -q \"$R\"; then out real-key-proc1-environ FAIL 'in /proc/1/environ'; else out real-key-proc1-environ PASS 'tr \\\\0 \\\\n < /proc/1/environ | grep <real-key prefix> finds nothing'; fi",
             "if grep -rsl \"$R\" / --exclude-dir=proc --exclude-dir=sys --exclude-dir=dev 2>/dev/null | head -1 | grep -q .; then out real-key-files FAIL \"$(grep -rsl \"$R\" / --exclude-dir=proc --exclude-dir=sys --exclude-dir=dev | head -3)\"; else out real-key-files PASS 'grep -rs <real-key prefix> / (mounted files included) finds nothing'; fi",
+            // ssh-connector only: the dummy ssh key cannot be read, and no private key is anywhere in the container.
+            "if [ -n \"$SSH_KEY_PATH\" ]; then if cat \"$SSH_KEY_PATH\" 2>/dev/null; then out ssh-key-path FAIL readable; else out ssh-key-path PASS \"cat $SSH_KEY_PATH fails\"; fi; fi",
+            "if [ -n \"$SSH_KEY_PATH\" ]; then K='BEGIN OPENSSH'; K=\"$K PRIVATE KEY\"; if grep -rsl \"$K\" / --exclude-dir=proc --exclude-dir=sys --exclude-dir=dev 2>/dev/null | head -1 | grep -q .; then out ssh-key-anywhere FAIL \"$(grep -rsl \"$K\" / --exclude-dir=proc --exclude-dir=sys --exclude-dir=dev | head -3)\"; else out ssh-key-anywhere PASS 'grep -rs <private key header> / (except proc, sys, dev) finds nothing'; fi; fi",
             "echo \"THROWAWAY_SHA256|$(printf '%s' \"$ACK_LLM_KEY\" | sha256sum | cut -d' ' -f1)\"",
             "if grep -q ACK_LLM_KEY \"$CONFIG_PATH\"; then out config-names-throwaway-var PASS \"grep ACK_LLM_KEY $CONFIG_PATH\"; else out config-names-throwaway-var FAIL \"$CONFIG_PATH does not name ACK_LLM_KEY\"; fi",
             "");
@@ -81,6 +90,10 @@ public class ConfinementCheck {
         String image = args[1];
         Path base = Path.of(args[2]).toAbsolutePath();
         Path hostJar = Path.of(args[3]).toAbsolutePath();
+        // "ssh-connector": the host is the ssh-connector jar itself, with no harness, and the podman arguments are the
+        // ones ssh-connector's ConnectorLaunch builds (tasks/todo.md, stage 11, step 3). Otherwise the test host.
+        boolean connectorMode = args.length > 4 && args[4].equals("ssh-connector");
+        String scope = connectorMode ? "ssh-connector" : "check";
         PodmanHarness harness = switch (which) {
             case "codex" -> new CodexHarness();
             case "opencode" -> new OpenCodeHarness();
@@ -91,10 +104,22 @@ public class ConfinementCheck {
         String realKey = REAL_PREFIX + "-" + token;
         String marker = MARKER_PREFIX + "-" + token;
 
-        Path kernelDir = base.resolve("kernel-dir");
-        Files.createDirectories(kernelDir);
+        Path connectorDir = base.resolve("connector");
+        Path kernelDir = connectorMode ? connectorDir.resolve("private") : base.resolve("kernel-dir");
+        Path sshKeyDir = base.resolve("ssh-key");
+        Path sshKey = sshKeyDir.resolve("id_ed25519");
+        Map<String, String> settings = new LinkedHashMap<>();
+        ConnectorProcess connector = null;
+        if (connectorMode) {
+            Files.createDirectories(sshKeyDir);
+            Process keygen = new ProcessBuilder("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "confinement-dummy",
+                    "-f", sshKey.toString()).inheritIO().start();
+            if (keygen.waitFor() != 0) throw new IllegalStateException("ssh-keygen failed");
+        }
+        // In ssh-connector mode its directory must not exist before it starts; the marker goes in once it serves.
+        if (!connectorMode) Files.createDirectories(kernelDir);
         Path kernelMarker = kernelDir.resolve("marker");
-        Files.writeString(kernelMarker, marker + "\n");
+        if (!connectorMode) Files.writeString(kernelMarker, marker + "\n");
         Path sshMarker = Path.of(System.getProperty("user.home"), ".ssh", "ack-confinement-marker-" + token);
         Files.writeString(sshMarker, marker + "\n");
         Path workDir = base.resolve("work-" + which);
@@ -123,24 +148,55 @@ public class ConfinementCheck {
         int failures = 0;
         List<String> rows = new ArrayList<>();
         // agent-connector-kernel's MCP server and LLM proxy, in a Quarkus application on one domain socket (step 5).
-        try (ConfinementHost host = ConfinementHost.start(hostJar, base, "check", workDir,
+        try (AutoCloseable host = connectorMode ? null : ConfinementHost.start(hostJar, base, "check", workDir,
                 URI.create("http://127.0.0.1:" + upstream.getAddress().getPort()), "Bearer " + realKey, "ACK-CHECK-" + token)) {
-            Path socketDir = host.socketDir;
-            String mcpKey = host.mcpKey;
-            String llmKey = host.llmKey;
-            System.out.println("host socket " + host.socket + " " + host.permissions());
-            Files.writeString(configFile, harness.configText("check", "dummy-model"));
-
-            PodmanConfinement.Launch launch = new PodmanConfinement.Launch(image, kernelDir, socketDir, workDir, configFile,
-                    harness, mcpKey, llmKey);
-            List<String> launcherArgs = PodmanConfinement.arguments(launch);
+            String mcpKey;
+            String llmKey;
+            List<String> launcherArgs;
+            Map<String, String> podmanEnv;
+            if (connectorMode) {
+                settings.put("ssh-connector.host.alias", "confinement-host");
+                settings.put("ssh-connector.host.name", "unreachable.invalid");
+                settings.put("ssh-connector.host.user", "dummy");
+                settings.put("ssh-connector.key", sshKey.toString());
+                settings.put("ssh-connector.work-dir", workDir.toString());
+                settings.put("agent-connector-kernel.llm.upstream", "http://127.0.0.1:" + upstream.getAddress().getPort());
+                connector = ConnectorProcess.start(hostJar, connectorDir, settings, "Bearer " + realKey, List.of());
+                connector.awaitServing(true);
+                Files.writeString(kernelMarker, marker + "\n");
+                mcpKey = connector.mcpKey();
+                llmKey = connector.llmKey();
+                System.out.println("ssh-connector socket " + connector.socket() + " "
+                        + java.nio.file.attribute.PosixFilePermissions.toString(Files.getPosixFilePermissions(connector.socket())));
+                com.scivicslab.sshconnector.ConnectorSettings parsed = com.scivicslab.sshconnector.ConnectorSettings.from(
+                        connectorDir, k -> java.util.Optional.ofNullable(settings.get(k)));
+                parsed = new com.scivicslab.sshconnector.ConnectorSettings(parsed.dir(), parsed.host(), parsed.jump(),
+                        parsed.ssh(), parsed.slurm(), parsed.limits(), parsed.workDir(), which, image, "dummy-model");
+                Files.writeString(configFile, harness.configText(scope, "dummy-model"));
+                com.scivicslab.chatui.harness.HarnessLaunch launch = com.scivicslab.sshconnector.ConnectorLaunch.launch(
+                        parsed, configFile, mcpKey, llmKey, List.of(), false);
+                launcherArgs = launch.command();
+                podmanEnv = launch.addedEnv();
+            } else {
+                ConfinementHost h = (ConfinementHost) host;
+                mcpKey = h.mcpKey;
+                llmKey = h.llmKey;
+                System.out.println("host socket " + h.socket + " " + h.permissions());
+                Files.writeString(configFile, harness.configText(scope, "dummy-model"));
+                PodmanConfinement.Launch launch = new PodmanConfinement.Launch(image, kernelDir, h.socketDir, workDir,
+                        configFile, harness, mcpKey, llmKey);
+                launcherArgs = PodmanConfinement.arguments(launch);
+                podmanEnv = PodmanConfinement.environment(launch);
+            }
             List<String> run = new ArrayList<>(launcherArgs.subList(0, launcherArgs.size() - harness.command().size()));
             // The only change to the launcher's arguments: the check script runs where the harness would.
             int imageAt = run.indexOf(image);
             List<String> extraEnv = List.of("-e", "HOST_STUB_PORT=" + hostStub.getAddress().getPort(),
                     "-e", "HOST_IPS=" + String.join(" ", hostAddresses()), "-e", "KERNEL_MARKER_PATH=" + kernelMarker,
-                    "-e", "SSH_MARKER_PATH=" + sshMarker, "-e", "CONFIG_PATH=" + harness.containerConfigPath());
+                    "-e", "SSH_MARKER_PATH=" + sshMarker, "-e", "CONFIG_PATH=" + harness.containerConfigPath(),
+                    "-e", "SCOPE=" + scope, "-e", "EXPECT_TOOL=" + (connectorMode ? "run_command" : "read"));
             run.addAll(imageAt, extraEnv);
+            if (connectorMode) run.addAll(imageAt, List.of("-e", "SSH_KEY_PATH=" + sshKey));
             run.addAll(List.of("sh", "-c", SCRIPT));
             List<String> command = new ArrayList<>(List.of("nice", "-n", "19"));
             command.addAll(run);
@@ -149,7 +205,7 @@ public class ConfinementCheck {
                     + " and runs the check script in place of: " + String.join(" ", harness.command()));
 
             ProcessBuilder pb = new ProcessBuilder(command).redirectErrorStream(true);
-            pb.environment().putAll(PodmanConfinement.environment(launch));
+            pb.environment().putAll(podmanEnv);
             Process p = pb.start();
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             p.getInputStream().transferTo(out);
@@ -182,14 +238,23 @@ public class ConfinementCheck {
                     "config-names-throwaway-var")) {
                 checks.putIfAbsent(expected, new String[] {"FAIL", "the script did not report it"});
             }
+            for (String expected : connectorMode ? List.of("ssh-key-path", "ssh-key-anywhere") : List.<String>of()) {
+                checks.putIfAbsent(expected, new String[] {"FAIL", "the script did not report it"});
+            }
             for (Map.Entry<String, String[]> c : checks.entrySet()) {
                 if (!"PASS".equals(c.getValue()[0])) failures++;
                 rows.add("| " + which + " | " + c.getKey() + " | " + c.getValue()[0] + " | " + c.getValue()[1].replace("|", "/") + " |");
             }
             System.out.println("podman exit " + (ended ? p.exitValue() : "timeout"));
         } finally {
+            if (connector != null) connector.close();
             upstream.stop(0);
             hostStub.stop(0);
+            if (connectorMode) {
+                Files.deleteIfExists(sshKey);
+                Files.deleteIfExists(sshKeyDir.resolve("id_ed25519.pub"));
+                Files.deleteIfExists(sshKeyDir);
+            }
             Files.deleteIfExists(sshMarker);
             Files.deleteIfExists(configFile);
         }

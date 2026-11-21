@@ -21,7 +21,8 @@ import java.util.logging.Logger;
  * the harness confined in Podman and ends with the harness's exit status.
  *
  * <p>With {@code ssh-connector.harness.kind=none} it starts no harness. It writes the scope's MCP key to
- * {@code private/mcp-key} (0600), for an MCP client the user starts, and serves until it is stopped.</p>
+ * {@code private/mcp-key} and, when an LLM upstream is set, the scope's proxy key to {@code private/llm-key} (both
+ * 0600), for a client the user starts, and serves until it is stopped.</p>
  */
 public class SshConnectorApp implements QuarkusApplication {
 
@@ -40,6 +41,11 @@ public class SshConnectorApp implements QuarkusApplication {
     public int run(String... args) throws Exception {
         if (settings.podmanHarness() == null) {
             writeOwnerOnly(settings.privateDir(), "mcp-key", scope.key() + "\n");
+            try {
+                writeOwnerOnly(settings.privateDir(), "llm-key", proxy.register(scope.name()) + "\n");
+            } catch (IllegalStateException e) {
+                LOG.info("no LLM proxy: agent-connector-kernel.llm.upstream is not set");
+            }
             LOG.info("ssh-connector serves on " + settings.socket() + " with no harness");
             Quarkus.waitForExit();
             return 0;

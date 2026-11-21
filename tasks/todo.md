@@ -586,6 +586,43 @@ ssh -F <ssh-connector's ssh_config> -o BatchMode=yes -o StrictHostKeyChecking=ac
   - `run_command` reaches `ssh`, which fails for the unreachable host with exit 255.
   - The log shows `MCP server offers 7 tools`, and the `ssh_config` written has every required key.
 
+### Stage 11, step 3: the 5.14 E2E against a throw-away sshd container (2026-11-22)
+
+- **What ran** (5.14, rootless Podman, nice 19; the jar `b61d9f2a…` copied with rsync, checksums compared; `step3.sh`):
+  - `e2e/sshd/Containerfile`: `ubuntu:24.04` with `openssh-server`, one account `dummy`, and fake `sbatch`, `squeue`, `sacct` and `scancel`. They record their arguments in `/var/fake-slurm` and answer like Slurm: `Submitted batch job 4242`; squeue lists 4242 as RUNNING until scancel; sacct reports COMPLETED. The host key and `authorized_keys` are mounted at `/keys`, and the port is published on the host's 127.0.0.1 only.
+  - `e2e/SshConnectorE2E.java` (with `ConnectorProcess` and `SocketMcpClient`), and `e2e/ConfinementCheck.java` in its new `ssh-connector` mode. Both run with the ssh-connector jar as the classpath.
+- **`SshConnectorE2E`: ALL PASSED, 21 checks.**
+  - A fresh dummy ed25519 client key and a fresh host key for each run. ssh-connector's `known_hosts` is empty before the first call; after it, the file holds `[127.0.0.1]:<port>` with the container's host key (accept-new).
+  - Each tool once, as a direct MCP call with the key (ssh-connector with no harness):
+    - `run_command` ran as `dummy`.
+    - `-oProxyCommand=touch <local file>` reached the remote shell: bash read it as its own `-o` and listed its options, exit 2. No local file was made.
+    - `submit_job` returned `job_id: 4242`. The fake `sbatch` got the script byte for byte, with the arguments `--job-name=e2e-job ssh-connector/jobs/<dir>/job.sh`.
+    - `job_status` 4242 came from squeue (RUNNING), and job 77 from sacct (COMPLETED). `cancel_job` 4242 reached the fake `scancel`.
+    - `list_remote` listed the job directory.
+    - `upload_file` of a file with quotes, `$(id)` and `ü` to `uploaded e2e.txt` matched byte for byte.
+    - `download_file` matched too. Again without `overwrite` it was refused, and `../escaped.txt` was refused with nothing written.
+  - **Host key change:** a new sshd container with a new host key on the same port. The next call failed with `Host key verification failed` (with `WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!`), and `known_hosts` was unchanged.
+  - **Confined harness:** ssh-connector with `kind=opencode` started OpenCode 1.19.6 confined, with a stub model.
+    - The stub answered: a reply to OpenCode's title request (no tools), a `submit_job` call, a `job_status` call with the id it got, then a reply.
+    - The fake `sbatch` got the stub's script byte for byte, and the later requests carried the tool results.
+    - The harness printed the reply, and ssh-connector ended with the harness's exit 0.
+    - Every request reached the stub through the proxy with the real (dummy) key. No container was left.
+  - The dummy client key and both host keys were deleted.
+- **`ConfinementCheck` in `ssh-connector` mode: ALL PASSED, 18 checks.**
+  - ssh-connector itself is the host, and the podman arguments are the ones `ConnectorLaunch` builds: `podman run --rm -i --network=none --userns=keep-id:uid=1001,gid=1001 --cap-drop=all --security-opt=no-new-privileges`, with the one socket, `/work` and the configuration file, and `-e ACK_LLM_KEY -e ACK_MCP_KEY`. The marker is in ssh-connector's `private/`.
+  - The original 16 all passed: the tools list (`run_command`) and the proxy through the relay; no external TCP, DNS, host loopback, host addresses or host gateway; neither marker readable (`private/` and `~/.ssh`) nor anywhere; the real key nowhere; the throw-away key where the harness expects it.
+  - The two new checks passed: the dummy ssh key named in the settings cannot be read (`cat` fails), and no `BEGIN OPENSSH PRIVATE KEY` is anywhere in the container.
+- **Change found by the run.** In ssh-connector with no harness, the scope is also opened to the LLM proxy when an upstream is set, and its key is written to `private/llm-key` (0600). A client the user starts can then use the proxy, and the confinement check needs it.
+- **First run: 12 of 21 failed**, the 16 confinement checks passed.
+  - Every ssh call got `Permission denied (publickey)`: sshd reads `authorized_keys` with the user's rights, and the `/keys` mount belongs to root inside the container. The image now copies it to `/home/dummy/.ssh/authorized_keys` at start-up, owned by `dummy`.
+  - The stub counted OpenCode's title request, which has no tools, as a round. Such a request now gets the reply and does not count.
+  - The second run passed everything. The first run's logs are kept as `e2e.1.log` and `cc.1.log`.
+- **Clean-up on 5.14:**
+  - `podman rmi localhost/ack-sshd-e2e:1 localhost/ack-opencode:1.19.6`, then `podman image prune -f` for their dangling layers;
+  - `podman ps -a`: no containers; `podman images -a`: only `docker.io/library/ubuntu:24.04` (chat-01's);
+  - `~/.ssh` has 36 entries, as before, and no marker;
+  - no key file is left under `~/chat77-confinement/s11`.
+
 - [ ] 12. **Wrap-up.**
   - Full `rm -rf target` and `mvn test` in a W206 Job, plus the E2E checks of stage 6 and the `ssh-connector` E2E of stage 11.
   - Diff against `main`.

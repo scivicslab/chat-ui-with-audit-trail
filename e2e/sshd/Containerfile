@@ -1,0 +1,16 @@
+# A throw-away sshd for ssh-connector's E2E (tasks/todo.md, stage 11, step 3). Never a real cluster: ubuntu:24.04 with
+# openssh-server, one account "dummy", and fake sbatch, squeue, sacct and scancel that record their arguments in
+# /var/fake-slurm and answer like Slurm. The host key and authorized_keys are made fresh for each run and mounted at
+# /keys; the E2E publishes the port on the host's 127.0.0.1 only.
+FROM docker.io/library/ubuntu:24.04
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends openssh-server \
+ && rm -rf /var/lib/apt/lists/* \
+ && rm -f /etc/ssh/ssh_host_* \
+ && useradd -m -s /bin/bash dummy && usermod -p '*' dummy \
+ && mkdir -p /run/sshd /var/fake-slurm && chown dummy:dummy /var/fake-slurm
+COPY sbatch squeue sacct scancel /usr/local/bin/
+RUN chmod 755 /usr/local/bin/sbatch /usr/local/bin/squeue /usr/local/bin/sacct /usr/local/bin/scancel
+EXPOSE 2222
+# sshd reads authorized_keys with the user's own rights, and the /keys mount belongs to root inside the container, so
+# the file is copied into dummy's home at start-up, owned by dummy.
+CMD ["/bin/sh", "-c", "install -d -o dummy -g dummy -m 700 /home/dummy/.ssh && install -o dummy -g dummy -m 600 /keys/authorized_keys /home/dummy/.ssh/authorized_keys && exec /usr/sbin/sshd -D -e -p 2222 -h /keys/host_key -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o AllowUsers=dummy"]
