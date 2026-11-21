@@ -1616,9 +1616,24 @@ This build's `ssh-connector` jar (`0e920d02…`) was copied with rsync and check
 - `quarkus-gpu-broker`: local branch `llm-relay` (`2d9d336`), not deployed; it waits for the person's approval.
 - The local branch `wip/s9p3` (`688ac1e`) is kept.
 
+### Native build, after chat-01's decision to fix it (chat-48, t175)
+
+- **The fix:** `DocSearchTool`'s `HttpClient` and its base URL are now made on first use, in `static volatile` fields guarded by a `synchronized` block, instead of `static final` fields set when the class is initialized.
+  - A holder class would not help: Quarkus initializes application classes at build time for a native image, so a holder's initializer would also run during the build.
+  - No `--initialize-at-run-time` option was added.
+  - In a JVM nothing changes: one client, with the same 10 s connect timeout, reused after the first call; and one base URL (`-Dchatui.docsearch.url`, else `$DOCSEARCH_URL`, else `http://localhost:28001`).
+  - The base URL was made lazy as well: in a native image its static initializer would have frozen the build machine's value into the executable.
+- **Tests first:** the new `DocSearchToolClientTest` (2 tests: the client is reused and has the 10 s connect timeout; the base URL is resolved once). Against the unchanged code it failed to compile ("cannot find symbol: method httpClient()"). It passed after the change; `agent-connector-kernel` now has 105 tests.
+- **The native build now succeeds** (W206 Job `chat77-s12b`; `rm -rf target */target`, then `mvn -B package -Dnative -pl ssh-connector -am`, GraalVM CE 25+37.1). It produced `ssh-connector-3.0.0-SNAPSHOT`, a 61.7 MB executable. No other static-init finding came up.
+- **The executable does not serve: stopped here, a design question.** Run with no harness for `SshConnectorCheck`, it registered its 7 tools and then failed to start. The cause: `Unable to start HTTP server` ← `Unable to bind to Unix domain socket. Consider adding the 'io.netty:netty-transport-native-epoll' dependency`. The event loop was Netty's `NioEventLoop`, not epoll.
+  - The dependency is in the image (`netty-transport-native-epoll-4.1.139.Final-linux-x86_64.jar`).
+  - The Quarkus Vert.x reference, section "Use native transports", says: "Native transports are not supported in native executables."
+  - ssh-connector serves only on the domain socket (Decision 13), and the domain socket needs a native transport. So a native ssh-connector cannot serve as designed.
+  - Making it work needs a design decision, for example a TCP port on 127.0.0.1 in the native build, which is what Decision 13 replaced. I did not change anything. `SshConnectorCheck` therefore did not pass against the native executable.
+
 ### Open
 
-- **Native image (stage 11, step 4):** fails on agent-connector-kernel's `static final HttpClient` in `DocSearchTool`. chat-01 decides whether to fix it (chat-48, t174).
+- **Native image:** it builds, but it cannot listen on the domain socket (above). The decision goes to chat-48 and chat-01.
 - **Real-model runs waiting for keys:** Codex CLI (OpenAI) and Claude Code (Anthropic).
 - **Proposed doc changes, for chat-48 to decide** (not written):
   - `ProviderAndToolPlugins_260912_oo01`: its module table gains `agent-connector-kernel` (the tools, `ToolRunner`, the MCP server, the LLM proxy, the Podman launchers, `HarnessLaunch`, `PluginRegistry`), `ssh-tools` and `ssh-connector`. `plugin-harness` now depends on the kernel as `provided`.
