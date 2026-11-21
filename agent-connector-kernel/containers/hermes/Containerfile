@@ -3,14 +3,15 @@
 # Version: Hermes Agent v0.23.3, the latest release (GitHub NousResearch/hermes-agent v0.23.3, marked Latest,
 # "Release Date: November 19, 2026"), commit caafe5389ae585ef77387a962aee05b1bcf17029, checked 2026-11-22.
 # Installed with the official installer (https://hermes-agent.nousresearch.com/docs/getting-started/installation),
-# pinned with its --commit option. The installer brings its own pinned Python and Node.js.
+# pinned with its --commit option. The installer brings its own pinned Python and Node.js. Its Node.js needs
+# libatomic.so.1, which ubuntu:24.04 lacks; the installer itself asks for `apt-get install -y libatomic1`.
 FROM docker.io/library/ubuntu:24.04
 RUN apt-get update \
- && apt-get install -y --no-install-recommends socat ca-certificates curl git \
+ && apt-get install -y --no-install-recommends socat ca-certificates curl git libatomic1 \
  && rm -rf /var/lib/apt/lists/*
 COPY ack-relay /usr/local/bin/ack-relay
 RUN chmod 0755 /usr/local/bin/ack-relay \
- && useradd -m -d /home/agent -s /bin/bash agent
+ && groupadd -g 1001 agent && useradd -m -u 1001 -g 1001 -d /home/agent -s /bin/bash agent
 USER agent
 ENV HOME=/home/agent
 RUN curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- \

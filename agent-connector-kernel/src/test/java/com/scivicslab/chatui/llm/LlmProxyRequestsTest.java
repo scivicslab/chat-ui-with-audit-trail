@@ -55,9 +55,23 @@ class LlmProxyRequestsTest {
         assertFalse(f.headers().containsValue(key), "the throw-away key is not passed on");
     }
 
+    /**
+     * An unknown scope is refused exactly like a wrong key, so a process without a key cannot learn which scopes
+     * exist. Only a request that names no scope at all is told apart (400).
+     */
     @Test
-    void anUnknownScopeIsRefused() {
-        LlmProxyRequests.Decision d = requests.decide("/s2/v1/messages", Map.of("x-api-key", List.of(key)));
-        assertEquals(404, assertInstanceOf(LlmProxyRequests.Refuse.class, d).status());
+    void anUnknownScopeIsRefusedLikeAWrongKey() {
+        LlmProxyRequests.Decision unknown = requests.decide("/s2/v1/messages", Map.of("x-api-key", List.of(key)));
+        LlmProxyRequests.Decision wrongKey = requests.decide("/s1/v1/messages", Map.of("x-api-key", List.of(key + "x")));
+        assertEquals(401, assertInstanceOf(LlmProxyRequests.Refuse.class, unknown).status());
+        assertEquals(wrongKey, unknown);
+    }
+
+    @Test
+    void aRequestThatNamesNoScopeIs400() {
+        assertEquals(400, assertInstanceOf(LlmProxyRequests.Refuse.class,
+                requests.decide("/", Map.of("x-api-key", List.of(key)))).status());
+        assertEquals(400, assertInstanceOf(LlmProxyRequests.Refuse.class,
+                requests.decide("", Map.of())).status());
     }
 }

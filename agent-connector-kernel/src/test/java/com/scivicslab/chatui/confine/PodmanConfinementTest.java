@@ -23,7 +23,7 @@ class PodmanConfinementTest {
     @Test
     void networkNoneTheTwoSocketsTheWorkDirTheConfigAndTheRelayBeforeTheHarness() {
         List<String> args = PodmanConfinement.arguments(launch(Path.of("/run/user/1000/agent-connector-kernel/s1/config.toml")));
-        assertEquals(List.of("podman", "run", "--rm", "-i", "--network=none", "--userns=keep-id", "--cap-drop=all",
+        assertEquals(List.of("podman", "run", "--rm", "-i", "--network=none", "--userns=keep-id:uid=1001,gid=1001", "--cap-drop=all",
                 "--security-opt=no-new-privileges",
                 "-v", "/run/user/1000/agent-connector-kernel/s1/mcp.sock:/run/agent-connector-kernel/mcp.sock",
                 "-v", "/run/user/1000/agent-connector-kernel/s1/llm.sock:/run/agent-connector-kernel/llm.sock",

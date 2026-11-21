@@ -14,8 +14,9 @@ import java.util.function.Predicate;
  * A plain object with no HTTP server in it.
  *
  * <p>A harness is given {@code http://127.0.0.1:<port>/<scope>} as its LLM base URL and a throw-away key, so a request
- * arrives as {@code /<scope>/v1/...} with the key in {@code x-api-key} or {@code Authorization: Bearer}. An unknown
- * scope gets 404, a missing or wrong key 401. Otherwise the request goes to the upstream with the path after the
+ * arrives as {@code /<scope>/v1/...} with the key in {@code x-api-key} or {@code Authorization: Bearer}. A request that
+ * names no scope gets 400. An unknown scope and a missing or wrong key get the same 401, so a process without a key
+ * cannot learn which scopes exist. Otherwise the request goes to the upstream with the path after the
  * scope, the throw-away key removed, and the real credential in its place.</p>
  */
 public final class LlmProxyRequests {
@@ -67,7 +68,7 @@ public final class LlmProxyRequests {
         String rest = path == null || !path.startsWith("/") ? "" : path.substring(1);
         int slash = rest.indexOf('/');
         String scope = slash < 0 ? rest : rest.substring(0, slash);
-        if (scope.isEmpty() || !scopeExists.test(scope)) return new Refuse(404, "no such scope: " + scope);
+        if (scope.isEmpty()) return new Refuse(400, "the request names no scope; the base URL ends with /<scope>");
         Map<String, String> lower = new LinkedHashMap<>();
         headers.forEach((name, values) -> {
             if (name != null && values != null && !values.isEmpty()) lower.put(name.toLowerCase(Locale.ROOT), values.get(0));
@@ -75,7 +76,10 @@ public final class LlmProxyRequests {
         String key = lower.get("x-api-key");
         String auth = lower.get("authorization");
         if (key == null && auth != null && auth.startsWith("Bearer ")) key = auth.substring(7).strip();
-        if (!keyOpens.test(scope, key)) return new Refuse(401, "the request does not carry this scope's key");
+        // An unknown scope and a wrong key get the same answer, so the answer tells nothing about which scopes exist.
+        if (!scopeExists.test(scope) || !keyOpens.test(scope, key)) {
+            return new Refuse(401, "the request does not carry this scope's key");
+        }
         Map<String, String> sent = new LinkedHashMap<>();
         lower.forEach((name, value) -> {
             if (!DROPPED.contains(name)) sent.put(name, value);

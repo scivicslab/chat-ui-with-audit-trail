@@ -38,6 +38,13 @@ public final class PodmanConfinement {
     public static final int LLM_PORT = 18766;
     /** The working directory inside the container. */
     public static final String WORK_DIR = "/work";
+    /**
+     * The image user's uid and gid ({@code agent}, fixed in every Containerfile). {@code --userns=keep-id} maps the
+     * launching user onto it, so the owner-only sockets are the container user's own.
+     */
+    public static final int IMAGE_UID = 1001;
+    /** See {@link #IMAGE_UID}. */
+    public static final int IMAGE_GID = 1001;
     /** The home directory of the image's user. */
     public static final String HOME = "/home/agent";
     /** The variable holding the LLM proxy's throw-away key. */
@@ -87,7 +94,8 @@ public final class PodmanConfinement {
             }
         }
         List<String> args = new ArrayList<>(List.of("podman", "run", "--rm", "-i", "--network=none",
-                "--userns=keep-id", "--cap-drop=all", "--security-opt=no-new-privileges"));
+                "--userns=keep-id:uid=" + IMAGE_UID + ",gid=" + IMAGE_GID, "--cap-drop=all",
+                "--security-opt=no-new-privileges"));
         Path sockets = launch.socketDir().toAbsolutePath().normalize();
         args.add("-v");
         args.add(sockets.resolve(MCP_SOCKET) + ":" + SOCKET_DIR + "/" + MCP_SOCKET);

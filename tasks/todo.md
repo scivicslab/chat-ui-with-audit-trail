@@ -355,7 +355,7 @@ A test that moves to another module still counts once, so the total stays the sa
       2. LLM endpoint: `ANTHROPIC_BASE_URL` with `ANTHROPIC_AUTH_TOKEN` (sent as `Authorization: Bearer`) or `ANTHROPIC_API_KEY` (sent as `x-api-key`) (https://code.claude.com/docs/en/llm-gateway-connect, https://code.claude.com/docs/en/llm-gateway).
       Caveat from the docs: `ANTHROPIC_API_KEY` "needs a one-time approval in interactive sessions", which `ANTHROPIC_AUTH_TOKEN` avoids.
   - **Result (2026-11-21, W206 Job `chat77-split-s4to8`):** BUILD SUCCESS for `mvn -B test` and `mvn -B package` after `rm -rf target */target`. Counts: `plugin-api` 0, `agent-connector-kernel` 80 (72 + 4 `LlmProxyRequestsTest` + 1 `LlmProxyTest` + 3 `ClaudeConfinementTest`), `app` 792, `plugin-web-tools` 17, `plugin-shell` 11, `plugin-harness` 61, total 961 = 934 + 27 new (19 from stages 5–7, 8 from this stage), with 0 failures, errors and skipped. The enforcer passed. E2E: `McpServerCheck` 19/19, `ToolCallingCheck` 9/9, `ExternalMcpCheck` 8/8, `--restored` 1/1 (run on this stage's jar; see the correction under stage 5).
-- [ ] 9. **Podman launchers for Codex CLI, OpenCode and Hermes Agent** (Decisions 8 and 9; Copilot CLI dropped).
+- [x] 9. **Podman launchers for Codex CLI, OpenCode and Hermes Agent** (Decisions 8 and 9; Copilot CLI dropped).
   - Each launcher builds the rootless Podman command of `HarnessConfinement_261121_oo01`:
     - only the working directory is mounted, never agent-connector-kernel's directory or the user's home;
     - `--network=none`: the container reaches agent-connector-kernel's MCP server and the LLM proxy only through Unix sockets bind-mounted into it, which `socat` inside the container exposes on 127.0.0.1 (Decisions 9);
@@ -402,6 +402,53 @@ A test that moves to another module still counts once, so the total stays the sa
     - Podman also warns `"/" is not a shared mount`, and `/dev/fuse` does not exist in the pod;
     - kernel 6.8.0-101-generic, `max_user_namespaces` 514234, `unprivileged_userns_clone` 1, seccomp off, CapEff `00000000a80425fb`.
     - Stage 9 stops here until chat-48 says how to proceed (t118:r1).
+  - **Part 2 (2026-11-22): the Podman confinement checks on 192.168.5.14 (stonefly514), as devteam, with rootless Podman 4.9.3** (Decisions 11). Builds and the normal test suite ran in W206 Job `chat77-split-s9b`.
+    - Code changes:
+      - `PodmanConfinement` now passes `--userns=keep-id:uid=1001,gid=1001`, and each Containerfile creates the image user `agent` with uid and gid 1001 pinned. The first run on 5.14 used the part-1 jar, with a bare `--userns=keep-id`. That mapped devteam to uid 1002 inside the container, while the image user `agent` was 1001, so the relay got `Permission denied` on both 0600 sockets in all three images. That run failed both socket checks and `upstream-got-real-key`; every other check passed. `PodmanConfinementTest` was changed first and failed (red), then the builder was fixed (green).
+      - The Hermes Containerfile adds `libatomic1`. The installer's Node.js needs `libatomic.so.1`, and the installer's own error message names that library.
+      - The LLM proxy now answers like stage 10's MCP server. An unknown scope gets the same 401, with the same body, as a wrong key, in both the TCP and Unix-socket forms, because both go through `LlmProxyRequests`. A request that names no scope still gets 400. `LlmProxyRequestsTest` was changed first: `anUnknownScopeIsRefused` became `anUnknownScopeIsRefusedLikeAWrongKey` (401 and the same `Refuse` as a wrong key), and `aRequestThatNamesNoScopeIs400` was added (`/` and empty give 400). On W206 it failed with `expected: <401> but was: <404>` and `expected: <400> but was: <404>`. Then `LlmProxyRequests` was fixed.
+      - New `e2e/ConfinementCheck.java`, a `main()` outside the Maven build (`TestingStandard_260404_oo01`). Usage: `java -cp <agent-connector-kernel jar and its dependencies> e2e/ConfinementCheck.java <codex|opencode|hermes> <image> <run dir>`.
+        - On the host it starts `LocalMcpServer` and `LlmProxy` on Unix sockets, a stub upstream and a stub on host 127.0.0.1. It plants a marker in an agent-connector-kernel directory and one in `~/.ssh`, and removes the `~/.ssh` marker at the end. The real key is a dummy, `ACKREALDUMMY-<random>`.
+        - It builds the arguments with `PodmanConfinement.arguments`, exactly as the launcher does. Only the trailing harness command is replaced, by `sh -c <check script>`, and five `-e` variables are added for the script: `HOST_STUB_PORT`, `HOST_IPS`, `KERNEL_MARKER_PATH`, `SSH_MARKER_PATH`, `CONFIG_PATH`. The keys reach Podman only through its environment. The run is under `nice -n 19`.
+        - The script builds the secret prefixes from halves, so the secrets never appear on its command line.
+    - W206 (`rm -rf target */target`, `mvn -B test` and `mvn -B package`, BUILD SUCCESS):
+      - counts: `plugin-api` 0, `agent-connector-kernel` 94, `app` 792, `plugin-web-tools` 17, `plugin-shell` 11, `plugin-harness` 61;
+      - total 975 = 934 + 41 new (27 from stages 5–8, 13 from part 1, and 1 from this part, `aRequestThatNamesNoScopeIs400`), with 0 failures, errors and skipped;
+      - the enforcer passed;
+      - E2E on this jar: `McpServerCheck` 19/19, `ToolCallingCheck` 9/9, `ExternalMcpCheck` 8/8, `--restored` 1/1.
+    - What ran on 5.14:
+      - the agent-connector-kernel jar built from this tree in that Job (sha256 `fb7df521a26bde7e38659d32113b8e443dadd3235290ef4e70b04ea0156f230d`, the same on 5.14 after rsync), its dependency jars, the Containerfiles and `ConfinementCheck.java`, all checked with `sha256sum -c` on 5.14 before the run;
+      - GraalVM CE 25+37.1 unpacked in `~/chat77-confinement/jdk`, because 5.14's system Java is 21;
+      - the images, built with `nice -n 19 podman build`: `localhost/ack-codex:0.171.0`, `localhost/ack-opencode:1.19.6`, `localhost/ack-hermes:0.23.3`.
+    - Launcher arguments, the same for each harness except the image, the config mount and the command: `podman run --rm -i --network=none --userns=keep-id:uid=1001,gid=1001 --cap-drop=all --security-opt=no-new-privileges -v <socket dir>/mcp.sock:/run/agent-connector-kernel/mcp.sock -v <socket dir>/llm.sock:/run/agent-connector-kernel/llm.sock -v <work>:/work -w /work -v <config>:<harness config path>:ro -e ACK_LLM_KEY -e ACK_MCP_KEY <image> /usr/local/bin/ack-relay <harness>`. The config paths are `/home/agent/.codex/config.toml`, `/home/agent/.config/opencode/opencode.json` and `/home/agent/.hermes/config.yaml`.
+    - **Result: 16/16 PASS for each of Codex CLI, OpenCode and Hermes Agent.**
+
+      | Check | Command (inside the container unless marked host) | Codex CLI | OpenCode | Hermes Agent |
+      |---|---|---|---|---|
+      | 1. MCP tools/list through the relay | `POST /mcp` tools/list via `socat TCP:127.0.0.1:18765`, with the MCP key | PASS | PASS | PASS |
+      | 1. One proxied request through the relay | `POST /check/v1/chat/completions` via `socat TCP:127.0.0.1:18766`, with the throw-away key | PASS | PASS | PASS |
+      | 1. External TCP fails | `socat -T3 /dev/null TCP:1.1.1.1:443` | PASS | PASS | PASS |
+      | 1. DNS fails | `getent hosts example.com` | PASS | PASS | PASS |
+      | 1. Host loopback port fails | `socat TCP:127.0.0.1:<port>`, where the host stub listens on host 127.0.0.1 | PASS | PASS | PASS |
+      | 1. Host addresses fail | `socat TCP:<each host IPv4: 10.28.163.1, 172.17.0.1, 192.168.5.14>:<port>` | PASS | PASS | PASS |
+      | 1. Host gateways fail | `socat TCP:10.0.2.2:<port>` and `TCP:10.88.0.1:<port>` | PASS | PASS | PASS |
+      | 2. agent-connector-kernel dir marker unreadable | `cat <run>/kernel-dir/marker` | PASS | PASS | PASS |
+      | 2. `~/.ssh` marker unreadable | `cat /home/devteam/.ssh/ack-confinement-marker-<random>` | PASS | PASS | PASS |
+      | 2. Marker nowhere in the container | `grep -rs <marker prefix> /`, except proc, sys and dev, finds nothing | PASS | PASS | PASS |
+      | 3. Real key not in `env` | `env`, grep for the real-key prefix, finds nothing | PASS | PASS | PASS |
+      | 3. Real key not in `/proc/1/environ` | `tr '\0' '\n' < /proc/1/environ`, grep for the real-key prefix, finds nothing | PASS | PASS | PASS |
+      | 3. Real key not in any file, mounted ones included | `grep -rs <real-key prefix> /` finds nothing | PASS | PASS | PASS |
+      | 3. Config names the throw-away variable | `grep ACK_LLM_KEY <harness config path>` | PASS | PASS | PASS |
+      | 3. Throw-away key where the harness expects it | host: sha256 of `$ACK_LLM_KEY` in the container = sha256 of the proxy's throw-away key | PASS | PASS | PASS |
+      | 3. The upstream got the real key | host: the stub upstream received `Authorization: Bearer <dummy real key>` | PASS | PASS | PASS |
+
+    - Afterwards, on 5.14:
+      - the three images and every intermediate layer were removed;
+      - `podman ps -a` and `podman ps -a --external` list nothing;
+      - `podman images -a` lists only `docker.io/library/ubuntu:24.04`, which chat-01 pulled and which is not mine;
+      - no `ack-` file is left in `~/.ssh`.
+      - Nothing outside `~/chat77-confinement` was touched: not the docker daemon or its images, not ml-marker (port 8001), the GPU or display :3.
+    - Still open: the risk from part 1 that OpenCode 1 installs `@ai-sdk/openai-compatible` on first use. The checks run the script in place of the harness, so that risk shows only in a run against a model, which waits for chat-48 (Decisions 8).
   - Check: full `rm -rf target */target` and `mvn -B test`, with the counts against the baseline and the new tests listed separately; the enforcer rule; and the three E2E checks.
 - [x] 10. **Native-image probe of `agent-connector-kernel`.**
   - An E2E program with `main()`, outside the Maven build (testing standard `TestingStandard_260404_oo01`): it builds a `ToolRunner` over a temporary directory, lists the tools, and calls `write`, then `read`.

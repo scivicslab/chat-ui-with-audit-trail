@@ -10,7 +10,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* /root/.npm
 COPY ack-relay /usr/local/bin/ack-relay
 RUN chmod 0755 /usr/local/bin/ack-relay \
- && useradd -m -d /home/agent -s /bin/bash agent \
+ && groupadd -g 1001 agent && useradd -m -u 1001 -g 1001 -d /home/agent -s /bin/bash agent \
  && mkdir -p /home/agent/.config/opencode && chown -R agent:agent /home/agent
 USER agent
 ENV HOME=/home/agent
