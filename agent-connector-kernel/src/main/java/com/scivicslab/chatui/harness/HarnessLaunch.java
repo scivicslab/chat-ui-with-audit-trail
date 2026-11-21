@@ -9,8 +9,8 @@ import java.util.Map;
 
 /**
  * How a harness CLI process is started: its command line, the environment variables removed from and added to what
- * it inherits, and its working directory (tasks/todo.md, stage 7). The one place the later confinement settings and
- * the LLM-proxy variables ({@code LlmKeyInjectionProxy_261121_oo01}) will be added.
+ * it inherits, and its working directory (tasks/todo.md, stage 7). Part of agent-connector-kernel since stage 11, so
+ * that any product can start a harness with it: chat-ui's {@code plugin-harness} and ssh-connector.
  *
  * @param command    the command line
  * @param removedEnv the inherited variables the process must not see

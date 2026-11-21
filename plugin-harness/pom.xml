@@ -21,6 +21,12 @@
       <artifactId>chat-ui-with-audit-trail-plugin-api</artifactId>
       <scope>provided</scope>
     </dependency>
+    <!-- HarnessLaunch is agent-connector-kernel's (stage 11); the body ships the kernel, so it is not bundled -->
+    <dependency>
+      <groupId>com.scivicslab</groupId>
+      <artifactId>agent-connector-kernel</artifactId>
+      <scope>provided</scope>
+    </dependency>
     <dependency>
       <groupId>org.json</groupId>
       <artifactId>json</artifactId>
