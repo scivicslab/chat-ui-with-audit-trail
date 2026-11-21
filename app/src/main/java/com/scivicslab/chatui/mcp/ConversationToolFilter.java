@@ -1,7 +1,6 @@
 package com.scivicslab.chatui.mcp;
 
 import com.scivicslab.chatui.core.actor.ChatUiActorSystem;
-import com.scivicslab.chatui.core.actor.ConversationToolRunner;
 import io.quarkiverse.mcp.server.McpConnection;
 import io.quarkiverse.mcp.server.ToolFilter;
 import io.quarkiverse.mcp.server.ToolManager.ToolInfo;
@@ -26,7 +25,6 @@ public class ConversationToolFilter implements ToolFilter {
 
     @Override
     public boolean test(ToolInfo tool, McpConnection connection) {
-        ConversationToolRunner runner = chats.toolRunnerOf(ChatUiMcpServer.conversationOf(currentRequest));
-        return runner != null && runner.offers(tool.name());
+        return ChatUiMcpServer.endpointOf(chats).offers(ChatUiMcpServer.conversationOf(currentRequest), tool.name());
     }
 }

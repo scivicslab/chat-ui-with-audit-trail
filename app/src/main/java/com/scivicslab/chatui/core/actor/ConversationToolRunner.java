@@ -130,6 +130,11 @@ public final class ConversationToolRunner implements ToolCallRecorder {
                 pluginTools), calculator, docs, new AppTools(), this);
     }
 
+    /** @return agent-connector-kernel's runner of this conversation's tools, which chat-ui's MCP server calls */
+    public ToolRunner core() {
+        return core;
+    }
+
     /** @return the conversation's qualified name, e.g. {@code "project1/chat-01"} */
     public String conversationName() {
         return ChatUiActorSystem.chatActorName(projectId, chatId);

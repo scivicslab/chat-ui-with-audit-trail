@@ -67,10 +67,20 @@ public class ChatUiMcpServer {
             return ToolResponse.error("error: the request names no conversation; send the " + CONVERSATION_HEADER
                     + " header with <project>/<chat>");
         }
-        ConversationToolRunner runner = chats.toolRunnerOf(conversation);
-        if (runner == null) return ToolResponse.error("error: no such conversation: " + conversation);
-        String observation = runner.callFromMcp(tool, new JSONObject(arguments == null ? Map.of() : arguments).toString());
-        return observation.startsWith("error: ") ? ToolResponse.error(observation) : ToolResponse.success(observation);
+        McpToolEndpoint.Result result = endpointOf(chats).call(conversation, tool,
+                new JSONObject(arguments == null ? Map.of() : arguments).toString());
+        return result.isError() ? ToolResponse.error(result.text()) : ToolResponse.success(result.text());
+    }
+
+    /**
+     * @return agent-connector-kernel's MCP tool endpoint over this instance's conversations: a conversation's scope
+     *         name is its qualified name, and its runner is the one the conversation last published
+     */
+    static McpToolEndpoint endpointOf(ChatUiActorSystem chats) {
+        return new McpToolEndpoint(name -> {
+            ConversationToolRunner runner = chats.toolRunnerOf(name);
+            return runner == null ? null : runner.core();
+        });
     }
 
     /**

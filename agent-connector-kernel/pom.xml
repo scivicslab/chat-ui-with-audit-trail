@@ -32,6 +32,13 @@
       <groupId>org.jsoup</groupId>
       <artifactId>jsoup</artifactId>
     </dependency>
+    <!-- The localhost MCP server keeps its scopes in an actor and runs requests on the actor system's managed pool
+         (tasks/todo.md, Decisions 5 and stage 6) -->
+    <dependency>
+      <groupId>com.scivicslab</groupId>
+      <artifactId>pojo-actor</artifactId>
+      <version>${pojo-actor.version}</version>
+    </dependency>
     <!-- ToolCatalog.Spec renders a tool's arguments as a JSON Schema object -->
     <dependency>
       <groupId>org.json</groupId>

@@ -263,7 +263,7 @@ A test that moves to another module still counts once, so the total stays the sa
     - The app's `ConversationToolRunner` keeps its public API (constructor, `offers`, `callFromMcp`, `run`, `IoPosition`, `Calculator`) and delegates to a `ToolRunner`. It supplies the I/O-log recorder (itself), the tools that operate ConversationSquad actors (an inner `AppTools` extension), and `DocsSources.choose` as the `DocsLookup`. `Calculator` now implements `ExpressionEvaluator`. `ChatSession` is unchanged.
     - New test `ToolRunnerTest` (6 tests), written first. Red run on W206: `mvn test -pl agent-connector-kernel -am` without the classes failed to compile (`cannot find symbol ToolExtension`, `ToolRunner`). Then green.
   - **Result (2026-11-21, W206 Job `chat77-split-s4to8`):** BUILD SUCCESS for `mvn -B test` and `mvn -B package` after `rm -rf target */target`. Counts: `plugin-api` 0, `agent-connector-kernel` 66 (the baseline's 60 plus the 6 new `ToolRunnerTest`), `app` 792, `plugin-web-tools` 17, `plugin-shell` 11, `plugin-harness` 54, total 940 = 934 + 6 new, with 0 failures, errors and skipped. The enforcer passed. E2E: `McpServerCheck` 19/19, `ToolCallingCheck` 9/9, `ExternalMcpCheck` 8/8, `--restored` 1/1.
-- [ ] 6. **MCP endpoint in `agent-connector-kernel`, Quarkus adapter in `app`.**
+- [x] 6. **MCP endpoint in `agent-connector-kernel`, Quarkus adapter in `app`.**
   - `McpToolEndpoint` and `ToolScopes`. `ChatUiMcpServer` and `ConversationToolFilter` delegate to them. `ChatUiActorSystem.toolRunnerOf` reads `ToolScopes`.
   - The localhost HTTP server of Decisions 5, inside `agent-connector-kernel`:
     - It is built on `com.sun.net.httpserver`, bound to the loopback address only, with POJO-actor concurrency (plain POJO first).
@@ -272,6 +272,19 @@ A test that moves to another module still counts once, so the total stays the sa
     - Its unit tests are written first and fail first: no key, wrong key, right key, unknown scope.
     - `app` does not start this server. chat-ui keeps its Quarkus `/mcp` exactly as today.
   - Check: unit tests, then in a W206 Job the E2E `McpServerCheck`, `ExternalMcpCheck` and `ToolCallingCheck` against a throw-away instance. Output must match stage 1.
+  - As built:
+    - `McpToolEndpoint` (`agent-connector-kernel`, package `com.scivicslab.chatui.mcp`): `offers(scope, tool)`, `call(scope, tool, argsJson)` and `list(scope)`, over a scope-name → `ToolRunner` function. It has no HTTP in it.
+    - `ChatUiMcpServer` and `ConversationToolFilter` call it through `ChatUiMcpServer.endpointOf(chats)`. That resolves a conversation by its qualified name to `ConversationToolRunner.core()`. The `X-Chat-Ui-Conversation` header and the error texts are unchanged.
+    - **Deviation from the plan line above:** `ChatUiActorSystem.toolRunnerOf` still reads chat-ui's own map, not `ToolScopes`. chat-ui's Quarkus `/mcp` takes no key, so `ToolScopes`, which holds a key per scope, belongs to the localhost server only. chat-ui's behaviour is unchanged.
+    - The localhost server: `LocalMcpServer` binds to `InetAddress.getLoopbackAddress()` on `com.sun.net.httpserver` at `/mcp`. `ToolScopes` is a plain POJO run as an actor (`mcp-scopes`); it issues a 32-byte random key per scope and compares keys with `MessageDigest.isEqual`. Requests run on the `ActorSystem`'s managed thread pool. `McpRequestHandler` is a plain POJO that decides each answer:
+      - 400 without the `X-Agent-Connector-Scope` header;
+      - 404 for an unknown scope;
+      - 401 without `Authorization: Bearer <the scope's key>`;
+      - otherwise JSON-RPC `initialize`, `tools/list`, `tools/call`, or 202 for a notification.
+    - `app` does not start this server.
+    - `agent-connector-kernel` now also depends on pojo-actor (`${pojo-actor.version}`). The enforcer still passes.
+    - New tests, written first: `McpRequestHandlerTest` (5: no key, wrong key, right key with `tools/call`, right key with `tools/list`, unknown scope and missing scope) and `LocalMcpServerTest` (1: loopback only, a real HTTP request with the key answered, a wrong key refused). Red run on W206: without the classes, `mvn test -pl agent-connector-kernel -am` failed to compile (`cannot find symbol ToolScopes`, `McpRequestHandler`, `LocalMcpServer`). Then green.
+  - **Result (2026-11-21, W206 Job `chat77-split-s4to8`):** BUILD SUCCESS for `mvn -B test` and `mvn -B package` after `rm -rf target */target`. Counts: `plugin-api` 0, `agent-connector-kernel` 72 (60 + 6 `ToolRunnerTest` + 5 `McpRequestHandlerTest` + 1 `LocalMcpServerTest`), `app` 792, `plugin-web-tools` 17, `plugin-shell` 11, `plugin-harness` 54, total 946 = 934 + 12 new, with 0 failures, errors and skipped. The enforcer passed. E2E: `McpServerCheck` 19/19, `ToolCallingCheck` 9/9, `ExternalMcpCheck` 8/8, `--restored` 1/1.
 - [ ] 7. **`HarnessLaunch` in `plugin-harness`.**
   - The MCP entry `HarnessLaunch` can hand a harness is a URL plus a key (Decisions 5). No stdio-shaped entry. Inside chat-ui none is passed (Decisions 3).
   - First write a test that pins today's argv and environment for claude (`stdbuf -oL claude --output-format stream-json --input-format stream-json --verbose --model …`, `--permission-mode bypassPermissions`, `--tools ""` for the full tool set, `CLAUDECODE` and `CLAUDE_CODE_ENTRYPOINT` removed) and for codex (`codex exec [resume <thread>] --json --skip-git-repo-check -c sandbox_mode="workspace-write" [-m <model>] -`). It passes before and after the change.
