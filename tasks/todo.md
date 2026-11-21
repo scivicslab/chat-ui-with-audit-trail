@@ -541,6 +541,18 @@ Files on `wip/s9p3`:
 ### New order of work (each step tests first, red then green on W206; a report after each)
 
 1. **Enforcer rule.** Remove the ban. `agent-connector-kernel` gets `quarkus-arc`, `quarkus-vertx-http`, `quarkus-mcp-server-http` 2.0.4 and the native transport (Linux epoll) that Unix domain sockets need, plus a Jandex index. The build and the 934 + 41 tests stay green.
+   - **Done (2026-11-22, W206 Job `chat77-split-k1`).**
+     - Change:
+       - The enforcer execution is removed.
+       - `agent-connector-kernel` depends on `quarkus-arc`, `quarkus-vertx-http` and `quarkus-mcp-server-http`. The MCP library's version, 2.0.4, now lives in the parent's dependency management, so `app` and the kernel share it.
+       - `jandex-maven-plugin` 3.2.7 writes `META-INF/jandex.idx`.
+       - The native transport waits for step 3, where the socket is used.
+       - Only `app` depends on the kernel, so no plain-Java plugin pulls Quarkus in.
+     - Test first: `BeanLibraryTest.theBuildWritesAJandexIndex`. It failed on W206 without the plugin (`BeanLibraryTest.java:22`, index not on the class path), and passes with it.
+     - Result (`rm -rf target */target`, `mvn -B test` and `mvn -B package`, BUILD SUCCESS):
+       - counts: `plugin-api` 0, `agent-connector-kernel` 95, `app` 792, `plugin-web-tools` 17, `plugin-shell` 11, `plugin-harness` 61;
+       - total 976 = 934 + 42 new (the 41 of stages 5–9 and `BeanLibraryTest`), with 0 failures, errors and skipped;
+       - E2E: `McpServerCheck` ALL PASSED, `ToolCallingCheck` ALL PASSED, `ExternalMcpCheck` and `--restored` exit 0.
 2. **One MCP server, from the library.**
    - Tests first: key per conversation; the same 401 and body for an unknown name and a wrong key; 400 for a request that names no conversation; only the conversation's tools in `tools/list`, and a `tools/call` outside them refused; `initialize` answers with a complete `serverInfo`.
    - Then the kernel's beans: `ToolManager` registration, `ToolFilter`, `HttpAuthenticationMechanism` and the `/mcp/*` permission, with `app`'s `ChatUiMcpServer` and `ConversationToolFilter` moved in.

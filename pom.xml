@@ -61,6 +61,12 @@
         <artifactId>jsoup</artifactId>
         <version>${jsoup.version}</version>
       </dependency>
+      <!-- agent-connector-kernel's MCP server; app uses the same version -->
+      <dependency>
+        <groupId>io.quarkiverse.mcp</groupId>
+        <artifactId>quarkus-mcp-server-http</artifactId>
+        <version>2.0.4</version>
+      </dependency>
       <!-- Reaches the body through plugin-log-db; pinned here so a plugin compiled against it
            (provided) sees the same version the body runs. -->
       <dependency>

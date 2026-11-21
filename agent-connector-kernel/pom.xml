@@ -13,10 +13,10 @@
   <packaging>jar</packaging>
 
   <!-- agent-connector-kernel: the headless side of chat-ui-with-audit-trail (the tool registry, the
-       tool runner, the MCP tool endpoint and the plain tools), which nigsc-connector will ship without
-       the screen and the record. It must run outside Quarkus, so the enforcer below fails the build
-       when any Quarkus, CDI, MicroProfile or Vert.x artifact reaches it, directly or transitively.
-       Dependencies are added as classes move in, one stage at a time (tasks/todo.md). -->
+       tool runner, the MCP server and the plain tools), which nigsc-connector will ship without the
+       screen and the record. It is a library of CDI beans for the Quarkus applications that use it
+       (app, and later ssh-connector): it has no Quarkus build of its own, and the Jandex index below
+       lets Quarkus discover its beans (tasks/todo.md, plan change 2026-11-22, Decision 12). -->
   <dependencies>
     <dependency>
       <groupId>com.scivicslab</groupId>
@@ -44,6 +44,19 @@
       <groupId>org.json</groupId>
       <artifactId>json</artifactId>
     </dependency>
+    <!-- The MCP server is Quarkiverse quarkus-mcp-server, the library app already uses (Decision 12) -->
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-arc</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-vertx-http</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.quarkiverse.mcp</groupId>
+      <artifactId>quarkus-mcp-server-http</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
@@ -54,34 +67,15 @@
   <build>
     <plugins>
       <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-enforcer-plugin</artifactId>
-        <version>3.5.0</version>
+        <groupId>io.smallrye</groupId>
+        <artifactId>jandex-maven-plugin</artifactId>
+        <version>3.2.7</version>
         <executions>
           <execution>
-            <id>no-framework-in-agent-connector-kernel</id>
+            <id>make-index</id>
             <goals>
-              <goal>enforce</goal>
+              <goal>jandex</goal>
             </goals>
-            <configuration>
-              <rules>
-                <bannedDependencies>
-                  <searchTransitive>true</searchTransitive>
-                  <excludes>
-                    <exclude>io.quarkus*</exclude>
-                    <exclude>io.quarkiverse*</exclude>
-                    <exclude>jakarta.*</exclude>
-                    <exclude>javax.inject</exclude>
-                    <exclude>javax.enterprise</exclude>
-                    <exclude>org.eclipse.microprofile*</exclude>
-                    <exclude>io.smallrye*</exclude>
-                    <exclude>io.vertx*</exclude>
-                  </excludes>
-                  <message>agent-connector-kernel must run without Quarkus: no Quarkus, CDI, MicroProfile, SmallRye or Vert.x artifact may reach it (tasks/todo.md, stage 2).</message>
-                </bannedDependencies>
-              </rules>
-              <fail>true</fail>
-            </configuration>
           </execution>
         </executions>
       </plugin>
