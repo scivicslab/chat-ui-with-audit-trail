@@ -60,7 +60,7 @@ Naming rule: in docs, comments and commit messages, always write `agent-connecto
 
 ## Later (after the split)
 
-- chat-ui's Quarkus `/mcp` takes no key, so when quarkus-chat-ui later launches a confined harness, it must switch to the key-checking `McpToolEndpoint` path (with `ToolScopes`) instead of its own map. Accepted deviation in stage 6 (`9c4b530`), chat-01, 2026-11-21.
+- chat-ui's `/mcp` takes no key during the split: `app` sets `agent-connector-kernel.mcp.require-key=false` (Decision 13). When quarkus-chat-ui confines harnesses, it turns the setting on (`true`), and its `McpScopes` bean must then give each conversation a key. This was the accepted deviation of stage 6 (`9c4b530`), recorded by chat-01 on 2026-11-21; chat-48 restated it on 2026-11-22 (t144:r1).
 
 ## Target modules
 
@@ -491,6 +491,13 @@ The person's decision, relayed by chat-01 and chat-48 in t143:r1: "Quarkusを使
    - There is one MCP server. `app`'s `ChatUiMcpServer` and `ConversationToolFilter` move into `agent-connector-kernel` as that server. `app` keeps only its `ToolExtension` for the ConversationSquad tools (Decisions 2).
    - Concurrency stays with POJO-actor: the scopes and keys stay in actors (`ToolScopes`, `ProxyKeys`), called from the beans.
 
+13. **Decision 13: one key setting per deployment** (chat-48, 2026-11-22, t144:r1). It is `agent-connector-kernel.mcp.require-key`, default `true`, in the kernel's `META-INF/microprofile-config.properties`.
+   - With `true`, every scope needs its key. A request that names no scope gets 400. An unknown scope, a missing key and a wrong key get the same 401 with the same (empty) body.
+   - `app` alone sets it to `false`. That keeps chat-ui's behaviour before the split exactly: no key, and a request goes on as the conversation it names in `X-Chat-Ui-Conversation` (`agent-connector-kernel.mcp.scope-header`), or with no tools when it names none.
+   - It is not a per-scope option, because an unkeyed scope inside ssh-connector would be a hole.
+   - Decisions item 3 stands: chat-ui's behaviour does not change during the split.
+   - The proxy shares the one Unix socket with the MCP server, at `/llm/<scope>/v1` (t144:r1, question 3). The LLM proxy's component (question 1) waits for chat-01's answer, and step 4 does not start before it.
+
 ### Doc answers (asked in t143:r1, points 4 and 5)
 
 - **Point 4: can the Quarkus HTTP server listen on a Unix domain socket? Yes.** The Vert.x reference guide, section "Use a Unix Domain Socket" (https://quarkus.io/guides/vertx-reference#use-a-unix-domain-socket), says:
@@ -557,6 +564,31 @@ Files on `wip/s9p3`:
    - Tests first: key per conversation; the same 401 and body for an unknown name and a wrong key; 400 for a request that names no conversation; only the conversation's tools in `tools/list`, and a `tools/call` outside them refused; `initialize` answers with a complete `serverInfo`.
    - Then the kernel's beans: `ToolManager` registration, `ToolFilter`, `HttpAuthenticationMechanism` and the `/mcp/*` permission, with `app`'s `ChatUiMcpServer` and `ConversationToolFilter` moved in.
    - `LocalMcpServer` and `McpRequestHandler` deleted, and the `McpServerCheck`, `ToolCallingCheck` and `ExternalMcpCheck` E2E checks pass against `app`.
+   - **Done (2026-11-22, W206 Job `chat77-split-k1`).** One MCP server, on the library.
+     - In `agent-connector-kernel`, package `com.scivicslab.chatui.mcp`:
+       - `McpScopes`: what an application provides, as one CDI bean: its tools, the runner of a scope, and whether a key opens a scope.
+       - `McpAccess`: the plain decision for both values of the setting (Decision 13).
+       - `McpKeyMechanism`: a Quarkus `HttpAuthenticationMechanism` for the MCP path only.
+       - `McpScopeToolFilter`: the library's `ToolFilter`.
+       - `KernelMcpServer`: `ToolManager.newTool` registration, and calls on the scope's runner.
+       - `META-INF/microprofile-config.properties`: the defaults and the permission `agent-connector-kernel-mcp` (`/mcp`, `/mcp/*`, `authenticated`).
+       - The kernel also depends on `quarkus-security`.
+     - In `app`: `ChatUiMcpScopes` (the conversations, keyless) replaces `ChatUiMcpServer` and `ConversationToolFilter`, which are deleted. `application.properties` sets `require-key=false` and `scope-header=X-Chat-Ui-Conversation`.
+     - Deleted: `LocalMcpServer`, `McpRequestHandler`, their tests (`LocalMcpServerTest`, `LocalMcpServerUnixSocketTest`, `McpRequestHandlerTest`) and `e2e/KernelNativeProbe.java`. The `serverInfo.version` fix on `wip/s9p3` is not carried; the library writes `serverInfo`, and `McpKeyCheck` shows it complete.
+     - `e2e/ConfinementCheck.java` still names `LocalMcpServer`. It is a program outside the build, and step 5 points it at the Quarkus server.
+     - Found on the way: a refusal must leave the request with no identity rather than fail authentication. When authentication fails, quarkus-mcp-server answers 401 with an MCP error naming the exception (`{"error":{"code":-32005,"message":"io.quarkus.security.AuthenticationFailedException"}}`), so a missing scope could not get 400. With no identity, the permission refuses through `McpKeyMechanism.getChallenge`.
+     - Tests first. The red run on W206 failed to compile (`cannot find symbol` / `package McpAccess does not exist` in `McpAccessTest`). New tests:
+       - `McpAccessTest`, 4: key required, the right key goes on; key required, unknown scope = wrong key = no key = non-Bearer key = empty key, all 401; key required, no scope gives 400; no key required, the request goes on as its scope without a key.
+       - `McpToolEndpointTest`, 1: a `FULL` and a `HARNESS` scope each see only their share, and an unknown scope sees none; brought over from `McpRequestHandlerTest`. My first version of it had `HARNESS` backwards and failed; the code was right, and the test was fixed.
+     - New E2E `e2e/McpKeyCheck.java`, run against two throw-away `app` instances (`mcpkey.sh`):
+       - `key-required` (`-Dagent-connector-kernel.mcp.require-key=true`): no conversation gives 400; a known conversation with no key, with a wrong key, and an unknown conversation each give 401 with the same body; `/q/health` is not refused. ALL PASSED.
+       - `no-key` (as shipped): `initialize` gives 200 with `serverInfo` carrying `name` and `version`. ALL PASSED.
+     - Result (`rm -rf target */target`, `mvn -B test` and `mvn -B package`, BUILD SUCCESS):
+       - counts: `plugin-api` 0, `agent-connector-kernel` 91, `app` 792, `plugin-web-tools` 17, `plugin-shell` 11, `plugin-harness` 61; total 972, with 0 failures, errors and skipped;
+       - against 976 after step 1: minus 9 deleted (`LocalMcpServerTest` 1, `LocalMcpServerUnixSocketTest` 3, `McpRequestHandlerTest` 5), plus 5 new.
+     - E2E on this jar:
+       - `McpServerCheck` ALL PASSED; `ExternalMcpCheck` and `--restored` exit 0.
+       - `ToolCallingCheck` failed once in that run: the conversation's history had an extra user and assistant pair (`[system, user, assistant, user, assistant, tool, assistant, tool, assistant]`); its other checks passed. It passed in the run before (the same server code in no-key mode) and in two reruns on the same jar (`e2eonly.sh`), both with `[system, user, assistant, tool, assistant, tool, assistant]`. The cause of the one failure is not known.
 3. **Unix domain socket.**
    - `quarkus.http.domain-socket` set by the launcher's process, and `UnixSocketHttpServer` deleted.
    - A test checks the socket's 0600 and the directory's 0700.

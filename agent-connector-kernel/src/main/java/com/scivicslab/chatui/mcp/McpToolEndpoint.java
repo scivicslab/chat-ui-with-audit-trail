@@ -9,8 +9,8 @@ import java.util.function.Function;
 
 /**
  * The MCP tools of a scope, with no transport in sight: which tools a scope is offered and what a call returns
- * ({@code ToolCatalogAndChatUiMcpServer_261120_oo01}, tasks/todo.md stage 6). chat-ui's Quarkus {@code /mcp} and
- * agent-connector-kernel's localhost HTTP server both call it; neither passes an HTTP detail in.
+ * ({@code ToolCatalogAndChatUiMcpServer_261120_oo01}, tasks/todo.md stage 6). {@link KernelMcpServer} and
+ * {@link McpScopeToolFilter} call it, and pass no HTTP detail in.
  */
 public final class McpToolEndpoint {
 
