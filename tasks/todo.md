@@ -51,6 +51,10 @@ Naming rule: in docs, comments and commit messages, always write `agent-connecto
 
    Tests use dummy keys only. A run against a real model (Claude, OpenAI, GLM-5.3 on the B200 vLLM, Copilot) is not done without chat-48 arranging the credential or endpoint.
 
+## Later (after the split)
+
+- chat-ui's Quarkus `/mcp` takes no key, so when quarkus-chat-ui later launches a confined harness, it must switch to the key-checking `McpToolEndpoint` path (with `ToolScopes`) instead of its own map. Accepted deviation in stage 6 (`9c4b530`), chat-01, 2026-11-21.
+
 ## Target modules
 
 The core side is the new `agent-connector-kernel` module plus the plugin jars that depend only on `plugin-api`. Neither `agent-connector-kernel` nor those plugins may depend on `app`.
