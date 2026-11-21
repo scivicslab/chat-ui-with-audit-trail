@@ -4,14 +4,17 @@ Design inputs: `AgentConnectorKernelConcept_261121_oo01` (`doc_SCIVICS003/docs/a
 
 Branch: `nigsc-connector-split`, from `main` at `7c4b507`. The name is the one chat-48 gave. Before branching, `git fetch origin` showed `main` equal to `origin/main` (both `7c4b507`). `git log main..harness-tools-mcp` and `git log main..origin/harness-tools-mcp` are both empty, so `harness-tools-mcp` holds no unmerged commits and changes nothing for the split.
 
-Goal of this rebuild: change the module structure, not the behaviour. The ssh tool, the LLM proxy and the harness confinement come later and go on the core side. The harness-side MCP transport, HTTP on localhost (Decisions 5), is built in stage 6. They are not part of these stages.
+Goal of this rebuild: change the module structure, not the behaviour. The LLM proxy and the harness confinement come later and go on the core side. The harness-side MCP transport, HTTP on localhost (Decisions 5), is built in stage 6, and `ssh-connector` with the ssh tools (Decisions 6) in stage 9. They are not part of these stages.
 
 Background (for reference only; this work renames nothing):
 - After the split, chat-ui-with-audit-trail returns to the quarkus-chat-ui brand, as a new major version in the old `scivicslab/quarkus-chat-ui` repository.
 - nigsc-connector is a later tool that depends on the core and carries the settings specific to the NIG supercomputer.
 - The docs for chat-ui and for the core go in `doc_SCIVICS003`.
-- The supercomputer ssh tool will later be added to this repository as a plugin, `ssh-connector`, loaded into `agent-connector-kernel` the way `plugin-shell` is loaded today.
-- `nigsc-connector` will be a separate thing that depends on `agent-connector-kernel` and `ssh-connector` and carries the NIG supercomputer's settings.
+- `ssh-connector` is a standalone tool, not a plugin of `agent-connector-kernel` (Decisions 6). It is `agent-connector-kernel`, plus the ssh tools, plus its own launcher executable with a `main` entry point.
+  - Its purpose is to let any harness, not only Claude Code, use clusters over MCP.
+  - Through `agent-connector-kernel` it launches and confines the harness, runs the MCP server (HTTP on localhost, Decisions 5) and the LLM proxy, and exposes the ssh tools.
+  - The ssh tools live in a module of their own, so quarkus-chat-ui can reuse that module.
+- `nigsc-connector` will be a separate thing that depends on `ssh-connector`, and through it on `agent-connector-kernel`, and adds the NIG supercomputer's settings.
 
 Naming rule: in docs, comments and commit messages, always write `agent-connector-kernel` in full, never "kernel" alone. The short form is confused with a Jupyter kernel and with Claude Science's Operon kernel process. Code identifiers avoid a bare `kernel` too.
 
@@ -28,6 +31,9 @@ Naming rule: in docs, comments and commit messages, always write `agent-connecto
    - it binds to the loopback address only;
    - its concurrency is written with POJO-actor, as a plain POJO first, with no class name ending in `Actor`.
    Inside chat-ui-with-audit-trail nothing changes: Decisions 3 stands, no MCP config is passed to the harness, and the E2E checks after each stage prove today's behaviour is kept.
+6. **`ssh-connector` is a standalone tool, not a plugin of `agent-connector-kernel`** (the person's decision, 2026-11-21, relayed by chat-01 and chat-48).
+   - The design documents were updated to match: `doc_SCIVICS003` commit `547f35a` (`AgentConnectorKernelConcept_261121_oo01`) and `doc_Infra001` commit `7f1dc54` (`NigscConnectorComposition_261121_oo01`).
+   - It is built in stage 9.
 
 ## Target modules
 
@@ -270,8 +276,15 @@ A test that moves to another module still counts once, so the total stays the sa
   - It also starts the localhost HTTP server of stage 6 inside the native image and sends it one request with the right key. The check passes when the server compiles into the image and answers that request.
   - Record what fails. Expected: `calc` through JShell, `PluginRegistry`'s runtime jar loading, jackson-databind, and POJO-actor, which is still unproven under native-image (`ConcurrencyWithPojoActor_261121_oo01` line 63).
   - This stage reports; it does not have to pass. What to exclude or replace is decided with chat-48.
-- [ ] 9. **Wrap-up.**
-  - Full `rm -rf target` and `mvn test` in a W206 Job, plus the E2E checks of stage 6.
+- [ ] 9. **`ssh-connector`** (Decisions 6).
+  - It produces two things:
+    - a module of its own for the ssh tools, which quarkus-chat-ui can reuse;
+    - a runnable `ssh-connector` artifact with a `main` entry point. It starts `agent-connector-kernel`'s MCP server (the localhost HTTP server of stage 6) and the LLM proxy, and launches a harness through `HarnessLaunch` (stage 7), handing it the MCP entry as a URL plus a key.
+  - The ssh tools themselves are **to be specified before the stage starts**; chat-48 will send that spec.
+  - Check: an E2E program with `main()`, outside the Maven build (`TestingStandard_260404_oo01`), run on a throw-away instance in a W206 Job. Plus full `rm -rf target`, `mvn test` with the counts against stage 1, and the E2E checks of stage 6, which show chat-ui is unchanged.
+  - Open before this stage can start: the LLM proxy (`LlmKeyInjectionProxy_261121_oo01`) has no stage of its own in this plan. Stage 9 needs it, so where it is built is to be settled with chat-48.
+- [ ] 10. **Wrap-up.**
+  - Full `rm -rf target` and `mvn test` in a W206 Job, plus the E2E checks of stage 6 and the `ssh-connector` E2E of stage 9.
   - Diff against `main`.
   - A review section in this file.
   - Proposed doc changes for chat-48 to decide: the module table of `ProviderAndToolPlugins_260912_oo01`, and a new 040_design doc for the split.
