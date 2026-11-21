@@ -748,16 +748,53 @@ So the shared library has two layers, and the part they share is the streaming u
    - Never deployed or restarted, and the running broker at 192.168.5.21:30805 and its config are not touched. Deploying waits for the person's approval.
 4. **Back to the plan:** step 5 (the 5.14 confinement checks and the stub runs), then step 6 (the real-model runs).
 
-### Open questions for chat-48
+### Answers (chat-48, 2026-11-22, t149:r1)
 
-1. **F1:** fix the requeue of a failure after `start`, or keep today's behaviour exactly?
-2. **The broker's path:** `llm-relay-core` alone, as above, rather than Vert.x HTTP Proxy, because the broker queues and retries a request that is no longer live.
+1. **F1: fix it**, with a test in the broker step. A failure before the first byte gives `RETRYABLE` and is requeued. A failure after it gives `FAILED_AFTER_START`, and the sink is failed. The broker branch's commit message and plan note the change.
+2. **The broker's path: `llm-relay-core` alone**, which matches the person's wording: vertx-http-proxy for the reverse proxy, and the Vert.x HTTP client where a plain upstream call is needed.
+3. **F2: "no timeout" stays the default**, and can be set. The broker step does not set one.
+4. Watch the `provided` scope: in each consumer, exactly one `vertx-core` must end up in the built application, and its version is reported.
 
-### Open questions for chat-48
+### Step 4a.1: `llm-relay` (done 2026-11-22)
 
-1. **Point 5:** Vert.x HTTP Proxy (recommended) or a hand-written route on Quarkus's router.
-2. **`app`'s `/mcp` gets keys when it becomes the kernel's server.** `0ac86a4` planned that switch for later. If it happens in step 2, `app`'s own Claude Code and Codex conversations must send their scope's key in their MCP config. The other way is that the security check applies only to scopes registered with a key.
-3. **One socket for both endpoints,** with the proxy at `/llm/<scope>/v1`, as point 4 leads to.
+- **Repository:** a new local git repository at `~/works/llm-relay`, commit `1f00ec1`.
+  - Author `scivicslab <devteam@scivicslab.com>`, the same as `quarkus-gpu-broker`.
+  - No remote, nothing pushed.
+  - Parent `com.scivicslab:llm-relay-parent` 0.1.0-SNAPSHOT, with modules `llm-relay-core` and `llm-relay-proxy`, Java 25.
+  - Installed into the Job's local repository with `mvn install`.
+- **`llm-relay-core`:**
+  - `RelayCall`, on the Vert.x `HttpClient`, with `send` (a `Future<Result>`) and `sendAndWait`.
+  - `RelayOptions`: HTTP/1.1 with no h2c upgrade, keep-alive, chunks of at most 8 KB, and connect and idle timeouts that are 0 (none) unless set.
+  - `UpstreamRequest`; `RelaySink` (`start`, `emit`, `stopRequested`, `complete`); outcomes `COMPLETED`, `RETRYABLE` and `FAILED_AFTER_START`.
+- **`llm-relay-proxy`:**
+  - `RelayProxy`: vertx-http-proxy's `HttpProxy.reverseProxy` with a `ProxyInterceptor` that runs the `RelayInterceptor`s in order. It is mounted on a vertx-web `Router` with vertx-web-proxy's `ProxyHandler`, which both Quarkus BOMs manage (4.5.21 and 4.5.35).
+  - `RelayInterceptor`: refuses with a `Refusal(status, contentType, body)`, or rewrites the `ProxyRequest`'s URI and headers.
+- **Dependencies:** Vert.x is `provided`, compiled against 4.5.21.
+- **Tests first.** The red run (`relay.sh r1red red`) failed to compile (`cannot find symbol` for `RelayCall`, `RelayOptions`, `UpstreamRequest`, `RelaySink`).
+- **Green, W206 Job `chat77-relay-1`:** `mvn -B test -Dvertx.version=4.5.35`, then `mvn -B install -Dvertx.version=4.5.21`. Both BUILD SUCCESS, and both give `RelayCallTest` 10 and `RelayProxyTest` 5: 15 tests, 0 failures.
+  - `RelayCallTest`:
+    - body and Content-Type verbatim over HTTP/1.1 with no `Upgrade` (B1, B2);
+    - a 503 is `RETRYABLE` with no sink call (B3);
+    - a refused connection is `RETRYABLE` with its cause (B4);
+    - a 400 reaches the sink with its status (B6);
+    - `start` once and first, `complete` last, `application/octet-stream` by default (B7, B10);
+    - the first chunk reaches the sink while the upstream still waits, then the rest in order, no chunk over 8 KB (B8);
+    - `stopRequested` closes the upstream connection and completes (B9);
+    - a connection closed after the start is `FAILED_AFTER_START` with no `complete` (F1);
+    - `sendAndWait` on a virtual thread, interrupted, is `RETRYABLE` and keeps the flag (B11, B12);
+    - no timeout by default, and a 1 s idle timeout before the start is `RETRYABLE` (B14, F2).
+  - `RelayProxyTest`:
+    - a refusal reaches the client with its status and body, and the upstream is not called;
+    - the URI and the `Authorization` header are rewritten before the request goes up;
+    - an OpenAI stream passes through unbroken: the first `data:` line arrives while the upstream still waits, then the rest in order;
+    - the same for an Anthropic stream with `event:` and `data:` lines;
+    - an upstream that is down is answered with 502.
+
+### Questions on the plan change (all settled)
+
+1. **Point 5: settled by the person's decision (2026-11-22, t147:r1).** The LLM proxy uses Vert.x HTTP Proxy, with the part shared with the GPU broker in `llm-relay` (step 4a).
+2. **Keys on `app`'s `/mcp`: settled (t144:r1, Decision 13).** One setting per deployment, `agent-connector-kernel.mcp.require-key`; `app` sets `false`.
+3. **One socket for both endpoints: settled (t144:r1).** The proxy is at `/llm/<scope>/v1`.
 
 ## Rules every stage follows
 
