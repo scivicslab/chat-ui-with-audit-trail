@@ -40,6 +40,8 @@ class BookStepsWorkflowTest {
     private PlanRunnerIIAR plan;
     private HttpServer endpoint;
     private final List<String> asked = new ArrayList<>();
+    /** When set, the question splitting the section whose title holds this text is answered with no unit. */
+    private volatile String noGroupsFor;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -59,7 +61,10 @@ class BookStepsWorkflowTest {
                 asked.add(new JSONObject(body).getJSONArray("messages").getJSONObject(0).getString("content"));
             }
             String question = new JSONObject(body).getJSONArray("messages").getJSONObject(0).getString("content");
-            String answer = question.contains("Split the blocks into units")
+            String noGroupsFor = this.noGroupsFor;
+            String answer = noGroupsFor != null && question.contains("Split the blocks into units") && question.contains(noGroupsFor)
+                    ? "a reply that names no unit"
+                    : question.contains("Split the blocks into units")
                     ? "p1-p2 | sequence"
                     : question.contains("The blocks have been split into these units")
                     ? "g1: concurrent programming\np1 | multithreading\np2 | processes side by side"
@@ -97,8 +102,12 @@ class BookStepsWorkflowTest {
     }
 
     private String run(String workflow) throws Exception {
+        return run(workflow, "core");
+    }
+
+    private String run(String workflow, String name) throws Exception {
         for (String[] p : new String[][] {
-                {"book", dir.resolve("book").toString()}, {"name", "core"}, {"db", dir.resolve("db/books").toString()},
+                {"book", dir.resolve("book").toString()}, {"name", name}, {"db", dir.resolve("db/books").toString()},
                 {"url", "http://127.0.0.1:" + endpoint.getAddress().getPort() + "/v1/chat/completions"}, {"model", "fake"},
                 {"parallel", "2"}, {"sections", ""}, {"min", "2"}}) {
             plan.callByActionName("putJson", new JSONObject().put("path", p[0]).put("value", p[1]).toString());
@@ -191,5 +200,49 @@ class BookStepsWorkflowTest {
             assertEquals("one way to program concurrently", s.properties("core").get("10.1.1").get(0).property());
         }
         assertNull(system.getIIActor("plan.books"), "the workflow removes the actor it made");
+    }
+
+    @Test
+    @DisplayName("book-frame-data: 一節が割れなくても残りの節で先へ進み、割れなかった節を結果に書く")
+    void frameData_oneSectionCannotBeGrouped_goesOnWithTheOtherAndNamesIt() throws Exception {
+        run("book-toc.yaml");
+        run("book-sections.yaml");
+        try (BookStore s = BookStore.forWriting("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
+            s.saveSectionRules("core", new BookStore.SectionRules("10.1.1", """
+                    (defrule s1 -> p1 p2 :heading "## 10.1.1. Threads")
+                    (defrule p1 -> :nucleus p1/1 :example p1/2)
+                    (defrule p1/1 -> "Multithreading is one way to program concurrently.")
+                    (defrule p1/2 -> "Java has threads.")
+                    (defrule p2 -> "Running processes side by side is another.")
+                    """, Map.of(), 2));
+            s.saveSectionRules("core", new BookStore.SectionRules("10.1", """
+                    (defrule s1 -> p1 p2 :heading "## 10.1. Running Threads")
+                    (defrule p1 -> "Threads run at once.")
+                    (defrule p2 -> "Processes run at once.")
+                    """, Map.of(), 1));
+        }
+        noGroupsFor = "Running Threads";
+
+        String outcome = run("book-frame-data.yaml");
+
+        assertTrue(outcome.startsWith("could not group the sections: 1 of 2 failed: 10.1: error: java.lang.IllegalStateException: "
+                + "the reply makes no group of the blocks"), outcome);
+        assertTrue(outcome.contains("1 section(s) of core asked for relations: {example of=1}, 0 failed"),
+                "the later steps ran on the section that was grouped: " + outcome);
+        try (BookStore s = BookStore.forWriting("jdbc:h2:" + dir.resolve("db/books") + ";AUTO_SERVER=TRUE")) {
+            assertEquals(List.of("10.1.1"), List.copyOf(s.groups("core").keySet()), "the grouped section is saved, the other is not");
+        }
+        assertNull(system.getIIActor("plan.books"), "the workflow removes the actor it made");
+    }
+
+    @Test
+    @DisplayName("book-frame-data: 本が無ければ何もせずに止まる")
+    void frameData_bookNotInTheDatabase_stops() throws Exception {
+        run("book-toc.yaml");
+
+        String outcome = run("book-frame-data.yaml", "no-such-book");
+
+        assertTrue(outcome.startsWith("(plan stopped: could not group the sections: "), outcome);
+        assertTrue(outcome.contains("no book no-such-book"), outcome);
     }
 }

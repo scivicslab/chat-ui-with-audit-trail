@@ -91,21 +91,59 @@ steps:
         arguments: {path: outcome, value: 'jexl:state.getString("placed") + "; " + state.getString("related") + "; " + state.getString("named") + "; " + result'}
         execution: direct
 
-  - states: ["1", "failed"]
+  # A batch step's action is false either because nothing could be done (the book is not in the database) or because
+  # some frames failed ("N of M failed: <frame>: <reason>; ..."). The frames done stay saved and a rerun asks the failed
+  # ones again, so on the second kind the run goes on with the frames that were done, and the outcome names the ones
+  # that failed. The reason is kept before it is tested, since a test replaces it. Relating the frames is not a batch.
+  - states: ["1", "1f"]
+    label: keep-why-placing-failed
+    actions: [{actor: this, method: putJson, arguments: {path: placed, value: "jexl:result"}, execution: direct}]
+
+  - states: ["1f", "failed"]
     label: could-not-place
-    actions: [{actor: this, method: doNothing, arguments: ["the book is not in the database, or the model could not be reached"], execution: direct}]
+    actions:
+      - {actor: this, method: onlyIf, arguments: "jexl: !state.getString('placed').matches('(?s).*[0-9]+ of [0-9]+ failed: .*')", execution: direct}
+      - {actor: this, method: doNothing, arguments: ["the book is not in the database, or the model could not be reached"], execution: direct}
+
+  - states: ["1f", "2"]
+    label: go-on-after-some-frames-could-not-be-placed
+    actions: [{actor: this, method: doNothing, arguments: ["some concrete frames could not be placed; the others go on"], execution: direct}]
 
   - states: ["2", "failed"]
     label: could-not-relate
     actions: [{actor: this, method: doNothing, arguments: ["the frames could not be related"], execution: direct}]
 
-  - states: ["3", "failed"]
-    label: could-not-name
-    actions: [{actor: this, method: doNothing, arguments: ["the frames could not be named"], execution: direct}]
+  - states: ["3", "3f"]
+    label: keep-why-naming-failed
+    actions: [{actor: this, method: putJson, arguments: {path: named, value: "jexl:result"}, execution: direct}]
 
-  - states: ["4", "failed"]
+  - states: ["3f", "failed"]
+    label: could-not-name
+    actions:
+      - {actor: this, method: onlyIf, arguments: "jexl: !state.getString('named').matches('(?s).*[0-9]+ of [0-9]+ failed: .*')", execution: direct}
+      - {actor: this, method: doNothing, arguments: ["the frames could not be named"], execution: direct}
+
+  - states: ["3f", "4"]
+    label: go-on-after-some-frames-could-not-be-named
+    actions: [{actor: this, method: doNothing, arguments: ["some frames could not be named; the others go on"], execution: direct}]
+
+  - states: ["4", "4f"]
+    label: keep-why-asking-items-failed
+    actions: [{actor: this, method: putJson, arguments: {path: items, value: "jexl:result"}, execution: direct}]
+
+  - states: ["4f", "failed"]
     label: could-not-ask-items
-    actions: [{actor: this, method: doNothing, arguments: ["the items of the frames could not be asked"], execution: direct}]
+    actions:
+      - {actor: this, method: onlyIf, arguments: "jexl: !state.getString('items').matches('(?s).*[0-9]+ of [0-9]+ failed: .*')", execution: direct}
+      - {actor: this, method: doNothing, arguments: ["the items of the frames could not be asked"], execution: direct}
+
+  - states: ["4f", "5"]
+    label: go-on-after-some-items-could-not-be-asked
+    actions:
+      - actor: this
+        method: putJson
+        arguments: {path: outcome, value: 'jexl:state.getString("placed") + "; " + state.getString("related") + "; " + state.getString("named") + "; " + state.getString("items")'}
+        execution: direct
 
   - states: ["5", "end"]
     label: tear-down-actor-tree
