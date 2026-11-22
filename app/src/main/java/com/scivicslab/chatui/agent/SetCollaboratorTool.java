@@ -58,6 +58,8 @@ public final class SetCollaboratorTool {
                     + " across projects must go through that project's gateway (not implemented yet)";
         }
         String onNode = node == null || node.isBlank() ? null : node.strip();
+        String unqualified = AskChatTool.remoteTargetRefusal(collaboratorChatId, onNode, "collaboratorChatId");
+        if (unqualified != null) return unqualified;
         if (onNode != null && !nodeKnown.test(onNode)) {
             return "error: node " + onNode + " is not known to this instance; give a node ask_chat can reach, "
                     + "or leave node out for a conversation of this instance";

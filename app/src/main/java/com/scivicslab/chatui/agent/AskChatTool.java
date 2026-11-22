@@ -145,9 +145,48 @@ public final class AskChatTool {
         // The sender may have meant a conversation of the same name in another instance (project numbers
         // are local to an instance), so a delivery across projects says where it went.
         String elsewhere = targetName.startsWith(myProjectId + "/") ? "" : OtherInstances.sameNameNote(targetName);
+        RemoteNodes nodes = RemoteNodes.of(system);
         return "sent to " + targetName + " as " + (urgent ? "urgent request " : "request ") + requestId
                 + (urgent ? ", ahead of " + passed + " waiting message(s)" : "")
-                + "; its reply will arrive in this conversation as a new message when its turn ends" + elsewhere;
+                + "; its reply will arrive in this conversation as a new message when its turn ends. "
+                + whereItWent(targetName, nodes == null ? null : nodes.myName(), true) + elsewhere;
+    }
+
+    /**
+     * Where a request went, in words: the conversation, its project, and the chat-ui instance (node). The result of
+     * {@code ask_chat} says it, so that a sender who meant another conversation sees it at once.
+     *
+     * @param targetName   the qualified name, e.g. {@code project1/chat-01}
+     * @param node         the node name: the other instance's, or this instance's own; {@code null} when not known
+     * @param thisInstance whether the conversation is on this instance
+     */
+    static String whereItWent(String targetName, String node, boolean thisInstance) {
+        int slash = targetName.indexOf('/');
+        String project = slash < 0 ? "?" : targetName.substring(0, slash);
+        String chat = slash < 0 ? targetName : targetName.substring(slash + 1);
+        String where = thisInstance
+                ? "on this chat-ui instance" + (node == null || node.isBlank() ? "" : " (node " + node + ")")
+                : "on node " + node + ", another chat-ui instance";
+        return "It went to conversation " + chat + " of project " + project + " " + where + ".";
+    }
+
+    /**
+     * Refuses a conversation named on another chat-ui instance without its project. Without one it would be read as
+     * the sender's own project there: project9/chat-01 sent {@code chat-01} with a node, meaning project1/chat-01 of
+     * its own instance, and the request went to project9/chat-01 on the other instance.
+     *
+     * @param chatId    the conversation as the model wrote it
+     * @param node      the node it gave; blank for this instance
+     * @param parameter the parameter's name, for the message
+     * @return the refusal, or {@code null} when the name is fine
+     */
+    public static String remoteTargetRefusal(String chatId, String node, String parameter) {
+        if (node == null || node.isBlank() || chatId == null || chatId.isBlank() || chatId.contains("/")) return null;
+        String id = chatId.strip().startsWith("chat-") ? chatId.strip() : "chat-" + chatId.strip();
+        return "error: with node \"" + node.strip() + "\", " + parameter + " must start with the project on that"
+                + " instance: write \"<project>/" + id + "\", for example \"project1/" + id + "\", not \""
+                + chatId.strip() + "\". A conversation of a project shown on this instance's screen is on this"
+                + " instance and takes no node: for it, write \"project1/" + id + "\" and leave node out.";
     }
 
     /**
@@ -522,6 +561,8 @@ public final class AskChatTool {
                                     String target, String prompt, String requestId, boolean urgent) {
         if (target == null || target.isBlank()) return "error: chatId is required";
         if (prompt == null || prompt.isBlank()) return "error: prompt is required";
+        String unqualified = remoteTargetRefusal(target, node, "chatId");
+        if (unqualified != null) return unqualified;
         RemoteNodes nodes = RemoteNodes.of(system);
         if (nodes == null) {
             return "error: node " + node + " is not available: this instance has no other chat-ui instance "
@@ -547,7 +588,8 @@ public final class AskChatTool {
             return "error: node " + nodeName + " did not receive the request: " + receipt.detail();
         }
         return "sent to " + targetName + " on node " + nodeName + " as " + (urgent ? "urgent request " : "request ")
-                + requestId + "; its reply will arrive in this conversation as a new message when its turn ends";
+                + requestId + "; its reply will arrive in this conversation as a new message when its turn ends. "
+                + whereItWent(targetName, nodeName, false);
     }
 
     /**

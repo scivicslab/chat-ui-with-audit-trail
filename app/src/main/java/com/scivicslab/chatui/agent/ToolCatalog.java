@@ -228,11 +228,15 @@ public final class ToolCatalog {
                     new ToolParameter("path", "string", true, "")),
                 false);
         add(m, "ask_chat", """
-                send an instruction to another conversation (e.g. "02" for one in your own project, or
-                "project2/02" to reach one in another project). Give "node" only to reach a conversation of
-                another chat-ui instance: to find the node name of another instance, call list_running_tools
-                first; then chatId names the conversation there. Leave "node" out for this instance. It does NOT
-                wait: the result only says the instruction was sent, and under which request id, e.g.
+                send an instruction to another conversation. Write chatId by where that conversation is: in your
+                own project, "chat-02"; in another project of this chat-ui instance, "project1/chat-01", with no
+                node. Every project shown on this instance's screen is on this instance, so a conversation of
+                this instance, in any project, takes no node. On another chat-ui instance: to find the node name
+                of another instance, call list_running_tools first; give it as "node", and write chatId with the
+                project on that instance first, e.g. "project1/chat-01"; with node, a chatId without its project
+                ("chat-01") is refused.
+                It does NOT wait: the result says the instruction was sent, to which conversation of which
+                project on which instance (node), and under which request id, e.g.
                 "project1/chat-01:s40:t5:r2" (your conversation, session, turn, and the number of this ask_chat
                 in your turn). The reply reaches you only AFTER YOU END YOUR TURN: it comes as a new message
                 starting with "[reply to request <request id>, from <the turn that wrote it>]" — match the id
@@ -253,8 +257,11 @@ public final class ToolCatalog {
                     new ToolParameter("node", "string", false, "")),
                 true);
         add(m, "ask_chat_urgent", """
-                as ask_chat (including "node": to find the node name of another instance, call
-                list_running_tools first), but the request goes into the other conversation's queue ahead of
+                as ask_chat, with chatId and node written as ask_chat says: a conversation of this instance, in
+                any project, takes no node ("chat-02", "project1/chat-01"); on another instance (to find the node
+                name of another instance, call list_running_tools first), give the node and write chatId with its
+                project, e.g. "project1/chat-01". The
+                request goes into the other conversation's queue ahead of
                 every waiting message that is not urgent, and its reply comes back to you the same way. It does
                 not interrupt a turn the other conversation is running; it is answered next. Use it when someone
                 asks you how the work you handed out is going: send each conversation you gave work to an urgent
@@ -269,9 +276,11 @@ public final class ToolCatalog {
                 true);
         add(m, "cancel_request", """
                 take back a request you sent with ask_chat or ask_chat_urgent while it still waits in the other
-                conversation's queue. "node" is optional: a request sent to another instance is found by its id;
-                its result then arrives as a new message (to find the node name of another instance, call
-                list_running_tools first). "requestId" is the id the ask_chat result gave, e.g.
+                conversation's queue. "node" is optional and only for a request sent to another chat-ui instance
+                (to find the node name of another instance, call list_running_tools first); a request to a
+                conversation of this instance, in any
+                project, takes no node. A request sent to another instance is found by its id; its result then
+                arrives as a new message. "requestId" is the id the ask_chat result gave, e.g.
                 "project1/chat-01:s40:t5:r2". Only you, the sender, can cancel it. The result says what
                 happened: "removed" (it is out of the queue and no reply will come, so do not wait for one),
                 "already running" (the other conversation has started it and it is not stopped; send a follow-up
@@ -308,9 +317,12 @@ public final class ToolCatalog {
                 when a reply says a report will come later (for example "I will report later" or "not finished
                 yet, about 20 more minutes"), register it with that conversation's timekeeper. After "minutes"
                 it is reminded once, and the answer it writes then comes to you as [follow-up to request …,
-                reminder N]. If that says "not yet" again, register again. "minutes" is in whole minutes. Give
-                "node" when the conversation that promised the report is on another chat-ui instance, as you
-                gave it to ask_chat (to find the node name of another instance, call list_running_tools first).
+                reminder N]. If that says "not yet" again, register again. "minutes" is in whole minutes. A
+                conversation of this instance, in any project, takes no node. Give "node" only when the
+                conversation that promised the report is on another chat-ui instance, as you gave it to ask_chat
+                (to find the node name of another instance, call list_running_tools first), and then write chatId
+                with its project first, e.g.
+                "project1/chat-01".
                 You do not register a reminder for a report you promise yourself: the end of your turn decides
                 that.
                 """,
@@ -348,10 +360,12 @@ public final class ToolCatalog {
                 false);
         add(m, "set_collaborator", """
                 record that, for ConversationSquad "chatId", the ConversationSquad playing role "role" (e.g.
-                "worker") is "collaboratorChatId". Give "node" only when the one playing the role is a
-                conversation of another chat-ui instance, as ask_chat takes it: to find the node name of another
-                instance, call list_running_tools first; then collaboratorChatId names the conversation there,
-                and the agent loop sends its work there. An agent loop installed via set_agent_loop can then
+                "worker") is "collaboratorChatId". A conversation of this instance, in any project, takes no
+                node. Give "node" only when the one playing the role is a conversation of another chat-ui
+                instance, as ask_chat takes it (to find the node name of another instance, call list_running_tools
+                first); then write
+                collaboratorChatId with its project on that instance first, e.g. "project1/chat-01", and the
+                agent loop sends its work there. An agent loop installed via set_agent_loop can then
                 resolve that role instead of a hardcoded chat id, and you can reassign it again later by calling
                 this a second time.
                 """,

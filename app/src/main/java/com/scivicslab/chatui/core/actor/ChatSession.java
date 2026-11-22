@@ -3000,6 +3000,8 @@ public class ChatSession extends Interpreter {
         if (!node.isBlank()) {
             // A conversation of another chat-ui instance (ConversationSquadsAcrossInstances_261115_oo01).
             if (chatId.isBlank()) return "error: give chatId, the conversation on node " + node.strip() + " that promised the report";
+            String unqualified = AskChatTool.remoteTargetRefusal(chatId, node, "chatId");
+            if (unqualified != null) return unqualified;
             if (requestId.isBlank()) return "error: give requestId, the request whose report was promised";
             String target = ChatUiActorSystem.resolveChatName(projectId, chatId);
             String result = AskChatTool.expectReportRemote(system, myChatName(), node, target, requestId, minutes);

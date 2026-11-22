@@ -493,6 +493,7 @@ class ConversationToolsTest {
 
         String sent = AskChatTool.send(system, "project1", "01", "02", "question", "project1/chat-01:s7:t3:r1");
         assertTrue(sent.startsWith("sent to project1/chat-02 as request project1/chat-01:s7:t3:r1"), sent);
+        assertTrue(sent.contains("conversation chat-02 of project project1 on this chat-ui instance"), sent);
 
         long deadline = System.currentTimeMillis() + 20_000;
         while (caller.prompts.size() < 2 && System.currentTimeMillis() < deadline) Thread.sleep(50);

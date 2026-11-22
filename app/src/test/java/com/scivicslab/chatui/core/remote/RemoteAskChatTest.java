@@ -141,7 +141,7 @@ class RemoteAskChatTest {
     void aRequestGoesToTheOtherInstance_itsTurnAnswers_andTheReplyArrivesInTheSendersQueue() throws Exception {
         IIActorSystem a = new IIActorSystem("instance-a");
         IIActorSystem b = new IIActorSystem("instance-b");
-        Scripted asker = new Scripted(false, invoke("ask_chat", "chatId", "01", "node", "b", "prompt", "do the job"),
+        Scripted asker = new Scripted(false, invoke("ask_chat", "chatId", "project1/chat-01", "node", "b", "prompt", "do the job"),
                 "Handed it out.", invoke("accept_reply"), "Done.");
         Scripted worker = new Scripted(false, "the job is done");
         Squad one = squad(a, asker);
@@ -160,6 +160,9 @@ class RemoteAskChatTest {
         assertTrue(reply.contains("the job is done"), reply);
         assertTrue(asker.prompts.stream().anyMatch(p -> p.contains("sent to project1/chat-01 on node b as request")),
                 "the tool said where it went: " + asker.prompts);
+        assertTrue(asker.prompts.stream().anyMatch(p -> p.contains(
+                        "conversation chat-01 of project project1 on node b, another chat-ui instance")),
+                "the tool named the instance, the project and the conversation: " + asker.prompts);
         waitUntil(() -> one.chat().outstandingChildrenDirect().isEmpty(), "the request closed on a");
     }
 
@@ -178,7 +181,7 @@ class RemoteAskChatTest {
         try {
             IIActorSystem a = new IIActorSystem("instance-a-restart");
             IIActorSystem b = new IIActorSystem("instance-b-before");
-            Scripted asker = new Scripted(false, invoke("ask_chat", "chatId", "01", "node", "b", "prompt", "do the job"),
+            Scripted asker = new Scripted(false, invoke("ask_chat", "chatId", "project1/chat-01", "node", "b", "prompt", "do the job"),
                     "Handed it out.", invoke("accept_reply"), "Done.");
             Scripted busy = new Scripted(true, "the long job is done");
             Squad aOne = squad(a, asker);
@@ -301,9 +304,9 @@ class RemoteAskChatTest {
             startNodes(a, b);
             personTypes(bOne, "a long job");
             assertTrue(busy.started.await(10, TimeUnit.SECONDS));
-            assertTrue(AskChatTool.sendRemote(a, "project1", "01", "b", "01", "job one", "project1/chat-01:s9:t2:r1", false)
+            assertTrue(AskChatTool.sendRemote(a, "project1", "01", "b", "project1/chat-01", "job one", "project1/chat-01:s9:t2:r1", false)
                     .startsWith("sent"));
-            assertTrue(AskChatTool.sendRemote(a, "project1", "01", "b", "01", "job two", "project1/chat-01:s9:t2:r2", false)
+            assertTrue(AskChatTool.sendRemote(a, "project1", "01", "b", "project1/chat-01", "job two", "project1/chat-01:s9:t2:r2", false)
                     .startsWith("sent"));
             waitUntil(() -> {
                 try {
@@ -411,8 +414,8 @@ class RemoteAskChatTest {
         IIActorSystem a = new IIActorSystem("instance-a-cancel");
         IIActorSystem b = new IIActorSystem("instance-b-cancel");
         Scripted asker = new Scripted(false,
-                invoke("ask_chat", "chatId", "01", "node", "b", "prompt", "first job") + "\n"
-                        + invoke("ask_chat", "chatId", "01", "node", "b", "prompt", "second job"),
+                invoke("ask_chat", "chatId", "project1/chat-01", "node", "b", "prompt", "first job") + "\n"
+                        + invoke("ask_chat", "chatId", "project1/chat-01", "node", "b", "prompt", "second job"),
                 "Handed both out.", "noted");
         Scripted worker = new Scripted(true, "first job done");
         Squad one = squad(a, asker);
@@ -446,7 +449,7 @@ class RemoteAskChatTest {
     void aFollowUpFromTheOtherInstanceArrivesInTheSendersQueue() throws Exception {
         IIActorSystem a = new IIActorSystem("instance-a-follow");
         IIActorSystem b = new IIActorSystem("instance-b-follow");
-        Scripted asker = new Scripted(false, invoke("ask_chat", "chatId", "01", "node", "b", "prompt", "start the survey"),
+        Scripted asker = new Scripted(false, invoke("ask_chat", "chatId", "project1/chat-01", "node", "b", "prompt", "start the survey"),
                 "Handed it out.", "noted");
         Scripted worker = new Scripted(false, "Started; I will report when it is done.", "The survey is done: 42 items.");
         Squad one = squad(a, asker);
@@ -599,9 +602,10 @@ class RemoteAskChatTest {
     void expectReportWithANodeRegistersThePromiseWithTheRemoteConversationsTimekeeper() throws Exception {
         IIActorSystem a = new IIActorSystem("instance-a-expect");
         IIActorSystem b = new IIActorSystem("instance-b-expect");
-        Scripted asker = new Scripted(false, invoke("ask_chat", "chatId", "01", "node", "b", "prompt", "start the survey"),
+        Scripted asker = new Scripted(false, invoke("ask_chat", "chatId", "project1/chat-01", "node", "b", "prompt", "start the survey"),
                 "Handed it out.",
                 invoke("expect_report", "chatId", "01", "node", "b", "requestId", "project1/chat-01:t1:r1", "minutes", "1"),
+                invoke("expect_report", "chatId", "project1/chat-01", "node", "b", "requestId", "project1/chat-01:t1:r1", "minutes", "1"),
                 "Waiting for the report.", "noted");
         Scripted worker = new Scripted(false, "Started; I will report when it is done.", "The survey is done: 42 items.");
         Squad one = squad(a, asker);
@@ -613,6 +617,8 @@ class RemoteAskChatTest {
         waitUntil(() -> asker.prompts.stream().anyMatch(p -> p.contains("timekeeper will remind it")), "expect_report ran");
         String result = asker.prompts.stream().filter(p -> p.contains("timekeeper will remind it")).findFirst().orElseThrow();
         assertTrue(result.contains("on node b"), "the promise went to b: " + result);
+        assertTrue(asker.prompts.stream().anyMatch(p -> p.contains("must start with the project on that instance")),
+                "expect_report with a node and a chatId without its project was refused first: " + asker.prompts);
         waitUntil(() -> !two.keeper().askNow(Timekeeper::pendingPromises).join().isEmpty(), "b's timekeeper holds the promise");
 
         two.keeper().ask(k -> { k.tick(System.currentTimeMillis() + 120_000); return null; }).get(5, TimeUnit.SECONDS);
@@ -658,7 +664,7 @@ class RemoteAskChatTest {
         try (StubWorkspace ws = new StubWorkspace()) {
             IIActorSystem a = new IIActorSystem("instance-a-ws");
             IIActorSystem b = new IIActorSystem("instance-b-ws");
-            Scripted asker = new Scripted(false, invoke("ask_chat", "chatId", "01", "node", "chat-ui-b", "prompt", "do the job"),
+            Scripted asker = new Scripted(false, invoke("ask_chat", "chatId", "project1/chat-01", "node", "chat-ui-b", "prompt", "do the job"),
                     "Handed it out.", invoke("accept_reply"), "Done.");
             Scripted worker = new Scripted(false, "the job is done");
             Squad one = squad(a, asker);
@@ -682,7 +688,7 @@ class RemoteAskChatTest {
         try (StubWorkspace ws = new StubWorkspace()) {
             IIActorSystem a = new IIActorSystem("instance-a-late");
             IIActorSystem c = new IIActorSystem("instance-c-late");
-            Scripted asker = new Scripted(false, invoke("ask_chat", "chatId", "01", "node", "chat-ui-c", "prompt", "do the job"),
+            Scripted asker = new Scripted(false, invoke("ask_chat", "chatId", "project1/chat-01", "node", "chat-ui-c", "prompt", "do the job"),
                     "Handed it out.", invoke("accept_reply"), "Done.");
             Scripted worker = new Scripted(false, "the late one did it");
             Squad one = squad(a, asker);
@@ -713,8 +719,8 @@ class RemoteAskChatTest {
             IIActorSystem a = new IIActorSystem("instance-a-drop");
             IIActorSystem b = new IIActorSystem("instance-b-drop");
             Scripted asker = new Scripted(false,
-                    invoke("ask_chat", "chatId", "01", "node", "chat-ui-b", "prompt", "first job"), "Noted.",
-                    invoke("ask_chat", "chatId", "01", "node", "chat-ui-b", "prompt", "second job"), "Handed it out.",
+                    invoke("ask_chat", "chatId", "project1/chat-01", "node", "chat-ui-b", "prompt", "first job"), "Noted.",
+                    invoke("ask_chat", "chatId", "project1/chat-01", "node", "chat-ui-b", "prompt", "second job"), "Handed it out.",
                     invoke("accept_reply"), "Done.");
             Scripted worker = new Scripted(false, "the second job is done");
             Squad one = squad(a, asker);
@@ -752,7 +758,7 @@ class RemoteAskChatTest {
     }
 
     @Test
-    void theChatIdWrittenAsProjectSlashChatDashNN_projectSlashNN_orNN_reachesTheSameRemoteConversation() throws Exception {
+    void theChatIdOnANode_isProjectSlashChatDashNN_orProjectSlashNN_andABareNNIsRefused() throws Exception {
         IIActorSystem a = new IIActorSystem("instance-a-ids");
         IIActorSystem b = new IIActorSystem("instance-b-ids");
         Scripted asker = new Scripted(false,
@@ -767,9 +773,14 @@ class RemoteAskChatTest {
 
         personTypes(one, "hand out three jobs");
 
-        for (String job : List.of("job one", "job two", "job three")) {
+        for (String job : List.of("job one", "job two")) {
             waitUntil(() -> worker.prompts.stream().anyMatch(p -> p.contains(job)), job + " on b's project1/chat-01");
         }
+        // A chatId without its project would be read as the sender's own project on the other instance: refused,
+        // with the way to write it (project9/chat-01 sent "chat-01" with a node and reached nobody it meant).
+        waitUntil(() -> asker.prompts.stream().anyMatch(p -> p.contains("must start with the project on that instance")
+                && p.contains("\"project1/chat-01\"")), "job three refused with the right form");
+        assertFalse(worker.prompts.stream().anyMatch(p -> p.contains("job three")), "job three was not sent");
         assertFalse(asker.prompts.stream().anyMatch(p -> p.contains("chat-chat-")), "no doubled prefix: " + asker.prompts);
     }
 
@@ -777,7 +788,7 @@ class RemoteAskChatTest {
     void aRequestToAConversationTheOtherInstanceDoesNotHave_comesBackAsConversationNotFound() throws Exception {
         IIActorSystem a = new IIActorSystem("instance-a-none");
         IIActorSystem b = new IIActorSystem("instance-b-none");
-        Scripted asker = new Scripted(false, invoke("ask_chat", "chatId", "99", "node", "b", "prompt", "anyone there"),
+        Scripted asker = new Scripted(false, invoke("ask_chat", "chatId", "project1/chat-99", "node", "b", "prompt", "anyone there"),
                 "Handed it out.", "Noted.");
         Squad one = squad(a, asker);
         squad(b, new Scripted(false, "unused"));
@@ -798,7 +809,7 @@ class RemoteAskChatTest {
         try (StubWorkspace ws = new StubWorkspace()) {
             IIActorSystem a = new IIActorSystem("instance-a-byhand");
             IIActorSystem b = new IIActorSystem("instance-b-byhand");
-            Scripted asker = new Scripted(false, invoke("ask_chat", "chatId", "01", "node", "b", "prompt", "do the job"),
+            Scripted asker = new Scripted(false, invoke("ask_chat", "chatId", "project1/chat-01", "node", "b", "prompt", "do the job"),
                     "Handed it out.", invoke("accept_reply"), "Done.");
             Scripted worker = new Scripted(false, "the job is done");
             Squad one = squad(a, asker);

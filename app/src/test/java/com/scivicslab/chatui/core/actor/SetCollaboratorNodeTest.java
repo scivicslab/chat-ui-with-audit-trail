@@ -25,17 +25,23 @@ class SetCollaboratorNodeTest {
         try {
             ActorRef<RoleTable> roles = system.actorOf("project1/roles",
                     new RoleTable("project1", SessionEntries.ofProject(null, null, "project1")));
-            String ok = SetCollaboratorTool.setCollaborator(roles, "project1/chat-01", "02", "worker", "01", "b", Set.of("b")::contains);
+            String ok = SetCollaboratorTool.setCollaborator(roles, "project1/chat-01", "02", "worker", "project1/chat-01", "b", Set.of("b")::contains);
             assertTrue(ok.startsWith("ok:") && ok.contains("on node b"), ok);
             assertEquals(new RoleTable.Collaborator("project1/chat-01", "b"),
                     roles.ask(t -> t.collaboratorAt("project1/chat-02", "worker")).get(5, TimeUnit.SECONDS));
 
-            String refused = SetCollaboratorTool.setCollaborator(roles, "project1/chat-01", "02", "reviewer", "01", "c", Set.of("b")::contains);
+            String refused = SetCollaboratorTool.setCollaborator(roles, "project1/chat-01", "02", "reviewer", "project1/chat-01", "c", Set.of("b")::contains);
             assertTrue(refused.startsWith("error:") && refused.contains("c"), refused);
             assertEquals(null, roles.ask(t -> t.collaboratorAt("project1/chat-02", "reviewer")).get(5, TimeUnit.SECONDS));
 
             String local = SetCollaboratorTool.setCollaborator(roles, "project1/chat-01", "02", "reviewer", "03", null, Set.of("b")::contains);
             assertTrue(local.startsWith("ok:") && !local.contains("node"), local);
+
+            // On another instance the collaborator is named with its project, as ask_chat names it there.
+            String bare = SetCollaboratorTool.setCollaborator(roles, "project1/chat-01", "02", "tester", "01", "b", Set.of("b")::contains);
+            assertTrue(bare.startsWith("error:") && bare.contains("must start with the project on that instance")
+                    && bare.contains("\"project1/chat-01\""), bare);
+            assertEquals(null, roles.ask(t -> t.collaboratorAt("project1/chat-02", "tester")).get(5, TimeUnit.SECONDS));
         } finally {
             system.terminate();
         }
