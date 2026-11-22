@@ -346,6 +346,19 @@ public class CliProcess {
      * Destroys the running CLI process and resets all I/O handles.
      */
     public void cancel() {
+        stop(false);
+    }
+
+    /**
+     * As {@link #cancel}, but kills the process ({@code destroyForcibly}) rather than asking it to end: for a
+     * stalled-turn recovery whose cancel did not end the turn. The next prompt starts the CLI again, resuming the
+     * session it had.
+     */
+    public void forceStop() {
+        stop(true);
+    }
+
+    private void stop(boolean force) {
         if (readerThread != null) {
             readerThread.interrupt();
             readerThread = null;
@@ -360,8 +373,13 @@ public class CliProcess {
         currentProcess = null;
         stdinStream = null;
         if (p != null && p.isAlive()) {
-            p.destroy();
-            logger.info(binary + " CLI process cancelled");
+            if (force) {
+                p.destroyForcibly();
+                logger.info(binary + " CLI process killed by stalled-turn recovery");
+            } else {
+                p.destroy();
+                logger.info(binary + " CLI process cancelled");
+            }
         }
     }
 

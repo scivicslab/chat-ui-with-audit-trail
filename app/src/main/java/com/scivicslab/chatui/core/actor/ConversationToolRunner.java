@@ -220,6 +220,9 @@ public final class ConversationToolRunner {
             case "create_chat" -> CreateChatTool.create(system, controls, projectId, chatId,
                     input(args, "provider"), input(args, "model"), input(args, "superior"), input(args, "role"));
             case "list_chats" -> OrganizationTools.list(controls, projectId, chatId);
+            case "list_stalled_chats" -> com.scivicslab.chatui.agent.StalledChatsTool.list(system);
+            case "recover_stalled_chats" -> com.scivicslab.chatui.agent.StalledChatsTool.recover(system, projectId,
+                    input(args, "chatId"));
             case "set_superior" -> OrganizationTools.setSuperior(controls, projectId, chatId,
                     input(args, "chatId"), input(args, "superiorChatId"));
             case "set_chat_provider" -> ProviderTools.setChatProvider(controls, projectId,

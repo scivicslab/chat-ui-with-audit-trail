@@ -110,6 +110,20 @@ public class ChatSession extends Interpreter {
     // from any thread — safe publication of a single-writer/multi-reader flag, not a loosening of
     // the actor-thread-exclusivity rule (writes stay exactly where they always were).
     private volatile boolean busy;
+
+    // ---- Stalled-turn recovery (StalledTurnRecovery, tasks/stalled-turn-recovery.md) ----
+    /** When the model call in flight began, in milliseconds since the epoch, or 0 when no call is in flight. */
+    private volatile long llmCallStartedAt;
+    /** Whether the model call in flight has produced anything at all: a streamed event or any line of the provider. */
+    private volatile boolean llmCallProducedOutput;
+    /** Set by {@link #stopForRecovery}: the running turn ends without answering, and its prompt goes back to the queue. */
+    private volatile boolean recoverRequested;
+    /** Set by {@link #abandonCallForRecovery}: the step stops waiting for a model call that did not end when cancelled. */
+    private volatile boolean abandonCall;
+    /** The usage-limit refusal the running turn got ({@link ChatEvent#usageLimit}), or {@code null}. */
+    private volatile String usageLimitMessage;
+    /** When the queue was held because a turn got the usage-limit refusal, or 0 when it is not. */
+    private volatile long limitHeldSince;
     private String apiKey;
     private final LinkedList<HistoryEntry> conversationHistory = new LinkedList<>();
     // Same safe-publication pattern as `busy`, for the same reason (BusyStateReadableSnapshot_260828_oo01):
@@ -956,6 +970,7 @@ public class ChatSession extends Interpreter {
         this.turnOriginal = null;
         this.turnAnswer = null;
         this.cancelled = false;
+        this.usageLimitMessage = null;
         this.turnError = null;
         this.turnTranscript.setLength(0);
         this.pauseRequested = false;
@@ -1045,7 +1060,14 @@ public class ChatSession extends Interpreter {
         // of every turn that worked for the request go in it, each under its turn's id
         // (ReportReachesTheAskerAfterDelegation_261107_oo01).
         CompletableFuture<TurnReply> originalDone = null;
-        boolean paused = pauseRequested;
+        // A turn stopped by stalled-turn recovery has not done the work either: its prompt goes back to the front of
+        // the queue and runs again, so nothing of this turn's ending reaches anyone (StalledTurnRecovery).
+        // A turn the model's service refused for the usage limit has not done the work either: its request goes back to
+        // the front and the queue is held, so the waiting requests are not failed one after another while the limit
+        // lasts; a stalled-turn recovery releases it (tasks/stalled-turn-recovery.md).
+        boolean limited = usageLimitMessage != null && !recoverRequested;
+        boolean recovering = recoverRequested || limited;
+        boolean paused = pauseRequested || recovering;
         if (turnOriginal != null) {
             originalDone = openRequests.doneOf(turnOriginal);
             // A paused turn has not finished the work: the request waits for the turn that resumes it.
@@ -1062,21 +1084,34 @@ public class ChatSession extends Interpreter {
                     turnFollowUp.link());
         }
         // Kept with the paused turn first, then cleared.
-        if (paused) queueResume(emitter, self);
+        if (paused && !recovering) queueResume(emitter, self);
         turnReminder = null;
         turnFollowUp = null;
         pauseRequested = false;
+        recoverRequested = false;
+        abandonCall = false;
+        llmCallStartedAt = 0;
         publishOutstanding();
+        ActorRef<PromptQueue> promptQueue = getPromptQueue();
+        // Told before busy clears, so whoever sees this conversation idle after a recovery finds its prompt back in
+        // the queue once the queue has read its mail (StalledTurnRecovery.recover).
+        if (limited) {
+            limitHeldSince = System.currentTimeMillis();
+            String why = usageLimitMessage;
+            logToConversationSquad("WARNING", turnId() + " was refused for the usage limit (" + why + "); its request is"
+                    + " back at the front and the queue is held until a stalled-turn recovery releases it");
+        }
+        usageLimitMessage = null;
+        if (promptQueue != null && recovering) promptQueue.tell(q -> q.returnRunningToFront(self, limited));
         busy = false;
         activeResultKey = null;
 
-        ActorRef<PromptQueue> promptQueue = getPromptQueue();
-        if (promptQueue != null) {
+        if (promptQueue != null && !recovering) {
             promptQueue.tell(q -> q.onPromptComplete(self));
         }
 
         emitter.accept(ChatEvent.status(provider.getCurrentModel(), provider.getSessionId(), false));
-        if (done != originalDone) done.complete(reply);
+        if (done != originalDone && !recovering) done.complete(reply);
     }
 
     /** Why a turn that left no answer has none: what its asker is told ({@code TurnWithoutAnAnswerTellsTheAsker_261119_oo01}). */
@@ -1272,6 +1307,7 @@ public class ChatSession extends Interpreter {
         this.stepLimitHit = false;
         this.personQuestion = null;
         this.cancelled = false;
+        this.usageLimitMessage = null;
         this.constructedPrompts.clear();
         this.cutOffPending = false;
         this.cutOffRun = 0;
@@ -1860,7 +1896,10 @@ public class ChatSession extends Interpreter {
         // The body the provider sends is kept so the I/O log can record it as it was sent
         // (RequestMessagesControl_261018_oo01); a provider with no request body leaves it null.
         java.util.concurrent.atomic.AtomicReference<String> sentBody = new java.util.concurrent.atomic.AtomicReference<>();
-        ProviderContext ctx = new ProviderContext(apiKey, stepImages, turnNoThink, () -> {}, sentBody::set, true);
+        // Any line the provider reads, even one it shows nothing for (a CLI's thinking_tokens), is output: the call
+        // is alive. Only a call that produces nothing at all is a stalled one (StalledTurnRecovery).
+        ProviderContext ctx = new ProviderContext(apiKey, stepImages, turnNoThink, () -> llmCallProducedOutput = true,
+                sentBody::set, true);
         boolean[] cutOff = {false};
         StringBuilder assistantBuf = new StringBuilder();
         // The reasoning is kept for the record, not for the answer: it goes to the I/O log's
@@ -1890,6 +1929,8 @@ public class ChatSession extends Interpreter {
         AtomicLong progressLoggedAt = new AtomicLong(System.currentTimeMillis());
         StepAnswerStream answerStream = new StepAnswerStream(e -> turnEmitter.accept(e));
 
+        llmCallProducedOutput = false;
+        llmCallStartedAt = System.currentTimeMillis();
         java.util.concurrent.CompletableFuture<Object> call = providerRef.ask(p -> {
             // The provider's own "delta"/"result" are not forwarded as they are: this step might
             // still be a tool call, not the final answer. Its streamed text goes to the browser as
@@ -1902,6 +1943,12 @@ public class ChatSession extends Interpreter {
             // answer text twice (once streamed here, once from finish()) — both observed live
             // before the provisional bubble replaced the raw forwarding.
             Consumer<ChatEvent> wrapped = event -> {
+                llmCallProducedOutput = true;
+                if ("usage_limit".equals(event.type())) {
+                    // Remembered, not shown: the error that follows says it on the screen.
+                    usageLimitMessage = event.content() == null ? "usage limit" : event.content();
+                    return;
+                }
                 if ("delta".equals(event.type()) && event.content() != null) {
                     assistantBuf.append(event.content());
                     noteStreamProgress(stepLabel, streamedChars, progressLoggedAt, event.content());
@@ -1965,7 +2012,21 @@ public class ChatSession extends Interpreter {
         }, system.getManagedThreadPool());
         boolean failed = false;
         try {
-            call.get();
+            // Waited for a second at a time, so that a stalled-turn recovery can stop waiting for a call that did not
+            // end when it was cancelled (abandonCallForRecovery).
+            while (true) {
+                try {
+                    call.get(1, TimeUnit.SECONDS);
+                    break;
+                } catch (java.util.concurrent.TimeoutException stillRunning) {
+                    if (abandonCall) {
+                        turnError = "the model call gave no output and did not end when cancelled; it was abandoned";
+                        logToConversationSquad("WARNING", stepLabel + " abandoned by stalled-turn recovery");
+                        failed = true;
+                        break;
+                    }
+                }
+            }
         } catch (java.util.concurrent.ExecutionException e) {
             // The provider could not finish the call, e.g. its CLI ended without a result. The step fails; what it
             // streamed before stays in the step's record (TurnWithoutAnAnswerTellsTheAsker_261119_oo01).
@@ -1974,6 +2035,8 @@ public class ChatSession extends Interpreter {
             turnEmitter.accept(ChatEvent.error("Error: " + turnError));
             logToConversationSquad("WARNING", stepLabel + " failed: " + turnError);
             failed = true;
+        } finally {
+            llmCallStartedAt = 0;
         }
 
         String text = assistantBuf.toString();
@@ -3241,8 +3304,11 @@ public class ChatSession extends Interpreter {
         if (replyDecisionSettled) return new ActionResult(true, "already settled");
         replyDecisionSettled = true;
         if (undecidedRequest == null) return new ActionResult(true, "no reply waiting for a decision");
-        // A paused turn is not ending: the turn that resumes it decides.
+        // A paused turn is not ending: the turn that resumes it decides. Nor is one a recovery stopped: its prompt runs
+        // again, and that turn decides.
         if (pauseRequested) return new ActionResult(true, "paused: the resumed turn decides");
+        if (recoverRequested) return new ActionResult(true, "stopped by stalled-turn recovery: the turn run again decides");
+        if (usageLimitMessage != null) return new ActionResult(true, "refused for the usage limit: the turn run again decides");
         String request = undecidedRequest;
         String replier = undecidedReplier;
         String leftOpen = personQuestion != null ? "this turn ended by asking the person"
@@ -3505,6 +3571,61 @@ public class ChatSession extends Interpreter {
         if (providerName == null) return;
         ActorRef<LlmProvider> providerRef = providerRef();
         if (providerRef != null) providerRef.tellNow(LlmProvider::cancel);
+    }
+
+    /**
+     * When the model call in flight began, if it has produced nothing at all since; readable from any thread, while a
+     * turn holds this actor's own.
+     *
+     * @return the call's start in milliseconds since the epoch, or 0 when no call is in flight or it has produced output
+     */
+    public long silentCallStartedAt() {
+        long started = llmCallStartedAt;
+        return started == 0 || llmCallProducedOutput ? 0 : started;
+    }
+
+    /** @return when the queue was held for a usage-limit refusal, or 0 when it is not; readable from any thread */
+    public long limitHeldSince() { return limitHeldSince; }
+
+    /** Forgets the usage-limit hold; the recovery releases the queue itself. */
+    public void clearLimitHold() { limitHeldSince = 0; }
+
+    /** @return whether a stalled-turn recovery has stopped the running turn and it has not ended yet */
+    public boolean isRecovering() { return recoverRequested; }
+
+    /**
+     * Stops the running turn so that the prompt it works on goes back to the front of the queue, unanswered, and is
+     * run again ({@code StalledTurnRecovery}). Sent with {@code tellNow}, because the turn holds this actor's thread.
+     * The turn ends as a cancelled one does, except that its request is not answered, no reply decision is recorded,
+     * and the queue is told to put the prompt back instead of starting the next one. Does nothing when no turn runs.
+     *
+     * @return whether a turn was running and was asked to stop
+     */
+    public boolean stopForRecovery() {
+        if (!busy) return false;
+        recoverRequested = true;
+        logToConversationSquad("WARNING", "stalled-turn recovery: stopping " + turnId()
+                + "; its prompt goes back to the front of the queue");
+        cancel();
+        return true;
+    }
+
+    /** Kills the provider's process for a stalled-turn recovery whose cancel did not end the turn ({@link LlmProvider#forceStop}). */
+    public void forceStopProvider() {
+        if (providerName == null) return;
+        ActorRef<LlmProvider> providerRef = providerRef();
+        if (providerRef != null) providerRef.tellNow(LlmProvider::forceStop);
+    }
+
+    /**
+     * After {@link #stopForRecovery}, when the turn did not end: the step stops waiting for the model call, which has
+     * been cancelled and whose process has been killed, and the turn ends. Sent with {@code tellNow}.
+     */
+    public void abandonCallForRecovery() {
+        if (!recoverRequested) return;
+        abandonCall = true;
+        logToConversationSquad("WARNING", "stalled-turn recovery: the model call of " + turnId()
+                + " did not end when cancelled; the turn stops waiting for it");
     }
 
     /**

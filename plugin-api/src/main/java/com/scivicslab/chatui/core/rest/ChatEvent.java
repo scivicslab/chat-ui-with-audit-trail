@@ -138,6 +138,18 @@ public record ChatEvent(
     }
 
     /**
+     * Creates the event a provider sends, just before its {@code error}, when the model's service refused the call for
+     * the account's usage limit (Claude Code's {@code usage_limit_reached}). The conversation keeps the request and holds
+     * its queue rather than failing every waiting request in turn ({@code tasks/stalled-turn-recovery.md}).
+     *
+     * @param content the service's message
+     * @return a new usage_limit event
+     */
+    public static ChatEvent usageLimit(String content) {
+        return new ChatEvent("usage_limit", content, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+    }
+
+    /**
      * Creates the event a provider sends when the server stopped a reply at a token limit
      * ({@code finish_reason=length}) and the caller asked to handle that itself
      * ({@code ProviderContext#handlesCutOff}). The text written so far has already been streamed as

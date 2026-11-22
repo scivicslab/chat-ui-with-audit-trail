@@ -59,7 +59,10 @@ class ToolCatalogTest {
             Map.entry("set_request_messages", List.of(List.of("chatId", "messages"), List.of("chatId", "messages"))),
             Map.entry("complete_messages", List.of(List.of("chatId", "messages", "model", "noThink"), List.of("chatId", "messages"))),
             // Added after the table was read (ExternalMcpServersOfAConversation_261120_oo01).
-            Map.entry("set_mcp_servers", List.of(List.of("chatId", "servers"), List.of("chatId", "servers"))));
+            Map.entry("set_mcp_servers", List.of(List.of("chatId", "servers"), List.of("chatId", "servers"))),
+            // Added for stalled-turn recovery (tasks/stalled-turn-recovery.md).
+            Map.entry("list_stalled_chats", List.of(List.of(), List.of())),
+            Map.entry("recover_stalled_chats", List.of(List.of("chatId"), List.of())));
 
     static final Set<String> DRIVING = Set.of(
             "ask_person", "ask_chat", "ask_chat_urgent", "accept_reply", "cancel_request", "expect_report");

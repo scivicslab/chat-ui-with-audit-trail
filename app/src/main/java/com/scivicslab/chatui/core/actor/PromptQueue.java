@@ -48,6 +48,11 @@ public class PromptQueue {
      */
     private ActorRef<PromptQueue> self;
 
+    /** The item whose turn is running now, from {@link #popFront} until that turn ends; {@code null} when none is. */
+    private QueueItem running;
+    /** While set, nothing is dispatched: a stalled-turn recovery is under way (StalledTurnRecovery). */
+    private boolean held;
+
     public void setSelf(ActorRef<PromptQueue> self) { this.self = self; }
 
     // ── What the queue records of itself (EachActorRecordsItsOwnState_261118_oo01, decision 4) ──────────
@@ -401,6 +406,59 @@ public class PromptQueue {
      * @param chatSessionRef reference to the ChatSession
      */
     public void onPromptComplete(ActorRef<ChatSession> chatSessionRef) {
+        running = null;
+        requestDispatch(chatSessionRef, false);
+    }
+
+    /**
+     * Stops dispatching until {@link #returnRunningToFront} or {@link #release}: the first step of a stalled-turn
+     * recovery, so that no waiting item starts in the moment between the stalled turn's end and its prompt's return to
+     * the front ({@code StalledTurnRecovery}).
+     */
+    public void hold() {
+        held = true;
+        logToConversationSquad("queue: held for stalled-turn recovery (queue size=" + queue.size() + ")");
+    }
+
+    /** @return whether dispatching is held */
+    public boolean isHeld() { return held; }
+
+    /**
+     * The end of a turn a stalled-turn recovery stopped, or one the model's service refused for the usage limit: the
+     * item it was running goes back to the front of the queue, the same item with the same request and the same waiting
+     * asker. After a recovery the queue is released and dispatches again; after a refusal it stays held, so the
+     * waiting requests are not failed one after another while the limit lasts, until a recovery releases it. Called
+     * by {@link ChatSession#onPromptComplete} in place of {@link #onPromptComplete}.
+     *
+     * @param keepHeld whether the queue stays held (a usage-limit refusal)
+     */
+    public void returnRunningToFront(ActorRef<ChatSession> chatSessionRef, boolean keepHeld) {
+        QueueItem item = running;
+        running = null;
+        if (item != null) {
+            queue.add(0, item);
+            recordEnqueued(item);
+            LOG.info("queue: put back at the front by stalled-turn recovery (queue size=" + queue.size() + "): "
+                    + truncate(item.prompt(), 80));
+            logToConversationSquad("queue: put back at the front by stalled-turn recovery (queue size=" + queue.size()
+                    + "): " + truncate(item.prompt(), 80));
+            try {
+                item.emitter().accept(ChatEvent.queueChanged());
+            } catch (Exception e) {
+                LOG.log(Level.WARNING, "Could not tell the pane the queue changed", e);
+            }
+        }
+        if (keepHeld) {
+            held = true;
+            logToConversationSquad("queue: held after a usage-limit refusal (queue size=" + queue.size() + ")");
+        } else {
+            release(chatSessionRef);
+        }
+    }
+
+    /** Ends a {@link #hold} and dispatches the front item if the conversation is idle. */
+    public void release(ActorRef<ChatSession> chatSessionRef) {
+        held = false;
         requestDispatch(chatSessionRef, false);
     }
 
@@ -668,9 +726,10 @@ public class PromptQueue {
      * thread ({@link #tryDispatch}'s {@code self.ask(...)}), never called directly.
      */
     public QueueItem popFront(boolean respectAuto) {
-        if (queue.isEmpty()) return null;
+        if (held || queue.isEmpty()) return null;
         if (respectAuto && !queue.get(0).auto()) return null;
         QueueItem item = queue.remove(0);
+        running = item;
         recordLeft(item, "started");
         sent.add(new QueueEntry(item.prompt(), item.source(), item.auto(), item.urgent()));
         trimSent();
