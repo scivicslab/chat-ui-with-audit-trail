@@ -1,0 +1,15 @@
+#!/bin/sh
+# ack-relay: inside a --network=none container, expose agent-connector-kernel's bind-mounted Unix socket on 127.0.0.1
+# (tasks/todo.md, Decisions 9, 10, 12 and 13), then run the harness given as arguments. The socket is the domain socket
+# of the application's Quarkus HTTP server, where both the MCP server and the LLM proxy answer:
+#   127.0.0.1:18765 -> the socket, for the MCP server at /mcp
+#   127.0.0.1:18766 -> the socket, for the LLM proxy at /llm/<scope>/v1
+set -eu
+SOCKET=/run/agent-connector-kernel/agent-connector-kernel.sock
+if [ ! -S "$SOCKET" ]; then
+  echo "ack-relay: $SOCKET is not a socket; start the container the way agent-connector-kernel's launcher does" >&2
+  exit 64
+fi
+socat TCP-LISTEN:18765,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:$SOCKET &
+socat TCP-LISTEN:18766,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:$SOCKET &
+exec "$@"

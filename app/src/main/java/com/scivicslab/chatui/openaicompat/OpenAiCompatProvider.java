@@ -1,6 +1,7 @@
 package com.scivicslab.chatui.openaicompat;
 
 import com.scivicslab.chatui.agent.ContextBudget;
+import com.scivicslab.chatui.agent.ConversationToolCatalog;
 import com.scivicslab.chatui.agent.ToolCatalog;
 import com.scivicslab.chatui.openaicompat.client.ChatMessage;
 import com.scivicslab.chatui.openaicompat.client.ContextLengthExceededException;
@@ -26,7 +27,7 @@ import java.util.logging.Logger;
  * <p>The model is given the conversation's tools as OpenAI tool definitions, and its calls come back from the
  * server's {@code tool_calls} ({@code OpenAiCompatStandardToolCalling_261120_oo01}). The tools that do not drive
  * the conversation are listed and run through an MCP client to chat-ui's MCP server; the ones that do come from
- * {@link ToolCatalog} and are run by the conversation itself.</p>
+ * {@link ConversationToolCatalog} and are run by the conversation itself.</p>
  */
 public class OpenAiCompatProvider implements LlmProvider {
 
@@ -180,9 +181,9 @@ public class OpenAiCompatProvider implements LlmProvider {
         return List.copyOf(all);
     }
 
-    /** @return the definitions of the tools the conversation runs itself, from {@link ToolCatalog} */
+    /** @return the definitions of the tools the conversation runs itself, from {@link ConversationToolCatalog} */
     static List<ToolDefinition> drivingTools() {
-        return ToolCatalog.builtInTools().values().stream().filter(ToolCatalog.Spec::drivesConversation)
+        return ConversationToolCatalog.builtInTools().values().stream().filter(ToolCatalog.Spec::drivesConversation)
                 .map(spec -> new ToolDefinition(spec.name(), spec.description(), spec.inputSchema().toString()))
                 .toList();
     }

@@ -55,6 +55,7 @@ public class CliProcess {
     // Written only by routeEvent (the reader thread) and reset when the process is restarted or cancelled.
     private volatile boolean autonomousTurnOpen;
     private volatile String apiKey;
+    private volatile HarnessLaunch.McpEntry mcpEntry;
 
     /**
      * Creates a new CLI process manager.
@@ -114,17 +115,7 @@ public class CliProcess {
         List<String> cmd = buildCommand();
         logger.fine(() -> "Starting CLI: " + String.join(" ", cmd));
 
-        ProcessBuilder pb = new ProcessBuilder(cmd);
-        pb.environment().remove("CLAUDECODE");
-        pb.environment().remove("CLAUDE_CODE_ENTRYPOINT");
-        if (apiKey != null && !apiKey.isBlank()) {
-            pb.environment().put(apiKeyEnvVar, apiKey);
-        }
-        if (config.workingDir() != null) {
-            pb.directory(new File(config.workingDir()));
-        }
-        pb.redirectErrorStream(false);
-        currentProcess = pb.start();
+        currentProcess = launch(cmd).processBuilder().start();
 
         stdinStream = currentProcess.getOutputStream();
         BufferedReader stdoutReader =
@@ -451,6 +442,26 @@ public class CliProcess {
         };
     }
 
+    /**
+     * @param cmd the command line {@link #buildCommand()} made
+     * @return how the CLI process is started: Claude Code's own nesting variables removed, the API key under its
+     *         variable when one is set, and the configured working directory
+     */
+    HarnessLaunch launch(List<String> cmd) {
+        java.util.Map<String, String> added = apiKey != null && !apiKey.isBlank()
+                ? java.util.Map.of(apiKeyEnvVar, apiKey) : java.util.Map.of();
+        return new HarnessLaunch(cmd, List.of("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT"), added,
+                config.workingDir() == null ? null : java.nio.file.Path.of(config.workingDir()));
+    }
+
+    /**
+     * Hands the CLI agent-connector-kernel's MCP server from the next start of the process on (tasks/todo.md,
+     * Decisions 5). chat-ui never calls this: its conversations keep the {@code <invoke>} path (Decisions 3).
+     *
+     * @param entry the server, or {@code null} for none
+     */
+    public void setMcpEntry(HarnessLaunch.McpEntry entry) { this.mcpEntry = entry; }
+
     List<String> buildCommand() {
         List<String> cmd = new ArrayList<>();
         // The CLI writes to a pipe here, not a TTY, so libc switches its stdout from line
@@ -487,6 +498,7 @@ public class CliProcess {
         // uses Claude as a bare model and runs this program's own tools instead
         // (CliHarnessProvider_260912_oo01).
         if (config.tools() != null) { cmd.add("--tools"); cmd.add(config.tools()); }
+        if (mcpEntry != null) { cmd.add("--mcp-config"); cmd.add(mcpEntry.claudeMcpConfig()); }
         return cmd;
     }
 

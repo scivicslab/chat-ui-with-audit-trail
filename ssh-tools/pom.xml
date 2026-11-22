@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd"
+    xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.scivicslab</groupId>
+    <artifactId>chat-ui-with-audit-trail-parent</artifactId>
+    <version>3.0.0-SNAPSHOT</version>
+  </parent>
+  <artifactId>ssh-tools</artifactId>
+  <version>3.0.0-SNAPSHOT</version>
+  <packaging>jar</packaging>
+
+  <!-- The ssh tools (tasks/todo.md, "Stage 11 spec: the ssh tools"; SshOnlyNoWebApi_261121_oo01): MCP tools that run
+       OpenSSH's ssh with a fixed argument array, for ssh-connector and later quarkus-chat-ui. A plain jar on
+       agent-connector-kernel's tool types; no CDI beans of its own. -->
+  <dependencies>
+    <dependency>
+      <groupId>com.scivicslab</groupId>
+      <artifactId>agent-connector-kernel</artifactId>
+    </dependency>
+    <!-- One SshRunner per host, run as an actor, so calls to one host go one at a time -->
+    <dependency>
+      <groupId>com.scivicslab</groupId>
+      <artifactId>pojo-actor</artifactId>
+      <version>${pojo-actor.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.json</groupId>
+      <artifactId>json</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

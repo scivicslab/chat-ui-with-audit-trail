@@ -1,0 +1,111 @@
+<?xml version="1.0"?>
+<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd"
+    xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.scivicslab</groupId>
+    <artifactId>chat-ui-with-audit-trail-parent</artifactId>
+    <version>3.0.0-SNAPSHOT</version>
+  </parent>
+  <artifactId>agent-connector-kernel</artifactId>
+  <version>3.0.0-SNAPSHOT</version>
+  <packaging>jar</packaging>
+
+  <!-- agent-connector-kernel: the headless side of chat-ui-with-audit-trail (the tool registry, the
+       tool runner, the MCP server and the plain tools), which nigsc-connector will ship without the
+       screen and the record. It is a library of CDI beans for the Quarkus applications that use it
+       (app, and later ssh-connector): it has no Quarkus build of its own, and the Jandex index below
+       lets Quarkus discover its beans (tasks/todo.md, plan change 2026-11-22, Decision 12). -->
+  <dependencies>
+    <dependency>
+      <groupId>com.scivicslab</groupId>
+      <artifactId>chat-ui-with-audit-trail-plugin-api</artifactId>
+    </dependency>
+    <!-- search_docs and list_references read html-saurus's JSON answers as trees, and DocSearchTool reads its HTML
+         pages with jsoup -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.jsoup</groupId>
+      <artifactId>jsoup</artifactId>
+    </dependency>
+    <!-- The localhost MCP server keeps its scopes in an actor and runs requests on the actor system's managed pool
+         (tasks/todo.md, Decisions 5 and stage 6) -->
+    <dependency>
+      <groupId>com.scivicslab</groupId>
+      <artifactId>pojo-actor</artifactId>
+      <version>${pojo-actor.version}</version>
+    </dependency>
+    <!-- ToolCatalog.Spec renders a tool's arguments as a JSON Schema object -->
+    <dependency>
+      <groupId>org.json</groupId>
+      <artifactId>json</artifactId>
+    </dependency>
+    <!-- The MCP server is Quarkiverse quarkus-mcp-server, the library app already uses (Decision 12) -->
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-arc</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-vertx-http</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.quarkiverse.mcp</groupId>
+      <artifactId>quarkus-mcp-server-http</artifactId>
+    </dependency>
+    <!-- The HTTP server's Unix domain socket needs a native transport
+         (https://quarkus.io/guides/vertx-reference#use-a-unix-domain-socket); Linux only, as the Podman launchers are -->
+    <dependency>
+      <groupId>io.netty</groupId>
+      <artifactId>netty-transport-native-epoll</artifactId>
+      <classifier>linux-x86_64</classifier>
+    </dependency>
+    <!-- The LLM proxy: llm-relay-proxy on vertx-http-proxy (step 4a). llm-relay declares Vert.x "provided", so the
+         Vert.x artifacts it uses come here at the versions Quarkus's BOM pins. -->
+    <dependency>
+      <groupId>com.scivicslab</groupId>
+      <artifactId>llm-relay-proxy</artifactId>
+      <version>${llm-relay.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.vertx</groupId>
+      <artifactId>vertx-http-proxy</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.vertx</groupId>
+      <artifactId>vertx-web-proxy</artifactId>
+    </dependency>
+    <!-- McpKeyMechanism: the per-scope key on the Quarkus security layer (Decisions 12 and 13) -->
+    <dependency>
+      <groupId>io.quarkus</groupId>
+      <artifactId>quarkus-security</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>io.smallrye</groupId>
+        <artifactId>jandex-maven-plugin</artifactId>
+        <version>3.2.7</version>
+        <executions>
+          <execution>
+            <id>make-index</id>
+            <goals>
+              <goal>jandex</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

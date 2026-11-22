@@ -13,13 +13,18 @@
        each plugin-* is a plain jar the body loads at start-up from chat-ui.plugins. -->
   <modules>
     <module>plugin-api</module>
+    <module>agent-connector-kernel</module>
     <module>app</module>
     <module>plugin-web-tools</module>
     <module>plugin-shell</module>
     <module>plugin-harness</module>
+    <module>ssh-tools</module>
+    <module>ssh-connector</module>
   </modules>
 
   <properties>
+    <!-- The shared streaming relay (~/works/llm-relay; tasks/todo.md, step 4a) -->
+    <llm-relay.version>0.1.0-SNAPSHOT</llm-relay.version>
     <compiler-plugin.version>3.14.0</compiler-plugin.version>
     <maven.compiler.release>25</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -51,9 +56,25 @@
         <version>${project.version}</version>
       </dependency>
       <dependency>
+        <groupId>com.scivicslab</groupId>
+        <artifactId>agent-connector-kernel</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.scivicslab</groupId>
+        <artifactId>ssh-tools</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
         <groupId>org.jsoup</groupId>
         <artifactId>jsoup</artifactId>
         <version>${jsoup.version}</version>
+      </dependency>
+      <!-- agent-connector-kernel's MCP server; app uses the same version -->
+      <dependency>
+        <groupId>io.quarkiverse.mcp</groupId>
+        <artifactId>quarkus-mcp-server-http</artifactId>
+        <version>2.0.4</version>
       </dependency>
       <!-- Reaches the body through plugin-log-db; pinned here so a plugin compiled against it
            (provided) sees the same version the body runs. -->

@@ -1,0 +1,5 @@
+#!/bin/sh
+# Fake sacct: every job it is asked about completed.
+d=/var/fake-slurm
+printf '%s\n' "$@" > "$d/sacct.args"
+echo "$2|e2e-job|COMPLETED|0:0|00:00:05"
