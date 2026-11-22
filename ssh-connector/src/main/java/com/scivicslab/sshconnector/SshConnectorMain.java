@@ -1,5 +1,6 @@
 package com.scivicslab.sshconnector;
 
+import com.scivicslab.sshtools.SshTargetGuard;
 import io.quarkus.runtime.Quarkus;
 import io.quarkus.runtime.annotations.QuarkusMain;
 
@@ -17,6 +18,9 @@ import java.nio.file.attribute.PosixFilePermissions;
  * <p>The directory is {@code -Dssh-connector.dir}, else {@code $SSH_CONNECTOR_DIR}, else {@code ~/.ssh-connector}.
  * It must exist, belong to its owner alone (0700) and hold {@value ConnectorSettings#FILE}. A system property given on
  * the command line wins over the file, as in any Quarkus application.</p>
+ *
+ * <p>Before Quarkus starts, {@link SshTargetGuard} checks every host the settings name: none may be this computer
+ * (tasks/todo.md, "ssh-connector's startup guard").</p>
  */
 @QuarkusMain
 public final class SshConnectorMain {
@@ -36,6 +40,13 @@ public final class SshConnectorMain {
         }
         Path file = dir.resolve(ConnectorSettings.FILE);
         if (!Files.isRegularFile(file)) fail("the settings file " + file + " does not exist");
+        // Before anything listens on the socket: an ssh target must be another computer than this one.
+        try {
+            SshTargetGuard.system().check(
+                    StartupSettings.read(dir, System::getProperty, System::getenv).hostEntries());
+        } catch (IOException | IllegalArgumentException | IllegalStateException e) {
+            fail(e.getMessage());
+        }
         setIfAbsent("ssh-connector.dir", dir.toString());
         setIfAbsent("quarkus.config.locations", file.toUri().toString());
         setIfAbsent("quarkus.http.domain-socket", dir.resolve("sockets").resolve(

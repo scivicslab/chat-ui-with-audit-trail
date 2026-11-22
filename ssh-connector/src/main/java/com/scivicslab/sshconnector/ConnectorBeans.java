@@ -6,6 +6,7 @@ import com.scivicslab.pojoactor.core.ActorSystem;
 import com.scivicslab.sshtools.SshCommandLine;
 import com.scivicslab.sshtools.SshConfigFile;
 import com.scivicslab.sshtools.SshRunner;
+import com.scivicslab.sshtools.SshTargetGuard;
 import com.scivicslab.sshtools.SshTools;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Disposes;
@@ -60,6 +61,8 @@ public class ConnectorBeans {
             Files.createDirectories(settings.privateDir(),
                     PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
             Files.createDirectories(settings.workDir());
+            // The same check SshConnectorMain made, on the settings Quarkus itself read.
+            SshTargetGuard.system().check(settings.hostEntries());
             Path config = SshConfigFile.write(settings.sshDir(), settings.hostEntries());
             String alias = settings.host().alias();
             ActorRef<SshRunner> runner = system.actorOf("ssh-" + alias, new SshRunner(settings.limits()));

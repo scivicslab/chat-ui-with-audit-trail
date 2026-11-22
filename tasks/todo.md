@@ -1658,3 +1658,27 @@ This build's `ssh-connector` jar (`0e920d02…`) was copied with rsync and check
   - A new 040_design document for the split: why the headless part is a library of CDI beans; the one domain socket with the MCP server and the proxy at `/llm/<scope>/v1`; Decision 13's `require-key`; what each product sets (chat-ui `false` with `X-Chat-Ui-Conversation`, ssh-connector `true`); and the module dependency graph.
 - No push and no deploy was done.
 
+## ssh-connector's startup guard (chat-48, t191; approved by the person)
+
+ssh-connector never connects to the user's own computer. If its ssh_config pointed at this machine, `run_command` would run commands on it outside the container. The model cannot choose the host, but whoever configures ssh-connector could.
+
+- **`SshTargetGuard`** (ssh-tools, a plain object):
+  - It takes every host ssh-connector would connect to: each Host block's `HostName`, plus each ProxyJump hop that is not the alias of a block. `jumpHosts` parses `user@host:port`, `[v6]:port` and comma lists.
+  - It resolves each one to all its addresses and refuses the start, naming the host and the reason, when the name is this machine's host name or FQDN (case-insensitive), or when any address is loopback, unspecified, or an address of one of this machine's network interfaces.
+  - Seams: a `Resolver`, the interface addresses and the local names. `system()` uses `InetAddress.getAllByName`, `NetworkInterface`, `InetAddress.getLocalHost()` and `$HOSTNAME`.
+  - A host that does not resolve at start-up passes: ssh cannot reach it either. A name that DNS later maps to this machine is not caught; the check is made once, at start-up.
+- **`StartupSettings`** (ssh-connector) reads the settings before Quarkus starts, in MicroProfile Config's order: a system property, then the environment variable (upper-cased, other characters as `_`), then `ssh-connector.properties`.
+- **Wiring:**
+  - `SshConnectorMain` checks the hosts of those settings before `Quarkus.run`, so a refusal comes before anything listens on the socket (exit 2).
+  - `ConnectorBeans` checks again on the settings Quarkus read, before it writes `ssh_config`.
+- **Tests first:**
+  - `SshTargetGuardTest` (11): `localhost`, `127.0.0.2`, `::1`, `0.0.0.0`, the machine's host name and FQDN, an interface address (also through a name with two addresses), a ProxyJump through a block on `localhost`, a ProxyJump `dummy@localhost:2222`, `check`'s message, a non-local host passes, and an unresolvable host passes.
+  - `StartupSettingsTest` (3): the file, the precedence, the environment name.
+  - Red against the skeleton on W206 (Job `chat77-guard`): 11 of 11 and 3 of 3 failed. The red run had "an unresolvable host is refused" in place of the last guard test, which was changed before the green run.
+- **Green (W206; `rm -rf target */target`, `mvn -B test`, `mvn -B package`, BUILD SUCCESS):** `plugin-api` 0, `agent-connector-kernel` 105, `app` 792, `plugin-web-tools` 17, `plugin-shell` 11, `plugin-harness` 59, `ssh-tools` 39, `ssh-connector` 11. Total 1034, 0 failures. Against 1020: +11 `SshTargetGuardTest`, +3 `StartupSettingsTest`. The stage 6 E2E checks: `McpServerCheck` and `ToolCallingCheck` ALL PASSED; `ExternalMcpCheck` and `--restored` exit 0.
+- **The packaged jar (`guardcheck.sh`):**
+  - With `ssh-connector.host.name=127.0.0.1` it exits 2 with `ssh target '127.0.0.1' resolves to the loopback address 127.0.0.1`, and no socket is created.
+  - `SSH_CONNECTOR_HOST_NAME=localhost` over the file is refused the same way. A system property over that environment variable wins.
+  - `SshConnectorCheck` (host `unreachable.invalid`) still passes.
+- **Open: the 5.14 E2E.** `SshConnectorE2E` reaches its throw-away sshd at `127.0.0.1:<published port>`, which the guard now refuses. Stopped and reported to chat-48 before changing the test setup.
+
