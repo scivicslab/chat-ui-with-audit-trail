@@ -1680,5 +1680,14 @@ ssh-connector never connects to the user's own computer. If its ssh_config point
   - With `ssh-connector.host.name=127.0.0.1` it exits 2 with `ssh target '127.0.0.1' resolves to the loopback address 127.0.0.1`, and no socket is created.
   - `SSH_CONNECTOR_HOST_NAME=localhost` over the file is refused the same way. A system property over that environment variable wins.
   - `SshConnectorCheck` (host `unreachable.invalid`) still passes.
-- **Open: the 5.14 E2E.** `SshConnectorE2E` reaches its throw-away sshd at `127.0.0.1:<published port>`, which the guard now refuses. Stopped and reported to chat-48 before changing the test setup.
+- **The 5.14 E2E.** `SshConnectorE2E` reached its throw-away sshd at `127.0.0.1:<published port>`, which the guard rightly refuses. Stopped and reported. chat-01 chose a throw-away sshd Pod on W206 behind a NodePort (chat-48, t194).
+  - Only the setup changed. The sshd runs as a Pod (same Containerfile and fake Slurm commands, image `192.168.5.13:32000/ack-sshd-e2e:1.0.0-2611220947` from one Kaniko pod) in the namespace `chat77-sshd-e2e`, behind the NodePort Service `ack-sshd-e2e`. The E2E connects to `<W206 node>:<NodePort>`.
+  - The dummy keys go to the Pod as a Secret. `e2e/sshd/sshd-pod.sh` starts, stops and execs the Pod, and tears the namespace down. The E2E runs it through `-Dsshd.control`; on 5.14 that is `ssh` to MiniPC, where kubectl reaches W206.
+  - The host-key change deletes the Pod and starts a new one with a new host key behind the same NodePort.
+  - No switch turns the guard off.
+- **ConfinementCheck on 5.14 (t193):** this build's jar (`6c939128…`, `fc3ae53`, rebuilt in W206 Job `chat77-pkg14` with its tests: kernel 105, `ssh-tools` 39, `ssh-connector` 11). ALL PASSED, 18 of 18; the guard let `unreachable.invalid` through.
+- **SshConnectorE2E on 5.14 against the Pod (node `192.168.5.13`, NodePort 31064):** ALL PASSED, 21 of 21, including `known_hosts` holding `[192.168.5.13]:31064` and the host-key change refused. Before the run, 5.14 read the SSH banner from a smoke Pod through its NodePort.
+- **Clean-up:**
+  - W206: the namespace `chat77-sshd-e2e` was deleted by the run's `trap` and `kubectl get namespace` answers NotFound; the Kaniko and helper pods and the Jobs are deleted. The sshd image's manifest was deleted from the registry (HTTP 202; the blobs go at the registry's next garbage collection).
+  - 5.14: the OpenCode image is removed; `podman ps -a` none; `podman images -a` only `docker.io/library/ubuntu:24.04`; `~/.ssh` 36 entries, no marker; no key file left.
 

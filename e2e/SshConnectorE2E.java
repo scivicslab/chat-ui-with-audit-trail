@@ -9,7 +9,6 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -28,26 +27,30 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * ssh-connector end to end against a throw-away sshd container, never a real cluster (tasks/todo.md, "Stage 11 spec",
- * step 3). An E2E program with main(), outside the Maven build (TestingStandard_260404_oo01), run on a host with
- * rootless Podman; it is compiled with ConnectorProcess and SocketMcpClient, and runs on the ssh-connector jar's
+ * ssh-connector end to end against a throw-away sshd, never a real cluster (tasks/todo.md, "Stage 11 spec", step 3). An
+ * E2E program with main(), outside the Maven build (TestingStandard_260404_oo01), run on a host with rootless Podman
+ * for the harness; it is compiled with ConnectorProcess and SocketMcpClient, and runs on the ssh-connector jar's
  * classpath (org.json).
  *
  * <pre>
- * java -cp &lt;ssh-connector jar&gt; e2e/SshConnectorE2E.java &lt;ssh-connector jar&gt; &lt;run dir&gt; &lt;sshd image&gt; &lt;opencode image&gt;
+ * java -Dsshd.control="&lt;command&gt;" -cp &lt;ssh-connector jar&gt; e2e/SshConnectorE2E.java \
+ *      &lt;ssh-connector jar&gt; &lt;run dir&gt; &lt;sshd node address&gt; &lt;opencode image&gt;
  * </pre>
  *
+ * The sshd runs on another computer, because ssh-connector's startup guard refuses this one: a Pod on W206 behind a
+ * NodePort, reached at {@code <sshd node address>:<node port>}. {@code sshd.control} is the command that runs
+ * {@code e2e/sshd/sshd-pod.sh} where kubectl reaches W206 (for example over ssh); its verbs start, stop and exec the Pod.
+ *
  * <ol>
- * <li>A fresh dummy ed25519 client key and a fresh host key; the sshd container publishes its port on the host's
- * 127.0.0.1 only.</li>
+ * <li>A fresh dummy ed25519 client key and a fresh host key, given to the Pod as a Secret.</li>
  * <li>Each of the seven tools once, as a direct MCP call with the key, through ssh-connector with no harness. ssh-connector's
  * known_hosts starts empty and accept-new records the host key. The fake sbatch must receive the script exactly.</li>
- * <li>A new sshd container with a changed host key on the same port: the next call fails with
+ * <li>A new sshd Pod with a changed host key behind the same NodePort: the next call fails with
  * {@code Host key verification failed}.</li>
  * <li>One confined harness, OpenCode with a stub model, calls submit_job and then job_status through MCP.</li>
  * </ol>
- * Afterwards the sshd container is stopped (it runs with --rm) and the dummy keys are deleted. Prints one row per check
- * and exits 1 when any fails.
+ * Afterwards the sshd Pods are deleted and the dummy keys are deleted; the namespace is deleted by whoever started the
+ * run. Prints one row per check and exits 1 when any fails.
  */
 public class SshConnectorE2E {
 
@@ -60,7 +63,11 @@ public class SshConnectorE2E {
     public static void main(String[] args) throws Exception {
         Path jar = Path.of(args[0]).toAbsolutePath();
         Path base = Path.of(args[1]).toAbsolutePath();
-        String sshdImage = args[2];
+        String sshdNode = args[2];
+        List<String> control = Arrays.asList(System.getProperty("sshd.control", "").trim().split("\\s+"));
+        if (control.get(0).isEmpty()) throw new IllegalArgumentException("set -Dsshd.control to the sshd-pod.sh command");
+        Sshd.node = sshdNode;
+        Sshd.control = control;
         String harnessImage = args[3];
         Files.createDirectories(base);
         String token = HexFormat.of().formatHex(SecureRandom.getInstanceStrong().generateSeed(6));
@@ -73,7 +80,6 @@ public class SshConnectorE2E {
         Files.createDirectories(work);
         String container1 = "ack-sshd-e2e-" + token + "-1";
         String container2 = "ack-sshd-e2e-" + token + "-2";
-        int port = freePort();
 
         Stub stub = new Stub(reply);
         HttpServer upstream = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
@@ -84,12 +90,12 @@ public class SshConnectorE2E {
             run(List.of("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "ssh-connector-e2e-dummy",
                     "-f", clientKeys.resolve("id_ed25519").toString()));
             String hostPub1 = hostKeys(hostKeys1, clientKeys);
-            startSshd(sshdImage, container1, hostKeys1, port);
-            System.out.println("sshd " + container1 + " on 127.0.0.1:" + port);
+            int port = startSshd(container1, hostKeys1);
+            System.out.println("sshd " + container1 + " on " + sshdNode + ":" + port);
 
             Map<String, String> settings = new LinkedHashMap<>();
             settings.put("ssh-connector.host.alias", "e2e-host");
-            settings.put("ssh-connector.host.name", "127.0.0.1");
+            settings.put("ssh-connector.host.name", sshdNode);
             settings.put("ssh-connector.host.port", String.valueOf(port));
             settings.put("ssh-connector.host.user", "dummy");
             settings.put("ssh-connector.key", clientKeys.resolve("id_ed25519").toString());
@@ -111,8 +117,8 @@ public class SshConnectorE2E {
                 check("run_command", hello.contains("exit 0") && hello.contains("hello-e2e") && hello.contains("dummy"),
                         "ran on the sshd container as dummy: " + oneLine(hello));
                 String known = Files.readString(knownHosts);
-                check("accept-new-recorded-the-host-key", known.contains("[127.0.0.1]:" + port) && known.contains(hostPub1),
-                        "known_hosts now holds [127.0.0.1]:" + port + " with the container's host key");
+                check("accept-new-recorded-the-host-key", known.contains("[" + sshdNode + "]:" + port) && known.contains(hostPub1),
+                        "known_hosts now holds [" + sshdNode + "]:" + port + " with the sshd Pod's host key");
                 String option = text(mcp.call("run_command", json("command", "-oProxyCommand=touch " + localMarker)));
                 check("option-text-runs-only-remotely", Files.notExists(localMarker) && option.startsWith("exit "),
                         "-oProxyCommand=touch <local file> reached the remote shell (" + oneLine(option)
@@ -120,8 +126,8 @@ public class SshConnectorE2E {
 
                 String submitted = text(mcp.call("submit_job", new JSONObject().put("script", SCRIPT)
                         .put("name", "e2e-job").toString()));
-                String gotScript = exec(container1, "cat", "/var/fake-slurm/sbatch.script");
-                List<String> sbatchArgs = exec(container1, "cat", "/var/fake-slurm/sbatch.args").lines().toList();
+                String gotScript = exec(container1, "cat /var/fake-slurm/sbatch.script");
+                List<String> sbatchArgs = exec(container1, "cat /var/fake-slurm/sbatch.args").lines().toList();
                 Matcher dir = Pattern.compile("job_dir: (\\S+)").matcher(submitted);
                 String jobDir = dir.find() ? dir.group(1) : "";
                 check("submit_job", submitted.contains("job_id: 4242") && SCRIPT.equals(gotScript)
@@ -135,7 +141,7 @@ public class SshConnectorE2E {
                 String ended = text(mcp.call("job_status", json("job_id", "77")));
                 check("job_status-sacct", ended.contains("sacct") && ended.contains("77|e2e-job|COMPLETED"), oneLine(ended));
                 String cancelled = text(mcp.call("cancel_job", json("job_id", "4242")));
-                String scancelArgs = exec(container1, "cat", "/var/fake-slurm/scancel.args").strip();
+                String scancelArgs = exec(container1, "cat /var/fake-slurm/scancel.args").strip();
                 check("cancel_job", cancelled.startsWith("cancelled 4242") && scancelArgs.equals("4242"),
                         "the fake scancel got " + scancelArgs);
 
@@ -147,7 +153,7 @@ public class SshConnectorE2E {
                 Files.writeString(work.resolve("up.txt"), content);
                 String up = text(mcp.call("upload_file", new JSONObject().put("local_path", "up.txt")
                         .put("remote_path", "uploaded e2e.txt").toString()));
-                String remote = exec(container1, "cat", "/home/dummy/uploaded e2e.txt");
+                String remote = exec(container1, "cat '/home/dummy/uploaded e2e.txt'");
                 check("upload_file", up.startsWith("uploaded") && content.equals(remote),
                         oneLine(up) + "; the remote file matches byte for byte");
 
@@ -167,7 +173,8 @@ public class SshConnectorE2E {
                 // 3. A changed host key on the same address.
                 stopSshd(container1);
                 hostKeys(hostKeys2, clientKeys);
-                startSshd(sshdImage, container2, hostKeys2, port);
+                int port2 = startSshd(container2, hostKeys2);
+                if (port2 != port) throw new IOException("the NodePort changed from " + port + " to " + port2);
                 String knownBefore = Files.readString(knownHosts);
                 String changed = text(mcp.call("run_command", json("command", "echo should-not-run")));
                 check("host-key-change-refused", changed.startsWith("error:")
@@ -200,7 +207,7 @@ public class SshConnectorE2E {
                 int statusAt = indexOf(answers, "tool-call job_status");
                 check("harness-called-submit_job-then-job_status", submitAt >= 0 && statusAt > submitAt
                         && answers.get(answers.size() - 1).equals("reply"), "the stub answered " + answers);
-                String gotScript = exec(container2, "cat", "/var/fake-slurm/sbatch.script");
+                String gotScript = exec(container2, "cat /var/fake-slurm/sbatch.script");
                 check("harness-script-reached-sbatch", HARNESS_SCRIPT.equals(gotScript),
                         "the fake sbatch got the stub's script byte for byte");
                 check("harness-got-the-tool-results", stub.seen.stream().anyMatch(s -> s.carriedJobId)
@@ -344,37 +351,56 @@ public class SshConnectorE2E {
         return Files.readString(dir.resolve("host_key.pub")).split(" ")[1];
     }
 
-    static void startSshd(String image, String name, Path keys, int port) throws Exception {
-        run(List.of("nice", "-n", "19", "podman", "run", "-d", "--rm", "--name", name, "-p", "127.0.0.1:" + port + ":2222",
-                "-v", keys + ":/keys:ro", image));
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+    /** Where the throw-away sshd Pod is reached, and the command that starts, stops and execs it. */
+    static final class Sshd {
+        static String node;
+        static List<String> control;
+    }
+
+    /** Starts the sshd Pod {@code name} with the keys in {@code keys}; waits for its banner; returns the NodePort. */
+    static int startSshd(String name, Path keys) throws Exception {
+        Path tar = keys.resolveSibling(keys.getFileName() + ".tar");
+        run(List.of("tar", "-C", keys.toString(), "-cf", tar.toString(), "host_key", "host_key.pub", "authorized_keys"));
+        List<String> cmd = new ArrayList<>(Sshd.control);
+        cmd.addAll(List.of("start", name));
+        Process p = new ProcessBuilder(cmd).redirectErrorStream(true).redirectInput(tar.toFile()).start();
+        String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        boolean done = p.waitFor(5, TimeUnit.MINUTES);
+        Files.deleteIfExists(tar);
+        Matcher m = Pattern.compile("NODEPORT=(\\d+)").matcher(out);
+        if (!done || p.exitValue() != 0 || !m.find()) throw new IOException("sshd Pod " + name + " did not start:\n" + out);
+        int port = Integer.parseInt(m.group(1));
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(60);
         while (System.nanoTime() < deadline) {
-            try (Socket s = new Socket(InetAddress.getLoopbackAddress(), port)) {
+            try (Socket s = new Socket(Sshd.node, port)) {
                 s.setSoTimeout(3000);
                 byte[] b = new byte[8];
                 int n = s.getInputStream().read(b);
-                if (n > 0 && new String(b, 0, n, StandardCharsets.US_ASCII).startsWith("SSH-2.0")) return;
+                if (n > 0 && new String(b, 0, n, StandardCharsets.US_ASCII).startsWith("SSH-2.0")) return port;
             } catch (IOException e) {
                 // not up yet
             }
-            Thread.sleep(300);
+            Thread.sleep(500);
         }
-        throw new IOException("sshd " + name + " did not answer on 127.0.0.1:" + port + "\n"
-                + run(List.of("podman", "logs", name)));
+        throw new IOException("sshd Pod " + name + " did not answer on " + Sshd.node + ":" + port);
     }
 
     static void stopSshd(String name) throws Exception {
-        run(List.of("podman", "stop", "--ignore", "-t", "2", name));
+        List<String> cmd = new ArrayList<>(Sshd.control);
+        cmd.addAll(List.of("stop", name));
+        run(cmd);
     }
 
-    /** @return the standard output of a command in the container, exactly */
-    static String exec(String container, String... command) throws Exception {
-        List<String> cmd = new ArrayList<>(List.of("podman", "exec", container));
-        cmd.addAll(Arrays.asList(command));
+    /** @return the standard output of a shell command in the sshd Pod, exactly */
+    static String exec(String name, String shellCommand) throws Exception {
+        List<String> cmd = new ArrayList<>(Sshd.control);
+        cmd.addAll(List.of("exec", name));
         Process p = new ProcessBuilder(cmd).redirectError(ProcessBuilder.Redirect.DISCARD).start();
-        p.getOutputStream().close();
+        try (OutputStream in = p.getOutputStream()) {
+            in.write(shellCommand.getBytes(StandardCharsets.UTF_8));
+        }
         byte[] out = p.getInputStream().readAllBytes();
-        p.waitFor(30, TimeUnit.SECONDS);
+        p.waitFor(60, TimeUnit.SECONDS);
         return new String(out, StandardCharsets.UTF_8);
     }
 
@@ -419,12 +445,6 @@ public class SshConnectorE2E {
 
     static void ownerOnlyDir(Path dir) throws IOException {
         Files.createDirectory(dir, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
-    }
-
-    static int freePort() throws IOException {
-        try (ServerSocket s = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
-            return s.getLocalPort();
-        }
     }
 
     static void deleteTree(Path dir) throws IOException {
