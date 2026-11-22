@@ -356,6 +356,22 @@ public class OpenAiCompatClient {
         return temperature;
     }
 
+    /**
+     * The body a request with these messages and tools would carry, without {@code max_tokens}: what the
+     * caller measures to tell how much of the model's window the request takes before the reply. The system
+     * message, every history message and the tool definitions are in it, as they are in the request sent.
+     *
+     * @param model    the model the request is for
+     * @param messages the messages sent, system message included
+     * @param tools    the tools sent; empty for none
+     * @return the request body
+     */
+    public static String requestBodyForEstimate(String model, List<ChatMessage> messages,
+                                                List<ToolDefinition> tools) {
+        return buildRequestBody(model == null ? "" : model, messages, false, 0, true,
+                tools == null ? List.of() : tools, null);
+    }
+
     static String buildRequestBody(String model, List<ChatMessage> messages,
                                    boolean noThink, int maxTokens) {
         return buildRequestBody(model, messages, noThink, maxTokens, true, List.of(), null);

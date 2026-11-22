@@ -72,6 +72,15 @@ public class OpenAiCompatProvider implements LlmProvider {
     static final int MIN_REPLY_TOKENS = 2_048;
     /** The least tokens kept free of the window for the prompt estimate being wrong. */
     private static final int REPLY_MARGIN_MIN_TOKENS = 1_024;
+    /**
+     * Most tokens a reply is allowed to run to, unless {@code chat-ui.max-reply-tokens} says otherwise. A reply
+     * budget of the whole room left in a 262,144-token window (224,982 on one request) leaves nothing for the
+     * prompt estimate being wrong: a request whose real prompt was 4,700 tokens over the estimate was refused,
+     * and every retry was refused again.
+     */
+    static final int DEFAULT_MAX_REPLY_TOKENS = 65_536;
+    /** Most tokens a reply is allowed to run to; {@link #DEFAULT_MAX_REPLY_TOKENS} unless set. */
+    private int maxReplyTokens = DEFAULT_MAX_REPLY_TOKENS;
     /** The share of the window kept free for the same reason, when that is more than the minimum. */
     private static final double REPLY_MARGIN_SHARE = 0.02;
     /** How many leading messages are collapsed turns rather than the running turn's steps
@@ -276,6 +285,11 @@ public class OpenAiCompatProvider implements LlmProvider {
      * <p>Set on every client this provider holds: which one serves a turn depends on the model,
      * and the conversation's temperature does not.</p>
      */
+    /** @param tokens most tokens a reply may run to; ignored unless positive */
+    public void setMaxReplyTokens(int tokens) {
+        if (tokens > 0) maxReplyTokens = tokens;
+    }
+
     @Override
     public void setTemperature(Double temperature) {
         this.temperature = temperature;
@@ -320,14 +334,21 @@ public class OpenAiCompatProvider implements LlmProvider {
         }
 
         int retries = 0;
+        // What a refused request taught about this one: how far the estimate fell short of the server's own
+        // count, and the window the server said it has. Both stay for the retries of this prompt.
+        double correction = 1.0;
+        int serverWindow = -1;
         while (retries <= MAX_TRIM_RETRIES) {
             if (cancelled) return;
             List<ChatMessage> snapshot = List.copyOf(history);
             final int currentRetry = retries;
+            int estimated = estimateRequestTokens(currentModel, snapshot, tools);
+            int window = serverWindow > 0 ? serverWindow : client.getMaxModelLen(currentModel);
+            int maxTokens = replyBudgetTokens(window, (int) Math.ceil(estimated * correction), maxReplyTokens);
             try {
                 StringBuilder assistantBuf = new StringBuilder();
                 List<ChatMessage.ToolCallRequest.ToolCall> calls = new ArrayList<>();
-                client.sendPrompt(currentModel, snapshot, ctx.noThink(), maxTokensFor(client, currentModel, snapshot),
+                client.sendPrompt(currentModel, snapshot, ctx.noThink(), maxTokens,
                     tools, new OpenAiCompatClient.StreamCallback() {
                         @Override public void onDelta(String content) {
                             assistantBuf.append(content);
@@ -392,13 +413,41 @@ public class OpenAiCompatProvider implements LlmProvider {
                 return;
             } catch (ContextLengthExceededException e) {
                 retries++;
-                if (retries > MAX_TRIM_RETRIES || history.size() <= 2) {
-                    emitter.accept(ChatEvent.error("Context too long even after trimming."));
-                    return;
+                // The server's own count says by how much the estimate fell short. The reply budget is
+                // shrunk first, from that count; the history is trimmed only when the prompt alone leaves
+                // no more than the smallest reply. Trimming while the estimate stays wrong lowered the
+                // estimate and raised the reply budget by as much, so the request stayed as large.
+                ContextOverflow overflow = ContextOverflow.parse(e.getMessage());
+                if (overflow.window() > 0) serverWindow = overflow.window();
+                if (overflow.promptTokens() > 0 && estimated > 0) {
+                    correction = Math.max(correction, overflow.promptTokens() * 1.02 / estimated);
+                } else {
+                    correction *= 1.25;
                 }
-                logger.warning("Context length exceeded, trimming history (attempt " + retries + ")");
-                emitter.accept(ChatEvent.thinking("Context too long, trimming history..."));
-                trimHistory();
+                int windowNow = serverWindow > 0 ? serverWindow : window;
+                int knownPrompt = overflow.promptTokens() > 0
+                        ? overflow.promptTokens() : (int) Math.ceil(estimated * correction);
+                boolean promptLeavesNoRoom = windowNow > 0
+                        && knownPrompt + MIN_REPLY_TOKENS + replyMarginTokens(windowNow) > windowNow;
+                boolean replyAtFloor = maxTokens <= MIN_REPLY_TOKENS;
+                if (promptLeavesNoRoom || replyAtFloor) {
+                    if (retries > MAX_TRIM_RETRIES || history.size() <= 2) {
+                        emitter.accept(ChatEvent.error("Context too long even after trimming."));
+                        return;
+                    }
+                    logger.warning("Context length exceeded, trimming history (attempt " + retries + "): "
+                            + e.getMessage());
+                    emitter.accept(ChatEvent.thinking("Context too long, trimming history..."));
+                    trimHistory();
+                } else {
+                    if (retries > MAX_TRIM_RETRIES) {
+                        emitter.accept(ChatEvent.error("Context too long even after trimming."));
+                        return;
+                    }
+                    logger.warning("Context length exceeded, shrinking the reply budget from " + maxTokens
+                            + " (attempt " + retries + "): " + e.getMessage());
+                    emitter.accept(ChatEvent.thinking("Context too long, shrinking the reply budget..."));
+                }
             }
         }
         } finally {
@@ -548,37 +597,92 @@ public class OpenAiCompatProvider implements LlmProvider {
     }
 
     /**
-     * The {@code max_tokens} to send: the room left in the model's window after the prompt, less a
-     * safety margin, and never below {@link #MIN_REPLY_TOKENS}. Without it each server applies its own
-     * default, which is far below the window on some (32,768 tokens on one broker deployment), and a
-     * long reply is cut off the moment it passes that default.
+     * The {@code max_tokens} to send, with {@link #DEFAULT_MAX_REPLY_TOKENS} as the most a reply may run to.
      *
-     * <p>The prompt size is {@link ContextBudget}'s estimate, which counts two characters to a token
-     * and so over-counts: the room it leaves is no more than the real room.</p>
-     *
-     * @param contextTokens the model's context length as the server reported it; at or below zero
-     *                      when it did not
-     * @param promptTokens  the estimated tokens of the whole request
-     * @return the value to send, or {@code 0} to send nothing because the window is unknown
+     * @see #replyBudgetTokens(int, int, int)
      */
     static int replyBudgetTokens(int contextTokens, int promptTokens) {
-        if (contextTokens <= 0) return 0;
-        int margin = Math.max(REPLY_MARGIN_MIN_TOKENS, (int) (contextTokens * REPLY_MARGIN_SHARE));
-        int room = contextTokens - promptTokens - margin;
-        return Math.min(Math.max(room, MIN_REPLY_TOKENS), contextTokens);
+        return replyBudgetTokens(contextTokens, promptTokens, DEFAULT_MAX_REPLY_TOKENS);
+    }
+
+    /**
+     * The {@code max_tokens} to send: the room left in the model's window after the prompt, less a safety
+     * margin, no more than {@code maxReply} and never below {@link #MIN_REPLY_TOKENS}. It is sent with every
+     * request: without it each server applies its own default, which is far below the window on some (32,768
+     * tokens on one broker deployment), and a long reply is cut off the moment it passes that default. When the
+     * server reports no window, the {@link #DEFAULT_CONTEXT_TOKENS} the history budget assumes is taken.
+     *
+     * <p>The prompt size is an estimate from characters ({@link ContextBudget}), which falls short for
+     * Japanese text (about 1.7 characters to a token, not 2); the cap keeps the total under the window when it
+     * does, and a refused request corrects the estimate from the server's own count.</p>
+     *
+     * @param contextTokens the model's context length as the server reported it; at or below zero when it did not
+     * @param promptTokens  the estimated tokens of the whole request
+     * @param maxReply      the most tokens a reply may run to
+     * @return the value to send
+     */
+    static int replyBudgetTokens(int contextTokens, int promptTokens, int maxReply) {
+        int window = contextTokens > 0 ? contextTokens : DEFAULT_CONTEXT_TOKENS;
+        int room = window - promptTokens - replyMarginTokens(window);
+        int budget = Math.max(Math.min(room, maxReply), MIN_REPLY_TOKENS);
+        return Math.min(budget, window);
+    }
+
+    /** @return the tokens kept free of the window for the prompt estimate being wrong */
+    private static int replyMarginTokens(int window) {
+        return Math.max(REPLY_MARGIN_MIN_TOKENS, (int) (window * REPLY_MARGIN_SHARE));
+    }
+
+    /**
+     * The estimated tokens of a whole request before the reply: the request body as it is sent, so the system
+     * message, every history message and the tool definitions are all in it.
+     *
+     * @return the estimate, from the body's characters
+     */
+    static int estimateRequestTokens(String model, List<ChatMessage> messages, List<ToolDefinition> tools) {
+        return ContextBudget.estimateTokens(OpenAiCompatClient.requestBodyForEstimate(model, messages, tools));
     }
 
     /**
      * {@link #replyBudgetTokens} for one request, with the window read from the server's model list
      * ({@code max_model_len} in {@code /v1/models}, cached by the client).
      *
-     * @return the value to send as {@code max_tokens}, or {@code 0} when the window is not known
+     * @return the value to send as {@code max_tokens}; {@code 0} only when there is no client or model
      */
     private int maxTokensFor(OpenAiCompatClient client, String model, List<ChatMessage> messages) {
         if (client == null || model == null || model.isBlank()) return 0;
-        int prompt = 0;
-        for (ChatMessage m : messages) prompt += ContextBudget.estimateMessageTokens(contentOf(m));
-        return replyBudgetTokens(client.getMaxModelLen(model), prompt);
+        return replyBudgetTokens(client.getMaxModelLen(model), estimateRequestTokens(model, messages, List.of()),
+                maxReplyTokens);
+    }
+
+    /**
+     * What a server's context-length refusal says, when it says it: the window, and how many tokens the
+     * prompt really took. Read from the forms the servers here write, e.g. {@code maximum context length is
+     * 262144 tokens: ... (7 prompt tokens plus max_tokens 262144)} and vLLM's {@code (42603 in the messages,
+     * 224982 in the completion)}.
+     *
+     * @param window       the model's context length, or {@code -1} when the message does not say
+     * @param promptTokens the prompt's real token count, or {@code -1} when the message does not say
+     */
+    record ContextOverflow(int window, int promptTokens) {
+        private static final java.util.regex.Pattern WINDOW =
+                java.util.regex.Pattern.compile("maximum context length is (\\d+)");
+        private static final java.util.regex.Pattern PROMPT = java.util.regex.Pattern.compile(
+                "(\\d+) prompt tokens|(\\d+) in the messages|(\\d+) input tokens|\"input_tokens\"\\s*:\\s*(\\d+)");
+
+        static ContextOverflow parse(String message) {
+            if (message == null) return new ContextOverflow(-1, -1);
+            java.util.regex.Matcher w = WINDOW.matcher(message);
+            int window = w.find() ? Integer.parseInt(w.group(1)) : -1;
+            java.util.regex.Matcher p = PROMPT.matcher(message);
+            int prompt = -1;
+            if (p.find()) {
+                for (int g = 1; g <= p.groupCount(); g++) {
+                    if (p.group(g) != null) { prompt = Integer.parseInt(p.group(g)); break; }
+                }
+            }
+            return new ContextOverflow(window, prompt);
+        }
     }
 
     /** @return the estimated token count of the whole history */

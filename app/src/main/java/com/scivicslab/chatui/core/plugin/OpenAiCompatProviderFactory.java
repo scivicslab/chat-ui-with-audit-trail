@@ -44,6 +44,11 @@ public class OpenAiCompatProviderFactory implements LlmProviderFactory {
         // of this conversation (OpenAiCompatStandardToolCalling_261120_oo01).
         McpToolClient mcp = new McpToolClient("http://127.0.0.1:" + ctx.httpPort() + "/mcp",
                 ChatUiActorSystem.chatActorName(ctx.projectId(), ctx.chatId()));
-        return new OpenAiCompatProvider(servers, defaultModel, mcp);
+        OpenAiCompatProvider provider = new OpenAiCompatProvider(servers, defaultModel, mcp);
+        // The most tokens a reply may run to; the provider's own default when it is not set.
+        org.eclipse.microprofile.config.ConfigProvider.getConfig()
+                .getOptionalValue("chat-ui.max-reply-tokens", Integer.class)
+                .ifPresent(provider::setMaxReplyTokens);
+        return provider;
     }
 }

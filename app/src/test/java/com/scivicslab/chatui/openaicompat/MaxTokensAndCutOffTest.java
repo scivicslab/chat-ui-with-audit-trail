@@ -17,8 +17,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Against a stub server: the request carries {@code max_tokens} when the model's window is known and
- * none when it is not, and a reply the server cut off at the token limit is kept in the history, not
+ * Against a stub server: the request carries {@code max_tokens} whether the model's window is known or not,
+ * capped at the most a reply may run to, and a reply the server cut off at the token limit is kept in the history, not
  * thrown away, when the caller handles it ({@code CutOffReplyContinues_261115_oo01}).
  */
 class MaxTokensAndCutOffTest {
@@ -76,15 +76,19 @@ class MaxTokensAndCutOffTest {
         JSONObject body = new JSONObject(received.get());
         assertTrue(body.has("max_tokens"), received.get());
         int sent = body.getInt("max_tokens");
-        assertTrue(sent > 90_000 && sent < 100_000, "room left in a 100000-token window: " + sent);
+        assertEquals(OpenAiCompatProvider.DEFAULT_MAX_REPLY_TOKENS, sent,
+                "the room left in a 100000-token window, capped at the most a reply may run to: " + sent);
     }
 
     @Test
-    void windowUnknown_requestCarriesNoMaxTokens() throws Exception {
+    void windowUnknown_requestStillCarriesMaxTokens() throws Exception {
         startStub("{\"data\":[{\"id\":\"stub-model\"}]}", "stop");
         send(provider(), false);
 
-        assertFalse(new JSONObject(received.get()).has("max_tokens"), received.get());
+        // Sent every time: without it the server applies its own default, 32,768 on one deployment.
+        JSONObject body = new JSONObject(received.get());
+        assertTrue(body.has("max_tokens"), received.get());
+        assertTrue(body.getInt("max_tokens") <= OpenAiCompatProvider.DEFAULT_MAX_REPLY_TOKENS, received.get());
     }
 
     @Test
