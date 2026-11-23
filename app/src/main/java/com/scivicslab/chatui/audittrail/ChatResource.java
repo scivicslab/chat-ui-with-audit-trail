@@ -43,6 +43,9 @@ import java.util.logging.Logger;
 @Path("/api/projects")
 public class ChatResource {
 
+    /** Allows a CLI provider to start its model-catalog process on the first request. */
+    private static final int MODEL_LIST_TIMEOUT_SECONDS = 25;
+
     private static final Logger LOG = Logger.getLogger(ChatResource.class.getName());
 
     @Inject
@@ -1081,9 +1084,11 @@ public class ChatResource {
         requireChat(projectId, chatId);
         ChatSessionIIAR chatSessionIIAR = actorSystem.getChatSession(projectId, chatId);
         try {
-            return chatSessionIIAR.ask(interp -> ((ChatSession) interp).getAvailableModels()).get(5, TimeUnit.SECONDS);
+            return chatSessionIIAR.ask(interp -> ((ChatSession) interp).getAvailableModels())
+                    .get(MODEL_LIST_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (java.util.concurrent.TimeoutException e) {
-            LOG.warning("Failed to list models for ConversationSquad " + chatId + ": timed out after 5 s");
+            LOG.warning("Failed to list models for ConversationSquad " + chatId + ": timed out after "
+                    + MODEL_LIST_TIMEOUT_SECONDS + " s");
             noteTimeout(projectId, chatId, chatSessionIIAR);
             return List.of();
         } catch (Exception e) {

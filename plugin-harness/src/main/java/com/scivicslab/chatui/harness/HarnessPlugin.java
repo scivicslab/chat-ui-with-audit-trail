@@ -38,7 +38,7 @@ public class HarnessPlugin implements ChatUiPlugin {
                 sessionDir,
                 ctx.httpPort(),
                 ctx.configOr("chat-ui.harness.claude-model", "sonnet"),
-                ctx.configOr("chat-ui.harness.codex-model", "gpt-5.5"),
+                ctx.config().apply("chat-ui.harness.codex-model").filter(v -> !v.isBlank()).orElse(null),
                 Path.of(ctx.configOr("chat-ui.harness.claude-projects-dir",
                         Path.of(System.getProperty("user.home"), ".claude", "projects").toString())));
     }

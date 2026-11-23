@@ -39,14 +39,8 @@ public class CodexProvider implements LlmProvider {
 
     public static final String ID = "codex";
 
-    /**
-     * What a ChatGPT-account Codex offers (its {@code ~/.codex/models_cache.json} lists exactly
-     * this; {@code gpt-5.4} and {@code gpt-5.2-codex} are refused with "not supported when using
-     * Codex with a ChatGPT account"). A name typed into the model box is passed through as is.
-     */
-    private static final List<ModelEntry> MODELS = List.of(
-        new ModelEntry("gpt-5.5", ID, null)
-    );
+    /** Shared because every conversation sees the same Codex installation and account. */
+    private static final CodexModelCatalog MODEL_CATALOG = new CodexModelCatalog();
 
     /** Codex's sandbox for the commands it runs; the project's working directory is what it may write. */
     private static final String SANDBOX_MODE = "workspace-write";
@@ -90,7 +84,14 @@ public class CodexProvider implements LlmProvider {
 
     @Override public String id() { return ID; }
     @Override public String displayName() { return "Codex"; }
-    @Override public List<ModelEntry> getAvailableModels() { return MODELS; }
+    @Override
+    public List<ModelEntry> getAvailableModels() {
+        CodexModelCatalog.Snapshot snapshot = MODEL_CATALOG.snapshot();
+        if ((model == null || model.isBlank()) && snapshot.defaultModel() != null) {
+            model = snapshot.defaultModel();
+        }
+        return snapshot.models();
+    }
     @Override public ProviderCapabilities capabilities() { return ProviderCapabilities.CLI; }
     @Override public String getCurrentModel() { return model; }
     @Override public void setModel(String model) { this.model = model; }

@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -50,6 +51,7 @@ class HarnessPluginTest {
         LlmProvider p = factory("codex").create(ctx(dir, ToolSet.HARNESS));
         assertTrue(p.promptPreface().startsWith("You are running inside Codex"), p.promptPreface());
         assertTrue(p.promptPreface().contains("web_search"));
+        assertNull(p.getCurrentModel(), "an unset model is left to Codex rather than hard-coded");
         assertThrows(IllegalArgumentException.class, () -> factory("codex").create(ctx(dir, ToolSet.FULL)));
     }
 
