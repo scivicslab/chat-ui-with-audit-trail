@@ -297,7 +297,8 @@ public final class ToolCatalog {
                 urgent request may wait while that conversation runs a long turn before the turn is paused to
                 answer it (default 10); childReplyWarnMinutes is how long a request it sent may go without a
                 reply before it is told (default 5). Give at least one of the two, in whole minutes; one left
-                out keeps its value.
+                out keeps its value. 0 turns that watch off: childReplyWarnMinutes 0 gives no "no reply yet"
+                notices at all, urgentWaitMinutes 0 never pauses a turn. It also takes your own chatId.
                 """,
                 List.of(
                     new ToolParameter("chatId", "string", true, ""),

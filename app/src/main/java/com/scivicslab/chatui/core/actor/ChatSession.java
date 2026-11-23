@@ -2997,11 +2997,47 @@ public class ChatSession extends Interpreter {
      * queue, and when that worked, lets go of it here: a request this turn sent for a request it received no
      * longer holds that request open, and the timekeeper no longer waits for its reply
      * ({@code CancelARequestInTheQueue_261113_oo01}).
+     *
+     * <p>A request this conversation still holds open but this run of the instance did not send (it was sent before a
+     * restart, or to a conversation since deleted) cannot be taken out of any queue, and no reply to it is
+     * awaited by anything that would deliver one; it is let go here, so the timekeeper stops reminding of it.</p>
      */
     private String cancelRequest(String requestId) {
         String result = AskChatTool.cancel(system, myChatName(), requestId);
         if (result.startsWith("removed") && openRequests.close(requestId.trim())) publishOutstanding();
+        if (result.startsWith("not found") && openRequests.close(requestId.trim())) {
+            publishOutstanding();
+            return closedNotFoundText(requestId.trim());
+        }
         return result;
+    }
+
+    /** What {@code cancel_request} says when it let go of an open request this run did not send. */
+    static String closedNotFoundText(String requestId) {
+        return "closed: request " + requestId + " was not sent in this run of the instance, so it is in no queue to "
+                + "take out of. It was still open here; it is now closed, it no longer holds any request you received "
+                + "open, and the timekeeper no longer reminds you of it. If a reply to it arrives anyway, it comes as "
+                + "a message in your queue.";
+    }
+
+    /**
+     * The conversation {@code targetName} was deleted: every request this conversation sent to it and still holds
+     * open is let go, since no turn of the deleted conversation will answer it, and the timekeeper stops reminding
+     * of it ({@code CancelARequestInTheQueue_261113_oo01}).
+     *
+     * @param targetName the deleted conversation's qualified name
+     * @return the requests let go
+     */
+    public List<String> targetDeleted(String targetName) {
+        List<String> closed = new java.util.ArrayList<>();
+        for (OpenRequests.Outstanding o : openRequests.outstandingChildren()) {
+            if (targetName.equals(o.target()) && openRequests.close(o.requestId())) closed.add(o.requestId());
+        }
+        if (!closed.isEmpty()) {
+            publishOutstanding();
+            logger.info(myChatName() + ": closed requests to the deleted " + targetName + ": " + closed);
+        }
+        return closed;
     }
 
     /** Between a conversation's name and its node, in what the timekeeper watches for a request sent to another instance. */

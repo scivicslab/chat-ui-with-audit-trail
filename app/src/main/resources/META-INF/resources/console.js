@@ -1389,8 +1389,10 @@
     }
 
     function timekeeperRender(w) {
-        setText("tk-urgent-wait", w.urgentWaitMinutes + (w.urgentWaitMinutes === 1 ? " minute" : " minutes"));
-        setText("tk-warn", w.childReplyWarnMinutes + (w.childReplyWarnMinutes === 1 ? " minute" : " minutes"));
+        setText("tk-urgent-wait", w.urgentWaitMinutes === 0 ? "off (never pauses a turn)"
+            : w.urgentWaitMinutes + (w.urgentWaitMinutes === 1 ? " minute" : " minutes"));
+        setText("tk-warn", w.childReplyWarnMinutes === 0 ? "off (no notices)"
+            : w.childReplyWarnMinutes + (w.childReplyWarnMinutes === 1 ? " minute" : " minutes"));
         setText("tk-turn", w.running
             ? "running" + (w.runningSince ? ", started " + tkSpan(Date.now() - w.runningSince) + " ago" : "")
             : "not running a turn");
@@ -1403,7 +1405,9 @@
             } else {
                 urgent.className = "";
                 urgent.textContent = "Waiting " + tkSpan(w.urgentWaitingMillis) + ". "
-                    + (w.pauseInMillis == null
+                    + (w.urgentWaitMinutes === 0
+                        ? "The pause is off; it is answered when the running turn ends."
+                        : w.pauseInMillis == null
                         ? "No turn is running, so nothing would be paused; it is answered next."
                         : w.pauseInMillis >= 0
                             ? "The running turn would be paused in " + tkSpan(w.pauseInMillis) + "."
@@ -1418,7 +1422,8 @@
                 tkCell(tr, s.requestId);
                 tkCell(tr, s.target || "(unknown)");
                 tkCell(tr, tkSpan(s.outMillis));
-                tkCell(tr, s.noticeSent ? "sent"
+                tkCell(tr, w.childReplyWarnMinutes === 0 ? "off"
+                    : s.noticeSent ? "sent"
                     : s.noticeDueInMillis >= 0 ? "not sent; due " + tkWhen(s.noticeDueInMillis)
                     : "not sent; due at the next check", s.noticeSent ? "tk-late" : "");
                 return tr;

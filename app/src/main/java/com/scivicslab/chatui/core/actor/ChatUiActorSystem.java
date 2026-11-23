@@ -809,6 +809,11 @@ public class ChatUiActorSystem implements ConversationControls {
         organizationOf(projectId).tell(o -> o.remove(chatId));
         // Its role edges, and every edge that names it in any project, go with it (CollaborationGraph_260828_oo01).
         forgetInEveryRoleTable(t -> t.forgetConversation(name));
+        // Requests sent to it that are still open are let go by their senders, so their timekeepers stop reminding
+        // of a reply that will never come (CancelARequestInTheQueue_261113_oo01).
+        for (ChatSessionIIAR sender : chatSessions.values()) {
+            sender.asChatSessionRef().tell(c -> c.targetDeleted(name));
+        }
         LOG.info("Deleted conversation " + name);
         return new ChatDeletion(ChatDeletion.Kind.DELETED, "");
     }
@@ -2268,12 +2273,12 @@ public class ChatUiActorSystem implements ConversationControls {
      * @param urgentWaitMinutes     the new limit for an urgent request waiting at the front, or {@code null} to keep it
      * @param childReplyWarnMinutes the new limit for a sent request with no reply, or {@code null} to keep it
      * @return the limits now in force, as {@code [urgentWaitMinutes, childReplyWarnMinutes]}
-     * @throws IllegalArgumentException for an unknown conversation or a limit below one minute
+     * @throws IllegalArgumentException for an unknown conversation or a negative limit; 0 turns that watch off
      */
     @Override
     public long[] setTimekeeperLimits(String projectId, String chatId, Long urgentWaitMinutes, Long childReplyWarnMinutes) {
-        if ((urgentWaitMinutes != null && urgentWaitMinutes < 1) || (childReplyWarnMinutes != null && childReplyWarnMinutes < 1)) {
-            throw new IllegalArgumentException("a limit is a whole number of minutes, at least 1");
+        if ((urgentWaitMinutes != null && urgentWaitMinutes < 0) || (childReplyWarnMinutes != null && childReplyWarnMinutes < 0)) {
+            throw new IllegalArgumentException("a limit is a whole number of minutes, 0 or more (0 turns that watch off)");
         }
         String name = chatActorName(projectId, chatId);
         ActorRef<Timekeeper> keeper = actorSystem.getActor(name + ".timekeeper");

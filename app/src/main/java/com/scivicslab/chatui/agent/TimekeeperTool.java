@@ -9,7 +9,7 @@ import java.util.logging.Logger;
 /**
  * The {@code set_chat_timekeeper} tool: changes how long a conversation's timekeeper lets an urgent request wait
  * before pausing the running turn, and how long it lets a sent request go without a reply before saying so
- * ({@code TimekeeperPausesATurnForAnUrgentRequest_261107_oo01}). Only for conversations of the caller's own
+ * ({@code TimekeeperPausesATurnForAnUrgentRequest_261107_oo01}); 0 turns that watch off. Only for conversations of the caller's own
  * project, as {@code set_chat_model}.
  */
 public final class TimekeeperTool {
@@ -48,8 +48,11 @@ public final class TimekeeperTool {
         String targetChatId = targetName.substring((myProjectId + "/chat-").length());
         try {
             long[] now = controls.setTimekeeperLimits(myProjectId, targetChatId, urgent, warn);
-            return "ok: " + targetName + " now pauses a turn for an urgent request after " + now[0]
-                    + " minute(s), and reports a request with no reply after " + now[1] + " minute(s)";
+            String pause = now[0] == 0 ? "never pauses a turn for an urgent request"
+                    : "pauses a turn for an urgent request after " + now[0] + " minute(s)";
+            String warnText = now[1] == 0 ? "never reports a request with no reply"
+                    : "reports a request with no reply after " + now[1] + " minute(s)";
+            return "ok: " + targetName + " now " + pause + ", and " + warnText;
         } catch (IllegalArgumentException e) {
             return "error: " + e.getMessage();
         } catch (Exception e) {

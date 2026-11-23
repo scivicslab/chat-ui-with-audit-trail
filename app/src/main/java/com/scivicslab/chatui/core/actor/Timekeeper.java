@@ -24,6 +24,8 @@ import com.scivicslab.chatui.core.rest.ChatEvent;
  * answered next, and the paused work goes on after it.</li>
  * <li>When a request the conversation sent has had no reply for longer than {@link #childReplyWarnMillis}, it puts
  * one notice saying so into the conversation's queue. What to do about it is the conversation's model's call.</li>
+ * <li>A limit set to 0 minutes turns its watch off ({@link #OFF}): with the urgent wait off no turn is paused for an
+ * urgent request, and with the reply wait off no "no reply yet" notice is given.</li>
  * <li>When a report the conversation promised was registered with {@code expect_report} and its time has come,
  * it puts one reminder into the conversation's queue, naming the request; the answer of the turn the reminder
  * starts goes to the asker as a follow-up ({@code ReplyDecisionAndPromisedReport_261108_oo01}).</li>
@@ -48,6 +50,12 @@ public class Timekeeper {
      * ({@code ReminderDecidedAtTheEndOfTheTurn_261114_oo01}).
      */
     public static final long DEFAULT_PROMISE_REMINDER_MINUTES = 5;
+
+    /**
+     * The value a limit holds, in milliseconds, when its watch is off: set as 0 minutes. A limit of 0 milliseconds,
+     * given to the constructor, is not off; it acts at the first check.
+     */
+    static final long OFF = -1;
 
     /** Source of the notice put into the conversation's queue. */
     public static final String SOURCE = "agent:timekeeper";
@@ -112,8 +120,9 @@ public class Timekeeper {
      * Changes this conversation's limits ({@code TimekeeperPausesATurnForAnUrgentRequest_261107_oo01}).
      *
      * @param urgentWaitMinutes     how long an urgent request may wait at the front of a running turn, or
-     *                              {@code null} to keep the current value
-     * @param childReplyWarnMinutes how long a sent request may go without a reply, or {@code null} to keep it
+     *                              {@code null} to keep the current value; 0 turns the pause off
+     * @param childReplyWarnMinutes how long a sent request may go without a reply, or {@code null} to keep it;
+     *                              0 turns the notices off
      */
     public void setLimits(Long urgentWaitMinutes, Long childReplyWarnMinutes) {
         applyLimits(urgentWaitMinutes, childReplyWarnMinutes);
@@ -121,8 +130,18 @@ public class Timekeeper {
     }
 
     private void applyLimits(Long urgentWaitMinutes, Long childReplyWarnMinutes) {
-        if (urgentWaitMinutes != null) urgentWaitMillis = TimeUnit.MINUTES.toMillis(urgentWaitMinutes);
-        if (childReplyWarnMinutes != null) childReplyWarnMillis = TimeUnit.MINUTES.toMillis(childReplyWarnMinutes);
+        if (urgentWaitMinutes != null) urgentWaitMillis = millisOf(urgentWaitMinutes);
+        if (childReplyWarnMinutes != null) childReplyWarnMillis = millisOf(childReplyWarnMinutes);
+    }
+
+    /** @return a limit given in minutes, in milliseconds; 0 minutes is {@link #OFF} */
+    private static long millisOf(long minutes) {
+        return minutes == 0 ? OFF : TimeUnit.MINUTES.toMillis(minutes);
+    }
+
+    /** @return a limit in milliseconds, in minutes; {@link #OFF} is 0 minutes */
+    private static long minutesOf(long millis) {
+        return millis == OFF ? 0 : TimeUnit.MILLISECONDS.toMinutes(millis);
     }
 
     /** Label of the conversation's entry that holds its timekeeper's limits. */
@@ -156,7 +175,7 @@ public class Timekeeper {
         Long urgent = saved.isNull("urgentWaitMinutes") ? null : saved.optLong("urgentWaitMinutes");
         Long warn = saved.has("childReplyWarnMinutes") && !saved.isNull("childReplyWarnMinutes")
                 ? saved.optLong("childReplyWarnMinutes") : null;
-        applyLimits(urgent != null && urgent >= 1 ? urgent : null, warn != null && warn >= 1 ? warn : null);
+        applyLimits(urgent != null && urgent >= 0 ? urgent : null, warn != null && warn >= 0 ? warn : null);
         org.json.JSONObject savedPromises = saved.optJSONObject("promised");
         if (!earlierForm && savedPromises != null) promised.load(savedPromises);
         if (earlierForm) record();
@@ -174,12 +193,12 @@ public class Timekeeper {
 
     /** @return how long, in minutes, an urgent request may wait at the front of a running turn */
     public long urgentWaitMinutes() {
-        return TimeUnit.MILLISECONDS.toMinutes(urgentWaitMillis);
+        return minutesOf(urgentWaitMillis);
     }
 
     /** @return how long, in minutes, a sent request may go without a reply before the conversation is told */
     public long childReplyWarnMinutes() {
-        return TimeUnit.MILLISECONDS.toMinutes(childReplyWarnMillis);
+        return minutesOf(childReplyWarnMillis);
     }
 
     /**
@@ -278,7 +297,7 @@ public class Timekeeper {
                            Set<String> warned, java.util.Map<String, Long> rearmedAt,
                            List<PromisedReports.Pending> promised, long now) {
         Long waited = urgentQueuedAt == null ? null : now - urgentQueuedAt;
-        Long pauseIn = waited != null && running ? urgentWaitMillis - waited : null;
+        Long pauseIn = waited != null && running && urgentWaitMillis != OFF ? urgentWaitMillis - waited : null;
         List<Watch.Sent> sent = out.stream()
                 .sorted((a, b) -> Long.compare(a.sentAt(), b.sentAt()))
                 .map(o -> new Watch.Sent(o.requestId(), o.target(), now - o.sentAt(), warned.contains(o.requestId()),
@@ -288,8 +307,7 @@ public class Timekeeper {
                 .sorted((a, b) -> Long.compare(a.dueAt(), b.dueAt()))
                 .map(p -> new Watch.Promised(p.requestId(), p.asker(), p.dueAt() - now, p.number()))
                 .toList();
-        return new Watch(conversation, TimeUnit.MILLISECONDS.toMinutes(urgentWaitMillis),
-                TimeUnit.MILLISECONDS.toMinutes(childReplyWarnMillis), running, running ? runningSince : null,
+        return new Watch(conversation, minutesOf(urgentWaitMillis), minutesOf(childReplyWarnMillis), running, running ? runningSince : null,
                 waited, pauseIn, sent, due);
     }
 
@@ -318,7 +336,7 @@ public class Timekeeper {
      */
     public void tick(long now) {
         try {
-            if (chat.isBusyDirect()) {
+            if (urgentWaitMillis != OFF && chat.isBusyDirect()) {
                 Long since = queue.ask(PromptQueue::frontUrgentQueuedAt).get(5, TimeUnit.SECONDS);
                 if (since != null && now - since > urgentWaitMillis) {
                     LOG.info(conversation + ": an urgent request has waited " + (now - since) / 1000
@@ -334,7 +352,7 @@ public class Timekeeper {
             // (AutomaticReplyDecision_261119_oo01).
             java.util.Set<String> quiet = chat.promisedRequestsDirect();
             for (OpenRequests.Outstanding o : out) {
-                if (quiet.contains(o.requestId())) continue;
+                if (childReplyWarnMillis == OFF || quiet.contains(o.requestId())) continue;
                 if (now - watchedFrom(o, rearmedAt) > childReplyWarnMillis && warned.add(o.requestId())) {
                     TargetState state;
                     try {
