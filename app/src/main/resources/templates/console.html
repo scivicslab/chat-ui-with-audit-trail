@@ -274,6 +274,7 @@
                     <option value="syslog" data-perspective="chat">System Log</option>
                     <option value="agentloop" data-perspective="chat">Agent Loop</option>
                     <option value="logsearch" data-perspective="chat">Log Search</option>
+                    <option value="tokens" data-perspective="chat">Tokens</option>
                     <option value="projectprop" data-perspective="project">Project Property</option>
                     <option value="jobrun" data-perspective="project">Run</option>
                     <option value="joblog" data-perspective="project">Job Log</option>
@@ -348,6 +349,26 @@
                     <div id="lsearch-reading">
                         <div id="lsearch-reading-head">Pick a message above to read it here.</div>
                         <div id="lsearch-reading-body"></div>
+                    </div>
+                </section>
+
+                <!-- Tokens: what the block a conversation's first request starts with is made of, and how
+                     the first request grew from turn to turn. Read-only: it shows who may cut a part
+                     and cuts nothing. -->
+                <section id="tab-tokens" class="rtab-content" data-perspective="chat">
+                    <div class="tab-toolbar">
+                        <button id="tokens-refresh" type="button">Refresh</button>
+                        <span id="tokens-status"></span>
+                    </div>
+                    <div id="tokens-body">
+                        <div class="tk-section">
+                            <h3>Parts of the head block</h3>
+                            <div id="tokens-parts"></div>
+                        </div>
+                        <div class="tk-section">
+                            <h3>First request of each turn</h3>
+                            <div id="tokens-turns"></div>
+                        </div>
                     </div>
                 </section>
 

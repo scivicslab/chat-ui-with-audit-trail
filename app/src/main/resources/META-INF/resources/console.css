@@ -673,6 +673,9 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
 #console-root[data-perspective="timekeeper"] .rtab-content[data-perspective="chat"],
 #console-root[data-perspective="timekeeper"] .rtab-content[data-perspective="project"] { display: none; }
 
+#tokens-body { flex: 1; min-height: 0; overflow: auto; padding: 8px; }
+#tokens-body td.num, #tokens-body th.num { text-align: right; }
+#tokens-body tr.tokens-total td { font-weight: 600; }
 .tk-section { margin-bottom: 18px; }
 .tk-section h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--text-secondary, #9aa0a6); }
 .tk-limits { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }

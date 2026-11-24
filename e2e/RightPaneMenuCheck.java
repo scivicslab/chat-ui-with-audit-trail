@@ -25,7 +25,7 @@ import java.util.List;
  */
 public class RightPaneMenuCheck {
 
-    static final List<String> CHAT_ENTRIES = List.of("Sessions", "System Log", "Agent Loop", "Log Search", "Actions");
+    static final List<String> CHAT_ENTRIES = List.of("Sessions", "System Log", "Agent Loop", "Log Search", "Tokens", "Actions");
     static final List<String> PROJECT_ENTRIES =
             List.of("Project Property", "Run", "Job Log", "Batch Jobs", "Method Search", "Actions");
 

@@ -29,6 +29,7 @@
         logdb: "To see exactly what this conversation sent to its model and what came back, open a recorded session and follow its turns step by step.",
         syslog: "When a turn of this conversation went wrong, read its log here; set Level to WARN or ERROR to find the failure.",
         agentloop: "This conversation runs each of its turns by the agent loop shown here; choose another one to change how it works.",
+        tokens: "When this conversation's window fills up, see here which part of its first request takes the tokens and who can cut it; nothing here cuts anything.",
         logsearch: "When you remember what was said but not which conversation said it, search here: it covers every conversation this instance recorded.",
         actions: "A workflow step names an actor and one of its actions, so while writing a workflow, look up here which actors exist and what each action takes.",
         projectprop: "To set up this project, edit its name, working directory, conversations and liaison here.",
@@ -70,6 +71,7 @@
         if (tab === "syslog") refreshLogs();
         if (tab === "agentloop") wfOnShow();
         if (tab === "logsearch") lsearchOnShow();
+        if (tab === "tokens") tokensLoad();
         if (tab === "jobrun") jobRunOnShow();
         if (tab === "jobs") jobsOnShow();
         if (tab === "joblog") jobLogOnShow();
@@ -2047,6 +2049,9 @@
         if (document.getElementById("tab-agentloop") && document.getElementById("tab-agentloop").classList.contains("active")) {
             wfOnShow();
         }
+        if (document.getElementById("tab-tokens") && document.getElementById("tab-tokens").classList.contains("active")) {
+            tokensLoad();
+        }
     }
 
     // The last tree drawn, to find the nodes above a conversation.
@@ -3092,6 +3097,121 @@
     }
 
 
+    // ── Tokens tab ────────────────────────────────────────────────────────────
+    // Two read-only tables for the open conversation: the parts the head of its first request is made of
+    // (GET api/chats/<project>/chat-<id>/head-block) and what each turn's first request carried
+    // (GET api/sessions/<session>/tokens). It shows who may cut a part; it cuts nothing.
+    var tokensLoadSeq = 0;
+
+    function tokensSetStatus(t) { setText("tokens-status", t); }
+
+    function tokensTable(headers, rows, numericFrom) {
+        var table = document.createElement("table");
+        table.className = "io-sessions";
+        var head = document.createElement("tr");
+        headers.forEach(function (h, i) {
+            var th = document.createElement("th");
+            th.textContent = h;
+            if (i >= numericFrom && i < numericFrom + 2) th.className = "num";
+            head.appendChild(th);
+        });
+        table.appendChild(head);
+        rows.forEach(function (cells) {
+            var tr = document.createElement("tr");
+            if (cells.total) tr.className = "tokens-total";
+            cells.values.forEach(function (v, i) {
+                var td = document.createElement("td");
+                td.textContent = v;
+                if (i >= numericFrom && i < numericFrom + 2) td.className = "num";
+                tr.appendChild(td);
+            });
+            table.appendChild(tr);
+        });
+        return table;
+    }
+
+    function tokensEmpty(box, text) {
+        box.textContent = "";
+        var d = document.createElement("div");
+        d.className = "io-empty";
+        d.textContent = text;
+        box.appendChild(d);
+    }
+
+    function tokensShowParts(hb) {
+        var box = document.getElementById("tokens-parts");
+        if (!box) return;
+        box.textContent = "";
+        var rows = (hb.parts || []).map(function (p) {
+            return { values: [p.name, p.measured ? String(p.chars) : "-", p.measured ? String(p.estimatedTokens) : "-",
+                              p.whoCanCut] };
+        });
+        box.appendChild(tokensTable(["Part", "Chars", "Estimated tokens", "Who can cut it"], rows, 1));
+        // The estimate beside what the provider reported for the first request, so the estimate's error is visible.
+        var measured = hb.measuredFirstRequestTotal;
+        var summary = [{ values: ["Estimated total of the parts above", String(hb.estimatedTotal)] },
+                       { values: ["Measured first request", measured === null || measured === undefined ? "not recorded" : String(measured)] }];
+        if (measured !== null && measured !== undefined) {
+            var diff = measured - hb.estimatedTotal;
+            summary.push({ total: true, values: ["Measured minus estimated (parts not counted here, and estimation error)",
+                                                 (diff > 0 ? "+" : "") + diff] });
+        }
+        var gap = document.createElement("div");
+        gap.style.height = "10px";
+        box.appendChild(gap);
+        box.appendChild(tokensTable(["First request", "Tokens"], summary, 1));
+    }
+
+    function tokensShowTurns(t) {
+        var box = document.getElementById("tokens-turns");
+        if (!box) return;
+        var turns = (t && t.turns) || [];
+        if (!turns.length) { tokensEmpty(box, "No request of this conversation has a recorded token count yet."); return; }
+        box.textContent = "";
+        var rows = turns.map(function (u) {
+            var g = u.growth;
+            return { values: [String(u.turn), String(u.firstRequestTotal),
+                              g === null || g === undefined ? "-" : (g > 0 ? "+" : "") + g] };
+        });
+        box.appendChild(tokensTable(["Turn", "First request (tokens)", "Growth from the previous turn"], rows, 1));
+    }
+
+    function tokensLoad() {
+        var c = (typeof window.chatUiGetActiveChat === "function") ? window.chatUiGetActiveChat() : null;
+        var partsBox = document.getElementById("tokens-parts");
+        var turnsBox = document.getElementById("tokens-turns");
+        if (!c || !partsBox || !turnsBox) return;
+        var seq = ++tokensLoadSeq;
+        // Empty first, so a table drawn for the conversation shown before is never taken for this one's.
+        partsBox.textContent = "";
+        turnsBox.textContent = "";
+        var conversation = encodeURIComponent(c.projectId) + "/chat-" + encodeURIComponent(c.chatId);
+        tokensSetStatus("loading…");
+        fetch("api/chats/" + conversation + "/head-block")
+            .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)); })
+            .then(function (hb) { if (seq === tokensLoadSeq) tokensShowParts(hb); })
+            .catch(function (e) { if (seq === tokensLoadSeq) tokensEmpty(partsBox, "error: " + e.message); });
+        // The newest session of this conversation holds its requests.
+        fetch("api/sessions?conversationSquadId=" + encodeURIComponent(c.projectId + "/chat-" + c.chatId))
+            .then(function (r) { return r.json(); })
+            .then(function (list) {
+                if (!list || !list.length) return null;
+                return fetch("api/sessions/" + list[0].sessionId + "/tokens")
+                        .then(function (r) { return r.ok ? r.json() : null; });
+            })
+            .then(function (t) {
+                if (seq !== tokensLoadSeq) return;
+                tokensShowTurns(t);
+                tokensSetStatus(c.projectId + "/chat-" + c.chatId);
+            })
+            .catch(function (e) { if (seq === tokensLoadSeq) { tokensEmpty(turnsBox, "error: " + e.message); tokensSetStatus(""); } });
+    }
+
+    function initTokens() {
+        var refresh = document.getElementById("tokens-refresh");
+        if (refresh) refresh.addEventListener("click", tokensLoad);
+    }
+
     // ── Log Search tab (CrossConversationLogSearch_260913_oo01) ──────────────
     // The Sessions tab answers about the conversation that is open. This one asks the whole I/O
     // log database at once, so a conversation whose actor was removed (loader.removeChild leaves
@@ -3388,6 +3508,7 @@
         initLogs();
         initWorkflow();
         initLsearch();
+        initTokens();
         initExtensions();
         initProjectWorkflows();
         initProjectWorkflowEditor();

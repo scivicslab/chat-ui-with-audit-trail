@@ -311,12 +311,14 @@ public class ScriptedModelServer {
                 index++;
             }
             sse.append("data: ").append(chunk(null, "tool_calls")).append("\n\n");
+            appendUsage(sse, req, messages.size());
             sse.append("data: [DONE]\n\n");
             send(ex, 200, "text/event-stream", sse.toString().getBytes(StandardCharsets.UTF_8));
         } else if (req.path("stream").asBoolean(false)) {
             StringBuilder sse = new StringBuilder();
             sse.append("data: ").append(chunk(reply, null)).append("\n\n");
             sse.append("data: ").append(chunk(null, "stop")).append("\n\n");
+            appendUsage(sse, req, messages.size());
             sse.append("data: [DONE]\n\n");
             send(ex, 200, "text/event-stream", sse.toString().getBytes(StandardCharsets.UTF_8));
         } else {
@@ -328,6 +330,22 @@ public class ScriptedModelServer {
             body.putObject("usage").put("prompt_tokens", 1).put("completion_tokens", 1).put("total_tokens", 2);
             send(ex, 200, "application/json", JSON.writeValueAsBytes(body));
         }
+    }
+
+    /**
+     * Ends a stream with the chunk that carries the request's token counts, as a server does when the request has
+     * {@code stream_options.include_usage}: 1000 prompt tokens plus 100 for each message, so a turn's request is
+     * larger than the turn before it by a known amount (the Tokens tab check).
+     */
+    static void appendUsage(StringBuilder sse, JsonNode req, int messageCount) throws Exception {
+        if (!req.path("stream_options").path("include_usage").asBoolean(false)) return;
+        ObjectNode d = JSON.createObjectNode();
+        d.putArray("choices");
+        int prompt = 1000 + 100 * messageCount;
+        ObjectNode usage = d.putObject("usage");
+        usage.put("prompt_tokens", prompt).put("completion_tokens", 5).put("total_tokens", prompt + 5);
+        usage.putObject("prompt_tokens_details").put("cached_tokens", 0);
+        sse.append("data: ").append(JSON.writeValueAsString(d)).append("\n\n");
     }
 
     static String chunk(String content, String finish) throws Exception {
