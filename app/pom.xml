@@ -65,7 +65,7 @@
     <dependency>
       <groupId>com.scivicslab</groupId>
       <artifactId>pojo-actor-distributed</artifactId>
-      <version>1.1.0</version>
+      <version>5.0.0</version>
     </dependency>
     <!-- turing-workflow:3.7.0's own published pom omits this, even though Interpreter (which
          ChatSession extends) uses org.apache.commons.jexl3 directly — declared explicitly here
@@ -73,7 +73,7 @@
     <dependency>
       <groupId>org.apache.commons</groupId>
       <artifactId>commons-jexl3</artifactId>
-      <version>3.3</version>
+      <version>3.7.1</version>
     </dependency>
     <!-- H2-backed complete I/O log (Sessions tab / audit trail). Only the storage primitives are
          used (H2LogStore / DistributedLogStore / SessionStatus), which depend on H2 + org.json only.
@@ -82,7 +82,7 @@
     <dependency>
       <groupId>com.scivicslab.turingworkflow.plugins</groupId>
       <artifactId>plugin-log-db</artifactId>
-      <version>4.8.0</version>
+      <version>5.0.0</version>
       <exclusions>
         <exclusion>
           <groupId>com.scivicslab</groupId>
@@ -102,7 +102,7 @@
     <dependency>
       <groupId>com.scivicslab.turingworkflow.plugins</groupId>
       <artifactId>plugin-log-output</artifactId>
-      <version>4.8.0</version>
+      <version>5.0.0</version>
     </dependency>
     <!-- Prompt construction (TurnResourceLimits/DocRetrievalAgentLoop): PromptBuilderActor keeps
          the constraints sent with every step in the workflow YAML rather than in Java, which is
@@ -110,19 +110,19 @@
     <dependency>
       <groupId>com.scivicslab.turingworkflow.plugins</groupId>
       <artifactId>plugin-prompt-builder</artifactId>
-      <version>4.8.0</version>
+      <version>5.0.0</version>
     </dependency>
     <!-- rst-on-lisp rule files and frames (FramesAndSamplesFromBooks_261021_oo01): the plan runner's
          frame actions read and rewrite rule files through this plugin's classes. -->
     <dependency>
       <groupId>com.scivicslab.turingworkflow.plugins</groupId>
       <artifactId>plugin-rst-frame</artifactId>
-      <version>4.9.0-SNAPSHOT</version>
+      <version>5.0.0</version>
     </dependency>
     <dependency>
       <groupId>com.scivicslab.turingworkflow.plugins</groupId>
       <artifactId>plugin-text</artifactId>
-      <version>4.8.0</version>
+      <version>5.0.0</version>
     </dependency>
     <!-- Agent-loop tools (read/write/web_search/fetch/search_docs): jsoup for HTML parsing
          (DuckDuckGo results, fetched pages). Same version as quarkus-chat-ui3, which these
@@ -239,8 +239,8 @@
 
       <!-- This module's action manifest: each @Action method's Javadoc (first sentence, body, <pre> example,
            @param prose), read back by ActionManifest and shown in the Actions tab
-           (ActionCatalogWithJavadoc_260930_oo01). The resource is named after the module and indexed in a
-           services file, because the uber-jar keeps only one entry per name. -->
+           (ActionCatalogWithJavadoc_260930_oo01). The doclet of turing-workflow 5.0.0 writes one file per class under
+           META-INF/turing-actions/, so no two jars write the same entry and no index is needed. -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-javadoc-plugin</artifactId>
@@ -264,8 +264,6 @@
               <additionalOptions>
                 <additionalOption>-turingClassesDir</additionalOption>
                 <additionalOption>${project.build.outputDirectory}</additionalOption>
-                <additionalOption>-turingManifestResource</additionalOption>
-                <additionalOption>META-INF/turing-plugin/${project.groupId}.${project.artifactId}.json</additionalOption>
               </additionalOptions>
               <doclint>none</doclint>
               <failOnError>false</failOnError>

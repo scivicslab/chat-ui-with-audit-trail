@@ -1,10 +1,10 @@
 package com.scivicslab.chatui.audittrail;
 
 import com.scivicslab.pojoactor.core.ActorRef;
+import com.scivicslab.pojoactor.core.ManagedThreadPool;
 import com.scivicslab.pojoactor.core.scheduler.Scheduler;
 
 import java.time.Instant;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -47,7 +47,7 @@ public class ActivityWatcher {
     private final ActivityWork work;
 
     private ActorRef<ActivityWatcher> self;
-    private ExecutorService pool;
+    private ManagedThreadPool pool;
     private Scheduler scheduler;
 
     private ActivityAnswer held = ActivityAnswer.pending();
@@ -71,7 +71,7 @@ public class ActivityWatcher {
      * @param self this actor's own reference
      * @param pool the actor system's managed thread pool
      */
-    public void bind(ActorRef<ActivityWatcher> self, ExecutorService pool) {
+    public void bind(ActorRef<ActivityWatcher> self, ManagedThreadPool pool) {
         this.self = self;
         this.pool = pool;
     }
