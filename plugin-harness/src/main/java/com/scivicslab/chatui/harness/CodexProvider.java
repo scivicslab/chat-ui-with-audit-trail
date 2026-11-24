@@ -112,10 +112,7 @@ public class CodexProvider implements LlmProvider {
         if (model != null && !model.isBlank()) this.model = model;
         List<String> cmd = buildCommand();
         logger.fine(() -> "Starting codex: " + String.join(" ", cmd));
-        ProcessBuilder pb = new ProcessBuilder(cmd);
-        if (workingDir != null) pb.directory(new File(workingDir.toString()));
-        if (ctx.apiKey() != null && !ctx.apiKey().isBlank()) pb.environment().put("OPENAI_API_KEY", ctx.apiKey());
-        pb.redirectErrorStream(false);
+        ProcessBuilder pb = launch(cmd, ctx.apiKey()).processBuilder();
 
         Process process;
         try {
@@ -185,6 +182,18 @@ public class CodexProvider implements LlmProvider {
             emitter.accept(ChatEvent.error("codex exited with status " + exit + " before completing the turn"));
         }
         emitter.accept(ChatEvent.result(threadId, -1, -1, this.model, false));
+    }
+
+    /**
+     * @param cmd    the command line {@link #buildCommand()} made
+     * @param apiKey the conversation's API key, or {@code null}
+     * @return how one turn's codex process is started: {@code OPENAI_API_KEY} when a key is set, and the
+     *         conversation's working directory
+     */
+    HarnessLaunch launch(List<String> cmd, String apiKey) {
+        java.util.Map<String, String> added = apiKey != null && !apiKey.isBlank()
+                ? java.util.Map.of("OPENAI_API_KEY", apiKey) : java.util.Map.of();
+        return new HarnessLaunch(cmd, List.of(), added, workingDir);
     }
 
     /** The command of one turn: a fresh thread, or a resume of the one this conversation holds. */

@@ -1,6 +1,7 @@
 package com.scivicslab.chatui.core.actor;
 
 import com.scivicslab.chatui.agent.FileAccessScope;
+import com.scivicslab.chatui.agent.ConversationToolCatalog;
 import com.scivicslab.chatui.agent.ToolCatalog;
 import com.scivicslab.chatui.agent.ToolSet;
 import com.scivicslab.chatui.plugin.ConversationTool;
@@ -42,7 +43,7 @@ class ConversationToolRunnerTest {
     @Test
     void itOffersNoToolThatDrivesTheConversation(@TempDir Path dir) {
         ConversationToolRunner r = runner(dir, ToolSet.FULL);
-        for (String driving : ToolCatalog.conversationDrivingTools()) assertFalse(r.offers(driving), driving);
+        for (String driving : ConversationToolCatalog.conversationDrivingTools()) assertFalse(r.offers(driving), driving);
         assertTrue(r.offers("read"));
         assertTrue(r.offers("list_chats"));
         assertTrue(r.offers("echo"), "a plugin tool");

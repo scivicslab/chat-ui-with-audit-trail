@@ -66,13 +66,13 @@ class ToolCatalogTest {
 
     @Test
     void theCatalogHasExactlyTheToolsTheTableHad() {
-        assertEquals(BEFORE.keySet(), ToolCatalog.builtInTools().keySet());
+        assertEquals(BEFORE.keySet(), ConversationToolCatalog.builtInTools().keySet());
     }
 
     @Test
     void eachToolKeepsItsArgumentOrderAndItsRequiredArguments() {
         BEFORE.forEach((name, expected) -> {
-            ToolCatalog.Spec spec = ToolCatalog.builtIn(name);
+            ToolCatalog.Spec spec = ConversationToolCatalog.builtIn(name);
             assertNotNull(spec, name);
             assertEquals(expected.get(0), spec.signature(), name + " signature");
             assertEquals(expected.get(1), spec.required(), name + " required");
@@ -81,19 +81,19 @@ class ToolCatalogTest {
 
     @Test
     void askPersonIsListedFirst() {
-        assertEquals("ask_person", ToolCatalog.builtInTools().keySet().iterator().next());
+        assertEquals("ask_person", ConversationToolCatalog.builtInTools().keySet().iterator().next());
     }
 
     @Test
     void onlyTheSixConversationDrivingToolsAreFlagged() {
-        ToolCatalog.builtInTools().forEach((name, spec) ->
+        ConversationToolCatalog.builtInTools().forEach((name, spec) ->
                 assertEquals(DRIVING.contains(name), spec.drivesConversation(), name));
-        assertEquals(DRIVING, Set.copyOf(ToolCatalog.conversationDrivingTools()));
+        assertEquals(DRIVING, Set.copyOf(ConversationToolCatalog.conversationDrivingTools()));
     }
 
     @Test
     void descriptionsDoNotDependOnTheInvokeForm() {
-        ToolCatalog.builtInTools().forEach((name, spec) -> {
+        ConversationToolCatalog.builtInTools().forEach((name, spec) -> {
             assertFalse(spec.description().contains("<parameter"), name + ": " + spec.description());
             assertFalse(spec.description().contains("<invoke"), name + ": " + spec.description());
             assertFalse(spec.description().contains("\n"), name);
@@ -102,7 +102,7 @@ class ToolCatalogTest {
 
     @Test
     void theInvokeEntryStartsWithTheSignatureAndNamesTheRequiredTags() {
-        ToolCatalog.builtInTools().forEach((name, spec) -> {
+        ConversationToolCatalog.builtInTools().forEach((name, spec) -> {
             String entry = spec.invokeDescription();
             assertTrue(entry.startsWith("- " + name + "(" + String.join(", ", spec.signature()) + "): "), entry);
             assertTrue(entry.endsWith("\n"), name);
@@ -123,7 +123,7 @@ class ToolCatalogTest {
 
     @Test
     void theInputSchemaHasTheTypesAndTheRequiredList() {
-        JSONObject schema = ToolCatalog.builtIn("complete_messages").inputSchema();
+        JSONObject schema = ConversationToolCatalog.builtIn("complete_messages").inputSchema();
         assertEquals("object", schema.getString("type"));
         JSONObject props = schema.getJSONObject("properties");
         assertEquals(List.of("chatId", "messages", "model", "noThink").stream().sorted().toList(),
@@ -132,7 +132,7 @@ class ToolCatalogTest {
         assertEquals("string", props.getJSONObject("chatId").getString("type"));
         assertEquals(List.of("chatId", "messages"), schema.getJSONArray("required").toList());
         assertEquals("integer",
-                ToolCatalog.builtIn("expect_report").inputSchema().getJSONObject("properties")
+                ConversationToolCatalog.builtIn("expect_report").inputSchema().getJSONObject("properties")
                         .getJSONObject("minutes").getString("type"));
     }
 

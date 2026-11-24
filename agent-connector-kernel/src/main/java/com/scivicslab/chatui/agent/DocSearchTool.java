@@ -48,11 +48,14 @@ public final class DocSearchTool {
      *  threshold and the model sees the whole ranking rather than its head and tail. */
     static final int SUMMARY_CHARS = 150;
 
-    private static final String BASE_URL = resolveBaseUrl();
     private static final ObjectMapper MAPPER = new ObjectMapper();
-    private static final HttpClient HTTP = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .build();
+
+    // The base URL and the HTTP client are made on first use, not in a static initializer: Quarkus initializes
+    // application classes at build time for a native image, which would freeze the build machine's settings into the
+    // executable and put an HttpClient in its image heap (tasks/todo.md, stage 12). In a JVM nothing changes: one of
+    // each, made once and then reused.
+    private static volatile String baseUrl;
+    private static volatile HttpClient http;
 
     private static String resolveBaseUrl() {
         String p = System.getProperty("chatui.docsearch.url");
@@ -94,7 +97,7 @@ public final class DocSearchTool {
      * @return the merged list as the Observation text, or a message saying nothing was found
      */
     static String search(String query, int maxResults, String route) {
-        return search(query, maxResults, route, DocsSource.http(BASE_URL));
+        return search(query, maxResults, route, DocsSource.http(baseUrl()));
     }
 
     /**
@@ -180,7 +183,7 @@ public final class DocSearchTool {
                     .header("Content-Type", "text/plain; charset=UTF-8")
                     .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
                     .build();
-            HttpResponse<String> response = HTTP.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = httpClient().send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() >= 400) throw new RuntimeException("HTTP " + response.statusCode());
             JsonNode arr = MAPPER.readTree(response.body());
             if (arr.isArray()) arr.forEach(hits::add);
@@ -237,9 +240,32 @@ public final class DocSearchTool {
         return hits;
     }
 
-    /** The html-saurus base URL both this tool and {@link ReferenceLinkTool} call when no html-saurus node is known. */
+    /**
+     * The html-saurus base URL both this tool and {@link ReferenceLinkTool} call when no html-saurus node is known:
+     * {@code -Dchatui.docsearch.url}, else {@code $DOCSEARCH_URL}, else {@code http://localhost:28001}, read on the first
+     * call and kept.
+     */
     public static String baseUrl() {
-        return BASE_URL;
+        String url = baseUrl;
+        if (url == null) {
+            synchronized (DocSearchTool.class) {
+                url = baseUrl;
+                if (url == null) baseUrl = url = resolveBaseUrl();
+            }
+        }
+        return url;
+    }
+
+    /** @return the one HTTP client of the docs tools, with a 10 s connect timeout, made on the first call and reused */
+    static HttpClient httpClient() {
+        HttpClient client = http;
+        if (client == null) {
+            synchronized (DocSearchTool.class) {
+                client = http;
+                if (client == null) http = client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+            }
+        }
+        return client;
     }
 
     /** Fetches a html-saurus JSON-array endpoint; empty list on no-hits or any failure. */
@@ -256,7 +282,7 @@ public final class DocSearchTool {
                 .header("Accept", "application/json")
                 .GET()
                 .build();
-        HttpResponse<String> response = HTTP.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = httpClient().send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() >= 400) {
             throw new RuntimeException("HTTP " + response.statusCode());
         }
@@ -342,6 +368,6 @@ public final class DocSearchTool {
     private static String toUrl(String path) {
         if (path == null || path.isBlank()) return "";
         if (path.startsWith("http://") || path.startsWith("https://")) return path;
-        return BASE_URL + (path.startsWith("/") ? path : "/" + path);
+        return baseUrl() + (path.startsWith("/") ? path : "/" + path);
     }
 }

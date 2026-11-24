@@ -1,0 +1,5 @@
+#!/bin/sh
+# Fake scancel: records the job id; squeue no longer lists 4242 afterwards.
+d=/var/fake-slurm
+printf '%s\n' "$@" > "$d/scancel.args"
+touch "$d/cancelled"

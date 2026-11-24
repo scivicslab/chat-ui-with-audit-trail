@@ -1,0 +1,16 @@
+# OpenAI Codex CLI for agent-connector-kernel's Podman confinement (tasks/todo.md, stage 9).
+# Build from agent-connector-kernel/containers:  podman build -f codex/Containerfile -t localhost/ack-codex:0.171.0 .
+# Version: @openai/codex 0.171.0, the latest release (GitHub openai/codex tag rust-v0.171.0, marked Latest;
+# npm registry @openai/codex latest = 0.171.0, engines node >=16), checked 2026-11-22.
+FROM docker.io/library/ubuntu:24.04
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends socat ca-certificates nodejs npm \
+ && npm install -g @openai/codex@0.171.0 \
+ && rm -rf /var/lib/apt/lists/* /root/.npm
+COPY ack-relay /usr/local/bin/ack-relay
+RUN chmod 0755 /usr/local/bin/ack-relay \
+ && groupadd -g 1001 agent && useradd -m -u 1001 -g 1001 -d /home/agent -s /bin/bash agent \
+ && mkdir -p /home/agent/.codex && chown -R agent:agent /home/agent
+USER agent
+ENV HOME=/home/agent CODEX_HOME=/home/agent/.codex
+WORKDIR /work

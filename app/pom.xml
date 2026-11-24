@@ -26,6 +26,12 @@
       <groupId>com.scivicslab</groupId>
       <artifactId>chat-ui-with-audit-trail-plugin-api</artifactId>
     </dependency>
+    <!-- The headless side the body is built on: the plain tools, the docs sources and the plugin registry
+         (tasks/todo.md, stage 3). -->
+    <dependency>
+      <groupId>com.scivicslab</groupId>
+      <artifactId>agent-connector-kernel</artifactId>
+    </dependency>
     <!-- REST + Qute templating for the server-rendered console shell -->
     <dependency>
       <groupId>io.quarkus</groupId>
@@ -44,7 +50,6 @@
     <dependency>
       <groupId>io.quarkiverse.mcp</groupId>
       <artifactId>quarkus-mcp-server-http</artifactId>
-      <version>2.0.4</version>
     </dependency>
     <!-- POJO-actor: the actor model that backs the actor tree -->
     <dependency>

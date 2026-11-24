@@ -1,5 +1,6 @@
 package com.scivicslab.chatui.core.actor;
 
+import com.scivicslab.chatui.agent.ConversationToolCatalog;
 import com.scivicslab.chatui.agent.ToolCatalog;
 import com.scivicslab.chatui.agent.AskChatTool;
 import com.scivicslab.chatui.agent.ContextBudget;
@@ -282,21 +283,21 @@ public class ChatSession extends Interpreter {
 
     /** @return the argument names in {@code - tool(a, b)} of the tool's description, in order */
     static List<String> signatureOf(String tool) {
-        ToolCatalog.Spec spec = ToolCatalog.builtIn(tool);
+        ToolCatalog.Spec spec = ConversationToolCatalog.builtIn(tool);
         return spec == null ? List.of() : spec.signature();
     }
 
-    /** @return each built-in tool's {@code <invoke>} entry, keyed by name, in {@link ToolCatalog}'s order */
+    /** @return each built-in tool's {@code <invoke>} entry, keyed by name, in {@link ConversationToolCatalog}'s order */
     private static Map<String, String> invokeDescriptions() {
         Map<String, String> m = new LinkedHashMap<>();
-        ToolCatalog.builtInTools().forEach((name, spec) -> m.put(name, spec.invokeDescription()));
+        ConversationToolCatalog.builtInTools().forEach((name, spec) -> m.put(name, spec.invokeDescription()));
         return Collections.unmodifiableMap(m);
     }
 
     /** @return each built-in tool that has optional arguments, with those arguments in signature order */
     private static Map<String, List<String>> optionalParameters() {
         Map<String, List<String>> m = new LinkedHashMap<>();
-        ToolCatalog.builtInTools().forEach((name, spec) -> {
+        ConversationToolCatalog.builtInTools().forEach((name, spec) -> {
             List<String> optional = spec.signature().stream().filter(a -> !spec.required().contains(a)).toList();
             if (!optional.isEmpty()) m.put(name, optional);
         });
@@ -3349,7 +3350,7 @@ public class ChatSession extends Interpreter {
 
     /** @return whether {@code tool} is a built-in tool that drives the conversation, which this session runs itself */
     private static boolean drivesConversation(String tool) {
-        ToolCatalog.Spec spec = ToolCatalog.builtIn(tool);
+        ToolCatalog.Spec spec = ConversationToolCatalog.builtIn(tool);
         return spec != null && spec.drivesConversation();
     }
 

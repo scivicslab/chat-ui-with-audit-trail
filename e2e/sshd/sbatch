@@ -1,0 +1,7 @@
+#!/bin/sh
+# Fake sbatch: records its arguments and the script it was given, and answers like Slurm.
+d=/var/fake-slurm
+printf '%s\n' "$@" > "$d/sbatch.args"
+for a in "$@"; do last=$a; done
+cp -- "$last" "$d/sbatch.script"
+echo "Submitted batch job 4242"
