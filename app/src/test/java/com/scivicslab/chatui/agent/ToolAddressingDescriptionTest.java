@@ -17,7 +17,7 @@ class ToolAddressingDescriptionTest {
 
     @Test
     void askChat_namesTheThreeWaysToWriteWhereAConversationIs_inTheFormIdsHave() {
-        String d = ToolCatalog.builtIn("ask_chat").description().replaceAll("\\s+", " ");
+        String d = ConversationToolCatalog.builtIn("ask_chat").description().replaceAll("\\s+", " ");
         assertTrue(d.contains("\"chat-02\""), "own project: " + d);
         assertTrue(d.contains("\"project1/chat-01\", with no node"), "another project of this instance: " + d);
         assertTrue(d.contains("Every project shown on this instance's screen is on this instance"), d);
@@ -29,14 +29,14 @@ class ToolAddressingDescriptionTest {
     @ParameterizedTest
     @ValueSource(strings = {"ask_chat", "ask_chat_urgent", "cancel_request", "expect_report", "set_collaborator"})
     void everyToolThatTakesNode_saysAConversationOfThisInstanceTakesNoNode(String tool) {
-        String d = ToolCatalog.builtIn(tool).description().replaceAll("\\s+", " ");
+        String d = ConversationToolCatalog.builtIn(tool).description().replaceAll("\\s+", " ");
         assertTrue(d.contains("takes no node"), tool + ": " + d);
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"ask_chat_urgent", "expect_report", "set_collaborator"})
     void toolsThatNameAConversationOnANode_writeItWithItsProject(String tool) {
-        String d = ToolCatalog.builtIn(tool).description().replaceAll("\\s+", " ");
+        String d = ConversationToolCatalog.builtIn(tool).description().replaceAll("\\s+", " ");
         assertTrue(d.contains("\"project1/chat-01\""), tool + ": " + d);
     }
 }
