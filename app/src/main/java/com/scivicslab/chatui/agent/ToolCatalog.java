@@ -457,31 +457,6 @@ public final class ToolCatalog {
                     new ToolParameter("chatId", "string", true, ""),
                     new ToolParameter("provider", "string", true, "")),
                 false);
-        add(m, "list_stalled_chats", """
-                list the conversations of this chat-ui instance, in every project, whose turn is stalled: its
-                model call has produced no output at all for the stall threshold (chat-ui.stall.threshold-minutes,
-                10 by default), or a turn was refused for the usage limit and its queue is held, its request back
-                at the front. One line each: the conversation, written "project1/chat-57", which of the two, for
-                how long, and how many prompts wait in its queue. Takes no parameters. It only reads;
-                recover_stalled_chats brings them back.
-                """,
-                List.of(),
-                false);
-        add(m, "recover_stalled_chats", """
-                bring back the conversations list_stalled_chats lists: all of them, or only the one you name in
-                "chatId" ("chat-02" in your own project, "project1/chat-57" in another project of this instance;
-                it takes no node, since only conversations of this instance are recovered). For each it stops the
-                stalled turn, killing its Claude Code process if a cancel does not end it; puts the request that
-                turn was working on back at the front of its queue, unanswered, with its asker still waiting; and
-                lets the queue run again, the CLI resuming the same session. One call brings a conversation back:
-                do not call it again for the same one, and do not cancel its turns by hand, since each cancel
-                drops the request its turn was working on. The result says, for each conversation, "recovered",
-                "not-running", "not-found" or "not-ended", and how many prompts wait in its queue. Use it when a
-                turn has been silent for minutes and the conversation's queue only grows.
-                """,
-                List.of(
-                    new ToolParameter("chatId", "string", false, "")),
-                false);
         add(m, "delete_chat", """
                 delete a conversation of your own project, for example one you made with create_chat. Refused,
                 with the reason and nothing changed, for project1's chat-01, the project's last conversation,

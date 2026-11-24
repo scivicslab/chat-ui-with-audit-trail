@@ -192,7 +192,6 @@ public class ChatUiActorSystem implements ConversationControls {
     private ActorRef<Housekeeper> housekeeperRef;
     private ActorRef<AutonomousTurnWatcher> autonomousTurnWatcherRef;
     private ActorRef<TimekeeperTicker> timekeeperTickerRef;
-    private ActorRef<StalledTurnRecovery> stalledTurnsRef;
     private ActorRef<CallWatchdog> callWatchdogRef;
     private ActorRef<SkillRegistry> skillRegistryRef;
     private ActorRef<com.scivicslab.chatui.audittrail.ActivityWatcher> activityWatcherRef;
@@ -243,7 +242,7 @@ public class ChatUiActorSystem implements ConversationControls {
     static final String CHAT_SESSION_SUFFIX = ".chat";
 
     /** What a conversation's name puts before its id. */
-    static final String CHAT_PREFIX = "chat-";
+    private static final String CHAT_PREFIX = "chat-";
 
     /** What a provider's name adds to its ChatSession's. */
     static final String PROVIDER_SUFFIX = ".provider";
@@ -453,32 +452,6 @@ public class ChatUiActorSystem implements ConversationControls {
         startActivityWatcher();
         startAutonomousTurnWatcher();
         startTimekeeperTicker();
-        startStalledTurnRecovery();
-    }
-
-    /**
-     * Creates the actor that finds stalled turns and brings their conversations back, and starts its schedule when
-     * automatic recovery is on ({@code chat-ui.stall.threshold-minutes}, default 10;
-     * {@code chat-ui.stall.auto-recover-minutes}, default 0, off). Under the housekeeper, like the other watchers.
-     */
-    private void startStalledTurnRecovery() {
-        long threshold = minutesSetting("chat-ui.stall.threshold-minutes", 10);
-        long auto = minutesSetting("chat-ui.stall.auto-recover-minutes", 0);
-        stalledTurnsRef = housekeeperRef.createChild(StalledTurnRecovery.ACTOR_NAME, new StalledTurnRecovery(() -> chatSessions,
-                System::currentTimeMillis, Math.max(1, threshold) * 60_000, auto * 60_000, 5_000));
-        stalledTurnsRef.tell(r -> r.bind(stalledTurnsRef));
-        stalledTurnsRef.tell(StalledTurnRecovery::startWatching);
-    }
-
-    /** @return the actor that finds and recovers stalled turns, for the REST resource and the conversation tools */
-    public ActorRef<StalledTurnRecovery> getStalledTurns() {
-        return stalledTurnsRef;
-    }
-
-    /** Stops the stalled-turn schedule before the actor system goes away. */
-    @PreDestroy
-    void stopStalledTurnRecovery() {
-        if (stalledTurnsRef != null) stalledTurnsRef.tell(StalledTurnRecovery::stopWatching).join();
     }
 
     /**

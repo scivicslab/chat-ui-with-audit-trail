@@ -254,7 +254,6 @@ public class ClaudeCodeProvider implements LlmProvider {
     @Override public String getSessionId() { return cliProcess.getLastSessionId(); }
     @Override public String detectEnvApiKey() { return System.getenv("ANTHROPIC_API_KEY"); }
     @Override public void cancel() { cliProcess.cancel(); }
-    @Override public void forceStop() { cliProcess.forceStop(); }
 
     @Override
     public void sendPrompt(String prompt, String model, Consumer<ChatEvent> emitter, ProviderContext ctx) {
@@ -315,9 +314,6 @@ public class ClaudeCodeProvider implements LlmProvider {
     void dispatch(StreamEvent event, Consumer<ChatEvent> emitter, boolean[] staleSession, boolean[] sawAssistant) {
         switch (event.type()) {
             case "assistant" -> {
-                // The CLI's own notice of a refused call (a synthetic message, is_api_error_message) is not the model's
-                // answer: the refusal reaches the conversation as an error instead.
-                if (isApiErrorMessage(event.rawJson())) return;
                 if (event.content() != null && !event.content().isEmpty()) {
                     sawAssistant[0] = true;
                     emitter.accept(ChatEvent.delta(event.content()));
@@ -341,9 +337,6 @@ public class ClaudeCodeProvider implements LlmProvider {
                 if (event.sessionId() != null) saveSession(event.sessionId());
             }
             case "result" -> {
-                // A failed result's session is the one --resume could not find: neither kept nor shown, the retry
-                // with a new session follows.
-                if (event.isError() && staleSession[0]) return;
                 // Newer CLIs may put the whole answer only in the result event; older ones always
                 // streamed it as assistant events. Send it once either way.
                 if (!sawAssistant[0] && event.content() != null && !event.content().isBlank()) {
@@ -358,7 +351,6 @@ public class ClaudeCodeProvider implements LlmProvider {
                         && event.content().contains("No conversation found with session ID")) {
                     staleSession[0] = true;
                 } else {
-                    if (isUsageLimit(event.rawJson())) emitter.accept(ChatEvent.usageLimit(event.content()));
                     emitter.accept(ChatEvent.error(event.content()));
                 }
             }
@@ -372,28 +364,6 @@ public class ClaudeCodeProvider implements LlmProvider {
                         event.promptId(), event.content(), event.promptType(), event.options()));
             }
             default -> { }
-        }
-    }
-
-    /** @return whether a CLI line is the synthetic notice the CLI writes for a refused call */
-    static boolean isApiErrorMessage(String rawJson) {
-        if (rawJson == null || !rawJson.contains("is_api_error_message")) return false;
-        try {
-            return new org.json.JSONObject(rawJson).optBoolean("is_api_error_message", false);
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    /** @return whether a failed result line is the refusal for the account's usage limit */
-    static boolean isUsageLimit(String rawJson) {
-        if (rawJson == null) return false;
-        try {
-            org.json.JSONObject json = new org.json.JSONObject(rawJson);
-            return "usage_limit_reached".equals(json.optString("api_error", ""))
-                    || ("result".equals(json.optString("type")) && json.optInt("api_error_status", 0) == 429);
-        } catch (Exception e) {
-            return false;
         }
     }
 

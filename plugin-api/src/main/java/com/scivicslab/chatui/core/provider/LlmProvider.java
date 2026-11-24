@@ -48,13 +48,6 @@ public interface LlmProvider {
     /** Cancels the currently running request. */
     void cancel();
 
-    /**
-     * Stops the call in flight harder than {@link #cancel}, for a stalled-turn recovery whose cancel did not end the
-     * turn: a provider that runs a process kills it ({@code destroyForcibly}), and the next prompt starts it again on
-     * the same session. The default is {@link #cancel}.
-     */
-    default void forceStop() { cancel(); }
-
     // ---- Optional features with default no-op implementations ----
 
     /**
