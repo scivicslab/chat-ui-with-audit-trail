@@ -78,6 +78,21 @@ public class SessionsResource {
         return ioLogView.settingsHistory(id);
     }
 
+    /**
+     * Where a session's window went: the tokens of each request that recorded them, and each turn's
+     * first request with its growth over the turn before.
+     *
+     * @param id the session id
+     * @return {@code {requests: [{turn, step, input, cacheCreation, cacheRead, output, total}],
+     *         turns: [{turn, firstRequestTotal, growth}]}}
+     */
+    @GET
+    @Path("/{id}/tokens")
+    @Produces(MediaType.APPLICATION_JSON)
+    public IoLogView.Tokens tokens(@PathParam("id") long id) {
+        return ioLogView.tokens(id);
+    }
+
     @GET
     @Path("/{id}/turns")
     @Produces(MediaType.APPLICATION_JSON)

@@ -1,5 +1,6 @@
 package com.scivicslab.chatui.openaicompat.client;
 
+import com.scivicslab.chatui.core.rest.TokenUsage;
 import com.scivicslab.chatui.openaicompat.ToolDefinition;
 
 import java.io.IOException;
@@ -67,6 +68,15 @@ public class OpenAiCompatClient {
          * @param toolCalls the calls in the order the server indexed them
          */
         default void onToolCalls(List<ChatMessage.ToolCallRequest.ToolCall> toolCalls) {}
+
+        /**
+         * Receives the tokens the request used, from the {@code usage} the server sends in the last chunk
+         * when the request asked for it ({@code stream_options.include_usage}), before {@link #onComplete}.
+         * Not called when the server sends none.
+         *
+         * @param usage the request's token usage
+         */
+        default void onUsage(TokenUsage usage) {}
     }
 
     /**
@@ -266,10 +276,14 @@ public class OpenAiCompatClient {
             ToolCallAssembler toolCalls = new ToolCallAssembler();
             boolean interrupted = false;
             String finishReason = null;
+            TokenUsage usage = null;
             var iterator = response.body().iterator();
             while (iterator.hasNext()) {
                 if (Thread.currentThread().isInterrupted()) { interrupted = true; break; }
-                SseDelta delta = parseSseDelta(iterator.next());
+                String line = iterator.next();
+                TokenUsage chunkUsage = parseSseUsage(line);
+                if (chunkUsage != null) usage = chunkUsage;
+                SseDelta delta = parseSseDelta(line);
                 if (delta == null) continue;
                 // The server failed after it had answered 200 and started the stream: the failure
                 // comes as a chunk of its own, and read as content it is an empty answer.
@@ -289,6 +303,7 @@ public class OpenAiCompatClient {
             }
             if (interrupted) { callback.onError("Request cancelled"); return null; }
             if (!toolCalls.isEmpty()) callback.onToolCalls(toolCalls.calls());
+            if (usage != null) callback.onUsage(usage);
             callback.onComplete(System.currentTimeMillis() - startTime, finishReason);
             return fullResponse.length() > 0 ? fullResponse.toString() : null;
 
@@ -407,6 +422,8 @@ public class OpenAiCompatClient {
         // is wanted left the Think box to whichever server the broker picked
         // (ThinkFlagAlwaysSent_261011_oo01).
         sb.append("\"chat_template_kwargs\":{\"enable_thinking\":").append(!noThink).append("},");
+        // Asks the server to end the stream with a chunk that carries the request's token counts.
+        if (stream) sb.append("\"stream_options\":{\"include_usage\":true},");
         if (!tools.isEmpty()) {
             sb.append("\"tools\":[");
             for (int i = 0; i < tools.size(); i++) {
@@ -596,6 +613,28 @@ public class OpenAiCompatClient {
             byIndex.forEach((index, c) -> out.add(new ChatMessage.ToolCallRequest.ToolCall(
                     c[0] != null ? c[0] : "call_" + index, c[1] != null ? c[1] : "", c[2])));
             return out;
+        }
+    }
+
+    /**
+     * Reads the {@code usage} of one streamed chunk. A server that was asked for it
+     * ({@code stream_options.include_usage}) sends it in the last chunk, whose {@code choices} is empty;
+     * a server that always sends {@code "usage":null} in the other chunks gives {@code null} here for them.
+     *
+     * @param line one line of the stream
+     * @return the chunk's usage, or {@code null} when it carries none
+     */
+    static TokenUsage parseSseUsage(String line) {
+        if (line == null || !line.startsWith("data: ") || !line.contains("\"usage\"")) return null;
+        try {
+            org.json.JSONObject usage = new org.json.JSONObject(line.substring(6).trim()).optJSONObject("usage");
+            if (usage == null) return null;
+            int prompt = usage.optInt("prompt_tokens", 0);
+            org.json.JSONObject details = usage.optJSONObject("prompt_tokens_details");
+            int cached = details == null ? 0 : Math.min(prompt, details.optInt("cached_tokens", 0));
+            return new TokenUsage(prompt - cached, 0, cached, usage.optInt("completion_tokens", 0));
+        } catch (org.json.JSONException e) {
+            return null;
         }
     }
 

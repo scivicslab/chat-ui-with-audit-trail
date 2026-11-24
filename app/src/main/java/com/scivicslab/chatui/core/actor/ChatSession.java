@@ -13,6 +13,7 @@ import com.scivicslab.chatui.core.provider.LlmProvider;
 import com.scivicslab.chatui.plugin.ConversationTool;
 import com.scivicslab.chatui.core.provider.ProviderContext;
 import com.scivicslab.chatui.core.rest.ChatEvent;
+import com.scivicslab.chatui.core.rest.TokenUsage;
 import com.scivicslab.chatui.core.service.AuthMode;
 import com.scivicslab.pojoactor.action.ActionResult;
 import com.scivicslab.pojoactor.core.ActorRef;
@@ -1004,7 +1005,8 @@ public class ChatSession extends Interpreter {
                             self.tell(b -> b.storeCompletedResult(resultKey, captured));
                         }
                         // Persist the completed turn to the I/O log in the Sessions-tab marker format.
-                        recordTurnIo(ioSession, ioTurnNo, prompt, assistantBuf.toString(), thinkingBuf.toString());
+                        recordTurnIo(ioSession, ioTurnNo, prompt, assistantBuf.toString(), thinkingBuf.toString(),
+                                event.usage());
                     }
                     emitter.accept(event);
                 };
@@ -1877,6 +1879,8 @@ public class ChatSession extends Interpreter {
         // to answer again (a "retraction") withdraws the text from here on, and only the answer to the
         // retry is parsed for tool calls (CliHarnessProvider_260912_oo01).
         int[] responseStart = {0};
+        // The tokens the provider reported for this step's request, or null when it reports none.
+        TokenUsage[] stepUsage = {null};
         ActorRef<LlmProvider> providerRef = providerRef();
 
         // The ConversationSquad log used to receive nothing between here and recordStepIo() below, so a step
@@ -1909,6 +1913,8 @@ public class ChatSession extends Interpreter {
                 } else if ("result".equals(event.type())) {
                     // The provider's own per-call completion signal; the agent loop's real
                     // completion signal is finish()'s result event, emitted once for the turn.
+                    // The tokens it reports belong to this step's row of the I/O log.
+                    stepUsage[0] = event.usage();
                 } else if ("tool_call".equals(event.type())) {
                     definedCalls.add(new ToolCall(event.toolUseId(), event.toolName(),
                             event.content() == null ? "" : event.content()));
@@ -1990,7 +1996,7 @@ public class ChatSession extends Interpreter {
         // model's plan is not what it meant to send.
         List<ToolCall> calls = analysis.broken() ? List.of() : analysis.calls();
         answerStream.finish(cutOff[0] || failed || !calls.isEmpty() || analysis.broken());
-        recordStepIo(promptToSend, sentBody.get(), text, thinkingBuf.toString(), calls);
+        recordStepIo(promptToSend, sentBody.get(), text, thinkingBuf.toString(), calls, stepUsage[0]);
         turnTranscript.append("You wrote:\n").append(text).append("\n\n");
         return new LlmStepOutcome(text, calls, cutOff[0], analysis, failed);
     }
@@ -2152,7 +2158,7 @@ public class ChatSession extends Interpreter {
      */
     private void recordStepIo(String promptSent, String responseText, String thinking,
                               List<ToolCall> calls) {
-        recordStepIo(promptSent, null, responseText, thinking, calls);
+        recordStepIo(promptSent, null, responseText, thinking, calls, null);
     }
 
     /**
@@ -2161,7 +2167,7 @@ public class ChatSession extends Interpreter {
      *                    {@code promptSent} as a single user message
      */
     private void recordStepIo(String promptSent, String requestBody, String responseText, String thinking,
-                              List<ToolCall> calls) {
+                              List<ToolCall> calls, TokenUsage usage) {
         if (ioLog == null || ioSession < 0) return;
         try {
             String requestJson = requestBody != null
@@ -2185,7 +2191,7 @@ public class ChatSession extends Interpreter {
             if (turnError != null) {
                 m.append("\n\nERROR:\n").append(turnError);
             }
-            m.append("\n\nUSAGE: promptTokens=0 completionTokens=0");
+            m.append("\n\n").append(TokenUsage.logLine(usage));
             ioLog.record(ioSession, "agent", "turn" + ioTurnNo + "/step" + stepCount + "/llm", m.toString());
             logToConversationSquad("INFO", "turn" + ioTurnNo + "/step" + stepCount + "/llm done: "
                     + (responseText == null ? 0 : responseText.length()) + " chars, "
@@ -3678,6 +3684,12 @@ public class ChatSession extends Interpreter {
      * text, {@code REASONING:} = thinking, {@code USAGE:} = token line). No-op when logging is off.
      */
     private void recordTurnIo(long ioSession, int turnNo, String prompt, String assistant, String thinking) {
+        recordTurnIo(ioSession, turnNo, prompt, assistant, thinking, null);
+    }
+
+    /** As above; {@code usage} is the tokens the provider reported for the turn, or {@code null}. */
+    private void recordTurnIo(long ioSession, int turnNo, String prompt, String assistant, String thinking,
+                              TokenUsage usage) {
         if (ioLog == null || ioSession < 0) return;
         try {
             String requestJson = new org.json.JSONObject()
@@ -3690,7 +3702,7 @@ public class ChatSession extends Interpreter {
             if (thinking != null && !thinking.isBlank()) {
                 m.append("\n\nREASONING:\n").append(thinking);
             }
-            m.append("\n\nUSAGE: promptTokens=0 completionTokens=0");
+            m.append("\n\n").append(TokenUsage.logLine(usage));
             ioLog.record(ioSession, "agent", "turn" + turnNo + "/step1/llm", m.toString());
             logToConversationSquad("INFO", "turn" + turnNo + "/step1/llm");
         } catch (Exception e) {

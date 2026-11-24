@@ -5,6 +5,7 @@ import com.scivicslab.chatui.core.provider.LlmProvider;
 import com.scivicslab.chatui.core.provider.ProviderCapabilities;
 import com.scivicslab.chatui.core.provider.ProviderContext;
 import com.scivicslab.chatui.core.rest.ChatEvent;
+import com.scivicslab.chatui.core.rest.TokenUsage;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -270,6 +271,7 @@ public class ClaudeCodeProvider implements LlmProvider {
 
         final boolean[] staleSession = {false};
         final boolean[] sawAssistant = {false};
+        firstRequestUsage = null;
         try {
             cliProcess.sendPrompt(prompt, ctx.imageDataUrls(), event -> {
                 ctx.onActivity().run();
@@ -312,6 +314,11 @@ public class ClaudeCodeProvider implements LlmProvider {
      * {@code tool_use}/{@code tool_result} for the conversation to record.
      */
     void dispatch(StreamEvent event, Consumer<ChatEvent> emitter, boolean[] staleSession, boolean[] sawAssistant) {
+        // The first model request of the call is the one that shows how much of the window the call starts
+        // with; the later requests of a tool-using call only grow it.
+        if (event.usage() != null && !"result".equals(event.type()) && firstRequestUsage == null) {
+            firstRequestUsage = event.usage();
+        }
         switch (event.type()) {
             case "assistant" -> {
                 if (event.content() != null && !event.content().isEmpty()) {
@@ -344,7 +351,7 @@ public class ClaudeCodeProvider implements LlmProvider {
                 }
                 if (event.sessionId() != null) saveSession(event.sessionId());
                 emitter.accept(ChatEvent.result(event.sessionId(), event.costUsd(), event.durationMs(),
-                        cliProcess.getConfig().model(), false));
+                        cliProcess.getConfig().model(), false, callUsage(event.usage())));
             }
             case "error" -> {
                 if (event.content() != null
@@ -365,6 +372,23 @@ public class ClaudeCodeProvider implements LlmProvider {
             }
             default -> { }
         }
+    }
+
+    /** Usage of the first model request of the call in progress, or {@code null} until one is seen. */
+    private TokenUsage firstRequestUsage;
+
+    /**
+     * The usage one call is recorded with: the input side of its first model request, and the output
+     * the CLI summed over all of the call's requests. The {@code result} line's own input counts add up
+     * every request of the call, which says nothing about the window; they are used only when no
+     * assistant line carried usage.
+     */
+    private TokenUsage callUsage(TokenUsage resultUsage) {
+        TokenUsage first = firstRequestUsage;
+        firstRequestUsage = null;
+        if (first == null) return resultUsage;
+        int output = resultUsage != null && resultUsage.output() > 0 ? resultUsage.output() : first.output();
+        return new TokenUsage(first.input(), first.cacheCreation(), first.cacheRead(), output);
     }
 
     // ---- Interactive prompts ----

@@ -1,5 +1,6 @@
 package com.scivicslab.chatui.harness;
 
+import com.scivicslab.chatui.core.rest.TokenUsage;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -157,7 +158,23 @@ public class StreamEventParser {
         if (events.isEmpty()) {
             events.add(new StreamEvent("assistant", "", null, -1, -1, false, rawJson));
         }
+        // The line's usage is the model request's, so it rides on the line's first event only.
+        TokenUsage usage = readUsage(message.optJSONObject("usage"));
+        if (usage != null) events.set(0, events.get(0).withUsage(usage));
         return events;
+    }
+
+    /**
+     * Reads a stream-json {@code usage} object.
+     *
+     * @return the four counts, or {@code null} when {@code usage} is absent
+     */
+    static TokenUsage readUsage(JSONObject usage) {
+        if (usage == null) return null;
+        return new TokenUsage(usage.optInt("input_tokens", 0),
+                usage.optInt("cache_creation_input_tokens", 0),
+                usage.optInt("cache_read_input_tokens", 0),
+                usage.optInt("output_tokens", 0));
     }
 
     /**
@@ -290,7 +307,7 @@ public class StreamEventParser {
         // no assistant event for this turn.
         String finalText = json.optString("result", "");
         return new StreamEvent("result", finalText.isEmpty() ? null : finalText,
-                sessionId, costUsd, durationMs, false, rawJson);
+                sessionId, costUsd, durationMs, false, rawJson).withUsage(readUsage(json.optJSONObject("usage")));
     }
 
     /**

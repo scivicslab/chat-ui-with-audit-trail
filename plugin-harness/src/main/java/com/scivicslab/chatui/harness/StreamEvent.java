@@ -1,5 +1,7 @@
 package com.scivicslab.chatui.harness;
 
+import com.scivicslab.chatui.core.rest.TokenUsage;
+
 import java.util.List;
 
 /**
@@ -19,6 +21,8 @@ import java.util.List;
  * @param options    selectable answers of an interactive prompt
  * @param toolName   the harness's tool name, for {@code tool_use} events
  * @param toolUseId  identifier pairing a {@code tool_use} with its {@code tool_result}
+ * @param usage      the tokens of the model request, on the first event of an {@code assistant} line
+ *                   and on {@code result}; {@code null} elsewhere
  */
 public record StreamEvent(
     String type,
@@ -32,8 +36,23 @@ public record StreamEvent(
     String promptType,
     List<String> options,
     String toolName,
-    String toolUseId
+    String toolUseId,
+    TokenUsage usage
 ) {
+
+    /** Event without token usage. */
+    public StreamEvent(String type, String content, String sessionId, double costUsd, long durationMs,
+                       boolean isError, String rawJson, String promptId, String promptType,
+                       List<String> options, String toolName, String toolUseId) {
+        this(type, content, sessionId, costUsd, durationMs, isError, rawJson, promptId, promptType, options,
+                toolName, toolUseId, null);
+    }
+
+    /** @return this event carrying the given token usage */
+    public StreamEvent withUsage(TokenUsage usage) {
+        return new StreamEvent(type, content, sessionId, costUsd, durationMs, isError, rawJson, promptId, promptType,
+                options, toolName, toolUseId, usage);
+    }
 
     /** Plain event without prompt or tool fields. */
     public StreamEvent(String type, String content, String sessionId,

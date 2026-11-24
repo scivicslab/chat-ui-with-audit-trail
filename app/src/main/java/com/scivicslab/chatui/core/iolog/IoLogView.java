@@ -122,6 +122,64 @@ public class IoLogView {
                 .orElse("");
     }
 
+    /** One model request: the tokens its {@code USAGE:} line holds. {@code total} is the whole input. */
+    public record TokenRequest(int turn, int step, int input, int cacheCreation, int cacheRead, int output,
+                               int total) {}
+
+    /**
+     * One turn's window figures: the first request's whole input, and how far it is from the previous turn's.
+     *
+     * @param growth {@code firstRequestTotal} minus the previous turn's; {@code 0} for the first turn
+     */
+    public record TokenTurn(int turn, int firstRequestTotal, int growth) {}
+
+    /** What the Tokens tab shows: every request that recorded tokens, and one line per turn. */
+    public record Tokens(List<TokenRequest> requests, List<TokenTurn> turns) {}
+
+    /** Where the tokens of a session's requests went; see {@link #tokensOf}. */
+    public Tokens tokens(long sessionId) {
+        return tokensOf(allLogs(sessionId));
+    }
+
+    /**
+     * Reads the {@code USAGE:} line of every {@code turnN/stepM/llm} row. A row written before usage was
+     * recorded holds {@code promptTokens=0 completionTokens=0}, or none of the keys, and is left out: it
+     * says nothing, and 0 would read as a request of no tokens. {@code input} is what is left of
+     * {@code promptTokens} after the cache keys, so a row of a server that reports no cache keys counts
+     * its whole input as {@code input}.
+     */
+    static Tokens tokensOf(List<LogEntry> raw) {
+        List<LogEntry> ordered = raw.stream()
+                .sorted(Comparator.comparing(IoLogView::ts).thenComparing(LogEntry::getId))
+                .toList();
+        List<TokenRequest> requests = new java.util.ArrayList<>();
+        for (LogEntry e : ordered) {
+            java.util.regex.Matcher m = TURN_LABEL.matcher(nz(e.getLabel()));
+            if (!m.find() || !"llm".equals(m.group(3))) continue;
+            String msg = nz(e.getMessage());
+            int prompt = parseTokenCount(msg, "promptTokens=");
+            int output = Math.max(0, parseTokenCount(msg, "completionTokens="));
+            if (prompt <= 0 && output <= 0) continue;
+            int cacheCreation = Math.max(0, parseTokenCount(msg, "cacheCreationTokens="));
+            int cacheRead = Math.max(0, parseTokenCount(msg, "cacheReadTokens="));
+            int total = Math.max(0, prompt);
+            int input = Math.max(0, total - cacheCreation - cacheRead);
+            requests.add(new TokenRequest(Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)),
+                    input, cacheCreation, cacheRead, output, total));
+        }
+        Map<Integer, Integer> firstTotal = new java.util.TreeMap<>();
+        for (TokenRequest r : requests) firstTotal.putIfAbsent(r.turn(), r.total());
+        List<TokenTurn> turns = new java.util.ArrayList<>();
+        int previous = 0;
+        boolean first = true;
+        for (Map.Entry<Integer, Integer> en : firstTotal.entrySet()) {
+            turns.add(new TokenTurn(en.getKey(), en.getValue(), first ? 0 : en.getValue() - previous));
+            previous = en.getValue();
+            first = false;
+        }
+        return new Tokens(requests, turns);
+    }
+
     /** Reconstructs the per-turn trace for a session. */
     public List<TraceTurn> trace(long sessionId) {
         return traceOf(allLogs(sessionId));

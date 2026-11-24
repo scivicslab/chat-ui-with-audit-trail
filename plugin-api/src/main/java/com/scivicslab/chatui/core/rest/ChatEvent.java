@@ -61,8 +61,19 @@ public record ChatEvent(
     /** The turn the event belongs to ({@code TurnAndRequestIds_261107_oo01}); on {@code turn} and {@code result}. */
     String turnId,
     /** The {@code ask_chat} request the turn's prompt is, or answers; on {@code turn} and {@code result}. */
-    String requestId
+    String requestId,
+    /** The tokens the request used, on {@code result} events of a provider that reports them; otherwise {@code null}. */
+    TokenUsage usage
 ) {
+
+    /** Every event made before the token usage existed: it is not set. */
+    public ChatEvent(String type, String content, String sessionId, Double costUsd, Long durationMs, String model,
+                     Boolean busy, String promptId, String promptType, List<String> options, String logLevel,
+                     String loggerName, Long timestamp, List<String> images, String toolName, String toolUseId,
+                     Boolean isError, String origin, String turnId, String requestId) {
+        this(type, content, sessionId, costUsd, durationMs, model, busy, promptId, promptType, options, logLevel,
+                loggerName, timestamp, images, toolName, toolUseId, isError, origin, turnId, requestId, null);
+    }
 
     /** Every event made before turn and request ids existed: neither is set. */
     public ChatEvent(String type, String content, String sessionId, Double costUsd, Long durationMs, String model,
@@ -88,7 +99,7 @@ public record ChatEvent(
     /** @return this event with the turn and request ids it belongs to */
     public ChatEvent withTurn(String turnId, String requestId) {
         return new ChatEvent(type, content, sessionId, costUsd, durationMs, model, busy, promptId, promptType, options,
-                logLevel, loggerName, timestamp, images, toolName, toolUseId, isError, origin, turnId, requestId);
+                logLevel, loggerName, timestamp, images, toolName, toolUseId, isError, origin, turnId, requestId, usage);
     }
 
     /**
@@ -125,6 +136,23 @@ public record ChatEvent(
      */
     public static ChatEvent result(String sessionId, double costUsd, long durationMs, String model, boolean busy) {
         return new ChatEvent("result", null, sessionId, costUsd, durationMs, model, busy, null, null, null, null, null, null, null, null, null, null, null);
+    }
+
+    /**
+     * Creates a result event that also carries the tokens the request used.
+     *
+     * @param usage the request's token usage, or {@code null} when the provider reported none
+     * @return a new result event
+     */
+    public static ChatEvent result(String sessionId, double costUsd, long durationMs, String model, boolean busy,
+                                   TokenUsage usage) {
+        return result(sessionId, costUsd, durationMs, model, busy).withUsage(usage);
+    }
+
+    /** @return this event with the given token usage */
+    public ChatEvent withUsage(TokenUsage usage) {
+        return new ChatEvent(type, content, sessionId, costUsd, durationMs, model, busy, promptId, promptType, options,
+                logLevel, loggerName, timestamp, images, toolName, toolUseId, isError, origin, turnId, requestId, usage);
     }
 
     /**
